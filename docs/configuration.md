@@ -31,7 +31,29 @@ sources:
       rule: "{ruleId}"                 # usable in route/filter conditions
     fingerprint_fields: [title]        # duplicate identity; empty = title+body
     dedup_window_seconds: 60
+    storm_threshold: 60                # storm FUSE: arrivals per window; 0 = off
+    storm_window_seconds: 60
 ```
+
+**The storm fuse is volume, not content** — it catches the high-cardinality
+flood that dedup structurally cannot (every payload different, so no
+fingerprint repeats). Two stages, one knob:
+
+| stage | trigger | behaviour |
+|---|---|---|
+| soft | count > `storm_threshold` | event RECORDED (`skipped · storm_suppressed`, window count in its trace), no pipeline, no channel |
+| hard | count > 10 × threshold | HTTP 429, nothing stored — at this volume the ledger itself is what needs protecting |
+
+Counters per source appear under `fuse` in `/status` (absent when healthy).
+The window is process-local by design: a restart resets it, which is correct
+for a fuse — it protects, it does not account.
+
+**When is it mandatory?** Whenever the thing behind the relay has no ingress
+backpressure of its own. A full WebhookWise has one (its own storm gate), so
+the reference production deploy runs without a fuse; **WebhookWise-lite does
+not** — put a fuse on every door in front of it. Signature verification always
+runs first, so an unsigned flood is rejected as unauthenticated and never
+consumes fuse budget.
 
 Path syntax: dots walk objects, integers walk arrays — `{alerts.0.labels.alertname}`.
 A missing path renders as `""` (an empty title is recoverable; a dropped event is not).

@@ -26,7 +26,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from hookrelay import registry
 from hookrelay.config import Config, ConfigError
 from hookrelay.delivery import process_due
-from hookrelay.pipeline import handle_hook
+from hookrelay.fuse import StormFuse
+from hookrelay.pipeline import handle_hook, record_storm_suppressed
 from hookrelay.security import token_ok
 from hookrelay.settings import Settings
 from hookrelay.store import Store, now_ts
@@ -81,6 +82,9 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     app.state.settings = app_settings
     app.state.config = app_config
     app.state.store = store
+    # The fuse sits in the fusebox, not in application logic: process-local
+    # counters, applied at the door regardless of what the pipeline says.
+    app.state.fuse = StormFuse()
 
     # ── the page ──────────────────────────────────────────────────────────
     # One self-contained file, no build step, no CDN. The page itself is a
@@ -112,6 +116,28 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             payload = json.loads(body or b"{}")
         except ValueError:
             raise HTTPException(status_code=400, detail="body is not JSON") from None
+        # ── storm fuse (volume, not content) ──────────────────────────────
+        # After verification (an unsigned flood is already 401 and free) and
+        # before the pipeline. Two stages: suppress keeps the account, reject
+        # protects the account itself.
+        verdict = app.state.fuse.check(source.name, source.storm_threshold, source.storm_window_seconds, now_ts())
+        if verdict == "reject":
+            raise HTTPException(status_code=429, detail="storm fuse open (hard)")
+        if verdict == "suppress":
+            try:
+                payload_obj = json.loads(body or b"{}")
+            except ValueError:
+                payload_obj = {}
+            event_id = await record_storm_suppressed(
+                app.state.store,
+                source,
+                payload_obj,
+                now_ts(),
+                app.state.fuse.window_count(source.name),
+                source.storm_threshold,
+            )
+            return JSONResponse({"event_id": event_id, "outcome": "skipped", "skip_code": "storm_suppressed"})
+
         extracted = adapter.parse(source, payload)
         result = await handle_hook(
             app.state.store,
@@ -138,6 +164,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         now = now_ts()
         return {
             "queue": await app.state.store.queue_counts(),
+            "fuse": app.state.fuse.snapshot(),
             "silences": await app.state.store.list_silences(now),
             "recent": await app.state.store.recent_events(50),
         }
