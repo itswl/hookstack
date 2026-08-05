@@ -1,0 +1,42 @@
+"""A local delivery sink for trying hookrelay without real channel tokens.
+
+Prints every POST it receives to stdout (visible via `docker compose logs
+sink`) and answers {"code": 0} so the delivery ledger records `sent`.
+
+HTTP/1.1 with an accurate Content-Length on purpose: httpx keep-alive
+reuses connections, and a toy server that closes without answering (or
+answers without a length) shows up in the ledger as transport errors —
+we learned both the hard way.
+"""
+
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_POST(self):  # noqa: N802 — http.server API
+        length = int(self.headers.get("content-length", 0))
+        raw = self.rfile.read(length)
+        try:
+            data = json.loads(raw)
+            line = json.dumps(data, ensure_ascii=False, indent=2)
+        except ValueError:
+            line = raw.decode(errors="replace")
+        signature = self.headers.get("X-Hook-Signature") or self.headers.get("X-Webhook-Signature") or "(unsigned)"
+        print(f"── delivery on {self.path} · signature: {signature[:24]}…\n{line}", flush=True)
+        body = b'{"code": 0}'
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):  # quiet the access log; the payload IS the log
+        pass
+
+
+if __name__ == "__main__":
+    print("sink listening on :9000", flush=True)
+    HTTPServer(("0.0.0.0", 9000), Handler).serve_forever()
