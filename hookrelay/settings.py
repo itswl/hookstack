@@ -34,6 +34,10 @@ class Settings:
     # Self-alarm for dead letters (who watches the watchman). Empty = off.
     alarm_url: str
     alarm_min_interval_seconds: int
+    # Per-channel circuit breaker: consecutive failures before the channel is
+    # given a rest, and how long that rest lasts.
+    breaker_threshold: int
+    breaker_cooldown_seconds: int
     worker_interval_seconds: float
 
     @classmethod
@@ -49,5 +53,7 @@ class Settings:
             retention_days=_int("HOOKRELAY_RETENTION_DAYS", 14),
             alarm_url=os.environ.get("HOOKRELAY_ALARM_URL", ""),
             alarm_min_interval_seconds=_int("HOOKRELAY_ALARM_MIN_INTERVAL_SECONDS", 600),
+            breaker_threshold=_int("HOOKRELAY_BREAKER_THRESHOLD", 5),
+            breaker_cooldown_seconds=_int("HOOKRELAY_BREAKER_COOLDOWN_SECONDS", 60),
             worker_interval_seconds=float(os.environ.get("HOOKRELAY_WORKER_INTERVAL", "1.0")),
         )

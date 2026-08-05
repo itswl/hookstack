@@ -140,3 +140,132 @@ async def test_dead_letters_alarm_through_the_worker(store, cfg, settings, monke
     await process_due(store, cfg, settings, client, now=1001.0 + 92, alarm=alarm)
     assert (await store.queue_counts())["dead"] == 3
     assert len(client.posts) >= 1, "dead letters must announce themselves"
+
+
+# ── delivery robustness: breaker, parallelism, idempotency ───────────────────
+
+
+def test_breaker_opens_after_threshold_then_probes_once() -> None:
+    from hookrelay.breaker import CircuitBreaker
+
+    breaker = CircuitBreaker(threshold=3, cooldown_seconds=60)
+
+    for _ in range(2):
+        assert breaker.allows("feishu", 1000.0)
+        breaker.record_failure("feishu", 1000.0)
+    assert breaker.allows("feishu", 1000.0), "still closed below the threshold"
+    breaker.record_failure("feishu", 1000.0)
+
+    # Open: deliveries wait instead of burning attempts against a wall.
+    assert not breaker.allows("feishu", 1010.0)
+    assert breaker.is_open("feishu", 1010.0)
+    assert breaker.snapshot(1010.0) == {"feishu": "open"}
+
+    # Half-open after cooldown: exactly ONE probe, not a stampede.
+    assert breaker.allows("feishu", 1061.0)
+    assert not breaker.allows("feishu", 1061.0), "a queue of 500 must not become 500 probes"
+    assert breaker.snapshot(1061.0) == {"feishu": "half-open"}
+
+    # A successful probe closes it completely.
+    breaker.record_success("feishu")
+    assert breaker.allows("feishu", 1062.0)
+    assert breaker.snapshot(1062.0) == {}
+
+
+def test_breaker_is_per_channel() -> None:
+    from hookrelay.breaker import CircuitBreaker
+
+    breaker = CircuitBreaker(threshold=1, cooldown_seconds=60)
+    breaker.record_failure("sick", 1000.0)
+    assert not breaker.allows("sick", 1001.0)
+    assert breaker.allows("healthy", 1001.0), "one sick channel must not gate the others"
+
+
+async def test_open_breaker_defers_without_burning_attempts(store, cfg, settings, monkeypatch) -> None:
+    import hookrelay.delivery as delivery_mod
+    from hookrelay.breaker import CircuitBreaker
+    from hookrelay.delivery import process_due
+    from hookrelay.pipeline import handle_hook
+
+    await handle_hook(
+        store, cfg, cfg.sources["grafana"], {"title": "t", "message": "m", "state": "alerting"}, now=1000.0
+    )
+
+    async def always_fail(client, channel, message):
+        return False, "connection refused"
+
+    monkeypatch.setattr(delivery_mod.channels, "send", always_fail)
+    breaker = CircuitBreaker(threshold=1, cooldown_seconds=600)
+
+    await process_due(store, cfg, settings, object(), now=1001.0, breaker=breaker)
+    cursor = await store.db.execute("SELECT status, attempts FROM deliveries ORDER BY id")
+    after_first = [dict(r) for r in await cursor.fetchall()]
+    burned = sum(r["attempts"] for r in after_first)
+
+    # Everything is due again, but the breakers are open: rows defer.
+    await process_due(store, cfg, settings, object(), now=1002.0, breaker=breaker)
+    cursor = await store.db.execute("SELECT status, attempts FROM deliveries ORDER BY id")
+    after_second = [dict(r) for r in await cursor.fetchall()]
+    assert sum(r["attempts"] for r in after_second) == burned, "an open breaker burns no attempt"
+    assert all(r["status"] == "queued" for r in after_second)
+
+
+async def test_channels_drain_in_parallel_not_head_of_line(store, cfg, settings, monkeypatch) -> None:
+    """A channel that hangs must not block deliveries to healthy channels."""
+    import asyncio
+
+    import hookrelay.delivery as delivery_mod
+    from hookrelay.delivery import process_due
+    from hookrelay.pipeline import handle_hook
+
+    await handle_hook(
+        store, cfg, cfg.sources["grafana"], {"title": "t", "message": "m", "state": "alerting"}, now=1000.0
+    )
+    order: list[str] = []
+
+    async def slow_feishu(client, channel, message):
+        if channel.name == "feishu-main":
+            await asyncio.sleep(0.05)  # the hanging peer
+        order.append(channel.name)
+        return True, "http 200"
+
+    monkeypatch.setattr(delivery_mod.channels, "send", slow_feishu)
+    await process_due(store, cfg, settings, object(), now=1001.0)
+
+    assert len(order) == 3
+    assert order[-1] == "feishu-main", "the slow channel finished last, the others did not wait for it"
+
+
+async def test_idempotency_key_travels_as_a_header_not_in_the_signed_body(store, cfg, settings, monkeypatch) -> None:
+    import hookrelay.delivery as delivery_mod
+    from hookrelay.channels import send as real_send
+    from hookrelay.delivery import process_due
+    from hookrelay.pipeline import handle_hook
+
+    captured: list[dict] = []
+
+    class _Client:
+        async def post(self, url, *, content=None, json=None, headers=None):
+            captured.append({"headers": headers or {}, "content": content, "json": json})
+
+            class _R:
+                status_code = 200
+                text = "{}"
+
+                def json(self):
+                    return {}
+
+            return _R()
+
+    monkeypatch.setattr(delivery_mod.channels, "send", real_send)
+    await handle_hook(
+        store, cfg, cfg.sources["grafana"], {"title": "t", "message": "m", "state": "alerting"}, now=1000.0
+    )
+    await process_due(store, cfg, settings, _Client(), now=1001.0)
+
+    generic = [c for c in captured if c["content"] is not None]
+    assert generic, "the generic channel sends bytes"
+    assert generic[0]["headers"]["X-Hook-Idempotency-Key"], "receivers need a dedupe key"
+    body = generic[0]["content"].decode()
+    assert "_idempotency_key" not in body, "transport keys must never enter the signed content"
+    assert '"payload"' not in body, "nor the raw payload in normalized mode"

@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from hookrelay import metrics, registry
 from hookrelay.alarm import SelfAlarm
+from hookrelay.breaker import CircuitBreaker
 from hookrelay.config import Config, ConfigError
 from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
@@ -52,7 +53,15 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         while True:
             try:
                 now = now_ts()
-                await process_due(store, app.state.config, app_settings, client, now, alarm=app.state.alarm)
+                await process_due(
+                    store,
+                    app.state.config,
+                    app_settings,
+                    client,
+                    now,
+                    alarm=app.state.alarm,
+                    breaker=app.state.breaker,
+                )
                 # Retention rides the same loop, hourly: once ALL traffic
                 # passes through this ledger it must not grow forever.
                 if app_settings.retention_days > 0 and now >= next_purge:
@@ -87,6 +96,9 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     # counters, applied at the door regardless of what the pipeline says.
     app.state.fuse = StormFuse()
     app.state.alarm = SelfAlarm(app_settings.alarm_url, app_settings.alarm_min_interval_seconds)
+    app.state.breaker = CircuitBreaker(
+        threshold=app_settings.breaker_threshold, cooldown_seconds=app_settings.breaker_cooldown_seconds
+    )
 
     # ── the page ──────────────────────────────────────────────────────────
     # One self-contained file, no build step, no CDN. The page itself is a
@@ -167,6 +179,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         return {
             "queue": await app.state.store.queue_counts(),
             "fuse": app.state.fuse.snapshot(),
+            "breakers": app.state.breaker.snapshot(now),
             "silences": await app.state.store.list_silences(now),
             "recent": await app.state.store.recent_events(50),
         }
