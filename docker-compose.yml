@@ -1,0 +1,21 @@
+services:
+  hookrelay:
+    build: .
+    ports:
+      - "8100:8100"
+    volumes:
+      # Mount a directory holding config.yaml; the SQLite db lives beside it.
+      - ./data:/data
+    environment:
+      HOOKRELAY_ADMIN_TOKEN: ${HOOKRELAY_ADMIN_TOKEN:-}
+      HOOKRELAY_READ_TOKEN: ${HOOKRELAY_READ_TOKEN:-}
+      # Channel/source secrets referenced as ${NAME} in config.yaml:
+      GRAFANA_HOOK_SECRET: ${GRAFANA_HOOK_SECRET:-}
+      FEISHU_WEBHOOK_URL: ${FEISHU_WEBHOOK_URL:-}
+      FEISHU_WEBHOOK_SECRET: ${FEISHU_WEBHOOK_SECRET:-}
+      DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
+      DINGTALK_WEBHOOK_SECRET: ${DINGTALK_WEBHOOK_SECRET:-}
+      WECOM_WEBHOOK_URL: ${WECOM_WEBHOOK_URL:-}
+      ARCHIVE_WEBHOOK_URL: ${ARCHIVE_WEBHOOK_URL:-}
+      ARCHIVE_OUT_SECRET: ${ARCHIVE_OUT_SECRET:-}
+    restart: unless-stopped

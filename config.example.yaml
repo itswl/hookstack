@@ -1,0 +1,71 @@
+# hookrelay routing configuration.
+#
+# Copy to config.yaml and adjust. Secrets are written as ${ENV_NAME} and
+# resolve from the environment at startup — this file stays commit-safe.
+
+sources:
+  # Grafana alerting webhook. The extraction templates walk the payload with
+  # dotted paths; a missing path renders as "" instead of failing the event.
+  - name: grafana
+    secret: ${GRAFANA_HOOK_SECRET}
+    title: "{title}"
+    body: "{message}"
+    level: "{state}"
+    level_map:
+      alerting: high
+      ok: info
+    fields:
+      state: "{state}"
+    fingerprint_fields: [title]     # repeats of the same alert dedup on title
+    dedup_window_seconds: 120
+
+  # A generic JSON producer on a trusted network — no secret, accepted
+  # unsigned. Do this only when the network itself is the boundary.
+  - name: ci
+    secret: ""
+    title: "{pipeline} · {status}"
+    body: "{detail}"
+    level: "{status}"
+    level_map:
+      failed: high
+      success: info
+
+channels:
+  - name: ops-feishu
+    type: feishu
+    url: ${FEISHU_WEBHOOK_URL}
+    secret: ${FEISHU_WEBHOOK_SECRET}   # empty if the bot has no signing
+    max_per_minute: 20
+
+  - name: ops-dingtalk
+    type: dingtalk
+    url: ${DINGTALK_WEBHOOK_URL}
+    secret: ${DINGTALK_WEBHOOK_SECRET}
+
+  - name: ops-wecom
+    type: wecom
+    url: ${WECOM_WEBHOOK_URL}
+
+  - name: archive
+    type: generic
+    url: ${ARCHIVE_WEBHOOK_URL}
+    secret: ${ARCHIVE_OUT_SECRET}      # outbound X-Hook-Signature for the receiver
+
+routes:
+  # Highest priority first. `stop: true` ends the walk after a match.
+  - name: high-everywhere
+    source: "*"
+    when:
+      level: [high, critical]
+    send_to: [ops-feishu, ops-dingtalk]
+    priority: 100
+
+  - name: grafana-default
+    source: grafana
+    send_to: [ops-feishu]
+    priority: 10
+
+  - name: everything-to-archive
+    source: "*"
+    send_to: [archive]
+    priority: 0
