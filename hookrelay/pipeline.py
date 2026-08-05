@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from hookrelay import registry
+from hookrelay import metrics, registry
 from hookrelay.config import Config, Source
 from hookrelay.extract import extract_event, fingerprint
 from hookrelay.processors import EventContext, Runtime
@@ -85,4 +85,5 @@ async def _record(store: Store, ctx: EventContext, outcome: str, skip_code: str 
     fp = ctx.fingerprint or fingerprint(ctx.source, ctx.extracted)
     event_id = await store.insert_event(ctx.source.name, fp, ctx.extracted, payload_json, ctx.now)
     await store.insert_decision(event_id, outcome, skip_code, channels, ctx.steps)
+    metrics.record_event(ctx.source.name, skip_code or outcome)
     return event_id
