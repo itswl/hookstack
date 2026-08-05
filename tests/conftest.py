@@ -61,6 +61,7 @@ def settings(tmp_path) -> Settings:
     return Settings(
         config_path="unused",
         db_path=str(tmp_path / "test.db"),
+        plugins_dir=str(tmp_path / "no-plugins"),
         admin_token="admin-t",
         read_token="read-t",
         max_body_bytes=256 * 1024,

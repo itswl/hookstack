@@ -59,6 +59,7 @@ def test_generic_forwards_the_normalized_event_signed(cfg):
 
     signed = Channel(name="m2", type="generic", url="https://m2.example/in", secret="outsec")
     _, payload, headers = build_request(signed, MESSAGE, now=0.0)
-    assert payload == MESSAGE
-    body = json.dumps(MESSAGE, ensure_ascii=False, sort_keys=True).encode()
-    assert headers["X-Hook-Signature"] == hmac.new(b"outsec", body, hashlib.sha256).hexdigest()
+    # Bytes-exact: the signature covers the payload AS SENT.
+    assert isinstance(payload, bytes)
+    assert json.loads(payload.decode()) == MESSAGE
+    assert headers["X-Hook-Signature"] == hmac.new(b"outsec", payload, hashlib.sha256).hexdigest()
