@@ -203,13 +203,17 @@ class Store:
     async def recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.db.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.level,"
-            "       d.outcome, d.skip_code, d.channels_json"
+            "       d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id"
             " ORDER BY e.id DESC LIMIT ?",
             (limit,),
         )
         events = [dict(row) for row in await cursor.fetchall()]
         for event in events:
+            # Parsed, not raw: the status page (and any client) gets the
+            # decision trace as data, because WHY is the product.
+            event["channels"] = json.loads(event.pop("channels_json") or "[]")
+            event["steps"] = json.loads(event.pop("steps_json") or "[]")
             cursor = await self.db.execute(
                 "SELECT channel, status, attempts, last_error FROM deliveries WHERE event_id = ? ORDER BY id",
                 (event["id"],),
