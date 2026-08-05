@@ -64,7 +64,9 @@ async def test_status_requires_read_token_when_configured(client):
     assert (await client.get("/status")).status_code == 401
     response = await client.get("/status", headers={"X-Read-Token": "read-t"})
     assert response.status_code == 200
-    assert set(response.json().keys()) == {"queue", "silences", "recent"}
+    # fuse joined the board when the storm fuse landed; the set is pinned so a
+    # future key must be a decision, not an accident.
+    assert set(response.json().keys()) == {"queue", "fuse", "silences", "recent"}
 
 
 async def test_silence_lifecycle_via_admin_api(client):

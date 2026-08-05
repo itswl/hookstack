@@ -66,6 +66,16 @@ async def handle_hook(
     return {"event_id": event_id, "outcome": "routed", "channels": ctx.channels, "steps": ctx.steps}
 
 
+async def record_storm_suppressed(
+    store: Store, source: Source, payload: Any, now: float, count: int, threshold: int
+) -> int:
+    """A fused event still gets an account — the storm is exactly when you most
+    need to know what arrived. It walks no pipeline and reaches no channel."""
+    ctx = EventContext(source=source, payload=payload, extracted=extract_event(source, payload), now=now)
+    ctx.steps.append({"gate": "storm_fuse", "result": "suppressed", "window_count": count, "threshold": threshold})
+    return await _record(store, ctx, "skipped", "storm_suppressed", [])
+
+
 async def _record(store: Store, ctx: EventContext, outcome: str, skip_code: str | None, channels: list[str]) -> int:
     # Stored WHOLE: with raw-passthrough channels the payload IS the working
     # copy (the exact thing a downstream brain receives), so truncating here

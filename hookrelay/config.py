@@ -59,6 +59,12 @@ class Source:
     # Which extracted keys form the duplicate fingerprint. Empty = title+body.
     fingerprint_fields: tuple[str, ...] = ()
     dedup_window_seconds: int = 120
+    # Storm fuse (volume, not content — see hookrelay/fuse.py). 0 = no fuse.
+    # Mandatory reading: a brain-paired deploy may rely on the brain's own
+    # backpressure, but a relay in front of something WITHOUT backpressure
+    # (e.g. WebhookWise-lite) must carry its own fuse.
+    storm_threshold: int = 0
+    storm_window_seconds: int = 60
     # Free-form bag for custom adapters (the core never reads it).
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -129,6 +135,8 @@ class Config:
                 fields={str(k): str(v) for k, v in (item.get("fields") or {}).items()},
                 fingerprint_fields=tuple(item.get("fingerprint_fields") or ()),
                 dedup_window_seconds=int(item.get("dedup_window_seconds", 120)),
+                storm_threshold=max(0, int(item.get("storm_threshold", 0))),
+                storm_window_seconds=max(1, int(item.get("storm_window_seconds", 60))),
                 options=_resolve_deep(dict(item.get("options") or {})),
             )
             if src.adapter not in registry.SOURCE_ADAPTERS:
