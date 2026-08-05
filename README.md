@@ -132,6 +132,8 @@ failure, so it burns no attempt.
 
 ## Configuration
 
+Full field-by-field reference: **[docs/configuration.md](docs/configuration.md)**.
+
 One YAML file (see `config.example.yaml`): `sources` (who may knock, how to
 extract `title`/`body`/`level`/`fields` via `{dotted.paths.0.into.json}`),
 `channels` (feishu / dingtalk / wecom / generic, each with optional signing and

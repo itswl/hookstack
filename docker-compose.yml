@@ -6,17 +6,12 @@ services:
     volumes:
       # Directory holding config.yaml (+ optional plugins/); SQLite lives beside it.
       - ./data:/data
+    # The WHOLE .env is injected, so a new ${NAME} reference in config.yaml
+    # only needs a line in .env — no compose edit, no forgotten passthrough.
+    env_file:
+      - .env
     environment:
       HOOKRELAY_PLUGINS: /data/plugins
-      HOOKRELAY_ADMIN_TOKEN: ${HOOKRELAY_ADMIN_TOKEN:-}
-      HOOKRELAY_READ_TOKEN: ${HOOKRELAY_READ_TOKEN:-}
-      # Channel/source secrets referenced as ${NAME} in config.yaml:
-      GRAFANA_HOOK_SECRET: ${GRAFANA_HOOK_SECRET:-}
-      FEISHU_WEBHOOK_URL: ${FEISHU_WEBHOOK_URL:-}
-      FEISHU_WEBHOOK_SECRET: ${FEISHU_WEBHOOK_SECRET:-}
-      DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
-      DINGTALK_WEBHOOK_SECRET: ${DINGTALK_WEBHOOK_SECRET:-}
-      WECOM_WEBHOOK_URL: ${WECOM_WEBHOOK_URL:-}
     restart: unless-stopped
     depends_on:
       - sink
