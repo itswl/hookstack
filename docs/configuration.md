@@ -43,8 +43,15 @@ GitHub's `X-Hub-Signature-256`.
 
 ## 2. Processors — `pipeline`
 
-Omit the key entirely → default `[dedup, silence, routes]`. Write it → the
-walk is exactly your list, in order. **Must contain `routes`.**
+Omit the key entirely → default `[dedup, silence, routes]` (the STANDALONE
+posture: dedup here is a storm fuse for deployments with no brain behind the
+relay). Write it → the walk is exactly your list, in order. **Must contain
+`routes`.**
+
+**Paired with a brain (e.g. WebhookWise)?** Use `pipeline: [silence, routes]`
+— the brain owns dedup/noise judgment and its accounting must stay truthful;
+the edge keeps only the valve. This is how the reference production deploy
+runs.
 
 ```yaml
 pipeline:
