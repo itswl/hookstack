@@ -46,9 +46,18 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     store = Store(app_settings.db_path)
 
     async def _worker_loop(client: httpx.AsyncClient) -> None:
+        next_purge = 0.0
         while True:
             try:
-                await process_due(store, app.state.config, app_settings, client, now_ts())
+                now = now_ts()
+                await process_due(store, app.state.config, app_settings, client, now)
+                # Retention rides the same loop, hourly: once ALL traffic
+                # passes through this ledger it must not grow forever.
+                if app_settings.retention_days > 0 and now >= next_purge:
+                    next_purge = now + 3600
+                    purged = await store.purge_older_than(now - app_settings.retention_days * 86400, now)
+                    if purged["events"] or purged["silences"]:
+                        print(f"[hookrelay] retention: purged {purged['events']} events, {purged['silences']} silences")
             except Exception as error:  # noqa: BLE001 — the loop must survive anything
                 print(f"[hookrelay] worker error: {error.__class__.__name__}: {error}")
             await asyncio.sleep(app_settings.worker_interval_seconds)

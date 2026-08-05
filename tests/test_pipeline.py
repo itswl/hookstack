@@ -70,10 +70,15 @@ async def test_no_route_is_a_named_outcome_not_an_error(store, cfg):
     assert route_step["gate"] == "routes" and route_step["matched_channels"] == []
 
 
-async def test_oversized_payload_is_truncated_in_storage(store, cfg):
+async def test_payload_is_stored_whole_for_raw_fidelity(store, cfg):
+    """Since raw-passthrough channels deliver the stored payload, truncating it
+    would corrupt deliveries. Size is bounded at the DOOR (413 over
+    max_body_bytes), so storage keeps every byte that was admitted."""
     big = dict(PAYLOAD, blob="x" * 40_000)
     result = await handle_hook(store, cfg, cfg.sources["grafana"], big, now=1000.0)
     assert result["outcome"] == "routed"
     cursor = await store.db.execute("SELECT payload_json FROM events WHERE id = ?", (result["event_id"],))
     row = await cursor.fetchone()
-    assert '"_truncated": true' in row["payload_json"].lower()
+    import json as _json
+
+    assert _json.loads(row["payload_json"])["blob"] == "x" * 40_000

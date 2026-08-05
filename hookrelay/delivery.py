@@ -51,6 +51,9 @@ async def process_due(store: Store, cfg: Config, settings: Settings, client: htt
             "level": row["level"],
             "fields": json.loads(row["fields_json"] or "{}"),
             "received_at": row["received_at"],
+            # The original inbound payload, for raw-mode channels. Normalized
+            # channels never serialize it (generic strips it before signing).
+            "payload": json.loads(row["payload_json"] or "null"),
         }
         ok, detail = await channels.send(client, channel, message)
         processed += 1

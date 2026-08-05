@@ -67,11 +67,11 @@ async def handle_hook(
 
 
 async def _record(store: Store, ctx: EventContext, outcome: str, skip_code: str | None, channels: list[str]) -> int:
+    # Stored WHOLE: with raw-passthrough channels the payload IS the working
+    # copy (the exact thing a downstream brain receives), so truncating here
+    # would silently corrupt deliveries. Size is already bounded upstream by
+    # the ingress body cap (413 at the door), and retention purges old rows.
     payload_json = json.dumps(ctx.payload, ensure_ascii=False)
-    # The raw payload is forensic context, not the working copy — cap it so a
-    # hostile 200KB body cannot bloat every row it touches.
-    if len(payload_json) > 32_768:
-        payload_json = json.dumps({"_truncated": True, "_bytes": len(payload_json)})
     fp = ctx.fingerprint or fingerprint(ctx.source, ctx.extracted)
     event_id = await store.insert_event(ctx.source.name, fp, ctx.extracted, payload_json, ctx.now)
     await store.insert_decision(event_id, outcome, skip_code, channels, ctx.steps)

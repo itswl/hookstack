@@ -30,6 +30,7 @@ class Settings:
     read_token: str
     max_body_bytes: int
     max_attempts: int
+    retention_days: int  # 0 = keep forever
     worker_interval_seconds: float
 
     @classmethod
@@ -42,5 +43,6 @@ class Settings:
             read_token=os.environ.get("HOOKRELAY_READ_TOKEN", ""),
             max_body_bytes=_int("HOOKRELAY_MAX_BODY_BYTES", 256 * 1024),
             max_attempts=_int("HOOKRELAY_MAX_ATTEMPTS", 8),
+            retention_days=_int("HOOKRELAY_RETENTION_DAYS", 14),
             worker_interval_seconds=float(os.environ.get("HOOKRELAY_WORKER_INTERVAL", "1.0")),
         )

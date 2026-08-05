@@ -51,6 +51,15 @@ channels:
     url: ${ARCHIVE_WEBHOOK_URL}
     secret: ${ARCHIVE_OUT_SECRET}      # outbound X-Hook-Signature for the receiver
 
+  # Transparent edge: forward the ORIGINAL payload into WebhookWise's own
+  # per-source ingest — WW unchanged, hookrelay's ledger in front.
+  # - name: to-webhookwise
+  #   type: generic
+  #   url: https://your-ww/v1/webhook/grafana
+  #   secret: ${WEBHOOKWISE_SECRET}
+  #   signature_header: X-Webhook-Signature
+  #   options: {payload: raw}
+
   # Feed WebhookWise directly: same generic type, its signature dialect.
   # - name: webhookwise
   #   type: generic

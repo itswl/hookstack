@@ -127,7 +127,7 @@ class Store:
 
     async def due_deliveries(self, now: float, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.db.execute(
-            "SELECT d.*, e.source, e.title, e.body, e.level, e.fields_json, e.received_at"
+            "SELECT d.*, e.source, e.title, e.body, e.level, e.fields_json, e.payload_json, e.received_at"
             " FROM deliveries d JOIN events e ON e.id = d.event_id"
             " WHERE d.status = 'queued' AND d.next_attempt_at <= ? ORDER BY d.id LIMIT ?",
             (now, limit),
@@ -202,6 +202,30 @@ class Store:
     async def list_silences(self, now: float) -> list[dict[str, Any]]:
         cursor = await self.db.execute("SELECT * FROM silences WHERE until_ts > ? ORDER BY id DESC", (now,))
         return [dict(row) for row in await cursor.fetchall()]
+
+    # ── retention ─────────────────────────────────────────────────────────
+
+    async def purge_older_than(self, cutoff: float, now: float) -> dict[str, int]:
+        """Retention: this ledger must not grow forever once ALL traffic rides
+        through it. An event is purgeable when it is older than the cutoff AND
+        none of its deliveries is still queued — a promise in flight is never
+        deleted out from under the worker. Expired silences go with them."""
+        cursor = await self.db.execute(
+            "SELECT id FROM events e WHERE e.received_at < ?"
+            " AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.event_id = e.id AND d.status = 'queued')",
+            (cutoff,),
+        )
+        ids = [int(row["id"]) for row in await cursor.fetchall()]
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            marks = ",".join("?" for _ in chunk)
+            await self.db.execute(f"DELETE FROM deliveries WHERE event_id IN ({marks})", chunk)
+            await self.db.execute(f"DELETE FROM decisions WHERE event_id IN ({marks})", chunk)
+            await self.db.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk)
+        cursor = await self.db.execute("DELETE FROM silences WHERE until_ts < ?", (now,))
+        silences = cursor.rowcount
+        await self.db.commit()
+        return {"events": len(ids), "silences": max(0, silences)}
 
     # ── status view ───────────────────────────────────────────────────────
 

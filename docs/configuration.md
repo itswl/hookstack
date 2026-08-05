@@ -144,6 +144,64 @@ exponential backoff 30s·2ⁿ capped at 10 min, 8 attempts, then a visible
 `dead` with the last error. Feishu/DingTalk/WeCom in-body error codes
 (`code`/`errcode` ≠ 0) count as failures even on HTTP 200.
 
+### Raw mode — the WebhookWise split
+
+Every channel type accepts:
+
+```yaml
+options:
+  payload: raw          # deliver the ORIGINAL inbound payload, not the summary
+  payload_path: card    # optional: a sub-object of it (dotted path)
+```
+
+Two recipes this enables:
+
+**Transparent edge (monitoring → hookrelay → WebhookWise)** — WW unchanged,
+its own per-ecosystem adapters keep working; hookrelay adds the ledger, storm
+dedup and a named door in front:
+
+```yaml
+channels:
+  - name: to-webhookwise
+    type: generic
+    url: https://your-ww/v1/webhook/grafana     # WW's own per-source ingest
+    secret: ${WEBHOOKWISE_SECRET}
+    signature_header: X-Webhook-Signature
+    options: {payload: raw}
+# edge dedup must not swallow recoveries: put the state in the fingerprint
+sources:
+  - name: grafana
+    fingerprint_fields: [title, state]
+```
+
+**Finished payloads out (WebhookWise → hookrelay → 飞书)** — the brain builds
+the exact message (interactive cards with their callback buttons survive);
+hookrelay owns retry / rate limit / dead letters and injects bot signing only:
+
+```yaml
+sources:
+  - name: ww-out
+    secret: ${WW_OUT_SECRET}
+channels:
+  - name: feishu-final
+    type: feishu
+    url: ${FEISHU_WEBHOOK_URL}
+    secret: ${FEISHU_WEBHOOK_SECRET}
+    options: {payload: raw, payload_path: notification}
+routes:
+  - {name: ww-to-feishu, source: ww-out, send_to: [feishu-final]}
+```
+
+`payload: raw` with a missing/empty path fails INTO the delivery ledger with a
+named error — a misconfiguration must never silently deliver an empty body.
+
+### Retention
+
+`HOOKRELAY_RETENTION_DAYS` (default 14, `0` = keep forever): an hourly sweep
+purges events older than the window **whose deliveries are all settled** — a
+queued promise is never deleted out from under the worker. Expired silences go
+with them.
+
 **Custom channel**: a plugin file with
 
 ```python
