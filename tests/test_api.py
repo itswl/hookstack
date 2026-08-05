@@ -6,28 +6,11 @@ import hashlib
 import hmac
 import json
 
-import httpx
-import pytest
-
-from hookrelay.app import create_app
-
 PAYLOAD = {"title": "db down", "message": "x", "state": "alerting"}
 
 
 def _sig(secret: str, body: bytes) -> str:
     return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-
-
-@pytest.fixture
-async def client(settings, cfg):
-    app = create_app(settings=settings, cfg=cfg)
-    # lifespan by hand: ASGITransport does not run it.
-    async with (
-        httpx.ASGITransport(app=app) as transport,
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(transport=transport, base_url="http://t") as c,
-    ):
-        yield c
 
 
 async def test_signed_hook_round_trip(client):

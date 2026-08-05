@@ -12,7 +12,8 @@ import json
 
 import httpx
 
-from hookrelay import channels
+from hookrelay import channels, metrics
+from hookrelay.alarm import SelfAlarm
 from hookrelay.config import Config
 from hookrelay.settings import Settings
 from hookrelay.store import Store
@@ -26,7 +27,14 @@ def backoff_delay(attempts: int) -> float:
     return float(min(_BACKOFF_CAP_SECONDS, _BACKOFF_BASE_SECONDS * (2 ** max(0, attempts - 1))))
 
 
-async def process_due(store: Store, cfg: Config, settings: Settings, client: httpx.AsyncClient, now: float) -> int:
+async def process_due(
+    store: Store,
+    cfg: Config,
+    settings: Settings,
+    client: httpx.AsyncClient,
+    now: float,
+    alarm: SelfAlarm | None = None,
+) -> int:
     processed = 0
     for row in await store.due_deliveries(now):
         channel = cfg.channels.get(row["channel"])
@@ -34,6 +42,15 @@ async def process_due(store: Store, cfg: Config, settings: Settings, client: htt
             # Config changed underneath a queued row: dead-letter it with the
             # reason instead of retrying into a void forever.
             await store.mark_failed(row["id"], row["attempts"] + 1, "channel no longer configured", None)
+            metrics.record_delivery(row["channel"], "dead")
+            if alarm is not None:
+                await alarm.dead_letter(
+                    client,
+                    channel=row["channel"],
+                    event_id=row["event_id"],
+                    error="channel no longer configured",
+                    now=now,
+                )
             processed += 1
             continue
 
@@ -41,6 +58,7 @@ async def process_due(store: Store, cfg: Config, settings: Settings, client: htt
             sent_last_minute = await store.sent_count_since(channel.name, now - 60)
             if sent_last_minute >= channel.max_per_minute:
                 await store.defer_delivery(row["id"], now + _RATE_DEFER_SECONDS)
+                metrics.record_delivery(channel.name, "deferred")
                 continue
 
         message = {
@@ -59,8 +77,12 @@ async def process_due(store: Store, cfg: Config, settings: Settings, client: htt
         processed += 1
         if ok:
             await store.mark_sent(row["id"], now)
+            metrics.record_delivery(channel.name, "sent")
         else:
             attempts = row["attempts"] + 1
             next_at = None if attempts >= settings.max_attempts else now + backoff_delay(attempts)
             await store.mark_failed(row["id"], attempts, detail, next_at)
+            metrics.record_delivery(channel.name, "dead" if next_at is None else "failed")
+            if next_at is None and alarm is not None:
+                await alarm.dead_letter(client, channel=channel.name, event_id=row["event_id"], error=detail, now=now)
     return processed
