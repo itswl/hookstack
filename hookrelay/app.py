@@ -200,14 +200,25 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     # ── read side ─────────────────────────────────────────────────────────
 
-    def _read_guard(token: str | None) -> None:
+    def _read_guard(token: str | None, authorization: str | None = None) -> None:
+        """X-Read-Token, or the standard Authorization: Bearer form.
+
+        Both accepted because tooling speaks Bearer: Prometheus can carry a
+        scrape credential from a FILE that way (its config has no env-var
+        expansion), which keeps the token out of any config file."""
         configured = app.state.settings.read_token
-        if configured and not token_ok(configured, token):
+        if not configured:
+            return
+        bearer = None
+        if authorization and authorization.lower().startswith("bearer "):
+            bearer = authorization[7:].strip()
+        if not (token_ok(configured, token) or (bearer and token_ok(configured, bearer))):
             raise HTTPException(status_code=401, detail="read token required")
 
     @app.get("/status")
     async def status(
         x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
         source: str | None = None,
         outcome: str | None = None,
         skip_code: str | None = None,
@@ -215,7 +226,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         before_id: int | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
-        _read_guard(x_read_token)
+        _read_guard(x_read_token, authorization)
         now = now_ts()
         return {
             "queue": await app.state.store.queue_counts(),
@@ -228,14 +239,19 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         }
 
     @app.get("/metrics", response_class=PlainTextResponse)
-    async def prometheus_metrics(x_read_token: str | None = Header(default=None)) -> str:
+    async def prometheus_metrics(
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> str:
         # Same guard as /status: the numbers describe the estate's alert flow.
-        _read_guard(x_read_token)
+        _read_guard(x_read_token, authorization)
+        now = now_ts()
         return metrics.render(
             queue=await app.state.store.queue_counts(),
             fuse=app.state.fuse.snapshot(),
-            silences=len(await app.state.store.list_silences(now_ts())),
+            silences=len(await app.state.store.list_silences(now)),
             retention_days=app.state.settings.retention_days,
+            breakers=app.state.breaker.snapshot(now),
         )
 
     @app.get("/healthz")

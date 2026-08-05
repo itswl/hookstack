@@ -28,6 +28,7 @@ def test_render_emits_help_type_and_all_consumer_series() -> None:
         fuse={"loud": {"suppressed": 7, "rejected": 2}},
         silences=1,
         retention_days=14,
+        breakers={"sick": "open", "recovering": "half-open"},
     )
 
     assert 'hookrelay_events_total{source="grafana",outcome="routed"} 2' in text
@@ -37,6 +38,7 @@ def test_render_emits_help_type_and_all_consumer_series() -> None:
     assert 'hookrelay_fuse_total{source="loud",stage="soft"} 7' in text
     assert 'hookrelay_fuse_total{source="loud",stage="hard"} 2' in text
     assert "hookrelay_silences_active 1" in text
+    assert 'hookrelay_breaker_open{channel="sick"} 1' in text
     assert "hookrelay_up 1" in text
     # Exposition hygiene: every metric carries HELP and TYPE, and the body ends
     # with a newline (scrapers reject a truncated final line).
@@ -269,3 +271,16 @@ async def test_idempotency_key_travels_as_a_header_not_in_the_signed_body(store,
     body = generic[0]["content"].decode()
     assert "_idempotency_key" not in body, "transport keys must never enter the signed content"
     assert '"payload"' not in body, "nor the raw payload in normalized mode"
+
+
+async def test_read_guard_accepts_both_header_dialects(client) -> None:
+    """Tooling speaks Bearer: Prometheus carries a scrape credential from a
+    FILE that way, which is how the token stays out of any config file (its
+    config has no env-var expansion)."""
+    assert (await client.get("/metrics")).status_code == 401
+    assert (await client.get("/metrics", headers={"X-Read-Token": "read-t"})).status_code == 200
+    assert (await client.get("/metrics", headers={"Authorization": "Bearer read-t"})).status_code == 200
+    assert (await client.get("/metrics", headers={"Authorization": "Bearer wrong"})).status_code == 401
+    assert (await client.get("/metrics", headers={"Authorization": "Basic read-t"})).status_code == 401
+    # /status shares the guard.
+    assert (await client.get("/status", headers={"Authorization": "Bearer read-t"})).status_code == 200

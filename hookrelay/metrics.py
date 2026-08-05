@@ -44,7 +44,14 @@ def _series(name: str, labels: dict[str, str], value: Any) -> str:
     return f"{name} {value}"
 
 
-def render(*, queue: dict[str, int], fuse: dict[str, dict[str, int]], silences: int, retention_days: int) -> str:
+def render(
+    *,
+    queue: dict[str, int],
+    fuse: dict[str, dict[str, int]],
+    silences: int,
+    retention_days: int,
+    breakers: dict[str, str] | None = None,
+) -> str:
     lines: list[str] = [
         "# HELP hookrelay_up Relay process is serving.",
         "# TYPE hookrelay_up gauge",
@@ -73,6 +80,12 @@ def render(*, queue: dict[str, int], fuse: dict[str, dict[str, int]], silences: 
     for source, counts in sorted(fuse.items()):
         lines.append(_series("hookrelay_fuse_total", {"source": source, "stage": "soft"}, counts.get("suppressed", 0)))
         lines.append(_series("hookrelay_fuse_total", {"source": source, "stage": "hard"}, counts.get("rejected", 0)))
+    lines += [
+        "# HELP hookrelay_breaker_open Channels whose breaker is not closed (1 = open, 0 = half-open probe).",
+        "# TYPE hookrelay_breaker_open gauge",
+    ]
+    for channel, state in sorted((breakers or {}).items()):
+        lines.append(_series("hookrelay_breaker_open", {"channel": channel}, 1 if state == "open" else 0))
     lines += [
         "# HELP hookrelay_silences_active Silences in force right now.",
         "# TYPE hookrelay_silences_active gauge",
