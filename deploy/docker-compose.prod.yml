@@ -1,0 +1,32 @@
+# Production shape: hookrelay as the single alert front door, joined to
+# WebhookWise's docker network so senders (Grafana / Alertmanager) reach it
+# by DNS name and it reaches WW's ingest the same way.
+#
+#   cd /opt/docker-compose/hookrelay
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+#
+# Differences from the laptop compose, each deliberate:
+#   - no sink toy service
+#   - port bound to 127.0.0.1 only (senders live on the docker network;
+#     the host binding exists for ssh-tunnel access to the status page)
+#   - joins webhookwise_webhook_net (external) under the DNS name `hookrelay`
+
+services:
+  hookrelay:
+    build:
+      context: ..
+    container_name: hookrelay
+    ports:
+      - "127.0.0.1:8100:8100"
+    volumes:
+      - ../data:/data
+    env_file:
+      - ../.env
+    environment:
+      HOOKRELAY_PLUGINS: /data/plugins
+    restart: unless-stopped
+
+networks:
+  default:
+    name: webhookwise_webhook_net
+    external: true
