@@ -234,13 +234,48 @@ class Store:
         counts = {row["status"]: int(row["n"]) for row in await cursor.fetchall()}
         return {"queued": counts.get("queued", 0), "sent": counts.get("sent", 0), "dead": counts.get("dead", 0)}
 
-    async def recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def recent_events(
+        self,
+        limit: int = 50,
+        *,
+        source: str | None = None,
+        outcome: str | None = None,
+        skip_code: str | None = None,
+        query: str | None = None,
+        before_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Latest events, newest first, with optional filters.
+
+        Once a whole estate rides through one relay, "did alert X arrive?" is
+        the question the ledger exists to answer — a fixed window of 50 cannot.
+        Filters compose (AND) and paginate with before_id.
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
+        if source:
+            clauses.append("e.source = ?")
+            params.append(source)
+        if outcome:
+            clauses.append("d.outcome = ?")
+            params.append(outcome)
+        if skip_code:
+            clauses.append("d.skip_code = ?")
+            params.append(skip_code)
+        if query:
+            clauses.append("(e.title LIKE ? OR e.body LIKE ?)")
+            params += [f"%{query}%", f"%{query}%"]
+        if before_id:
+            clauses.append("e.id < ?")
+            params.append(int(before_id))
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(max(1, min(500, int(limit))))
         cursor = await self.db.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.level,"
             "       d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id"
+            f"{where}"
             " ORDER BY e.id DESC LIMIT ?",
-            (limit,),
+            tuple(params),
         )
         events = [dict(row) for row in await cursor.fetchall()]
         for event in events:

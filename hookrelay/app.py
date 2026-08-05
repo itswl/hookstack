@@ -165,6 +165,39 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         )
         return JSONResponse(result)
 
+    @app.post("/explain/{source_name}")
+    async def explain(
+        source_name: str, request: Request, x_admin_token: str | None = Header(default=None)
+    ) -> JSONResponse:
+        """Dry run: what WOULD this payload do? Admin-gated because it reveals
+        routing, and because the config page is its consumer.
+
+        Signature verification is skipped ON PURPOSE — you are asking about a
+        payload you are holding, not delivering one. Nothing is recorded and
+        nothing is enqueued, so the explain button can never become a way to
+        put a message in the group."""
+        _admin_guard(x_admin_token)
+        source = app.state.config.sources.get(source_name)
+        if source is None:
+            raise HTTPException(status_code=404, detail="unknown source")
+        try:
+            payload = json.loads(await request.body() or b"{}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="body is not JSON") from None
+        adapter = registry.SOURCE_ADAPTERS[source.adapter]
+        result = await handle_hook(
+            app.state.store,
+            app.state.config,
+            source,
+            payload,
+            now_ts(),
+            settings=app_settings,
+            client=app.state.http_client,
+            extracted=adapter.parse(source, payload),
+            dry_run=True,
+        )
+        return JSONResponse(result)
+
     # ── read side ─────────────────────────────────────────────────────────
 
     def _read_guard(token: str | None) -> None:
@@ -173,7 +206,15 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             raise HTTPException(status_code=401, detail="read token required")
 
     @app.get("/status")
-    async def status(x_read_token: str | None = Header(default=None)) -> dict[str, Any]:
+    async def status(
+        x_read_token: str | None = Header(default=None),
+        source: str | None = None,
+        outcome: str | None = None,
+        skip_code: str | None = None,
+        q: str | None = None,
+        before_id: int | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
         _read_guard(x_read_token)
         now = now_ts()
         return {
@@ -181,7 +222,9 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             "fuse": app.state.fuse.snapshot(),
             "breakers": app.state.breaker.snapshot(now),
             "silences": await app.state.store.list_silences(now),
-            "recent": await app.state.store.recent_events(50),
+            "recent": await app.state.store.recent_events(
+                limit, source=source, outcome=outcome, skip_code=skip_code, query=q, before_id=before_id
+            ),
         }
 
     @app.get("/metrics", response_class=PlainTextResponse)
