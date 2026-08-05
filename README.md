@@ -137,10 +137,15 @@ Pipe *protections* — kept, but named for what they are:
 - **silence is a VALVE**, not noise reduction: the emergency shutoff an
   operator pulls when the thing behind the pipe is melting. Source-scoped or
   global, always with expiry.
-- **dedup is a STORM FUSE**, not noise judgment: it stops identical-payload
-  floods from crushing what's downstream. In a brain-paired deployment turn
-  it OFF (`pipeline: [silence, routes]`) so the brain's own noise accounting
-  stays truthful.
+- **the STORM FUSE is volume protection**: per-door arrival limits
+  (`storm_threshold`), catching the high-cardinality flood that content dedup
+  structurally cannot. Soft stage keeps the account, hard stage (10×) protects
+  the account. Mandatory in front of anything without its own backpressure —
+  WebhookWise-lite, for instance.
+- **dedup is CONTENT protection**, not noise judgment: identical payloads
+  inside a window. In a brain-paired deployment turn it OFF
+  (`pipeline: [silence, routes]`) so the brain's own noise accounting stays
+  truthful; the fuse is the one that stays.
 - **rate limits protect downstream quotas** by deferring, never dropping.
 
 Judgment features (`filter`, `set`, dedup-as-noise-control) exist for
