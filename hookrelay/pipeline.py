@@ -32,6 +32,7 @@ async def handle_hook(
     settings: Settings | None = None,
     client: httpx.AsyncClient | None = None,
     extracted: dict[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Run one event through the configured pipeline.
 
@@ -53,12 +54,28 @@ async def handle_hook(
         options["_name"] = stage.name
         verdict, detail = await processor.run(rt, ctx, options)
         if verdict == "skip":
+            if dry_run:
+                return {"dry_run": True, "outcome": "skipped", "skip_code": str(detail), "steps": ctx.steps}
             event_id = await _record(store, ctx, "skipped", str(detail), [])
             return {"event_id": event_id, "outcome": "skipped", "skip_code": str(detail), "steps": ctx.steps}
 
     if not ctx.channels:
+        if dry_run:
+            return {"dry_run": True, "outcome": "skipped", "skip_code": "no_route", "steps": ctx.steps}
         event_id = await _record(store, ctx, "skipped", "no_route", [])
         return {"event_id": event_id, "outcome": "skipped", "skip_code": "no_route", "steps": ctx.steps}
+
+    if dry_run:
+        # Nothing recorded, nothing enqueued: the answer to "what WOULD this
+        # payload do" must not itself become an event, or the explain button
+        # becomes a way to spam the group.
+        return {
+            "dry_run": True,
+            "outcome": "routed",
+            "channels": ctx.channels,
+            "steps": ctx.steps,
+            "extracted": ctx.extracted,
+        }
 
     event_id = await _record(store, ctx, "routed", None, ctx.channels)
     for channel_name in ctx.channels:

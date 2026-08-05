@@ -120,7 +120,19 @@
   <div id="silences"></div>
 
   <h2>最近事件 · 点开看决策链</h2>
+  <div class="row">
+    <input id="fSearch" placeholder="搜标题/正文" style="flex:1">
+    <input id="fSource" placeholder="来源" style="width:130px">
+    <select id="fOutcome" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;">
+      <option value="">全部结局</option>
+      <option value="routed">routed</option>
+      <option value="skipped">skipped</option>
+    </select>
+    <button class="btn" id="fApply">搜索</button>
+    <button class="btn" id="fClear">清空</button>
+  </div>
   <div id="events"><div class="empty">…</div></div>
+  <div class="row"><button class="btn" id="loadMore" style="display:none">加载更早</button></div>
   </div><!-- /panel-events -->
 
   <div id="panel-config" style="display:none">
@@ -137,6 +149,15 @@
       <span class="hint">校验不过 = 什么都不改;秘密请写 ${ENV} 引用,值放 .env</span>
     </div>
     <div class="msg" id="cfgMsg"></div>
+
+    <h2>干跑:这段载荷会怎么走?</h2>
+    <div class="row">
+      <input id="exSource" placeholder="来源名(门)" style="width:170px">
+      <span class="hint">不验签、不记账、不投递</span>
+    </div>
+    <textarea class="editor" id="exPayload" spellcheck="false" style="min-height:120px" placeholder='{"title":"试试","state":"alerting"}'></textarea>
+    <div class="row"><button class="btn primary" id="exRun">解释</button></div>
+    <pre class="trace" id="exResult" style="display:none"></pre>
 
     <h2>新建静音</h2>
     <div class="row">
@@ -188,6 +209,7 @@
       document.getElementById("events").innerHTML = '<div class="empty">还没有事件 — 投一条试试:examples/try.sh</div>';
       return;
     }
+    document.getElementById("loadMore").style.display = events.length >= filters.limit ? "" : "none";
     document.getElementById("events").innerHTML = events.map(function (e) {
       var badge = e.outcome === "routed"
         ? '<span class="badge routed">routed → ' + esc((e.channels || []).join(", ")) + "</span>"
@@ -214,12 +236,22 @@
     }).join("");
   }
 
+  var filters = { q: "", source: "", outcome: "", limit: 50 };
+
+  function statusQuery() {
+    var pairs = ["limit=" + filters.limit];
+    if (filters.q) pairs.push("q=" + encodeURIComponent(filters.q));
+    if (filters.source) pairs.push("source=" + encodeURIComponent(filters.source));
+    if (filters.outcome) pairs.push("outcome=" + encodeURIComponent(filters.outcome));
+    return "/status?" + pairs.join("&");
+  }
+
   function refresh() {
     if (document.hidden) return;
     var headers = {};
     var token = localStorage.getItem(TOKEN_KEY);
     if (token) headers["X-Read-Token"] = token;
-    fetch("/status", { headers: headers }).then(function (res) {
+    fetch(statusQuery(), { headers: headers }).then(function (res) {
       if (res.status === 401) {
         document.getElementById("tokenbar").classList.add("show");
         document.getElementById("stamp").textContent = "需要读取令牌";
@@ -330,6 +362,41 @@
       fetch("/deliveries/" + retry.getAttribute("data-retry-delivery") + "/retry", { method: "POST", headers: adminHeaders() })
         .then(function (res) { if (!res.ok) alert("重试失败:需要管理令牌(配置页设置)"); refresh(); });
     }
+  });
+
+  document.getElementById("fApply").addEventListener("click", function () {
+    filters.q = document.getElementById("fSearch").value.trim();
+    filters.source = document.getElementById("fSource").value.trim();
+    filters.outcome = document.getElementById("fOutcome").value;
+    filters.limit = 50;
+    refresh();
+  });
+  document.getElementById("fClear").addEventListener("click", function () {
+    document.getElementById("fSearch").value = "";
+    document.getElementById("fSource").value = "";
+    document.getElementById("fOutcome").value = "";
+    filters = { q: "", source: "", outcome: "", limit: 50 };
+    refresh();
+  });
+  document.getElementById("loadMore").addEventListener("click", function () {
+    filters.limit = Math.min(500, filters.limit + 50);
+    refresh();
+  });
+  document.getElementById("fSearch").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") document.getElementById("fApply").click();
+  });
+
+  document.getElementById("exRun").addEventListener("click", function () {
+    var box = document.getElementById("exResult");
+    fetch("/explain/" + encodeURIComponent(document.getElementById("exSource").value.trim()), {
+      method: "POST",
+      headers: Object.assign({ "content-type": "application/json" }, adminHeaders()),
+      body: document.getElementById("exPayload").value || "{}"
+    }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+      .then(function (r) {
+        box.style.display = "block";
+        box.textContent = r.ok ? JSON.stringify(r.d, null, 2) : ("失败: " + (r.d.detail || "未知"));
+      });
   });
 
   refresh();

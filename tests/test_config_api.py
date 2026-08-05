@@ -138,3 +138,78 @@ async def test_dead_delivery_can_be_requeued(file_client, monkeypatch):
     response = await file_client.post(f"/deliveries/{delivery_id}/retry", headers=ADMIN)
     assert response.status_code == 200
     assert (await store.queue_counts())["queued"] == 1
+
+
+# ── dry run and ledger search ────────────────────────────────────────────────
+
+
+async def test_explain_answers_without_recording_or_delivering(file_client):
+    """The explain button must never become a way to put a message in the
+    group: no event, no delivery, no signature required (you are asking about
+    a payload you hold, not delivering one)."""
+    before = (await file_client.get("/status")).json()
+
+    response = await file_client.post("/explain/test", json={"title": "would this route?"}, headers=ADMIN)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dry_run"] is True
+    assert body["outcome"] == "routed" and body["channels"] == ["sink"]
+    assert [s["gate"] for s in body["steps"]] == ["dedup", "silence", "routes"]
+    assert body["extracted"]["title"] == "would this route?"
+
+    after = (await file_client.get("/status")).json()
+    assert after["recent"] == before["recent"], "a dry run leaves no trace"
+    assert after["queue"] == before["queue"]
+
+
+async def test_explain_is_admin_gated_and_validates_input(file_client):
+    assert (await file_client.post("/explain/test", json={})).status_code == 403
+    assert (await file_client.post("/explain/nope", json={}, headers=ADMIN)).status_code == 404
+    bad = await file_client.post("/explain/test", content=b"not json", headers=ADMIN)
+    assert bad.status_code == 400
+
+
+async def test_explain_reports_a_miss_as_clearly_as_a_hit(file_client):
+    """Route the door to nothing, and the dry run must say WHY."""
+    narrowed = GOOD_YAML.replace(
+        'routes:\n  - name: all\n    source: "*"\n    send_to: [sink]',
+        'routes:\n  - name: only-high\n    source: "*"\n    when: {level: [high]}\n    send_to: [sink]',
+    )
+    assert (await file_client.put("/config", content=narrowed, headers=ADMIN)).status_code == 200
+
+    body = (await file_client.post("/explain/test", json={"title": "quiet"}, headers=ADMIN)).json()
+    assert body["outcome"] == "skipped" and body["skip_code"] == "no_route"
+    considered = body["steps"][-1]["considered"]
+    assert considered[0]["matched"] is False and considered[0]["missed_on"] == ["level"]
+
+
+async def test_ledger_search_filters_and_paginates(file_client):
+    for i in range(6):
+        await file_client.post("/hook/test", json={"title": f"事件 {i}" if i % 2 else f"other {i}"})
+
+    all_events = (await file_client.get("/status", params={"limit": 100})).json()["recent"]
+    assert len(all_events) == 6
+
+    matched = (await file_client.get("/status", params={"q": "事件"})).json()["recent"]
+    assert len(matched) == 3 and all("事件" in e["title"] for e in matched)
+
+    by_source = (await file_client.get("/status", params={"source": "test"})).json()["recent"]
+    assert len(by_source) == 6
+    assert (await file_client.get("/status", params={"source": "nobody"})).json()["recent"] == []
+
+    routed = (await file_client.get("/status", params={"outcome": "routed"})).json()["recent"]
+    assert len(routed) == 6
+
+    # Pagination walks backwards by id without gaps or repeats.
+    page1 = (await file_client.get("/status", params={"limit": 2})).json()["recent"]
+    page2 = (await file_client.get("/status", params={"limit": 2, "before_id": page1[-1]["id"]})).json()["recent"]
+    assert [e["id"] for e in page1] + [e["id"] for e in page2] == sorted([e["id"] for e in all_events], reverse=True)[
+        :4
+    ]
+
+
+async def test_search_limit_is_clamped(file_client):
+    await file_client.post("/hook/test", json={"title": "one"})
+    # A hostile limit must not turn the ledger view into a full-table dump.
+    response = await file_client.get("/status", params={"limit": 99999})
+    assert response.status_code == 200 and len(response.json()["recent"]) == 1
