@@ -49,6 +49,7 @@ async def file_client(tmp_path):
         read_token="",
         max_body_bytes=256 * 1024,
         max_attempts=3,
+        retention_days=14,
         worker_interval_seconds=0.01,
     )
     app = create_app(settings=settings)

@@ -25,6 +25,7 @@ import httpx
 
 from hookrelay import registry
 from hookrelay.config import Channel
+from hookrelay.extract import resolve_path
 
 # Feishu card header colours by normalized level. Red is reserved for high —
 # the family colour doctrine: alarm colours are earned, not decorative.
@@ -41,13 +42,54 @@ Payload = dict[str, Any] | bytes
 BuiltRequest = tuple[str, Payload, dict[str, str]]
 
 
+def _prebuilt(channel: Channel, message: dict[str, Any]) -> Any | None:
+    """Raw mode: the upstream brain supplies the FINISHED payload; hookrelay
+    owns delivery mechanics only (retry, rate limit, signing, the ledger) and
+    keeps its hands off the content.
+
+        options:
+          payload: raw            # default: normalized
+          payload_path: card      # optional sub-object of the inbound payload
+
+    Returns None when the channel is in normalized mode. Raises ValueError
+    when raw was requested but nothing is there — a misconfiguration must
+    surface in the delivery ledger, not silently deliver an empty body."""
+    if str(channel.options.get("payload") or "normalized") != "raw":
+        return None
+    selected = message.get("payload")
+    path = channel.options.get("payload_path")
+    if path:
+        selected = resolve_path(selected, str(path))
+    if selected is None:
+        raise ValueError(f"payload: raw on channel {channel.name}: payload_path {path!r} yielded nothing")
+    return selected
+
+
 def _fields_lines(message: dict[str, Any]) -> str:
     fields = message.get("fields") or {}
     return "\n".join(f"**{name}**: {value}" for name, value in fields.items() if value)
 
 
+def _feishu_sign_fields(secret: str, now: float) -> dict[str, str]:
+    timestamp = str(int(now))
+    key = f"{timestamp}\n{secret}".encode()
+    sign = base64.b64encode(hmac.new(key, b"", hashlib.sha256).digest()).decode()
+    return {"timestamp": timestamp, "sign": sign}
+
+
 @registry.channel("feishu")
 def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
+    prebuilt = _prebuilt(channel, message)
+    if prebuilt is not None:
+        # The brain's finished Feishu message (interactive cards with their
+        # callback buttons survive intact); only bot signing is injected here,
+        # because the SENDER owns the timestamp.
+        if not isinstance(prebuilt, dict):
+            raise ValueError(f"channel {channel.name}: raw feishu payload must be an object")
+        payload = dict(prebuilt)
+        if channel.secret:
+            payload.update(_feishu_sign_fields(channel.secret, now))
+        return channel.url, payload, {}
     color = _FEISHU_LEVEL_COLOR.get(str(message.get("level", "info")), "turquoise")
     body_lines = [part for part in (message.get("body", ""), _fields_lines(message)) if part]
     elements: list[dict[str, Any]] = [
@@ -66,16 +108,17 @@ def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> Built
     }
     # Feishu custom-bot signing: base64(HMAC-SHA256(key="{ts}\n{secret}", msg="")).
     if channel.secret:
-        timestamp = str(int(now))
-        key = f"{timestamp}\n{channel.secret}".encode()
-        sign = base64.b64encode(hmac.new(key, b"", hashlib.sha256).digest()).decode()
-        payload["timestamp"] = timestamp
-        payload["sign"] = sign
+        payload.update(_feishu_sign_fields(channel.secret, now))
     return channel.url, payload, {}
 
 
 @registry.channel("dingtalk")
 def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
+    prebuilt = _prebuilt(channel, message)
+    if prebuilt is not None:
+        if not isinstance(prebuilt, dict):
+            raise ValueError(f"channel {channel.name}: raw dingtalk payload must be an object")
+        return _dingtalk_signed_url(channel, now), prebuilt, {}
     lines = [f"### {message['title']}"]
     if message.get("body"):
         lines.append(str(message["body"]))
@@ -84,19 +127,28 @@ def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> Bui
         lines.append(fields)
     lines.append(f"> hookrelay · {message['source']} · #{message['event_id']}")
     payload = {"msgtype": "markdown", "markdown": {"title": message["title"], "text": "\n\n".join(lines)}}
+    return _dingtalk_signed_url(channel, now), payload, {}
+
+
+def _dingtalk_signed_url(channel: Channel, now: float) -> str:
+    """DingTalk signing rides the query string: sign of "{ts_ms}\n{secret}"."""
     url = channel.url
-    # DingTalk signing rides the query string: sign of "{ts_ms}\n{secret}".
     if channel.secret:
         timestamp = str(int(now * 1000))
         digest = hmac.new(channel.secret.encode(), f"{timestamp}\n{channel.secret}".encode(), hashlib.sha256).digest()
         sign = quote_plus(base64.b64encode(digest))
         joiner = "&" if "?" in url else "?"
         url = f"{url}{joiner}timestamp={timestamp}&sign={sign}"
-    return url, payload, {}
+    return url
 
 
 @registry.channel("wecom")
 def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
+    prebuilt = _prebuilt(channel, message)
+    if prebuilt is not None:
+        if not isinstance(prebuilt, dict):
+            raise ValueError(f"channel {channel.name}: raw wecom payload must be an object")
+        return channel.url, prebuilt, {}
     lines = [f"**{message['title']}**"]
     if message.get("body"):
         lines.append(str(message["body"]))
@@ -109,13 +161,23 @@ def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> BuiltR
 
 @registry.channel("generic")
 def build_generic(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
-    """The whole normalized event as canonical bytes, optionally signed.
+    """Canonical JSON bytes, optionally signed — two contents:
+
+    normalized (default): hookrelay's event summary.
+    payload: raw — the ORIGINAL inbound payload, verbatim in content. This is
+    what makes hookrelay a TRANSPARENT edge: point the url at WebhookWise's
+    /v1/webhook/{source} and the brain receives exactly what the monitoring
+    system sent, unchanged, with hookrelay's ledger in between.
 
     The signature covers EXACTLY the bytes returned, and the header NAME is
     configurable (signature_header) so hookrelay can speak a receiver's
     dialect — X-Webhook-Signature feeds WebhookWise's ingest directly.
     """
-    body = json.dumps(message, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    prebuilt = _prebuilt(channel, message)
+    content: Any = (
+        prebuilt if prebuilt is not None else {key: value for key, value in message.items() if key != "payload"}
+    )
+    body = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     headers: dict[str, str] = {"content-type": "application/json"}
     if channel.secret:
         headers[channel.signature_header] = hmac.new(channel.secret.encode(), body, hashlib.sha256).hexdigest()
@@ -130,7 +192,10 @@ def build_request(channel: Channel, message: dict[str, Any], now: float | None =
 async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, Any]) -> tuple[bool, str]:
     """Deliver one message. Returns (ok, detail) — never raises: a delivery
     failure is a scheduling event for the caller, not an exception."""
-    url, payload, headers = build_request(channel, message)
+    try:
+        url, payload, headers = build_request(channel, message)
+    except ValueError as error:
+        return False, f"build: {error}"
     try:
         if isinstance(payload, bytes):
             response = await client.post(url, content=payload, headers=headers)
