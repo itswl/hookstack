@@ -176,3 +176,89 @@ async def test_signature_check_still_precedes_the_fuse(tmp_path):
             response = await client.post("/hook/loud", content=json.dumps({"n": n}).encode())
             assert response.status_code == 401
         assert (await client.get("/status")).json()["fuse"] == {}
+
+
+# ── replay protection ────────────────────────────────────────────────────────
+
+
+def test_timestamped_signature_rejects_stale_and_tampered() -> None:
+    import hashlib
+    import hmac as hmac_mod
+
+    from hookrelay.security import verify_signature
+
+    body = b'{"a":1}'
+    stamp = "1700000000"
+    good = hmac_mod.new(b"s", stamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+
+    # Fresh: accepted.
+    assert verify_signature("s", body, good, timestamp_value=stamp, now=1700000010.0)
+    # Stale beyond the window: the whole point — a captured request expires.
+    assert not verify_signature("s", body, good, timestamp_value=stamp, now=1700000400.0)
+    # Clock skew in the other direction is equally refused.
+    assert not verify_signature("s", body, good, timestamp_value=stamp, now=1699999000.0)
+    # Body tampered under a valid timestamp.
+    assert not verify_signature("s", b'{"a":2}', good, timestamp_value=stamp, now=1700000010.0)
+    # Timestamp tampered under a valid body signature.
+    assert not verify_signature("s", body, good, timestamp_value="1700000001", now=1700000010.0)
+    # Garbage timestamp is a refusal, not a crash.
+    assert not verify_signature("s", body, good, timestamp_value="not-a-number", now=1700000010.0)
+
+
+def test_legacy_body_only_form_until_the_door_closes() -> None:
+    import hashlib
+    import hmac as hmac_mod
+
+    from hookrelay.security import verify_signature
+
+    body = b'{"a":1}'
+    legacy = hmac_mod.new(b"s", body, hashlib.sha256).hexdigest()
+
+    # Accepted while senders migrate...
+    assert verify_signature("s", body, legacy)
+    assert verify_signature("s", body, "sha256=" + legacy)
+    # ...and refused once the door requires freshness.
+    assert not verify_signature("s", body, legacy, require_timestamp=True)
+
+
+async def test_door_with_require_timestamp_refuses_replayable_requests(tmp_path):
+    import hashlib
+    import hmac as hmac_mod
+    import time
+
+    yaml_text = FUSED_YAML.replace(
+        '  - name: unfused\n    secret: ""\n    title: "{n}"',
+        '  - name: strict\n    secret: "s3"\n    title: "{n}"\n    require_timestamp: true',
+    )
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+    settings = Settings(
+        config_path=str(config_path),
+        db_path=str(tmp_path / "t3.db"),
+        plugins_dir=str(tmp_path / "none"),
+        admin_token="admin-t",
+        read_token="",
+        max_body_bytes=256 * 1024,
+        max_attempts=3,
+        retention_days=14,
+        alarm_url="",
+        alarm_min_interval_seconds=600,
+        worker_interval_seconds=0.01,
+    )
+    app = create_app(settings=settings)
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        body = json.dumps({"n": 1}).encode()
+        legacy = hmac_mod.new(b"s3", body, hashlib.sha256).hexdigest()
+        refused = await client.post("/hook/strict", content=body, headers={"X-Hook-Signature": legacy})
+        assert refused.status_code == 401, "a replayable signature must not open a strict door"
+
+        stamp = str(int(time.time()))
+        fresh = hmac_mod.new(b"s3", stamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+        accepted = await client.post(
+            "/hook/strict", content=body, headers={"X-Hook-Signature": fresh, "X-Hook-Timestamp": stamp}
+        )
+        assert accepted.status_code == 200 and accepted.json()["outcome"] == "routed"
