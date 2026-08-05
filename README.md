@@ -117,13 +117,43 @@ Two shapes, both zero-code:
 - **Any scorer as a pipeline stage** (sync): the `http` contract above; point
   it at anything that answers within the timeout.
 
-## The three built-in gates, in order
+## Product doctrine: a content-blind pipe
 
-| # | gate | skip_code | why this order |
-|---|------|-----------|----------------|
-| ① | fingerprint dedup (per-source window) | `duplicate` | repeats must not reach the silence check, let alone a channel |
-| ② | silence (source-scoped or `*`, with expiry) | `silenced` | quiet is an operator decision and costs no route walk |
-| ③ | route matching (priority order, `stop` supported) | `no_route` | an unclaimed event is a *named* outcome, not a mystery |
+One test decides what belongs here: **is this a property of a good PIPE, or a
+judgment about the alert's worth?** Pipe properties live in hookrelay.
+Judgment belongs to a brain behind it (or nowhere).
+
+Four pillars — the product itself:
+
+| pillar | what it owns |
+|---|---|
+| 接 receive | doors, signature dialects, extraction for routing |
+| 路由 route | source + conditions → channels, priority, stop |
+| 发 deliver | retry, backoff, rate limits, dead letters, channel wire formats |
+| 账本 account | one decision per event, one outcome per delivery — the soul |
+
+Pipe *protections* — kept, but named for what they are:
+
+- **silence is a VALVE**, not noise reduction: the emergency shutoff an
+  operator pulls when the thing behind the pipe is melting. Source-scoped or
+  global, always with expiry.
+- **dedup is a STORM FUSE**, not noise judgment: it stops identical-payload
+  floods from crushing what's downstream. In a brain-paired deployment turn
+  it OFF (`pipeline: [silence, routes]`) so the brain's own noise accounting
+  stays truthful.
+- **rate limits protect downstream quotas** by deferring, never dropping.
+
+Judgment features (`filter`, `set`, dedup-as-noise-control) exist for
+**standalone posture** — a small team with no brain that still wants
+webhook→飞书 with taste. In **paired posture** (a WebhookWise behind the
+relay) they should all yield; the `http` processor is the doorway that keeps
+it honest — judgment gets *delegated*, never absorbed.
+
+| | paired posture (with a brain) | standalone posture |
+|---|---|---|
+| pipeline | `[silence, routes]` | default `[dedup, silence, routes]` (+ filter/set to taste) |
+| templates' job | extract enough to route + a readable ledger title | full message formatting |
+| content | blind both ways (raw in, raw out) | the templates ARE the presentation |
 
 Delivery is a separate ledger: an outbox row per (event × channel), retried
 with exponential backoff (30s·2ⁿ, cap 10 min, 8 attempts) into a visible dead
