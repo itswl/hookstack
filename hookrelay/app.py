@@ -14,11 +14,12 @@ import asyncio
 import contextlib
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from hookrelay import registry
 from hookrelay.config import Config
@@ -69,6 +70,16 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     app.state.settings = app_settings
     app.state.config = app_config
     app.state.store = store
+
+    # ── the page ──────────────────────────────────────────────────────────
+    # One self-contained file, no build step, no CDN. The page itself is a
+    # static shell; the DATA sits behind /status and its read token — so
+    # serving the shell unauthenticated leaks nothing.
+    status_page = (Path(__file__).parent / "status.html").read_text(encoding="utf-8")
+
+    @app.get("/", response_class=HTMLResponse)
+    async def index() -> str:
+        return status_page
 
     # ── inbound ───────────────────────────────────────────────────────────
 

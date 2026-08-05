@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hookrelay</title>
+<style>
+  /* One file, no build, no CDN. Dark-first; colour is EARNED by state —
+     a healthy board reads quiet. */
+  :root {
+    --bg: #0b0e14; --surface: #11151d; --border: #1f2530; --border-soft: #171c26;
+    --text: #d7dde6; --muted: #8b94a3; --accent: #4c8dff;
+    --ok: #3dd68c; --warn: #f5a524; --bad: #e5484d;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 60px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .02em; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .stamp { margin-left: auto; color: var(--muted); font-size: 12px; font-family: var(--mono); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card .label { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .card .value { font-size: 26px; font-weight: 650; font-family: var(--mono); }
+  .card.dead-alarm { border-left: 3px solid var(--bad); }
+  .card.dead-alarm .value { color: var(--bad); }
+
+  h2 { font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .06em;
+       text-transform: uppercase; margin: 26px 0 10px; }
+  .silence { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--warn);
+             border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 13px; }
+  .silence .note { color: var(--muted); }
+
+  .event { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+           margin-bottom: 10px; overflow: hidden; }
+  .event summary { list-style: none; cursor: pointer; padding: 10px 14px;
+                   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .event summary::-webkit-details-marker { display: none; }
+  .event[open] summary { border-bottom: 1px solid var(--border-soft); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .dot.high, .dot.critical { background: var(--bad); }
+  .dot.warning, .dot.medium { background: var(--warn); }
+  .dot.info, .dot.low { background: var(--accent); }
+  .eid { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+  .etitle { font-weight: 600; overflow-wrap: anywhere; }
+  .esrc { color: var(--muted); font-size: 12px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
+           color: var(--muted); font-family: var(--mono); }
+  .badge.routed { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .badge.skipped { color: var(--muted); }
+  .etime { margin-left: auto; color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 14px 10px; }
+  .chip { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 6px;
+          border: 1px solid var(--border); color: var(--muted); }
+  .chip.sent { color: var(--ok); }
+  .chip.dead { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .chip.queued { color: var(--warn); }
+  .trace { margin: 0; padding: 12px 14px; background: #0a0d13; color: #aeb7c4;
+           font-family: var(--mono); font-size: 12px; overflow-x: auto; }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+
+  .tokenbar { display: none; gap: 8px; margin-bottom: 16px; }
+  .tokenbar.show { display: flex; }
+  .tokenbar input { flex: 1; background: var(--surface); border: 1px solid var(--border);
+                    border-radius: 8px; color: var(--text); padding: 8px 12px; font-family: var(--mono); }
+  .tokenbar button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+                     padding: 8px 16px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>hookrelay</h1>
+    <span class="sub">收 → 判 → 发,每一步有交代</span>
+    <span class="stamp" id="stamp">加载中…</span>
+  </header>
+
+  <div class="tokenbar" id="tokenbar">
+    <input id="tokenInput" type="password" placeholder="X-Read-Token">
+    <button id="tokenSave">进入</button>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">排队中</div><div class="value" id="cQueued">–</div></div>
+    <div class="card"><div class="label">已送达</div><div class="value" id="cSent">–</div></div>
+    <div class="card" id="deadCard"><div class="label">死信</div><div class="value" id="cDead">–</div></div>
+  </div>
+
+  <div id="silences"></div>
+
+  <h2>最近事件 · 点开看决策链</h2>
+  <div id="events"><div class="empty">…</div></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var TOKEN_KEY = "hookrelay-read-token";
+
+  function esc(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+  function fmtTime(ts) {
+    var d = new Date(ts * 1000);
+    function p(n) { return n < 10 ? "0" + n : String(n); }
+    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+
+  function render(data) {
+    document.getElementById("cQueued").textContent = data.queue.queued;
+    document.getElementById("cSent").textContent = data.queue.sent;
+    document.getElementById("cDead").textContent = data.queue.dead;
+    // Alarm colour is earned: dead=0 stays quiet.
+    document.getElementById("deadCard").className = "card" + (data.queue.dead > 0 ? " dead-alarm" : "");
+
+    var silences = data.silences || [];
+    document.getElementById("silences").innerHTML = silences.length
+      ? "<h2>生效中的静音</h2>" + silences.map(function (s) {
+          return '<div class="silence">#' + esc(s.id) + " · " + esc(s.source) +
+            ' · 至 ' + esc(fmtTime(s.until_ts)) +
+            (s.note ? ' · <span class="note">' + esc(s.note) + "</span>" : "") + "</div>";
+        }).join("")
+      : "";
+
+    var events = data.recent || [];
+    if (!events.length) {
+      document.getElementById("events").innerHTML = '<div class="empty">还没有事件 — 投一条试试:examples/try.sh</div>';
+      return;
+    }
+    document.getElementById("events").innerHTML = events.map(function (e) {
+      var badge = e.outcome === "routed"
+        ? '<span class="badge routed">routed → ' + esc((e.channels || []).join(", ")) + "</span>"
+        : '<span class="badge skipped">skipped · ' + esc(e.skip_code || "?") + "</span>";
+      var chips = (e.deliveries || []).map(function (d) {
+        var extra = d.status === "dead" || d.last_error
+          ? ' title="' + esc(d.last_error || "") + '"' : "";
+        return '<span class="chip ' + esc(d.status) + '"' + extra + ">" +
+          esc(d.channel) + " · " + esc(d.status) + (d.attempts ? " ×" + esc(d.attempts) : "") + "</span>";
+      }).join("");
+      return '<details class="event">' +
+        '<summary>' +
+          '<span class="dot ' + esc(e.level) + '"></span>' +
+          '<span class="eid">#' + esc(e.id) + "</span>" +
+          '<span class="etitle">' + esc(e.title) + "</span>" +
+          '<span class="esrc">' + esc(e.source) + "</span>" + badge +
+          '<span class="etime">' + esc(fmtTime(e.received_at)) + "</span>" +
+        "</summary>" +
+        (chips ? '<div class="chips">' + chips + "</div>" : "") +
+        '<pre class="trace">' + esc(JSON.stringify(e.steps || [], null, 2)) + "</pre>" +
+      "</details>";
+    }).join("");
+  }
+
+  function refresh() {
+    if (document.hidden) return;
+    var headers = {};
+    var token = localStorage.getItem(TOKEN_KEY);
+    if (token) headers["X-Read-Token"] = token;
+    fetch("/status", { headers: headers }).then(function (res) {
+      if (res.status === 401) {
+        document.getElementById("tokenbar").classList.add("show");
+        document.getElementById("stamp").textContent = "需要读取令牌";
+        return null;
+      }
+      document.getElementById("tokenbar").classList.remove("show");
+      return res.json();
+    }).then(function (data) {
+      if (!data) return;
+      render(data);
+      document.getElementById("stamp").textContent = "刷新于 " + new Date().toTimeString().slice(0, 8);
+    }).catch(function () {
+      document.getElementById("stamp").textContent = "连接失败,重试中…";
+    });
+  }
+
+  document.getElementById("tokenSave").addEventListener("click", function () {
+    localStorage.setItem(TOKEN_KEY, document.getElementById("tokenInput").value.trim());
+    refresh();
+  });
+
+  refresh();
+  setInterval(refresh, 5000);
+})();
+</script>
+</body>
+</html>

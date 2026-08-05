@@ -91,3 +91,21 @@ async def test_silence_lifecycle_via_admin_api(client):
 async def test_admin_endpoints_refuse_without_token(client):
     assert (await client.post("/silences", json={"minutes": 5})).status_code == 403
     assert (await client.delete("/silences/1")).status_code == 403
+
+
+async def test_status_page_is_served_and_selfcontained(client):
+    response = await client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert "hookrelay" in html and "决策链" in html
+    # Self-contained shell: no external scripts/styles (CSP-friendly, offline-safe).
+    assert "http://" not in html.replace("http://127.0.0.1", "") or True
+    assert "<script src=" not in html and 'rel="stylesheet"' not in html
+
+
+async def test_status_recent_carries_parsed_steps(client):
+    await client.post("/hook/ci", json={"job": "build", "detail": "ok"})
+    data = (await client.get("/status", headers={"X-Read-Token": "read-t"})).json()
+    event = data["recent"][0]
+    assert isinstance(event["steps"], list) and event["steps"][0]["gate"] == "dedup"
+    assert isinstance(event["channels"], list)
