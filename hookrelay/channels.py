@@ -180,7 +180,16 @@ def build_generic(channel: Channel, message: dict[str, Any], now: float) -> Buil
     body = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     headers: dict[str, str] = {"content-type": "application/json"}
     if channel.secret:
-        headers[channel.signature_header] = hmac.new(channel.secret.encode(), body, hashlib.sha256).hexdigest()
+        # Timestamped by default when the receiver speaks our own dialect, so
+        # relay→relay hops are replay-protected; a foreign receiver (custom
+        # signature_header) gets the body-only form it expects.
+        if channel.signature_header == "X-Hook-Signature":
+            stamp = str(int(now))
+            headers["X-Hook-Timestamp"] = stamp
+            signed = stamp.encode() + b"." + body
+        else:
+            signed = body
+        headers[channel.signature_header] = hmac.new(channel.secret.encode(), signed, hashlib.sha256).hexdigest()
     return channel.url, body, headers
 
 

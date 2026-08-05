@@ -24,7 +24,14 @@ from hookrelay.security import verify_signature
 @registry.source_adapter("default")
 class DefaultAdapter:
     def verify(self, source: Source, body: bytes, headers: Mapping[str, str]) -> bool:
-        return verify_signature(source.secret, body, headers.get("x-hook-signature"))
+        return verify_signature(
+            source.secret,
+            body,
+            headers.get("x-hook-signature"),
+            timestamp_value=headers.get("x-hook-timestamp"),
+            max_skew_seconds=source.max_skew_seconds,
+            require_timestamp=source.require_timestamp,
+        )
 
     def parse(self, source: Source, payload: Any) -> dict[str, Any]:
         return extract_event(source, payload)

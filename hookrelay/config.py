@@ -65,6 +65,11 @@ class Source:
     # (e.g. WebhookWise-lite) must carry its own fuse.
     storm_threshold: int = 0
     storm_window_seconds: int = 60
+    # Replay protection. require_timestamp refuses the legacy body-only
+    # signature: turn it on once every sender for this door sends
+    # X-Hook-Timestamp (senders migrate first, then the door closes).
+    require_timestamp: bool = False
+    max_skew_seconds: int = 300
     # Free-form bag for custom adapters (the core never reads it).
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -137,6 +142,8 @@ class Config:
                 dedup_window_seconds=int(item.get("dedup_window_seconds", 120)),
                 storm_threshold=max(0, int(item.get("storm_threshold", 0))),
                 storm_window_seconds=max(1, int(item.get("storm_window_seconds", 60))),
+                require_timestamp=bool(item.get("require_timestamp", False)),
+                max_skew_seconds=max(1, int(item.get("max_skew_seconds", 300))),
                 options=_resolve_deep(dict(item.get("options") or {})),
             )
             if src.adapter not in registry.SOURCE_ADAPTERS:
