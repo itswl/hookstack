@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Import the package from the repo root regardless of how pytest is invoked
+# (`pytest` does not put cwd on sys.path; `python -m pytest` does).
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
