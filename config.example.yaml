@@ -51,6 +51,21 @@ channels:
     url: ${ARCHIVE_WEBHOOK_URL}
     secret: ${ARCHIVE_OUT_SECRET}      # outbound X-Hook-Signature for the receiver
 
+  # Feed WebhookWise directly: same generic type, its signature dialect.
+  # - name: webhookwise
+  #   type: generic
+  #   url: https://your-webhookwise/v1/webhook
+  #   secret: ${WEBHOOKWISE_SECRET}
+  #   signature_header: X-Webhook-Signature
+
+# Optional: reorder/extend the processing pipeline (default: dedup, silence,
+# routes). See README for the http-processor contract.
+# pipeline:
+#   - dedup
+#   - silence
+#   - {type: http, name: triage, url: ${BRAIN_URL}, on_error: pass}
+#   - routes
+
 routes:
   # Highest priority first. `stop: true` ends the walk after a match.
   - name: high-everywhere
