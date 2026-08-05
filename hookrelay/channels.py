@@ -1,8 +1,14 @@
 """Channel adapters: pure request builders plus one thin sender.
 
-Builders return (url, json_payload, headers) and touch no network, so tests
-assert exact wire shapes without mocking HTTP. The sender is the only place
-that talks to the world.
+Builders are registry entries — the four built-ins register through the same
+decorator a plugin would use. A builder returns (url, payload, headers) and
+touches no network; payload is either a dict (serialized by httpx) or BYTES.
+
+Bytes matter when the payload is signed: the signature must cover the exact
+octets that leave the socket. The first version of the generic builder signed
+a sort_keys canonicalization while httpx serialized the dict its own way —
+signature and wire bytes disagreed, and every downstream verification would
+have failed. Signed builders now emit the final bytes themselves.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from urllib.parse import quote_plus
 
 import httpx
 
+from hookrelay import registry
 from hookrelay.config import Channel
 
 # Feishu card header colours by normalized level. Red is reserved for high —
@@ -30,13 +37,17 @@ _FEISHU_LEVEL_COLOR = {
     "info": "blue",
 }
 
+Payload = dict[str, Any] | bytes
+BuiltRequest = tuple[str, Payload, dict[str, str]]
+
 
 def _fields_lines(message: dict[str, Any]) -> str:
     fields = message.get("fields") or {}
     return "\n".join(f"**{name}**: {value}" for name, value in fields.items() if value)
 
 
-def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> tuple[str, dict[str, Any], dict[str, str]]:
+@registry.channel("feishu")
+def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     color = _FEISHU_LEVEL_COLOR.get(str(message.get("level", "info")), "turquoise")
     body_lines = [part for part in (message.get("body", ""), _fields_lines(message)) if part]
     elements: list[dict[str, Any]] = [
@@ -63,7 +74,8 @@ def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> tuple
     return channel.url, payload, {}
 
 
-def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> tuple[str, dict[str, Any], dict[str, str]]:
+@registry.channel("dingtalk")
+def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     lines = [f"### {message['title']}"]
     if message.get("body"):
         lines.append(str(message["body"]))
@@ -83,7 +95,8 @@ def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> tup
     return url, payload, {}
 
 
-def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> tuple[str, dict[str, Any], dict[str, str]]:
+@registry.channel("wecom")
+def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     lines = [f"**{message['title']}**"]
     if message.get("body"):
         lines.append(str(message["body"]))
@@ -94,28 +107,23 @@ def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> tuple[
     return channel.url, {"msgtype": "markdown", "markdown": {"content": "\n".join(lines)}}, {}
 
 
-def build_generic(channel: Channel, message: dict[str, Any], now: float) -> tuple[str, dict[str, Any], dict[str, str]]:
-    """The whole normalized event, signed the same way we verify inbound —
-    a hookrelay can feed another hookrelay without ceremony."""
-    headers: dict[str, str] = {}
+@registry.channel("generic")
+def build_generic(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
+    """The whole normalized event as canonical bytes, optionally signed.
+
+    The signature covers EXACTLY the bytes returned, and the header NAME is
+    configurable (signature_header) so hookrelay can speak a receiver's
+    dialect — X-Webhook-Signature feeds WebhookWise's ingest directly.
+    """
+    body = json.dumps(message, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    headers: dict[str, str] = {"content-type": "application/json"}
     if channel.secret:
-        body = json.dumps(message, ensure_ascii=False, sort_keys=True).encode()
-        headers["X-Hook-Signature"] = hmac.new(channel.secret.encode(), body, hashlib.sha256).hexdigest()
-    return channel.url, message, headers
+        headers[channel.signature_header] = hmac.new(channel.secret.encode(), body, hashlib.sha256).hexdigest()
+    return channel.url, body, headers
 
 
-_BUILDERS = {
-    "feishu": build_feishu,
-    "dingtalk": build_dingtalk,
-    "wecom": build_wecom,
-    "generic": build_generic,
-}
-
-
-def build_request(
-    channel: Channel, message: dict[str, Any], now: float | None = None
-) -> tuple[str, dict[str, Any], dict[str, str]]:
-    builder = _BUILDERS[channel.type]
+def build_request(channel: Channel, message: dict[str, Any], now: float | None = None) -> BuiltRequest:
+    builder = registry.CHANNEL_BUILDERS[channel.type]
     return builder(channel, message, now if now is not None else time.time())
 
 
@@ -124,7 +132,10 @@ async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, A
     failure is a scheduling event for the caller, not an exception."""
     url, payload, headers = build_request(channel, message)
     try:
-        response = await client.post(url, json=payload, headers=headers)
+        if isinstance(payload, bytes):
+            response = await client.post(url, content=payload, headers=headers)
+        else:
+            response = await client.post(url, json=payload, headers=headers)
     except httpx.HTTPError as error:
         return False, f"transport: {error.__class__.__name__}: {error}"
     if response.status_code >= 300:
