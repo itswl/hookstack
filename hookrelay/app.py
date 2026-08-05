@@ -20,10 +20,11 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from hookrelay import registry
 from hookrelay.config import Config
 from hookrelay.delivery import process_due
 from hookrelay.pipeline import handle_hook
-from hookrelay.security import token_ok, verify_signature
+from hookrelay.security import token_ok
 from hookrelay.settings import Settings
 from hookrelay.store import Store, now_ts
 
@@ -32,6 +33,12 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     """App factory: tests hand in Settings/Config directly; production loads
     them from the environment and config.yaml."""
     app_settings = settings or Settings.load()
+    # Plugins load BEFORE config validation: config references adapters,
+    # processors and channel types by name, and unknown names must fail the
+    # boot, not the first event.
+    loaded_plugins = registry.load_plugins(app_settings.plugins_dir)
+    if loaded_plugins:
+        print(f"[hookrelay] plugins loaded: {', '.join(loaded_plugins)}")
     app_config = cfg or Config.from_file(app_settings.config_path)
     store = Store(app_settings.db_path)
 
@@ -47,6 +54,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await store.open()
         client = httpx.AsyncClient(timeout=10.0)
+        app.state.http_client = client
         worker = asyncio.create_task(_worker_loop(client))
         try:
             yield
@@ -72,13 +80,27 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         body = await request.body()
         if len(body) > app_settings.max_body_bytes:
             raise HTTPException(status_code=413, detail="body too large")
-        if not verify_signature(source.secret, body, request.headers.get("X-Hook-Signature")):
+        # The source's ADAPTER owns both verification and payload reading —
+        # GitHub's header scheme and Grafana's are one plugin apart.
+        adapter = registry.SOURCE_ADAPTERS[source.adapter]
+        headers = {key.lower(): value for key, value in request.headers.items()}
+        if not adapter.verify(source, body, headers):
             raise HTTPException(status_code=401, detail="bad signature")
         try:
             payload = json.loads(body or b"{}")
         except ValueError:
             raise HTTPException(status_code=400, detail="body is not JSON") from None
-        result = await handle_hook(app.state.store, app.state.config, source, payload, now_ts())
+        extracted = adapter.parse(source, payload)
+        result = await handle_hook(
+            app.state.store,
+            app.state.config,
+            source,
+            payload,
+            now_ts(),
+            settings=app_settings,
+            client=app.state.http_client,
+            extracted=extracted,
+        )
         return JSONResponse(result)
 
     # ── read side ─────────────────────────────────────────────────────────

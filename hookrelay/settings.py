@@ -21,6 +21,7 @@ def _int(name: str, default: int) -> int:
 class Settings:
     config_path: str
     db_path: str
+    plugins_dir: str
     # Required for silence management; empty disables those endpoints entirely
     # (403), so an unconfigured instance cannot be muted by a stranger.
     admin_token: str
@@ -36,6 +37,7 @@ class Settings:
         return cls(
             config_path=os.environ.get("HOOKRELAY_CONFIG", "config.yaml"),
             db_path=os.environ.get("HOOKRELAY_DB", "hookrelay.db"),
+            plugins_dir=os.environ.get("HOOKRELAY_PLUGINS", "plugins"),
             admin_token=os.environ.get("HOOKRELAY_ADMIN_TOKEN", ""),
             read_token=os.environ.get("HOOKRELAY_READ_TOKEN", ""),
             max_body_bytes=_int("HOOKRELAY_MAX_BODY_BYTES", 256 * 1024),
