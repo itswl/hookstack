@@ -4,9 +4,10 @@ services:
     ports:
       - "8100:8100"
     volumes:
-      # Mount a directory holding config.yaml; the SQLite db lives beside it.
+      # Directory holding config.yaml (+ optional plugins/); SQLite lives beside it.
       - ./data:/data
     environment:
+      HOOKRELAY_PLUGINS: /data/plugins
       HOOKRELAY_ADMIN_TOKEN: ${HOOKRELAY_ADMIN_TOKEN:-}
       HOOKRELAY_READ_TOKEN: ${HOOKRELAY_READ_TOKEN:-}
       # Channel/source secrets referenced as ${NAME} in config.yaml:
@@ -16,6 +17,16 @@ services:
       DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
       DINGTALK_WEBHOOK_SECRET: ${DINGTALK_WEBHOOK_SECRET:-}
       WECOM_WEBHOOK_URL: ${WECOM_WEBHOOK_URL:-}
-      ARCHIVE_WEBHOOK_URL: ${ARCHIVE_WEBHOOK_URL:-}
-      ARCHIVE_OUT_SECRET: ${ARCHIVE_OUT_SECRET:-}
+    restart: unless-stopped
+    depends_on:
+      - sink
+
+  # Local no-token downstream: prints every delivery to its logs and answers
+  # {"code": 0}. Point any generic channel at http://sink:9000/... and watch
+  # `docker compose logs -f sink`.
+  sink:
+    image: python:3.14-slim
+    command: ["python", "/examples/sink.py"]
+    volumes:
+      - ./examples:/examples:ro
     restart: unless-stopped
