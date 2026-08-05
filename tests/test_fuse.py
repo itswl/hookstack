@@ -90,6 +90,8 @@ async def fused_client(tmp_path):
         max_body_bytes=256 * 1024,
         max_attempts=3,
         retention_days=14,
+        alarm_url="",
+        alarm_min_interval_seconds=600,
         worker_interval_seconds=0.01,
     )
     app = create_app(settings=settings)
@@ -160,6 +162,8 @@ async def test_signature_check_still_precedes_the_fuse(tmp_path):
         max_body_bytes=256 * 1024,
         max_attempts=3,
         retention_days=14,
+        alarm_url="",
+        alarm_min_interval_seconds=600,
         worker_interval_seconds=0.01,
     )
     app = create_app(settings=settings)

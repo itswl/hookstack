@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
+from hookrelay.app import create_app
 from hookrelay.config import Config
 from hookrelay.settings import Settings
 from hookrelay.store import Store
@@ -67,5 +69,19 @@ def settings(tmp_path) -> Settings:
         max_body_bytes=256 * 1024,
         max_attempts=3,
         retention_days=14,
+        alarm_url="",
+        alarm_min_interval_seconds=600,
         worker_interval_seconds=0.01,
     )
+
+
+@pytest.fixture
+async def client(settings, cfg):
+    app = create_app(settings=settings, cfg=cfg)
+    # lifespan by hand: ASGITransport does not run it.
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as c,
+    ):
+        yield c

@@ -21,9 +21,10 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from hookrelay import registry
+from hookrelay import metrics, registry
+from hookrelay.alarm import SelfAlarm
 from hookrelay.config import Config, ConfigError
 from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
@@ -51,7 +52,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         while True:
             try:
                 now = now_ts()
-                await process_due(store, app.state.config, app_settings, client, now)
+                await process_due(store, app.state.config, app_settings, client, now, alarm=app.state.alarm)
                 # Retention rides the same loop, hourly: once ALL traffic
                 # passes through this ledger it must not grow forever.
                 if app_settings.retention_days > 0 and now >= next_purge:
@@ -85,6 +86,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     # The fuse sits in the fusebox, not in application logic: process-local
     # counters, applied at the door regardless of what the pipeline says.
     app.state.fuse = StormFuse()
+    app.state.alarm = SelfAlarm(app_settings.alarm_url, app_settings.alarm_min_interval_seconds)
 
     # ── the page ──────────────────────────────────────────────────────────
     # One self-contained file, no build step, no CDN. The page itself is a
@@ -168,6 +170,17 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             "silences": await app.state.store.list_silences(now),
             "recent": await app.state.store.recent_events(50),
         }
+
+    @app.get("/metrics", response_class=PlainTextResponse)
+    async def prometheus_metrics(x_read_token: str | None = Header(default=None)) -> str:
+        # Same guard as /status: the numbers describe the estate's alert flow.
+        _read_guard(x_read_token)
+        return metrics.render(
+            queue=await app.state.store.queue_counts(),
+            fuse=app.state.fuse.snapshot(),
+            silences=len(await app.state.store.list_silences(now_ts())),
+            retention_days=app.state.settings.retention_days,
+        )
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
