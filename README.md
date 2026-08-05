@@ -189,11 +189,33 @@ path, admin/read tokens, body-size cap, max attempts.
 | DELETE | `/silences/{id}` | `X-Admin-Token` |
 | GET | `/healthz` | none |
 
+## Operating it
+
+| surface | what it answers |
+|---|---|
+| `GET /` | the board: queue, breakers, fuse, silences, searchable events with full traces |
+| `GET /status?q=&source=&outcome=&before_id=&limit=` | the same as JSON (read token) |
+| `GET /metrics` | Prometheus text: events by door/outcome, deliveries by channel/result, outbox depth, fuse and silences (read token) |
+| `POST /explain/{source}` | dry run — what WOULD this payload do; records nothing, delivers nothing (admin token) |
+| `GET/PUT /config`, `POST /config/reload` | the config file, validated-or-nothing, hot-applied (admin token) |
+| `POST /silences`, `DELETE /silences/{id}` | the valve (admin token) |
+| `POST /deliveries/{id}/retry` | a dead letter's second chance (admin token) |
+
+Environment knobs beyond the doors: `HOOKRELAY_RETENTION_DAYS` (14),
+`HOOKRELAY_ALARM_URL` + `HOOKRELAY_ALARM_MIN_INTERVAL_SECONDS` (dead-letter
+self-alarm), `HOOKRELAY_BREAKER_THRESHOLD` / `_COOLDOWN_SECONDS`,
+`HOOKRELAY_MAX_ATTEMPTS`, `HOOKRELAY_PLUGINS`.
+
 ## Tests
 
 ```bash
-.venv/bin/pytest -q
+bash scripts/gate.sh     # the full gate — the exact list CI runs
+.venv/bin/pytest -q      # just the suite
 ```
+
+A contract test pins gate.sh and ci.yml to the same check list: adding one
+without the other fails. CI also builds the image and boots it, because the
+container is how this actually ships.
 
 Gates order and trace shape, route semantics, per-channel wire formats
 (including DingTalk/Feishu signing), backoff → dead-letter, rate-limit

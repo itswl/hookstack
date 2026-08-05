@@ -242,3 +242,26 @@ def test_generic_signature_covers_the_exact_wire_bytes():
     assert isinstance(payload, bytes), "signed payloads must be final bytes"
     assert headers["X-Webhook-Signature"] == hmac.new(b"wwsec", payload, hashlib.sha256).hexdigest()
     assert headers["content-type"] == "application/json"
+
+
+def test_gate_matches_ci():
+    """scripts/gate.sh must run what CI runs — a local list that is merely
+    'close enough' is how a red CI arrives as a surprise. Adding a check to
+    one requires adding it to the other in the same change."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    gate = (root / "scripts" / "gate.sh").read_text()
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+
+    for check in (
+        "compileall -q hookrelay tests",
+        "ruff check hookrelay tests",
+        "ruff format --check hookrelay tests",
+        "status.html",
+        "examples/plugins",
+        "config.example.yaml",
+        "pytest -q",
+    ):
+        assert check in gate, f"gate.sh is missing {check!r}"
+        assert check in ci, f"ci.yml is missing {check!r}"

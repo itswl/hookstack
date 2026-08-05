@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  # One job on purpose: the suite is fast (sub-second) and hermetic — no
+  # database, no network, no services. Splitting it would cost more in runner
+  # startup than it saves. scripts/gate.sh runs this exact list locally.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt ruff==0.16.1
+      - run: python -m compileall -q hookrelay tests
+      - run: ruff check hookrelay tests
+      - run: ruff format --check hookrelay tests
+      # Node ships pre-installed on GitHub-hosted ubuntu runners.
+      - name: inline page JS parses
+        run: |
+          node -e '
+          const fs = require("fs");
+          const html = fs.readFileSync("hookrelay/status.html", "utf8");
+          const m = html.match(/<script>([\s\S]*)<\/script>/);
+          if (!m) { console.error("no inline script found"); process.exit(1); }
+          new Function(m[1]);
+          console.log("status.html inline JS: OK");
+          '
+      - name: example plugins import cleanly
+        run: |
+          python - <<'PYEOF'
+          from pathlib import Path
+          from hookrelay import registry
+          loaded = registry.load_plugins(Path("examples/plugins"))
+          assert loaded, "examples/plugins loaded nothing — an untested example is a lie"
+          print("plugins:", ", ".join(loaded))
+          PYEOF
+      - name: config.example.yaml is valid
+        env:
+          FEISHU_WEBHOOK_URL: https://example.invalid/hook
+          DINGTALK_WEBHOOK_URL: https://example.invalid/hook
+          WECOM_WEBHOOK_URL: https://example.invalid/hook
+          ARCHIVE_WEBHOOK_URL: https://example.invalid/hook
+        run: |
+          python - <<'PYEOF'
+          from hookrelay.config import Config
+          cfg = Config.from_file("config.example.yaml")
+          print(f"{len(cfg.sources)} sources, {len(cfg.channels)} channels, {len(cfg.routes)} routes")
+          PYEOF
+      - run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      # The image is how this actually ships; a build break must not wait for
+      # a deploy to surface.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: hookrelay-ci:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: the built image boots and serves
+        run: |
+          mkdir -p /tmp/relaydata
+          cat > /tmp/relaydata/config.yaml <<'YEOF'
+          sources:
+            - name: ci
+              secret: ""
+              title: "{title}"
+          channels:
+            - name: sink
+              type: generic
+              url: http://127.0.0.1:9/discard
+          routes:
+            - {name: all, source: "*", send_to: [sink]}
+          YEOF
+          docker run -d --name relay -p 8100:8100 \
+            -v /tmp/relaydata:/data -e HOOKRELAY_PORT=8100 hookrelay-ci:latest
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8100/healthz > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8100/healthz
+          # A real event walks the real pipeline in the real image.
+          curl -sf -X POST http://127.0.0.1:8100/hook/ci \
+            -H 'content-type: application/json' -d '{"title":"ci smoke"}' | tee /tmp/out.json
+          grep -q '"outcome": *"routed"' /tmp/out.json
+          docker logs relay | tail -20
