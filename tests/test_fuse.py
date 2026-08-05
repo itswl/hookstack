@@ -92,6 +92,8 @@ async def fused_client(tmp_path):
         retention_days=14,
         alarm_url="",
         alarm_min_interval_seconds=600,
+        breaker_threshold=5,
+        breaker_cooldown_seconds=60,
         worker_interval_seconds=0.01,
     )
     app = create_app(settings=settings)
@@ -164,6 +166,8 @@ async def test_signature_check_still_precedes_the_fuse(tmp_path):
         retention_days=14,
         alarm_url="",
         alarm_min_interval_seconds=600,
+        breaker_threshold=5,
+        breaker_cooldown_seconds=60,
         worker_interval_seconds=0.01,
     )
     app = create_app(settings=settings)
@@ -243,6 +247,8 @@ async def test_door_with_require_timestamp_refuses_replayable_requests(tmp_path)
         retention_days=14,
         alarm_url="",
         alarm_min_interval_seconds=600,
+        breaker_threshold=5,
+        breaker_cooldown_seconds=60,
         worker_interval_seconds=0.01,
     )
     app = create_app(settings=settings)
