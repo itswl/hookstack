@@ -175,7 +175,11 @@ def build_generic(channel: Channel, message: dict[str, Any], now: float) -> Buil
     """
     prebuilt = _prebuilt(channel, message)
     content: Any = (
-        prebuilt if prebuilt is not None else {key: value for key, value in message.items() if key != "payload"}
+        prebuilt
+        if prebuilt is not None
+        # The raw payload and any _-prefixed key are TRANSPORT, not content:
+        # they must not enter the signed body a receiver verifies.
+        else {key: value for key, value in message.items() if key != "payload" and not key.startswith("_")}
     )
     body = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     headers: dict[str, str] = {"content-type": "application/json"}
@@ -205,6 +209,11 @@ async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, A
         url, payload, headers = build_request(channel, message)
     except ValueError as error:
         return False, f"build: {error}"
+    # Header, never body: a receiver that dedupes on it needs it stable across
+    # retries, and it must not perturb the signature of the content.
+    key = message.get("_idempotency_key")
+    if key:
+        headers = {**headers, "X-Hook-Idempotency-Key": str(key)}
     try:
         if isinstance(payload, bytes):
             response = await client.post(url, content=payload, headers=headers)

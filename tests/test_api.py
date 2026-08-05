@@ -49,7 +49,7 @@ async def test_status_requires_read_token_when_configured(client):
     assert response.status_code == 200
     # fuse joined the board when the storm fuse landed; the set is pinned so a
     # future key must be a decision, not an accident.
-    assert set(response.json().keys()) == {"queue", "fuse", "silences", "recent"}
+    assert set(response.json().keys()) == {"queue", "fuse", "breakers", "silences", "recent"}
 
 
 async def test_silence_lifecycle_via_admin_api(client):
