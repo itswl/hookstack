@@ -63,6 +63,27 @@
            font-family: var(--mono); font-size: 12px; overflow-x: auto; }
   .empty { color: var(--muted); padding: 30px 0; text-align: center; }
 
+  .tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+  .tab { background: none; border: 0; color: var(--muted); padding: 8px 14px; cursor: pointer;
+         font: inherit; border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .btn { background: var(--surface); border: 1px solid var(--border); color: var(--text);
+         border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.tiny { padding: 1px 8px; font-size: 11px; border-radius: 6px; }
+  .editor { width: 100%; min-height: 380px; background: #0a0d13; color: #d7dde6;
+            border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+            font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+  .row input { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+               color: var(--text); padding: 7px 10px; font-family: var(--mono); }
+  .msg { font-size: 12.5px; font-family: var(--mono); padding: 8px 12px; border-radius: 8px;
+         border: 1px solid var(--border); display: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.show { display: block; }
+  .msg.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .msg.err { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .hint { color: var(--muted); font-size: 12px; }
+
   .tokenbar { display: none; gap: 8px; margin-bottom: 16px; }
   .tokenbar.show { display: flex; }
   .tokenbar input { flex: 1; background: var(--surface); border: 1px solid var(--border);
@@ -84,6 +105,12 @@
     <button id="tokenSave">进入</button>
   </div>
 
+  <div class="tabs">
+    <button class="tab active" data-tab="events">事件</button>
+    <button class="tab" data-tab="config">配置</button>
+  </div>
+
+  <div id="panel-events">
   <div class="cards">
     <div class="card"><div class="label">排队中</div><div class="value" id="cQueued">–</div></div>
     <div class="card"><div class="label">已送达</div><div class="value" id="cSent">–</div></div>
@@ -94,6 +121,33 @@
 
   <h2>最近事件 · 点开看决策链</h2>
   <div id="events"><div class="empty">…</div></div>
+  </div><!-- /panel-events -->
+
+  <div id="panel-config" style="display:none">
+    <div class="row">
+      <input id="adminToken" type="password" placeholder="X-Admin-Token(仅存本机 localStorage)" style="flex:1">
+      <button class="btn" id="adminSave">记住</button>
+    </div>
+
+    <h2>config.yaml · 文件即真源,这里只是它的编辑器</h2>
+    <textarea class="editor" id="cfgEditor" spellcheck="false" placeholder="加载中…"></textarea>
+    <div class="row">
+      <button class="btn primary" id="cfgSave">校验并保存(热生效)</button>
+      <button class="btn" id="cfgReload">从文件重载</button>
+      <span class="hint">校验不过 = 什么都不改;秘密请写 ${ENV} 引用,值放 .env</span>
+    </div>
+    <div class="msg" id="cfgMsg"></div>
+
+    <h2>新建静音</h2>
+    <div class="row">
+      <input id="silSource" placeholder="来源名,或 * 表示全部" style="width:200px">
+      <input id="silMinutes" type="number" value="60" min="1" style="width:90px">
+      <span class="hint">分钟</span>
+      <input id="silNote" placeholder="备注(可选)" style="flex:1">
+      <button class="btn primary" id="silCreate">静音</button>
+    </div>
+    <div class="msg" id="silMsg"></div>
+  </div><!-- /panel-config -->
 </div>
 
 <script>
@@ -124,7 +178,8 @@
       ? "<h2>生效中的静音</h2>" + silences.map(function (s) {
           return '<div class="silence">#' + esc(s.id) + " · " + esc(s.source) +
             ' · 至 ' + esc(fmtTime(s.until_ts)) +
-            (s.note ? ' · <span class="note">' + esc(s.note) + "</span>" : "") + "</div>";
+            (s.note ? ' · <span class="note">' + esc(s.note) + "</span>" : "") +
+            ' <button class="btn tiny" data-lift-silence="' + esc(s.id) + '">解除</button></div>';
         }).join("")
       : "";
 
@@ -140,8 +195,10 @@
       var chips = (e.deliveries || []).map(function (d) {
         var extra = d.status === "dead" || d.last_error
           ? ' title="' + esc(d.last_error || "") + '"' : "";
+        var retryBtn = d.status === "dead"
+          ? ' <button class="btn tiny" data-retry-delivery="' + esc(d.id) + '">重试</button>' : "";
         return '<span class="chip ' + esc(d.status) + '"' + extra + ">" +
-          esc(d.channel) + " · " + esc(d.status) + (d.attempts ? " ×" + esc(d.attempts) : "") + "</span>";
+          esc(d.channel) + " · " + esc(d.status) + (d.attempts ? " ×" + esc(d.attempts) : "") + "</span>" + retryBtn;
       }).join("");
       return '<details class="event">' +
         '<summary>' +
@@ -182,6 +239,97 @@
   document.getElementById("tokenSave").addEventListener("click", function () {
     localStorage.setItem(TOKEN_KEY, document.getElementById("tokenInput").value.trim());
     refresh();
+  });
+
+  // ── tabs ──
+  var ADMIN_KEY = "hookrelay-admin-token";
+  document.querySelectorAll(".tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      document.querySelectorAll(".tab").forEach(function (t) { t.classList.toggle("active", t === tab); });
+      var which = tab.getAttribute("data-tab");
+      document.getElementById("panel-events").style.display = which === "events" ? "" : "none";
+      document.getElementById("panel-config").style.display = which === "config" ? "" : "none";
+      if (which === "config") loadConfig();
+    });
+  });
+
+  function adminHeaders() {
+    var token = localStorage.getItem(ADMIN_KEY) || "";
+    return token ? { "X-Admin-Token": token } : {};
+  }
+  function showMsg(id, ok, text) {
+    var el = document.getElementById(id);
+    el.className = "msg show " + (ok ? "ok" : "err");
+    el.textContent = text;
+  }
+
+  var adminInput = document.getElementById("adminToken");
+  adminInput.value = localStorage.getItem(ADMIN_KEY) || "";
+  document.getElementById("adminSave").addEventListener("click", function () {
+    localStorage.setItem(ADMIN_KEY, adminInput.value.trim());
+    showMsg("cfgMsg", true, "令牌已保存在本机");
+    loadConfig();
+  });
+
+  // ── config editor: GET → edit → PUT (validate-or-nothing) ──
+  function loadConfig() {
+    fetch("/config", { headers: adminHeaders() }).then(function (res) {
+      if (res.status === 403) { showMsg("cfgMsg", false, "需要管理令牌(.env 里的 HOOKRELAY_ADMIN_TOKEN)"); return null; }
+      if (!res.ok) { return res.json().then(function (d) { showMsg("cfgMsg", false, d.detail || res.status); return null; }); }
+      return res.json();
+    }).then(function (data) {
+      if (data) { document.getElementById("cfgEditor").value = data.yaml; showMsg("cfgMsg", true, "已加载 " + data.path); }
+    });
+  }
+  document.getElementById("cfgSave").addEventListener("click", function () {
+    fetch("/config", { method: "PUT", headers: adminHeaders(), body: document.getElementById("cfgEditor").value })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+      .then(function (r) {
+        if (r.ok) {
+          showMsg("cfgMsg", true, "已保存并热生效\nsources: " + r.d.sources.join(", ") +
+            "\npipeline: " + r.d.pipeline.join(" → ") + "\nroutes: " + r.d.routes.join(", "));
+          refresh();
+        } else { showMsg("cfgMsg", false, "校验失败,未做任何更改:\n" + r.d.detail); }
+      });
+  });
+  document.getElementById("cfgReload").addEventListener("click", function () {
+    fetch("/config/reload", { method: "POST", headers: adminHeaders() })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+      .then(function (r) {
+        if (r.ok) { showMsg("cfgMsg", true, "已从文件重载"); loadConfig(); refresh(); }
+        else { showMsg("cfgMsg", false, r.d.detail || "重载失败"); }
+      });
+  });
+
+  // ── silences: create here, lift from the list ──
+  document.getElementById("silCreate").addEventListener("click", function () {
+    fetch("/silences", {
+      method: "POST",
+      headers: Object.assign({ "content-type": "application/json" }, adminHeaders()),
+      body: JSON.stringify({
+        source: document.getElementById("silSource").value.trim() || "*",
+        minutes: parseInt(document.getElementById("silMinutes").value, 10) || 60,
+        note: document.getElementById("silNote").value.trim()
+      })
+    }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+      .then(function (r) {
+        showMsg("silMsg", r.ok, r.ok ? ("已静音 #" + r.d.id + " · " + r.d.source) : (r.d.detail || "失败"));
+        refresh();
+      });
+  });
+
+  // Delegated actions on the events panel (lift silence / retry dead).
+  document.addEventListener("click", function (e) {
+    var lift = e.target.closest("[data-lift-silence]");
+    if (lift) {
+      fetch("/silences/" + lift.getAttribute("data-lift-silence"), { method: "DELETE", headers: adminHeaders() })
+        .then(function (res) { if (!res.ok) alert("解除失败:需要管理令牌(配置页设置)"); refresh(); });
+    }
+    var retry = e.target.closest("[data-retry-delivery]");
+    if (retry) {
+      fetch("/deliveries/" + retry.getAttribute("data-retry-delivery") + "/retry", { method: "POST", headers: adminHeaders() })
+        .then(function (res) { if (!res.ok) alert("重试失败:需要管理令牌(配置页设置)"); refresh(); });
+    }
   });
 
   refresh();

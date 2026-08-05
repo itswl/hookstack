@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -22,7 +24,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from hookrelay import registry
-from hookrelay.config import Config
+from hookrelay.config import Config, ConfigError
 from hookrelay.delivery import process_due
 from hookrelay.pipeline import handle_hook
 from hookrelay.security import token_ok
@@ -156,6 +158,66 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         now = now_ts()
         silence_id = await app.state.store.add_silence(source, now + minutes * 60, str(data.get("note", "")), now)
         return {"id": silence_id, "source": source, "until_ts": now + minutes * 60}
+
+    # ── admin: config (the FILE stays the source of truth) ───────────────
+    # The page is an editor for config.yaml, not a second config store:
+    # GET returns the raw text (${ENV} refs, never resolved secrets), PUT
+    # validates + writes atomically + hot-swaps, reload re-reads the file.
+    # Validation failure changes NOTHING — the running config keeps serving.
+
+    def _config_summary(loaded: Config) -> dict[str, Any]:
+        return {
+            "sources": sorted(loaded.sources),
+            "channels": sorted(loaded.channels),
+            "routes": [route.name for route in loaded.routes],
+            "pipeline": [stage.name for stage in loaded.pipeline],
+        }
+
+    @app.get("/config")
+    async def get_config(x_admin_token: str | None = Header(default=None)) -> JSONResponse:
+        _admin_guard(x_admin_token)
+        path = Path(app.state.settings.config_path)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"no config file at {path}")
+        return JSONResponse({"path": str(path), "yaml": path.read_text(encoding="utf-8")})
+
+    @app.put("/config")
+    async def put_config(request: Request, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+        _admin_guard(x_admin_token)
+        text = (await request.body()).decode("utf-8")
+        try:
+            import yaml as _yaml
+
+            candidate = Config.from_dict(_yaml.safe_load(text) or {})
+        except (ConfigError, Exception) as error:  # noqa: BLE001 — every parse error is a 400
+            raise HTTPException(status_code=400, detail=f"{error.__class__.__name__}: {error}") from None
+        path = Path(app.state.settings.config_path)
+        # Atomic replace: never leave a half-written config on disk.
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent) or ".", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_name, path)
+        app.state.config = candidate
+        return {"applied": True, **_config_summary(candidate)}
+
+    @app.post("/config/reload")
+    async def reload_config(x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+        _admin_guard(x_admin_token)
+        try:
+            candidate = Config.from_file(app.state.settings.config_path)
+        except (ConfigError, FileNotFoundError, Exception) as error:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"{error.__class__.__name__}: {error}") from None
+        app.state.config = candidate
+        return {"applied": True, **_config_summary(candidate)}
+
+    # ── admin: dead-letter retry ──────────────────────────────────────────
+
+    @app.post("/deliveries/{delivery_id}/retry")
+    async def retry_delivery(delivery_id: int, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+        _admin_guard(x_admin_token)
+        if not await app.state.store.retry_delivery(delivery_id, now_ts()):
+            raise HTTPException(status_code=404, detail="no dead delivery with that id")
+        return {"requeued": delivery_id}
 
     @app.delete("/silences/{silence_id}")
     async def remove_silence(silence_id: int, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
