@@ -166,6 +166,16 @@ class Store:
             )
         await self.db.commit()
 
+    async def retry_delivery(self, delivery_id: int, now: float) -> bool:
+        """Operator second chance: a dead delivery back to queued, due now.
+        Attempts reset — the operator's judgement outranks the backoff ledger."""
+        cursor = await self.db.execute(
+            "UPDATE deliveries SET status = 'queued', attempts = 0, next_attempt_at = ? WHERE id = ? AND status = 'dead'",
+            (now, delivery_id),
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
     # ── silences ──────────────────────────────────────────────────────────
 
     async def active_silence(self, source: str, now: float) -> dict[str, Any] | None:
@@ -215,7 +225,7 @@ class Store:
             event["channels"] = json.loads(event.pop("channels_json") or "[]")
             event["steps"] = json.loads(event.pop("steps_json") or "[]")
             cursor = await self.db.execute(
-                "SELECT channel, status, attempts, last_error FROM deliveries WHERE event_id = ? ORDER BY id",
+                "SELECT id, channel, status, attempts, last_error FROM deliveries WHERE event_id = ? ORDER BY id",
                 (event["id"],),
             )
             event["deliveries"] = [dict(row) for row in await cursor.fetchall()]
