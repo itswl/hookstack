@@ -26,8 +26,43 @@ dict three layers down.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+# Markers that say a condition ENDED. Used for two different questions, which
+# is why they live in one place: "is this a recovery?" and "which firing alert
+# is this the recovery OF?"
+_RECOVERY_WORDS = ("已恢复", "已解决", "恢复", "resolved", "recovered", "cleared")
+
+# [已恢复] / 【恢复】 / (RESOLVED) / [OK] — the decoration monitoring systems add
+# to an otherwise unchanged title.
+_MARKER_BRACKETED = re.compile(
+    r"[\[\(（【]\s*(?:" + "|".join(_RECOVERY_WORDS) + r"|ok)\s*[\]\)）】]",
+    re.IGNORECASE,
+)
+_MARKER_EDGE = re.compile(
+    r"(?:^\s*(?:" + "|".join(_RECOVERY_WORDS) + r"|ok)\b\s*[:：\-–·]*\s*)"
+    r"|(?:\s*[:：\-–·]*\s*\b(?:" + "|".join(_RECOVERY_WORDS) + r"|ok)\s*$)",
+    re.IGNORECASE,
+)
+
+
+def condition_title(title: str) -> str:
+    """The title with any "it ended" decoration removed.
+
+    A recovery is almost always the firing alert's title plus a marker, so
+    including the marker in the identity gives the pair two different
+    identities — and then a recovery can never find the firing it belongs to.
+    The recovery route was unreachable for exactly this reason: every recovery
+    fell through to the rule floor and re-derived an importance, so a "high"
+    alert would end with a "medium" recovery card. That is the contradiction
+    this whole design says it prevents.
+    """
+    cleaned = _MARKER_BRACKETED.sub(" ", title)
+    cleaned = _MARKER_EDGE.sub("", cleaned)
+    return " ".join(cleaned.split()) or " ".join(title.split())
+
 
 # Judgement routes, in the order the ledger reports them. Every judged event
 # has exactly one, and it is the first question about cost: what did we
@@ -98,8 +133,12 @@ class Incoming:
         The title plus the identity-ish fields — deliberately not the whole
         payload, whose timestamps and sequence numbers differ every time and
         would make every alert unique (which is the same as having no reuse).
+
+        The title is normalized (see condition_title): a firing alert and its
+        recovery are ONE condition, and they must share an identity or the
+        recovery cannot be linked to what it recovered from.
         """
-        parts = [self.source, self.title]
+        parts = [self.source, condition_title(self.title)]
         for key in sorted(self.fields):
             if key in ("timestamp", "time", "id", "event_id", "uuid"):
                 continue
@@ -111,10 +150,9 @@ class Incoming:
         """Did the condition END? Recovery is a fact about the alert, not an
         opinion, so it is read here and never asked of the model."""
         haystack = f"{self.title} {self.body} {' '.join(self.fields.values())}".lower()
-        markers = ("resolved", "recovered", "ok", "cleared", "恢复", "已解决", "已恢复")
         # "ok" only counts as a standalone word: "okhttp timeout" is not a recovery.
         words = set(haystack.replace("[", " ").replace("]", " ").replace(":", " ").split())
-        return any(m in haystack for m in markers if m != "ok") or "ok" in words
+        return any(word in haystack for word in _RECOVERY_WORDS) or "ok" in words
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,7 +199,12 @@ class Outgoing:
         return {
             "meta": {
                 "brain": self.brain,
-                "alert_name": self.incoming.title,
+                # The CONDITION's name, with any "it ended" decoration removed.
+                # State travels separately in is_recovery, and the pipe renders
+                # it ("✅ 已恢复 · <name>"). Sending the raw title made the
+                # recovery card say so twice: "✅ 已恢复 · [已恢复] 支付网关…".
+                # One fact, one field.
+                "alert_name": condition_title(self.incoming.title),
                 "source": self.incoming.source,
                 "importance": self.verdict.importance,
                 "correlation_id": self.incoming.correlation_id,

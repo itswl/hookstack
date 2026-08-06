@@ -179,7 +179,17 @@ async def test_a_restatement_reuses_and_costs_nothing(app_client, monkeypatch):
     assert latest["summary"] == "原始判断" and latest["cost"] == 0
 
 
-async def test_a_recovery_reuses_its_firing_and_never_pays(app_client):
+@pytest.mark.parametrize("marker", ["[RESOLVED] {}", "[已恢复] {}", "{} 已恢复", "【恢复】{}"])
+async def test_a_recovery_inherits_its_firings_verdict_and_never_pays(app_client, marker: str):
+    """The route must be `recovery`, not `rule`.
+
+    This assertion used to read `in ("recovery", "rule")`, which passed while
+    the recovery route was unreachable: identity included the raw title, so
+    "[已恢复] X" and "X" were two different conditions and no recovery ever
+    found its firing. Every recovery fell to the rule floor and re-derived an
+    importance from scratch, so a `high` alert ended with a `medium` recovery
+    card — the contradiction this design exists to prevent.
+    """
     store = app_client.app.state.store
     from hookjudge.contract import Incoming, Verdict
 
@@ -187,16 +197,43 @@ async def test_a_recovery_reuses_its_firing_and_never_pays(app_client):
     await store.record(firing, Verdict(summary="原始判断", importance="high", route="ai", model="m").normalized(), 100)
 
     ended = json.loads(json.dumps(EVENT))
-    ended["event"]["title"] = "[RESOLVED] 充值金额单次超500报警"
+    ended["event"]["title"] = marker.format("充值金额单次超500报警")
     await app_client.post("/events", json=ended)
     for _ in range(60):
         await asyncio.sleep(0.01)
-        rows = await store.recent(5)
-        if any(r["is_recovery"] for r in rows):
+        if any(r["is_recovery"] for r in await store.recent(5)):
             break
     recovery = next(r for r in await store.recent(5) if r["is_recovery"])
-    assert recovery["route"] in ("recovery", "rule")
+    assert recovery["route"] == "recovery", f"{marker!r} did not link to its firing"
+    assert recovery["importance"] == "high", "a recovery must not contradict its own firing alert"
+    assert recovery["summary"] == "原始判断"
     assert recovery["cost"] == 0, "analysing the past is the easiest cost never to incur"
+
+
+async def test_a_recovery_inherits_even_a_degraded_firing(app_client):
+    """For a storm, only AI verdicts are reusable — spreading one degraded
+    answer across a whole storm is worse than judging each. For a recovery the
+    goal is different: agree with the alert it belongs to, degraded or not."""
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    firing = Incoming.parse(EVENT, now=time.time())
+    await store.record(
+        firing,
+        Verdict(summary="规则判定", importance="high", route="rule", degraded_reason="AI 未配置").normalized(),
+        10,
+    )
+
+    ended = json.loads(json.dumps(EVENT))
+    ended["event"]["title"] = "[已恢复] 充值金额单次超500报警"
+    await app_client.post("/events", json=ended)
+    for _ in range(60):
+        await asyncio.sleep(0.01)
+        if any(r["is_recovery"] for r in await store.recent(5)):
+            break
+    recovery = next(r for r in await store.recent(5) if r["is_recovery"])
+    assert recovery["route"] == "recovery"
+    assert recovery["importance"] == "high", "still must not contradict the firing"
 
 
 async def test_status_and_metrics_are_guarded_and_report_the_cost_question(app_client):
