@@ -63,7 +63,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _judge_and_record(client: httpx.AsyncClient, event: Incoming) -> int:
         """One event, one verdict, one row. Never raises into the caller."""
         started = time.monotonic()
-        prior = await store.prior_verdict(event.identity, app_settings.reuse_window_seconds, now_ts())
+        prior = await store.prior_verdict(
+            event.identity,
+            app_settings.reuse_window_seconds,
+            now_ts(),
+            # A recovery inherits its firing's verdict whatever route produced
+            # it: the point is not to save a call but to agree with the alert
+            # this recovery belongs to.
+            any_route=event.is_recovery,
+        )
         if prior is not None:
             verdict = reuse_verdict(prior, recovery=event.is_recovery)
         elif event.is_recovery:

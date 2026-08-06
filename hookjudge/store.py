@@ -78,16 +78,25 @@ class Store:
         assert self._db is not None, "Store.open() was not called"
         return self._db
 
-    async def prior_verdict(self, identity: str, window_seconds: int, now: float) -> dict[str, Any] | None:
-        """The last real judgement for this identity inside the window.
+    async def prior_verdict(
+        self, identity: str, window_seconds: int, now: float, *, any_route: bool = False
+    ) -> dict[str, Any] | None:
+        """The last judgement for this identity inside the window.
 
-        Only AI verdicts are reusable: reusing a rule verdict would spread a
-        degraded answer across a whole storm, and reusing a reuse would let one
-        judgement live forever by being re-served.
+        For a storm, only AI verdicts are reusable: reusing a rule verdict
+        would spread one degraded answer across the whole storm, and reusing a
+        reuse would let a single judgement live forever by being re-served.
+
+        For a RECOVERY (any_route=True) the goal is different. It is not saving
+        a call — it is not contradicting the alert this recovery belongs to. A
+        firing judged "high" by the rule floor must not end with a "medium"
+        recovery card, so the recovery inherits whatever its firing said,
+        degraded or not.
         """
+        route_clause = "" if any_route else " AND route = 'ai'"
         cursor = await self.db.execute(
             "SELECT summary, importance, event_type, impact_scope, model FROM judgements"
-            " WHERE identity = ? AND route = 'ai' AND received_at >= ? ORDER BY id DESC LIMIT 1",
+            f" WHERE identity = ?{route_clause} AND received_at >= ? ORDER BY id DESC LIMIT 1",
             (identity, now - max(1, window_seconds)),
         )
         row = await cursor.fetchone()
