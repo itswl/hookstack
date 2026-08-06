@@ -23,9 +23,17 @@ CREATE TABLE IF NOT EXISTS events (
     body TEXT NOT NULL DEFAULT '',
     level TEXT NOT NULL DEFAULT 'info',
     fields_json TEXT NOT NULL DEFAULT '{}',
-    payload_json TEXT NOT NULL DEFAULT '{}'
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    -- The id this event QUOTED back, when a brain echoed ours. First-class and
+    -- indexed rather than buried in the trace, because gathering N brains'
+    -- work under one original alert is a query, not a scan.
+    correlation_id TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_events_fp_time ON events (fingerprint, received_at);
+-- ix_events_correlation is created in _migrate(), NOT here: this script runs
+-- against ledgers written by older builds, and indexing a column that table
+-- does not have yet fails the whole open. (It did — on a ledger with 173 real
+-- events in it, which is why the migration test exists.)
 
 CREATE TABLE IF NOT EXISTS decisions (
     event_id INTEGER PRIMARY KEY REFERENCES events (id),
@@ -65,9 +73,33 @@ class Store:
 
     async def open(self) -> None:
         self._db = await aiosqlite.connect(self._path)
-        self._db.row_factory = aiosqlite.Row
-        await self._db.executescript(_SCHEMA)
-        await self._db.commit()
+        try:
+            self._db.row_factory = aiosqlite.Row
+            await self._db.executescript(_SCHEMA)
+            await self._migrate()
+            await self._db.commit()
+        except Exception:
+            # The connection runs a thread; leaving it open on a failed start
+            # hangs the process at exit and turns a clear schema error into a
+            # mysterious timeout (it turned one into a killed CI job).
+            await self._db.close()
+            self._db = None
+            raise
+
+    async def _migrate(self) -> None:
+        """Additive column migrations for ledgers created by older builds.
+
+        CREATE TABLE IF NOT EXISTS never adds a column to a table that already
+        exists, so a running relay would keep its old shape and every query
+        touching the new column would fail — the production ledger has 173
+        events in it and must survive the upgrade.
+        """
+        cursor = await self._db.execute("PRAGMA table_info(events)")
+        columns = {str(row["name"]) for row in await cursor.fetchall()}
+        if "correlation_id" not in columns:
+            await self._db.execute("ALTER TABLE events ADD COLUMN correlation_id TEXT")
+        # Always, and only after the column is certain to exist.
+        await self._db.execute("CREATE INDEX IF NOT EXISTS ix_events_correlation ON events (correlation_id)")
 
     async def close(self) -> None:
         if self._db is not None:
@@ -81,10 +113,19 @@ class Store:
 
     # ── events & decisions ────────────────────────────────────────────────
 
-    async def insert_event(self, source: str, fp: str, extracted: dict[str, Any], payload_json: str, now: float) -> int:
+    async def insert_event(
+        self,
+        source: str,
+        fp: str,
+        extracted: dict[str, Any],
+        payload_json: str,
+        now: float,
+        correlation_id: str | None = None,
+    ) -> int:
         cursor = await self.db.execute(
-            "INSERT INTO events (source, received_at, fingerprint, title, body, level, fields_json, payload_json)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO events (source, received_at, fingerprint, title, body, level, fields_json, payload_json,"
+            "                   correlation_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 source,
                 now,
@@ -94,6 +135,7 @@ class Store:
                 extracted["level"],
                 json.dumps(extracted["fields"], ensure_ascii=False),
                 payload_json,
+                correlation_id or None,
             ),
         )
         await self.db.commit()
@@ -202,6 +244,58 @@ class Store:
     async def list_silences(self, now: float) -> list[dict[str, Any]]:
         cursor = await self.db.execute("SELECT * FROM silences WHERE until_ts > ? ORDER BY id DESC", (now,))
         return [dict(row) for row in await cursor.fetchall()]
+
+    async def round_trip(self, event_id: int) -> dict[str, Any] | None:
+        """Assemble one alert's whole journey: the original, where it fanned
+        out to, and what each brain sent back.
+
+        This is the view that makes several processing systems COMPARABLE — the
+        same payload went to each of them, so the differences in what came back
+        are differences in their judgement, not in their input.
+        """
+        origin = await self._event_row(event_id)
+        if origin is None:
+            return None
+        # Returns quote the id we stamped on egress. If this event is itself a
+        # return, gather around its origin instead so the view is the same from
+        # either end.
+        anchor_id = event_id
+        quoted = str(origin.get("correlation_id") or "")
+        if quoted.startswith("hr-") and quoted[3:].isdigit():
+            anchor = await self._event_row(int(quoted[3:]))
+            if anchor is not None:
+                origin, anchor_id = anchor, int(quoted[3:])
+
+        cursor = await self.db.execute(
+            "SELECT id FROM events WHERE correlation_id = ? ORDER BY id",
+            (f"hr-{anchor_id}",),
+        )
+        returns = [await self._event_row(int(row["id"])) for row in await cursor.fetchall()]
+        for item in returns:
+            if item is not None:
+                item["latency_seconds"] = round(float(item["received_at"]) - float(origin["received_at"]), 3)
+        return {"origin": origin, "returns": [r for r in returns if r is not None]}
+
+    async def _event_row(self, event_id: int) -> dict[str, Any] | None:
+        cursor = await self.db.execute(
+            "SELECT e.id, e.source, e.received_at, e.title, e.body, e.level, e.fields_json, e.correlation_id,"
+            "       d.outcome, d.skip_code, d.channels_json, d.steps_json"
+            " FROM events e LEFT JOIN decisions d ON d.event_id = e.id WHERE e.id = ?",
+            (event_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        event = dict(row)
+        event["fields"] = json.loads(event.pop("fields_json") or "{}")
+        event["channels"] = json.loads(event.pop("channels_json") or "[]")
+        event["steps"] = json.loads(event.pop("steps_json") or "[]")
+        cursor = await self.db.execute(
+            "SELECT id, channel, status, attempts, last_error, sent_at FROM deliveries WHERE event_id = ? ORDER BY id",
+            (event_id,),
+        )
+        event["deliveries"] = [dict(r) for r in await cursor.fetchall()]
+        return event
 
     # ── retention ─────────────────────────────────────────────────────────
 
