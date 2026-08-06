@@ -39,11 +39,17 @@ def render(template: str, payload: Any) -> str:
     recoverable, a lost event is not."""
 
     def _sub(match: re.Match[str]) -> str:
-        value = resolve_path(payload, match.group(1).strip())
-        if value is None:
-            return ""
-        if isinstance(value, (dict, list)):
-            return json.dumps(value, ensure_ascii=False)
-        return str(value)
+        # {a|b|c} takes the first path that yields something. Upstream shapes
+        # carry the same meaning under different keys (eventArn here, region
+        # there), and without fallbacks each variant needs its own template —
+        # which is how one door ends up with a template per sender.
+        for path in match.group(1).split("|"):
+            value = resolve_path(payload, path.strip())
+            if value is None or value == "":
+                continue
+            if isinstance(value, (dict, list)):
+                return json.dumps(value, ensure_ascii=False)
+            return str(value)
+        return ""
 
     return _PLACEHOLDER.sub(_sub, template).strip()
