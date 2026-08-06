@@ -211,3 +211,114 @@ def test_inline_processor_timeout_is_capped_at_config_load():
     )
     with pytest.raises(ConfigError, match="async topology"):
         Config.from_dict(slow)
+
+
+# ── primitives an ecosystem spec needs ───────────────────────────────────────
+
+
+def test_fallback_paths_take_the_first_that_yields():
+    """Upstream shapes carry one meaning under different keys; without {a|b}
+    each variant needs its own template."""
+    from hookrelay.render import render
+
+    payload = {"detail": {"eventArn": "", "service": "SES"}, "region": "ap-southeast-1"}
+    assert render("{detail.eventArn|region}", payload) == "ap-southeast-1", "empty is skipped, not returned"
+    assert render("{detail.service|region}", payload) == "SES"
+    assert render("{nope.here|also.missing}", payload) == ""
+    assert render("res={detail.eventArn|region} svc={detail.service}", payload) == "res=ap-southeast-1 svc=SES"
+
+
+def test_any_of_selector_claims_either_variant():
+    cfg = Config.from_dict(
+        {
+            "templates": [
+                {
+                    "name": "prom-like",
+                    "match": {"any_of": ["alerts", "commonLabels"]},
+                    "title": "{alerts.0.labels.alertname|commonLabels.alertname}",
+                },
+                {"name": "rest", "title": "{title}"},
+            ],
+            "sources": [{"name": "d", "secret": "", "templates": ["prom-like", "rest"]}],
+            "channels": [{"name": "c", "type": "generic", "url": "https://x.example"}],
+            "routes": [{"name": "r", "source": "*", "send_to": ["c"]}],
+        }
+    )
+    door = cfg.sources["d"]
+    listed = extract_event(door, {"alerts": [{"labels": {"alertname": "DiskFull"}}]})
+    assert listed["_template"] == "prom-like" and listed["title"] == "DiskFull"
+
+    common = extract_event(door, {"commonLabels": {"alertname": "CpuHot"}})
+    assert common["_template"] == "prom-like" and common["title"] == "CpuHot"
+
+    neither = extract_event(door, {"title": "something else"})
+    assert neither["_template"] == "rest"
+
+
+def test_a_real_ecosystem_spec_is_expressible():
+    """The migration test: WebhookWise's aws_health adapter, written as a pipe
+    template. Its identity choice (eventTypeCode, NOT eventArn — the arn is
+    per-occurrence and would defeat dedup) survives the move."""
+    cfg = Config.from_dict(
+        {
+            "templates": [
+                {
+                    "name": "aws-health",
+                    "match": {"equals": {"source": "aws.health"}, "exists": ["detail.eventTypeCode"]},
+                    "title": "{detail.eventTypeCode}",
+                    "body": "{detail.eventDescription.0.latestDescription}",
+                    # No level on purpose: eventTypeCategory is issue /
+                    # accountNotification / scheduledChange — not a severity
+                    # scale, so inventing a ranking AWS never expressed would
+                    # be the pipe judging, which is not its job.
+                    "fields": {
+                        "service": "{detail.service}",
+                        "resource": "{detail.eventArn|region}",
+                        "category": "{detail.eventTypeCategory}",
+                    },
+                },
+                {"name": "rest", "title": "{title}"},
+            ],
+            "sources": [
+                {
+                    "name": "inbound",
+                    "secret": "",
+                    "templates": ["aws-health", "rest"],
+                    "fingerprint_fields": ["title", "service"],
+                }
+            ],
+            "channels": [{"name": "c", "type": "generic", "url": "https://x.example"}],
+            "routes": [{"name": "r", "source": "*", "send_to": ["c"]}],
+        }
+    )
+    event = {
+        "source": "aws.health",
+        "region": "ap-southeast-1",
+        "detail": {
+            "service": "SES",
+            "eventTypeCode": "AWS_SES_ENFORCEMENT_PROBATION",
+            "eventTypeCategory": "accountNotification",
+            "eventArn": "arn:aws:health:abc",
+            "eventDescription": [{"latestDescription": "SES account on probation"}],
+        },
+    }
+    read = extract_event(cfg.sources["inbound"], event)
+    assert read["_template"] == "aws-health"
+    assert read["title"] == "AWS_SES_ENFORCEMENT_PROBATION", "identity is the recurring condition"
+    assert read["body"] == "SES account on probation"
+    assert read["level"] == "info", "no severity invented where the sender expressed none"
+    assert read["fields"]["service"] == "SES" and read["fields"]["resource"] == "arn:aws:health:abc"
+
+    # Dedup grain follows the identity choice, not the per-occurrence arn.
+    from hookrelay.extract import fingerprint
+
+    other_occurrence = json_roundtrip(event)
+    other_occurrence["detail"]["eventArn"] = "arn:aws:health:xyz"
+    same = extract_event(cfg.sources["inbound"], other_occurrence)
+    assert fingerprint(cfg.sources["inbound"], read) == fingerprint(cfg.sources["inbound"], same)
+
+
+def json_roundtrip(value):
+    import json
+
+    return json.loads(json.dumps(value))

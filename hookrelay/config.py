@@ -154,9 +154,17 @@ class Config:
                 exists_paths = [str(v) for v in exists_raw]
             else:
                 exists_paths = [str(exists_raw)]
+            any_raw = match.get("any_of")
+            if any_raw is None:
+                any_paths: list[str] = []
+            elif isinstance(any_raw, list):
+                any_paths = [str(v) for v in any_raw]
+            else:
+                any_paths = [str(any_raw)]
             selector = TemplateSelector(
                 exists=tuple(exists_paths),
                 equals={str(k): str(v) for k, v in (match.get("equals") or {}).items()},
+                any_of=tuple(any_paths),
             )
             template = ExtractTemplate(
                 name=str(item["name"]),
