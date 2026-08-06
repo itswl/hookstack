@@ -54,6 +54,7 @@ async def handle_hook(
     # two unrelated halves.
     quoted = str(ctx.extracted.get("fields", {}).get("correlation_id") or "").strip()
     if quoted:
+        ctx.correlation_id = quoted
         ctx.steps.append({"gate": "correlate", "with": quoted})
     rt = Runtime(store=store, config=cfg, settings=settings, http_client=client)
 
@@ -110,7 +111,9 @@ async def _record(store: Store, ctx: EventContext, outcome: str, skip_code: str 
     # the ingress body cap (413 at the door), and retention purges old rows.
     payload_json = json.dumps(ctx.payload, ensure_ascii=False)
     fp = ctx.fingerprint or fingerprint(ctx.source, ctx.extracted)
-    event_id = await store.insert_event(ctx.source.name, fp, ctx.extracted, payload_json, ctx.now)
+    event_id = await store.insert_event(
+        ctx.source.name, fp, ctx.extracted, payload_json, ctx.now, correlation_id=ctx.correlation_id
+    )
     await store.insert_decision(event_id, outcome, skip_code, channels, ctx.steps)
     metrics.record_event(ctx.source.name, skip_code or outcome)
     return event_id

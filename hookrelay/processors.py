@@ -44,6 +44,9 @@ class EventContext:
     steps: list[dict[str, Any]] = field(default_factory=list)
     channels: list[str] = field(default_factory=list)
     fingerprint: str | None = None  # set by dedup; computed at record time otherwise
+    # Set when a brain quoted our correlation id back: this event is the RETURN
+    # half of a round trip, and the ledger can gather it under the original.
+    correlation_id: str | None = None
 
     def routing_context(self) -> dict[str, str]:
         return {

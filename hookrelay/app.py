@@ -238,6 +238,26 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             ),
         }
 
+    @app.get("/trace/{event_id}")
+    async def round_trip(
+        event_id: int,
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """One alert's whole journey: the original, where it fanned out to, and
+        what each processing system sent back.
+
+        The comparison view. Every brain received the SAME payload, so the
+        differences in what came back are differences in their judgement — not
+        in their input. Works from either end: ask about a return and you get
+        the group assembled around its origin.
+        """
+        _read_guard(x_read_token, authorization)
+        trip = await app.state.store.round_trip(event_id)
+        if trip is None:
+            raise HTTPException(status_code=404, detail="no such event")
+        return trip
+
     @app.get("/metrics", response_class=PlainTextResponse)
     async def prometheus_metrics(
         x_read_token: str | None = Header(default=None),
