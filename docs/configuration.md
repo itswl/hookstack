@@ -186,6 +186,41 @@ receivers actually keep). A brain that quotes it back — e.g. in a field the
 return door extracts as `correlation_id` — gets a `{"gate": "correlate",
 "with": "hr-86"}` step in the return event's trace.
 
+### Fan out to several brains, then compare
+
+The relay can hand the SAME alert to more than one processing system and
+gather what each made of it. Because the input is byte-identical, the
+differences in what comes back are differences in JUDGEMENT — which is the
+point of running two brains side by side.
+
+```yaml
+routes:
+  - {name: fan-to-brains, source: inbound, send_to: [to-ww, to-ww-lite], stop: true}
+  - {name: ww-to-chat,    source: ww-notify,   send_to: [ops-feishu], stop: true}
+  # The shadow brain is gathered and compared, never delivered onward —
+  # comparing two brains must not double every notification an operator gets.
+  - {name: lite-compare,  source: lite-notify, send_to: [compare-log], stop: true}
+```
+
+**The correlation contract.** Every outbound delivery carries
+`X-Hook-Correlation-Id: hr-<event_id>` (and `X-Request-Id`). A brain that
+quotes it back — in a field the return door extracts as `correlation_id` —
+gets its reading gathered under the original alert. A brain that cannot quote
+it still lands in the ledger; it just is not grouped. Contract, not
+requirement.
+
+`GET /trace/{event_id}` assembles the group from either end (ask about a
+return, get the same view), with each brain's **latency** — the number that
+answers "what does the slow one buy us":
+
+```json
+{"origin": {"id": 86, "title": "充值金额单次超500报警", "deliveries": [...]},
+ "returns": [{"fields": {"brain": "ww-lite"},    "level": "medium", "latency_seconds": 0.4},
+             {"fields": {"brain": "webhookwise"}, "level": "high",   "latency_seconds": 47.0}]}
+```
+
+The status page shows it under each event ("看这条的往返 / 各系统加工").
+
 Two standing limits on processors, both deliberate:
 
 - they may only **set fields and pass/drop** — never pick channels, split an
