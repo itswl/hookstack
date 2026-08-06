@@ -14,7 +14,8 @@ async def test_routed_event_enqueues_deliveries_and_records_why(store, cfg):
     # priority 100 route matched (level high) AND the catch-all mirror:
     assert result["channels"] == ["feishu-main", "ding-main", "mirror"]
     gates = [step.get("gate") for step in result["steps"]]
-    assert gates == ["dedup", "silence", "routes"]
+    # extract leads: which template read the payload is part of the account.
+    assert gates == ["extract", "dedup", "silence", "routes"]
 
     rows = await store.due_deliveries(now=1001.0)
     assert sorted(row["channel"] for row in rows) == ["ding-main", "feishu-main", "mirror"]
@@ -28,7 +29,7 @@ async def test_duplicate_within_window_is_skipped_against_the_original(store, cf
     second = await handle_hook(store, cfg, cfg.sources["grafana"], PAYLOAD, now=1030.0)
 
     assert second["outcome"] == "skipped" and second["skip_code"] == "duplicate"
-    dedup_step = second["steps"][0]
+    dedup_step = second["steps"][1]  # [0] is the extract step
     assert dedup_step["first_event_id"] == first["event_id"]
     assert dedup_step["seconds_ago"] == 30
     # No deliveries were enqueued for the repeat.

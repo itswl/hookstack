@@ -154,7 +154,7 @@ async def test_explain_answers_without_recording_or_delivering(file_client):
     body = response.json()
     assert body["dry_run"] is True
     assert body["outcome"] == "routed" and body["channels"] == ["sink"]
-    assert [s["gate"] for s in body["steps"]] == ["dedup", "silence", "routes"]
+    assert [s["gate"] for s in body["steps"]] == ["extract", "dedup", "silence", "routes"]
     assert body["extracted"]["title"] == "would this route?"
 
     after = (await file_client.get("/status")).json()

@@ -10,53 +10,35 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from typing import Any
 
 from hookrelay.config import Source
 
-_PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
-
-
-def resolve_path(data: Any, path: str) -> Any:
-    current = data
-    for token in path.split("."):
-        if isinstance(current, list):
-            try:
-                current = current[int(token)]
-            except (ValueError, IndexError):
-                return None
-        elif isinstance(current, dict):
-            if token not in current:
-                return None
-            current = current[token]
-        else:
-            return None
-    return current
-
-
-def render(template: str, payload: Any) -> str:
-    def _sub(match: re.Match[str]) -> str:
-        value = resolve_path(payload, match.group(1).strip())
-        if value is None:
-            return ""
-        if isinstance(value, (dict, list)):
-            return json.dumps(value, ensure_ascii=False)
-        return str(value)
-
-    return _PLACEHOLDER.sub(_sub, template).strip()
+# Re-exported: the primitives live in the leaf module now (import cycle), but
+# channels/plugins have imported them from here since day one.
+from hookrelay.render import render, resolve_path  # noqa: F401
 
 
 def extract_event(source: Source, payload: Any) -> dict[str, Any]:
-    """Normalize an inbound payload to the shape every channel understands."""
-    level_raw = render(source.level, payload).lower() if source.level else ""
-    level = source.level_map.get(level_raw, level_raw) or "info"
-    return {
-        "title": render(source.title, payload) or f"webhook from {source.name}",
-        "body": render(source.body, payload),
-        "level": level,
-        "fields": {name: render(template, payload) for name, template in source.fields.items()},
-    }
+    """Normalize an inbound payload, using the first template that claims it.
+
+    The result carries `_template` (the name that matched) so the decision
+    trace can say WHICH reading produced this title — "why is the title empty"
+    must be answerable from the ledger.
+    """
+    from hookrelay.templates import select
+
+    if not source.templates:  # defensive: config always fills this
+        level_raw = render(source.level, payload).lower() if source.level else ""
+        level = source.level_map.get(level_raw, level_raw) or "info"
+        return {
+            "title": render(source.title, payload) or f"webhook from {source.name}",
+            "body": render(source.body, payload),
+            "level": level,
+            "fields": {name: render(tpl, payload) for name, tpl in source.fields.items()},
+            "_template": "inline",
+        }
+    return select(source.templates, payload).extract(payload, door=source.name)
 
 
 def fingerprint(source: Source, extracted: dict[str, Any]) -> str:

@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import yaml
 
 from hookrelay import registry
+from hookrelay.templates import ExtractTemplate, TemplateSelector
 
 _ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
@@ -46,6 +47,12 @@ def _resolve_deep(value: Any) -> Any:
     return _resolve(value)
 
 
+# Routing speaks these three keys natively; an extracted field of the same
+# name would silently shadow one (the routing context merges fields last), so
+# the collision is refused at load time instead of surprising someone at 3am.
+RESERVED_FIELD_NAMES = ("source", "level", "title")
+
+
 @dataclass(frozen=True, slots=True)
 class Source:
     name: str
@@ -53,6 +60,10 @@ class Source:
     title: str
     body: str
     level: str
+    # Ordered extraction templates; one door, many payload shapes. Always at
+    # least one entry (the inline title/body/level form becomes template
+    # "inline"), so selection can never come up empty.
+    templates: tuple[ExtractTemplate, ...] = ()
     adapter: str = "default"
     level_map: dict[str, str] = field(default_factory=dict)
     fields: dict[str, str] = field(default_factory=dict)
@@ -127,6 +138,45 @@ class Config:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Config:
+        # Top-level named templates, referenced by doors. A door may also keep
+        # its fields inline (the original single-shape form) — that stays valid
+        # forever; it becomes a one-entry list called "inline".
+        named_templates: dict[str, ExtractTemplate] = {}
+        for item in raw.get("templates") or []:
+            kind = str(item.get("kind", "extract"))
+            if kind != "extract":
+                raise ConfigError(f"template {item.get('name')!r}: unknown kind {kind!r} (only 'extract' exists today)")
+            match = dict(item.get("match") or {})
+            exists_raw = match.get("exists")
+            if exists_raw is None:
+                exists_paths: list[str] = []
+            elif isinstance(exists_raw, list):
+                exists_paths = [str(v) for v in exists_raw]
+            else:
+                exists_paths = [str(exists_raw)]
+            selector = TemplateSelector(
+                exists=tuple(exists_paths),
+                equals={str(k): str(v) for k, v in (match.get("equals") or {}).items()},
+            )
+            template = ExtractTemplate(
+                name=str(item["name"]),
+                title=str(item.get("title", "{title}")),
+                body=str(item.get("body", "{body}")),
+                level=str(item.get("level", "")),
+                level_map={str(k).lower(): str(v) for k, v in (item.get("level_map") or {}).items()},
+                fields={str(k): str(v) for k, v in (item.get("fields") or {}).items()},
+                selector=selector,
+            )
+            for reserved in RESERVED_FIELD_NAMES:
+                if reserved in template.fields:
+                    raise ConfigError(
+                        f"template {template.name}: field {reserved!r} would shadow the routing key of the "
+                        f"same name — rename it"
+                    )
+            if template.name in named_templates:
+                raise ConfigError(f"duplicate template name: {template.name}")
+            named_templates[template.name] = template
+
         sources: dict[str, Source] = {}
         for item in raw.get("sources") or []:
             src = Source(
@@ -146,6 +196,40 @@ class Config:
                 max_skew_seconds=max(1, int(item.get("max_skew_seconds", 300))),
                 options=_resolve_deep(dict(item.get("options") or {})),
             )
+            for reserved in RESERVED_FIELD_NAMES:
+                if reserved in src.fields:
+                    raise ConfigError(
+                        f"source {src.name}: field {reserved!r} would shadow the routing key of the same "
+                        f"name — rename it"
+                    )
+            requested = [str(name) for name in (item.get("templates") or [])]
+            if requested:
+                missing = [name for name in requested if name not in named_templates]
+                if missing:
+                    raise ConfigError(
+                        f"source {src.name}: unknown template(s) {missing} (known: {sorted(named_templates)})"
+                    )
+                chosen = tuple(named_templates[name] for name in requested)
+                # A door whose last template has a selector can face a payload
+                # nothing claims; select() would then fall back to that last
+                # one anyway, so say it out loud rather than let it surprise.
+                if not chosen[-1].selector.is_fallback:
+                    raise ConfigError(
+                        f"source {src.name}: the last template ({chosen[-1].name}) must have no match "
+                        f"selector — it is the fallback for payloads nothing else claims"
+                    )
+            else:
+                chosen = (
+                    ExtractTemplate(
+                        name="inline",
+                        title=src.title,
+                        body=src.body,
+                        level=src.level,
+                        level_map=src.level_map,
+                        fields=src.fields,
+                    ),
+                )
+            src = replace(src, templates=chosen)
             if src.adapter not in registry.SOURCE_ADAPTERS:
                 raise ConfigError(
                     f"source {src.name}: unknown adapter {src.adapter!r} (known: {sorted(registry.SOURCE_ADAPTERS)})"
@@ -207,6 +291,17 @@ class Config:
                     type=stage_type,
                     options=_resolve_deep(options),
                 )
+            if stage.type == "http":
+                from hookrelay.processors import MAX_INLINE_TIMEOUT_SECONDS
+
+                requested_timeout = float(stage.options.get("timeout_seconds", 3.0))
+                if requested_timeout > MAX_INLINE_TIMEOUT_SECONDS:
+                    raise ConfigError(
+                        f"pipeline stage {stage.name}: timeout_seconds={requested_timeout} exceeds the inline "
+                        f"cap of {MAX_INLINE_TIMEOUT_SECONDS}s — an inline processor holds the sender's "
+                        f"connection open, so a slower brain belongs in the async topology (deliver to it as "
+                        f"a channel and let it re-enter through its own door)"
+                    )
             if stage.type not in registry.PROCESSORS:
                 raise ConfigError(
                     f"pipeline stage {stage.name}: unknown processor {stage.type!r} "

@@ -58,6 +58,53 @@ consumes fuse budget.
 Path syntax: dots walk objects, integers walk arrays — `{alerts.0.labels.alertname}`.
 A missing path renders as `""` (an empty title is recoverable; a dropped event is not).
 
+### One door, many payload shapes — named templates
+
+A door often faces more than one sender (the reference production `inbound`
+door takes Grafana alerts and SNS relays through the same public URL). Give it
+an ORDERED list of named templates, each with an optional selector over the
+RAW payload; first match wins, and **the last one must have no selector** —
+it is the fallback, and config refuses a list that could leave a payload
+unclaimed.
+
+```yaml
+templates:
+  - name: grafana-in
+    kind: extract                  # the only kind today; render is additive later
+    match:
+      exists: [evalMatches]        # every path must be present
+    title: "{title}"
+    body: "{message}"
+    level: "{state}"
+    level_map: {alerting: high}
+    fields: {metric: "{evalMatches.0.metric}"}
+  - name: sns-in
+    match:
+      exists: TopicArn             # a bare string works too
+      equals: {Type: Notification} # path must render to this value (AND)
+    title: "{Subject}"
+    body: "{Message}"
+  - name: catch-all                # no match = fallback, must be last
+    title: "{title}"
+
+sources:
+  - name: inbound
+    templates: [grafana-in, sns-in, catch-all]
+```
+
+**Which template read the event is recorded in the decision trace** (`{"gate":
+"extract", "template": "sns-in"}`) — "why is this title empty" has to be
+answerable from the ledger, not by re-deriving the payload by hand.
+
+Templates define the vocabulary routing speaks: a field only one template
+extracts can still drive a route, and events read by the other templates
+simply miss it. Field names may not collide with `source` / `level` / `title`
+(the routing context merges fields last, so a collision would silently shadow
+a routing key) — config refuses it.
+
+The single-shape inline form (`title:`/`body:`/`level:` directly on the source)
+stays valid forever; it becomes a one-entry list called `inline`.
+
 **Custom adapter** (different signature dialect / payload shape): drop a file
 in `data/plugins/`, reference by name. `examples/plugins/github_source.py` is
 a complete one — copy it in and write `adapter: github`; the door then expects
@@ -122,6 +169,30 @@ response:
 
 **Custom processor**: a plugin file with `@registry.processor("mine")` on a
 class exposing `async def run(self, rt, ctx, options) -> ("pass"|"skip", code)`.
+
+### Four processing topologies — pick by SPEED
+
+| | shape | when |
+|---|---|---|
+| **A. inline fast** ✓ | `http` stage: call out, wait, apply `pass`/`drop`/`set` | sub-second work — scoring, tagging, allowlist checks |
+| **B. inline slow** ✗ | the same, with a big timeout | **never**: the stage holds the sender's connection, so the sender times out and RETRIES — you get duplicate alerts while the first copy is still being analysed. `timeout_seconds` above 10 is refused at config load |
+| **C. async handoff** ✓ | deliver TO the brain as a channel; it re-enters through its own door | anything slow. This is how a 47-second AI analysis is wired in production |
+| **D. park and resume** ✗ | hold the event, ask, continue the pipeline later | not built: the relay would hold in-flight state and start becoming a workflow engine, and "is a parked event accounted for?" pollutes the ledger's promise. C covers the same need |
+
+Topology C splits one logical alert into two ledger events (inbound, and the
+brain's return). To make the round trip findable, every outbound delivery
+carries `X-Hook-Correlation-Id` (and `X-Request-Id`, which allowlist-minded
+receivers actually keep). A brain that quotes it back — e.g. in a field the
+return door extracts as `correlation_id` — gets a `{"gate": "correlate",
+"with": "hr-86"}` step in the return event's trace.
+
+Two standing limits on processors, both deliberate:
+
+- they may only **set fields and pass/drop** — never pick channels, split an
+  event, or hand back a rendered payload. Routes stay the only authority. Need
+  to influence routing? Write a field and let a route match it.
+- multiple brains **chain** (N `http` stages, order is semantics) but do not
+  run in parallel.
 
 ## 3. Downstream — `channels` + `routes`
 

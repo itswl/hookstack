@@ -124,7 +124,8 @@ async def test_suppressed_events_keep_their_account(fused_client):
 
     fused = [e for e in status["recent"] if e["skip_code"] == "storm_suppressed"]
     assert len(fused) == 2
-    step = fused[0]["steps"][0]
+    assert fused[0]["steps"][0]["gate"] == "extract"
+    step = fused[0]["steps"][1]
     assert step["gate"] == "storm_fuse" and step["threshold"] == 3 and step["window_count"] >= 4
 
 
