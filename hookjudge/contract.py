@@ -54,10 +54,23 @@ class Incoming:
     received_at: float
 
     @classmethod
-    def parse(cls, payload: dict[str, Any], *, now: float) -> Incoming:
-        meta = payload.get("meta") or {}
-        event = payload.get("event") or {}
-        fields = event.get("fields") or {}
+    def parse(cls, payload: dict[str, Any], *, now: float, correlation_id: str = "") -> Incoming:
+        """Accepts both shapes the pipe can deliver.
+
+        The wrapped {meta, event, raw} envelope above is the documented one,
+        but hookrelay's `payload: normalized` channel puts the event FLAT on
+        the wire — {event_id, source, title, body, level, fields, received_at}
+        — and strips the original payload before signing. Reading only the
+        wrapped shape parsed every real delivery into empty strings, which is
+        not a blank verdict but a WRONG one: identity collapses to the same
+        constant for every alert, so the second event and all after it reuse
+        the first one's judgement forever. It even looks healthy from the
+        outside, because a paid ratio near zero reads as excellent savings.
+        """
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        wrapped = payload.get("event") if isinstance(payload.get("event"), dict) else None
+        event = wrapped if wrapped is not None else payload
+        fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
         return cls(
             source=str(meta.get("source") or event.get("source") or "unknown"),
             title=str(event.get("title") or ""),
@@ -65,8 +78,17 @@ class Incoming:
             level=str(event.get("level") or "").lower(),
             fields={str(k): str(v) for k, v in fields.items() if str(v).strip()},
             raw=payload.get("raw") if isinstance(payload.get("raw"), dict) else {},
-            correlation_id=str(meta.get("correlation_id") or ""),
-            received_at=float(meta.get("received_at") or now),
+            # Precedence: the body says it, else the transport header did, else
+            # the pipe's own hr-<event_id> convention. The header matters
+            # because the flat shape carries no correlation id at all, and
+            # without one the pipe cannot group the judgement with its origin.
+            correlation_id=str(
+                meta.get("correlation_id")
+                or payload.get("correlation_id")
+                or correlation_id
+                or (f"hr-{event['event_id']}" if str(event.get("event_id") or "").strip() else "")
+            ),
+            received_at=float(meta.get("received_at") or event.get("received_at") or now),
         )
 
     @property

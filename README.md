@@ -30,6 +30,16 @@ file, so a change to either shape is a change you can see.
  "raw":   {"...": "the original, for analysis context"}}
 ```
 
+hookrelay's `payload: normalized` channel sends the same information **flat**
+— `{event_id, source, title, body, level, fields, received_at}` — and puts the
+correlation id in an `X-Hook-Correlation-Id` header rather than the signed
+body. Both shapes parse; a test pins the flat one to hookrelay's actual wire
+bytes. That test exists because reading only the wrapped shape turned every
+real delivery into empty strings, and the failure is worse than it sounds:
+identity collapses to one constant for every alert, so the second event and
+all after it reuse the first one's verdict forever — and the near-zero paid
+ratio that produces looks like excellent cost savings.
+
 **Out** — the judgement, posted back to a pipe door:
 
 ```json
