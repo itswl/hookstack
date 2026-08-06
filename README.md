@@ -1,5 +1,7 @@
 # hookrelay
 
+[![ci](https://github.com/itswl/hookrelay/actions/workflows/ci.yml/badge.svg)](https://github.com/itswl/hookrelay/actions/workflows/ci.yml)
+
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
 A small, pluggable router (~1400 lines with tests, five dependencies) that takes JSON webhooks in at
