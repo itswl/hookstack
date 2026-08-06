@@ -319,3 +319,76 @@ def test_the_wrapped_envelope_still_parses():
     assert parsed.source == "alertmanager" and parsed.correlation_id == "hr-9"
     assert parsed.level == "high" and parsed.raw == {"state": "firing"}
     assert parsed.received_at == 5.0
+
+
+@pytest.mark.parametrize(
+    "decorated",
+    [
+        "[RESOLVED] 磁盘使用率 93%",
+        "[已恢复] 磁盘使用率 93%",
+        "【恢复】磁盘使用率 93%",
+        "(recovered) 磁盘使用率 93%",
+        "[OK] 磁盘使用率 93%",
+        "已恢复: 磁盘使用率 93%",
+        "磁盘使用率 93% 已恢复",
+        "磁盘使用率 93% - resolved",
+    ],
+)
+def test_a_recovery_and_its_firing_are_one_condition(decorated: str):
+    """A recovery is the firing alert's title plus decoration. If the marker
+    stays in the identity the pair has two identities, and the recovery can
+    never find the alert it recovered from."""
+    firing = Incoming.parse({"source": "s", "title": "磁盘使用率 93%"}, now=1.0)
+    ended = Incoming.parse({"source": "s", "title": decorated}, now=1.0)
+    assert ended.is_recovery, decorated
+    assert ended.identity == firing.identity, f"{decorated!r} did not normalize to its firing"
+
+
+def test_normalizing_does_not_merge_genuinely_different_alerts():
+    """The marker strip must not blur conditions together — that would be the
+    identity collapse in a smaller costume."""
+    a = Incoming.parse({"source": "s", "title": "[已恢复] 磁盘使用率 93%"}, now=1.0)
+    b = Incoming.parse({"source": "s", "title": "[已恢复] 内存使用率 93%"}, now=1.0)
+    assert a.identity != b.identity
+
+    # Fields still separate two instances of the same alert text.
+    prod = Incoming.parse({"source": "s", "title": "[OK] x", "fields": {"env": "prod"}}, now=1.0)
+    stg = Incoming.parse({"source": "s", "title": "[OK] x", "fields": {"env": "staging"}}, now=1.0)
+    assert prod.identity != stg.identity
+
+
+def test_a_title_that_is_only_a_marker_keeps_something_to_identify_it():
+    """Stripping must never produce an empty identity — that is the collapse
+    this normalization is meant to avoid, arrived at from the other side."""
+    only = Incoming.parse({"source": "s", "title": "[已恢复]"}, now=1.0)
+    assert only.identity != "s|"
+    assert "已恢复" in only.identity
+
+
+def test_ok_inside_a_word_is_not_a_recovery_marker():
+    """okhttp timeouts are not recoveries, and must not be normalized as one."""
+    event = Incoming.parse({"source": "s", "title": "okhttp 连接超时"}, now=1.0)
+    assert not event.is_recovery
+    assert "okhttp" in event.identity
+
+
+def test_the_result_names_the_condition_and_states_its_state_separately():
+    """meta.alert_name is the condition; meta.is_recovery is its state.
+
+    The pipe renders the state as a prefix ("✅ 已恢复 · <name>"), so sending
+    the raw title made a real recovery card read
+    "✅ 已恢复 · [已恢复] 支付网关 5xx 比例 8%" — the same fact twice. One fact,
+    one field.
+    """
+    ended = Incoming.parse({"source": "s", "title": "[已恢复] 支付网关 5xx 比例 8%"}, now=1.0)
+    payload = Outgoing(incoming=ended, verdict=rule_verdict(ended)).payload()
+
+    assert payload["meta"]["alert_name"] == "支付网关 5xx 比例 8%"
+    assert payload["meta"]["is_recovery"] is True
+
+    firing = Incoming.parse({"source": "s", "title": "支付网关 5xx 比例 8%"}, now=1.0)
+    firing_payload = Outgoing(incoming=firing, verdict=rule_verdict(firing)).payload()
+    assert firing_payload["meta"]["alert_name"] == payload["meta"]["alert_name"], (
+        "a condition and its recovery must present the same name to the pipe"
+    )
+    assert firing_payload["meta"]["is_recovery"] is False
