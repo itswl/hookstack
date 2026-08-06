@@ -392,3 +392,70 @@ def test_the_result_names_the_condition_and_states_its_state_separately():
         "a condition and its recovery must present the same name to the pipe"
     )
     assert firing_payload["meta"]["is_recovery"] is False
+
+
+# ── the Alertmanager ecosystem, whose recovery has no marker in its text ──────
+
+_AM_FIELDS = {"env": "prod", "service": "pay", "alertname": "HighErrorRate"}
+
+
+def _from_pipe(**over):
+    """What hookrelay's Alertmanager templates actually produce.
+
+    Not invented: taken from running the payload through hookrelay's own
+    Config + source adapter, where `status` maps into level via level_map and
+    the annotations supply title and body.
+    """
+    base = {
+        "source": "alertmanager",
+        "title": "支付网关 5xx 比例 8.1%",
+        "body": "gateway-2 近 5 分钟 5xx 8.1%",
+        "level": "high",
+        "fields": dict(_AM_FIELDS, status="firing"),
+    }
+    base.update(over)
+    return Incoming.parse(base, now=1.0)
+
+
+def test_alertmanager_resolved_is_a_recovery_even_with_no_marker_in_its_text():
+    """Alertmanager says `status: resolved`, not "已恢复".
+
+    Its resolved body reads "已回落至 0.2%" — no recovery word anywhere in the
+    title, body, or level (which the pipe maps to `info`). The fact lives only
+    in `status`, so the pipe must carry it as a field and this must read it.
+    """
+    resolved = _from_pipe(body="已回落至 0.2%", level="info", fields=dict(_AM_FIELDS, status="resolved"))
+    assert resolved.is_recovery, "an Alertmanager resolve must not look like a new alert"
+
+
+def test_a_state_field_must_not_split_one_condition_in_two():
+    """The fix for the above cannot re-break identity.
+
+    Carrying `status` so is_recovery can see it also puts it in the identity,
+    which made status=firing and status=resolved two different conditions —
+    the same defect as leaving [已恢复] in the title, through another door. So
+    identity excludes state the way it excludes timestamps.
+    """
+    firing = _from_pipe()
+    resolved = _from_pipe(body="已回落至 0.2%", level="info", fields=dict(_AM_FIELDS, status="resolved"))
+    assert firing.identity == resolved.identity
+    assert "status" not in firing.identity
+
+    # An escalation is one condition getting worse, not a second condition.
+    worse = _from_pipe(fields=dict(_AM_FIELDS, status="firing", severity="critical"))
+    assert worse.identity == firing.identity
+
+    # Case does not rescue a state field into the identity.
+    shouty = _from_pipe(fields=dict(_AM_FIELDS, Status="resolved", STATE="ok"))
+    assert shouty.identity == firing.identity
+
+    # But a real label still distinguishes conditions.
+    other = _from_pipe(fields=dict(_AM_FIELDS, service="checkout", status="firing"))
+    assert other.identity != firing.identity
+
+
+def test_timestamps_still_excluded_from_identity():
+    """The original reason this exclusion list exists."""
+    a = _from_pipe(fields=dict(_AM_FIELDS, status="firing", timestamp="1786000000"))
+    b = _from_pipe(fields=dict(_AM_FIELDS, status="firing", timestamp="1786009999"))
+    assert a.identity == b.identity
