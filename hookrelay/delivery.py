@@ -122,6 +122,9 @@ async def _drain_channel(
             # THIS row, so a re-send after a crash between send and bookkeeping
             # is recognisable as the same delivery, not a second alert.
             "_idempotency_key": f"{row['event_id']}:{row['channel']}",
+            # Quotable identity for a brain that will send work back through
+            # another door: the return event can then be linked to this one.
+            "_correlation_id": f"hr-{row['event_id']}",
         }
         ok, detail = await channels.send(client, channel, message)
         processed += 1
