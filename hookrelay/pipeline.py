@@ -46,6 +46,15 @@ async def handle_hook(
         extracted=extracted if extracted is not None else extract_event(source, payload),
         now=now,
     )
+    # Which reading produced these fields. "Why is this title empty" must be
+    # answerable from the ledger, not by re-deriving the payload by hand.
+    ctx.steps.append({"gate": "extract", "template": ctx.extracted.get("_template", "inline")})
+    # A brain that quotes our correlation id back closes the round trip: the
+    # ledger can then answer "what became of alert X" in one place instead of
+    # two unrelated halves.
+    quoted = str(ctx.extracted.get("fields", {}).get("correlation_id") or "").strip()
+    if quoted:
+        ctx.steps.append({"gate": "correlate", "with": quoted})
     rt = Runtime(store=store, config=cfg, settings=settings, http_client=client)
 
     for stage in cfg.pipeline:
@@ -89,6 +98,7 @@ async def record_storm_suppressed(
     """A fused event still gets an account — the storm is exactly when you most
     need to know what arrived. It walks no pipeline and reaches no channel."""
     ctx = EventContext(source=source, payload=payload, extracted=extract_event(source, payload), now=now)
+    ctx.steps.append({"gate": "extract", "template": ctx.extracted.get("_template", "inline")})
     ctx.steps.append({"gate": "storm_fuse", "result": "suppressed", "window_count": count, "threshold": threshold})
     return await _record(store, ctx, "skipped", "storm_suppressed", [])
 

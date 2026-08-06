@@ -92,5 +92,6 @@ async def test_status_recent_carries_parsed_steps(client):
     await client.post("/hook/ci", json={"job": "build", "detail": "ok"})
     data = (await client.get("/status", headers={"X-Read-Token": "read-t"})).json()
     event = data["recent"][0]
-    assert isinstance(event["steps"], list) and event["steps"][0]["gate"] == "dedup"
+    assert isinstance(event["steps"], list)
+    assert [s["gate"] for s in event["steps"]][:2] == ["extract", "dedup"]
     assert isinstance(event["channels"], list)

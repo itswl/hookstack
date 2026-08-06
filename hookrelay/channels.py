@@ -209,11 +209,22 @@ async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, A
         url, payload, headers = build_request(channel, message)
     except ValueError as error:
         return False, f"build: {error}"
-    # Header, never body: a receiver that dedupes on it needs it stable across
-    # retries, and it must not perturb the signature of the content.
+    # Headers, never body: a receiver that dedupes needs a stable key, and a
+    # brain that will hand work BACK to us needs something to quote so the two
+    # halves of a round trip can be found together. Neither may perturb the
+    # signature of the content.
     key = message.get("_idempotency_key")
     if key:
         headers = {**headers, "X-Hook-Idempotency-Key": str(key)}
+    correlation = message.get("_correlation_id")
+    if correlation:
+        headers = {
+            **headers,
+            "X-Hook-Correlation-Id": str(correlation),
+            # X-Request-Id too: it is what allowlist-minded receivers (ours
+            # included) actually keep, so the id survives to be echoed back.
+            "X-Request-Id": str(correlation),
+        }
     try:
         if isinstance(payload, bytes):
             response = await client.post(url, content=payload, headers=headers)

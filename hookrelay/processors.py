@@ -67,6 +67,10 @@ class Runtime:
 Verdict = tuple[str, Any]
 PASS: Verdict = ("pass", None)
 
+# An inline processor holds the sender's connection open. Past this, the right
+# answer is a different topology, not a bigger number.
+MAX_INLINE_TIMEOUT_SECONDS = 10.0
+
 
 @registry.processor("dedup")
 class DedupProcessor:
@@ -158,6 +162,14 @@ class HttpProcessor:
       pass — fail open, the step records the error, the event continues
       drop — fail closed with skip_code processor_error
     A router must never invent a third behaviour on the fly.
+
+    INLINE MEANS FAST. This stage blocks the inbound HTTP request, so a slow
+    brain here makes the SENDER time out and retry — you get duplicate alerts
+    while the first copy is still being analysed. The timeout is capped
+    (MAX_INLINE_TIMEOUT_SECONDS, refused at config load above it): anything
+    slower belongs in the async topology — deliver TO the brain as a channel
+    and let it re-enter through its own door, which is how a 47-second AI
+    analysis is wired in production.
     """
 
     async def run(self, rt: Runtime, ctx: EventContext, options: dict[str, Any]) -> Verdict:
