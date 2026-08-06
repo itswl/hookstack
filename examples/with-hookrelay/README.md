@@ -66,3 +66,29 @@ SNS is not templatable. The real payload arrives as a **JSON string** in
 `Message.AlarmName` resolves to nothing. It needs a source adapter rather than
 a template, and a real one also has to handle the `SubscriptionConfirmation`
 handshake and SNS's certificate-based signatures. Not built.
+
+### Known gap: reuse saves money, not attention
+
+Verified live with a stub model endpoint: four events, two model calls, a paid
+ratio of 50%, and the recovery inheriting its firing's verdict at zero cost.
+The cost policy works.
+
+But the restatement still produced its own downstream card, identical to the
+first. `reuse` means "do not pay to judge this twice" — it does not mean "do
+not notify twice." So a storm of N restatements costs one model call and still
+sends N cards.
+
+That matters because this posture turns the pipe's dedup OFF on the grounds
+that the brain owns the noise accounting, and the brain currently accounts for
+spend rather than for attention. Whoever is on call sees no benefit.
+
+Two ways to close it, and the choice is a product decision, not a detail:
+
+  - The brain returns a suppression signal on `reuse`, and the pipe drops the
+    delivery. Keeps one place deciding what is noise, but a suppressed card can
+    hide a genuine escalation of the same condition.
+  - Turn the pipe's dedup back on for the return door, keyed on the condition.
+    Simpler, but then two components both decide what is noise and the brain's
+    ledger no longer describes what was actually delivered.
+
+Until one is chosen, expect one card per restatement.
