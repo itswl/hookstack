@@ -26,6 +26,7 @@ import httpx
 from hookrelay import registry
 from hookrelay.config import Channel
 from hookrelay.extract import resolve_path
+from hookrelay.processed import Processed
 
 # Feishu card header colours by normalized level. Red is reserved for high —
 # the family colour doctrine: alarm colours are earned, not decorative.
@@ -40,6 +41,22 @@ _FEISHU_LEVEL_COLOR = {
 
 Payload = dict[str, Any] | bytes
 BuiltRequest = tuple[str, Payload, dict[str, str]]
+
+
+def _processed(channel: Channel, message: dict[str, Any]) -> Processed | None:
+    """`payload: processed` — the brain judged, the pipe dresses.
+
+    The brain sends a RESULT (see hookrelay/processed.py) and each channel type
+    renders it in its own dialect: a Feishu card, DingTalk markdown, WeCom
+    markdown, or the structure itself for a generic receiver. This is the
+    division that lets a brain stop knowing what a Feishu card looks like.
+    """
+    if str(channel.options.get("payload") or "normalized") != "processed":
+        return None
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        raise TypeError(f"payload: processed on channel {channel.name}: inbound payload is not an object")
+    return Processed(payload)
 
 
 def _prebuilt(channel: Channel, message: dict[str, Any]) -> Any | None:
@@ -79,6 +96,12 @@ def _feishu_sign_fields(secret: str, now: float) -> dict[str, str]:
 
 @registry.channel("feishu")
 def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
+    processed = _processed(channel, message)
+    if processed is not None:
+        payload = processed.feishu_card()
+        if channel.secret:
+            payload.update(_feishu_sign_fields(channel.secret, now))
+        return channel.url, payload, {}
     prebuilt = _prebuilt(channel, message)
     if prebuilt is not None:
         # The brain's finished Feishu message (interactive cards with their
@@ -114,6 +137,13 @@ def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> Built
 
 @registry.channel("dingtalk")
 def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
+    processed = _processed(channel, message)
+    if processed is not None:
+        payload = {
+            "msgtype": "markdown",
+            "markdown": {"title": processed.headline, "text": processed.markdown(heading=True)},
+        }
+        return _dingtalk_signed_url(channel, now), payload, {}
     prebuilt = _prebuilt(channel, message)
     if prebuilt is not None:
         if not isinstance(prebuilt, dict):
@@ -144,6 +174,10 @@ def _dingtalk_signed_url(channel: Channel, now: float) -> str:
 
 @registry.channel("wecom")
 def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
+    processed = _processed(channel, message)
+    if processed is not None:
+        content = {"msgtype": "markdown", "markdown": {"content": processed.markdown(heading=False)}}
+        return channel.url, content, {}
     prebuilt = _prebuilt(channel, message)
     if prebuilt is not None:
         if not isinstance(prebuilt, dict):
@@ -173,6 +207,14 @@ def build_generic(channel: Channel, message: dict[str, Any], now: float) -> Buil
     configurable (signature_header) so hookrelay can speak a receiver's
     dialect — X-Webhook-Signature feeds WebhookWise's ingest directly.
     """
+    processed = _processed(channel, message)
+    if processed is not None:
+        body = json.dumps(processed.raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        headers: dict[str, str] = {"content-type": "application/json"}
+        if channel.secret:
+            headers[channel.signature_header] = hmac.new(channel.secret.encode(), body, hashlib.sha256).hexdigest()
+        return channel.url, body, headers
+
     prebuilt = _prebuilt(channel, message)
     content: Any = (
         prebuilt
@@ -207,8 +249,11 @@ async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, A
     failure is a scheduling event for the caller, not an exception."""
     try:
         url, payload, headers = build_request(channel, message)
-    except ValueError as error:
-        return False, f"build: {error}"
+    except (ValueError, TypeError, KeyError) as error:
+        # A builder complaining about its inputs is a MISCONFIGURATION, and it
+        # belongs in the delivery ledger with a name — not raised into the
+        # worker, where one bad channel would stall every other delivery.
+        return False, f"build: {error.__class__.__name__}: {error}"
     # Headers, never body: a receiver that dedupes needs a stable key, and a
     # brain that will hand work BACK to us needs something to quote so the two
     # halves of a round trip can be found together. Neither may perturb the
