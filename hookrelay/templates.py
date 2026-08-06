@@ -38,10 +38,14 @@ class TemplateSelector:
 
     exists: tuple[str, ...] = ()
     equals: dict[str, str] = field(default_factory=dict)
+    # any_of: at least ONE of these paths must be present. Real senders vary
+    # within an ecosystem (an alert list here, a single alert there), and
+    # requiring all of them would need a template per variant.
+    any_of: tuple[str, ...] = ()
 
     @property
     def is_fallback(self) -> bool:
-        return not self.exists and not self.equals
+        return not self.exists and not self.equals and not self.any_of
 
     def matches(self, payload: Any) -> bool:
         for path in self.exists:
@@ -51,6 +55,8 @@ class TemplateSelector:
             value = resolve_path(payload, path)
             if value is None or str(value) != str(expected):
                 return False
+        if self.any_of and all(resolve_path(payload, path) is None for path in self.any_of):
+            return False
         return True
 
 
