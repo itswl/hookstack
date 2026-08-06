@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hookjudge</title>
+<style>
+  :root { --bg:#0b0e14; --surface:#11151d; --border:#1f2530; --text:#d7dde6; --muted:#8b94a3;
+          --accent:#4c8dff; --ok:#3dd68c; --warn:#f5a524; --bad:#e5484d;
+          --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.55 -apple-system,"PingFang SC","Segoe UI",sans-serif; }
+  .wrap { max-width:1060px; margin:0 auto; padding:28px 20px 60px; }
+  header { display:flex; align-items:baseline; gap:12px; margin-bottom:20px; }
+  header h1 { font-size:18px; margin:0; }
+  header .sub, header .stamp { color:var(--muted); font-size:12px; }
+  header .stamp { margin-left:auto; font-family:var(--mono); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .card .label { color:var(--muted); font-size:12px; margin-bottom:4px; }
+  .card .value { font-size:26px; font-weight:650; font-family:var(--mono); }
+  h2 { font-size:13px; color:var(--muted); font-weight:600; letter-spacing:.06em;
+       text-transform:uppercase; margin:26px 0 10px; }
+  .row { background:var(--surface); border:1px solid var(--border); border-radius:10px;
+         padding:10px 14px; margin-bottom:8px; }
+  .head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); }
+  .dot.critical,.dot.high { background:var(--bad); }
+  .dot.medium { background:var(--warn); }
+  .dot.low { background:var(--accent); }
+  .title { font-weight:600; overflow-wrap:anywhere; }
+  .badge { font-size:11px; font-family:var(--mono); padding:2px 8px; border-radius:999px;
+           border:1px solid var(--border); color:var(--muted); }
+  .badge.ai { color:var(--accent); } .badge.reuse,.badge.recovery { color:var(--ok); }
+  .badge.rule { color:var(--warn); }
+  .badge.dead { color:var(--bad); border-color:var(--bad); }
+  .when { margin-left:auto; color:var(--muted); font-size:12px; font-family:var(--mono); }
+  .summary { color:var(--text); margin-top:6px; }
+  .meta { color:var(--muted); font-size:12px; font-family:var(--mono); margin-top:6px; }
+  .empty { color:var(--muted); text-align:center; padding:30px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>hookjudge</h1>
+    <span class="sub">只判断:一条事件,一个裁决,一笔账</span>
+    <span class="stamp" id="stamp">加载中…</span>
+  </header>
+  <div class="cards">
+    <div class="card"><div class="label">24h 裁决</div><div class="value" id="cJudged">–</div></div>
+    <div class="card"><div class="label">付费比例</div><div class="value" id="cPaid">–</div></div>
+    <div class="card"><div class="label">24h 花费</div><div class="value" id="cCost">–</div></div>
+    <div class="card"><div class="label">回传失败</div><div class="value" id="cDead">–</div></div>
+  </div>
+  <h2>最近裁决</h2>
+  <div id="rows"><div class="empty">…</div></div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var KEY = "hookjudge-read-token";
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+  }
+  function when(ts) {
+    var d = new Date(ts * 1000), p = function (n) { return n < 10 ? "0" + n : "" + n; };
+    return p(d.getMonth()+1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+  function refresh() {
+    if (document.hidden) return;
+    var headers = {}, token = localStorage.getItem(KEY);
+    if (token) headers["X-Read-Token"] = token;
+    fetch("/status?limit=50", { headers: headers }).then(function (r) {
+      if (r.status === 401) {
+        var entered = window.prompt("读取令牌");
+        if (entered) { localStorage.setItem(KEY, entered.trim()); refresh(); }
+        return null;
+      }
+      return r.json();
+    }).then(function (d) {
+      if (!d) return;
+      var s = d.summary;
+      document.getElementById("cJudged").textContent = s.judged;
+      document.getElementById("cPaid").textContent = s.paid_ratio_pct + "%";
+      document.getElementById("cCost").textContent = "$" + s.cost;
+      document.getElementById("cDead").textContent = s.returns.dead || 0;
+      var rows = d.recent || [];
+      document.getElementById("rows").innerHTML = rows.length ? rows.map(function (r) {
+        var ret = r.return_status === "sent" ? "" :
+          '<span class="badge ' + esc(r.return_status) + '">回传 ' + esc(r.return_status) + "</span>";
+        return '<div class="row"><div class="head">' +
+          '<span class="dot ' + esc(r.importance) + '"></span>' +
+          '<span class="title">' + esc(r.title) + "</span>" +
+          '<span class="badge ' + esc(r.route) + '">' + esc(r.route) + "</span>" + ret +
+          '<span class="when">' + esc(when(r.received_at)) + "</span></div>" +
+          '<div class="summary">' + esc(r.summary) + "</div>" +
+          '<div class="meta">' + esc(r.importance) + " · " + esc(r.event_type || "-") +
+          " · " + esc(r.latency_ms) + "ms" + (r.cost ? " · $" + esc(r.cost) : "") +
+          (r.degraded_reason ? " · " + esc(r.degraded_reason) : "") + "</div></div>";
+      }).join("") : '<div class="empty">还没有裁决</div>';
+      document.getElementById("stamp").textContent = "刷新于 " + new Date().toTimeString().slice(0,8);
+    }).catch(function () { document.getElementById("stamp").textContent = "连接失败"; });
+  }
+  refresh();
+  setInterval(refresh, 5000);
+})();
+</script>
+</body>
+</html>
