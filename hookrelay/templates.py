@@ -55,9 +55,7 @@ class TemplateSelector:
             value = resolve_path(payload, path)
             if value is None or str(value) != str(expected):
                 return False
-        if self.any_of and all(resolve_path(payload, path) is None for path in self.any_of):
-            return False
-        return True
+        return not (self.any_of and all(resolve_path(payload, path) is None for path in self.any_of))
 
 
 @dataclass(frozen=True, slots=True)
