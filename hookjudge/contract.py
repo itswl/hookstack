@@ -74,6 +74,37 @@ ROUTE_RULE = "rule"  # the model was unavailable or refused; rules decided
 
 IMPORTANCE = ("critical", "high", "medium", "low")
 
+# Fields that must never enter an identity. Identity answers ONE question —
+# which condition is this? — so anything answering a different question about
+# the same condition has to be excluded:
+#
+#   when did it happen   timestamps and per-delivery ids differ every time, so
+#                        including them makes every alert unique, which is the
+#                        same as having no reuse at all.
+#   what state is it in  status/severity change while the condition does not.
+#                        Alertmanager sends status=firing then status=resolved
+#                        for one alert; keeping status split the pair into two
+#                        identities and the recovery could not find its firing
+#                        — the same defect as leaving [已恢复] in the title,
+#                        arriving through a different door. A severity that
+#                        escalates is one condition getting worse, not a new one.
+_NON_IDENTITY_FIELDS = frozenset(
+    {
+        "timestamp",
+        "time",
+        "id",
+        "event_id",
+        "uuid",
+        "status",
+        "state",
+        "alertstate",
+        "severity",
+        "level",
+        "importance",
+        "priority",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Incoming:
@@ -140,7 +171,7 @@ class Incoming:
         """
         parts = [self.source, condition_title(self.title)]
         for key in sorted(self.fields):
-            if key in ("timestamp", "time", "id", "event_id", "uuid"):
+            if key.lower() in _NON_IDENTITY_FIELDS:
                 continue
             parts.append(f"{key}={self.fields[key]}")
         return "|".join(parts)
