@@ -29,6 +29,11 @@
   .dot.critical,.dot.high { background:var(--bad); }
   .dot.medium { background:var(--warn); }
   .dot.low { background:var(--accent); }
+  /* Ended, whatever it was worth while it was burning. The dot is the loudest
+     signal in the row, and a red one on a closed alert says "act now" about
+     something already over — the same reason the pipe renders a recovery card
+     green regardless of importance. */
+  .dot.ended { background:var(--ok); }
   .title { font-weight:600; overflow-wrap:anywhere; }
   .badge { font-size:11px; font-family:var(--mono); padding:2px 8px; border-radius:999px;
            border:1px solid var(--border); color:var(--muted); }
@@ -45,7 +50,7 @@
 <div class="wrap">
   <header>
     <h1>hookjudge</h1>
-    <span class="sub">只判断:一条事件,一个裁决,一笔账</span>
+    <span class="sub">只判断：一条事件，一个裁决，一笔账</span>
     <span class="stamp" id="stamp">加载中…</span>
   </header>
   <div class="cards">
@@ -64,6 +69,15 @@
   function esc(v) {
     return String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/</g,"&lt;")
       .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+  }
+  function took(ms) {
+    // 60110ms is a number nobody reads as "a minute". Same scale-to-the-unit
+    // rule the rest of the family uses for durations.
+    var n = Number(ms) || 0;
+    if (n < 1000) return n + "ms";
+    if (n < 60000) return (n / 1000).toFixed(1) + "s";
+    var m = Math.floor(n / 60000);
+    return m + "m" + Math.round((n % 60000) / 1000) + "s";
   }
   function when(ts) {
     var d = new Date(ts * 1000), p = function (n) { return n < 10 ? "0" + n : "" + n; };
@@ -92,13 +106,13 @@
         var ret = r.return_status === "sent" ? "" :
           '<span class="badge ' + esc(r.return_status) + '">回传 ' + esc(r.return_status) + "</span>";
         return '<div class="row"><div class="head">' +
-          '<span class="dot ' + esc(r.importance) + '"></span>' +
+          '<span class="dot ' + (r.is_recovery ? "ended" : esc(r.importance)) + '"></span>' +
           '<span class="title">' + esc(r.title) + "</span>" +
           '<span class="badge ' + esc(r.route) + '">' + esc(r.route) + "</span>" + ret +
           '<span class="when">' + esc(when(r.received_at)) + "</span></div>" +
           '<div class="summary">' + esc(r.summary) + "</div>" +
           '<div class="meta">' + esc(r.importance) + " · " + esc(r.event_type || "-") +
-          " · " + esc(r.latency_ms) + "ms" + (r.cost ? " · $" + esc(r.cost) : "") +
+          " · " + esc(took(r.latency_ms)) + (r.cost ? " · $" + esc(r.cost) : "") +
           (r.degraded_reason ? " · " + esc(r.degraded_reason) : "") + "</div></div>";
       }).join("") : '<div class="empty">还没有裁决</div>';
       document.getElementById("stamp").textContent = "刷新于 " + new Date().toTimeString().slice(0,8);
