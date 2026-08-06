@@ -27,7 +27,13 @@ ALERT = {"title": "示例充值超500告警", "message": "用户 42 充值 920",
 # brains must not double every notification an operator receives.
 FANOUT = {
     "templates": [
-        {"name": "alert-in", "title": "{title}", "body": "{message}", "level": "{state}", "level_map": {"alerting": "high"}},
+        {
+            "name": "alert-in",
+            "title": "{title}",
+            "body": "{message}",
+            "level": "{state}",
+            "level_map": {"alerting": "high"},
+        },
         {
             "name": "brain-return",
             "title": "{meta.alert_name}",
