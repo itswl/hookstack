@@ -15,6 +15,7 @@ import pytest
 
 from hookrelay.channels import build_request
 from hookrelay.config import Channel
+from hookrelay.processed import Processed
 
 RESULT = {
     "meta": {
@@ -171,3 +172,37 @@ def test_missing_optional_blocks_render_without_holes():
     blocks = json.dumps(payload["card"]["elements"], ensure_ascii=False)
     assert "影响" not in blocks and "相关文档" not in blocks
     assert "s" in blocks and payload["card"]["header"]["template"] == "orange"
+
+
+def test_the_footer_timestamp_reads_as_a_clock_not_an_epoch():
+    """A brain sends an epoch; a person reads a clock.
+
+    meta.timestamp went into the card as the float it arrived as, so a real
+    end-to-end run ended its Feishu card with "· 1786037727.669673". Same
+    format as the status page so one alert reads the same in both places.
+    """
+    import re
+    import time
+
+    epoch = 1786037727.669673
+    card = Processed({"meta": {"source": "inbound", "timestamp": epoch}, "analysis": {"event_type": "business"}})
+    footer = card.footer()
+
+    assert "1786037727" not in footer, "an epoch is not a time a person can read"
+    assert re.search(r"\d{2}-\d{2} \d{2}:\d{2}:\d{2}", footer), footer
+    assert footer.endswith(time.strftime("%m-%d %H:%M:%S", time.localtime(epoch)))
+    assert footer.startswith("inbound · business · ")
+
+
+def test_the_footer_tolerates_what_brains_actually_send():
+    """Milliseconds, an already-formatted string, and nothing at all."""
+    ms = Processed({"meta": {"timestamp": 1786037727669}}).footer()
+    sec = Processed({"meta": {"timestamp": 1786037727}}).footer()
+    assert ms == sec, "milliseconds must not render as a date in the year 58000"
+
+    # A brain that formatted its own string keeps it — it knows its own room.
+    assert Processed({"meta": {"timestamp": "2026-08-06 17:35"}}).footer() == "2026-08-06 17:35"
+
+    assert Processed({"meta": {"source": "grafana"}}).footer() == "grafana"
+    assert Processed({"meta": {"timestamp": ""}}).footer() == ""
+    assert Processed({"meta": {"timestamp": None}}).footer() == ""
