@@ -255,3 +255,67 @@ def test_the_result_carries_judgement_and_no_presentation():
     blob = json.dumps(out, ensure_ascii=False)
     for presentation in ("card", "msg_type", "markdown", "template", "color"):
         assert presentation not in blob, f"{presentation} is the pipe's business, not ours"
+
+
+def test_the_pipes_real_normalized_wire_shape_parses():
+    """These are the exact bytes hookrelay's `payload: normalized` generic
+    channel puts on the wire — flat, not wrapped, and with no correlation id
+    in the body.
+
+    Reading only the wrapped {meta, event} envelope parsed every one of these
+    into empty strings. That is not a blank verdict but a wrong one: identity
+    collapses to the same constant for every alert, so event two onward reuse
+    event one's judgement forever, and the resulting near-zero paid ratio
+    looks like excellent cost savings rather than a broken parser.
+    """
+    wire = {
+        "body": "用户 42 充值 920 元",
+        "event_id": 86,
+        "fields": {"env": "prod"},
+        "level": "high",
+        "received_at": 1786000000.0,
+        "source": "grafana",
+        "title": "充值金额单次超500报警",
+    }
+    parsed = Incoming.parse(wire, now=1.0)
+    assert parsed.source == "grafana"
+    assert parsed.title == "充值金额单次超500报警"
+    assert parsed.body == "用户 42 充值 920 元"
+    assert parsed.level == "high"
+    assert parsed.fields == {"env": "prod"}
+    assert parsed.received_at == 1786000000.0
+    assert parsed.identity == "grafana|充值金额单次超500报警|env=prod"
+
+    other = Incoming.parse({**wire, "event_id": 87, "title": "磁盘使用率 91%"}, now=1.0)
+    assert other.identity != parsed.identity, "two conditions must not share one identity"
+
+
+def test_correlation_id_comes_from_the_transport_when_the_body_omits_it():
+    """The flat shape carries no correlation id; hookrelay puts it in a header.
+    Without reading it there, the pipe cannot group the judgement with the
+    event that caused it."""
+    wire = {"source": "grafana", "title": "t", "event_id": 86}
+    assert Incoming.parse(wire, now=1.0, correlation_id="hr-86").correlation_id == "hr-86"
+
+    # Header stripped by a proxy: fall back to the pipe's own convention.
+    assert Incoming.parse(wire, now=1.0).correlation_id == "hr-86"
+
+    # An explicit body value still wins over both.
+    wrapped = {"meta": {"source": "s", "correlation_id": "hr-1"}, "event": {"title": "t"}}
+    assert Incoming.parse(wrapped, now=1.0, correlation_id="hr-999").correlation_id == "hr-1"
+
+
+def test_the_wrapped_envelope_still_parses():
+    """The documented shape must keep working — a brain-agnostic contract is
+    the point, and the flat shape is one pipe's dialect of it."""
+    parsed = Incoming.parse(
+        {
+            "meta": {"source": "alertmanager", "correlation_id": "hr-9", "received_at": 5.0},
+            "event": {"title": "t", "body": "b", "level": "HIGH", "fields": {"env": "prod"}},
+            "raw": {"state": "firing"},
+        },
+        now=1.0,
+    )
+    assert parsed.source == "alertmanager" and parsed.correlation_id == "hr-9"
+    assert parsed.level == "high" and parsed.raw == {"state": "firing"}
+    assert parsed.received_at == 5.0

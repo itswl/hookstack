@@ -184,6 +184,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         x_hook_signature: str | None = Header(default=None),
         x_hook_timestamp: str | None = Header(default=None),
+        x_hook_correlation_id: str | None = Header(default=None),
+        x_request_id: str | None = Header(default=None),
     ) -> JSONResponse:
         body = await request.body()
         if len(body) > app_settings.max_body_bytes:
@@ -194,7 +196,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payload = json.loads(body or b"{}")
         except ValueError:
             raise HTTPException(status_code=400, detail="body is not JSON") from None
-        event = Incoming.parse(payload if isinstance(payload, dict) else {}, now=now_ts())
+        # The pipe stamps the id on the transport, not in the signed body, so
+        # it must be read here or the round trip cannot be reassembled. Both
+        # names, because allowlist-minded proxies keep X-Request-Id.
+        event = Incoming.parse(
+            payload if isinstance(payload, dict) else {},
+            now=now_ts(),
+            correlation_id=(x_hook_correlation_id or x_request_id or "").strip(),
+        )
 
         # Judged in the background: the answer takes tens of seconds and the
         # sender must not be held for it.
