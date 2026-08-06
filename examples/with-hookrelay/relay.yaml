@@ -1,0 +1,56 @@
+# The paired topology, verified end to end:
+#
+#   upstream ──► hookrelay /hook/inbound ──► hookjudge /events
+#                                                  │  (judges, 202 immediately)
+#   downstream ◄── hookrelay /hook/judge-notify ◄───┘
+#
+# Two doors on the pipe and one on the brain. The brain never learns what the
+# upstream sends or what the downstream expects.
+
+sources:
+  # The single front door. Every alert source posts here.
+  - name: inbound
+    secret: ${INBOUND_SECRET}
+    title: "{title}"
+    body: "{message}"
+    level: "{state}"
+    level_map: {alerting: high, ok: info}
+    fields:
+      env: "{env}"
+
+  # The return door: the brain posts its judgement back here. The extraction
+  # templates read the RESULT shape, not an upstream dialect.
+  - name: judge-notify
+    secret: ${JUDGE_RETURN_SECRET}
+    title: "{meta.alert_name}"
+    body: "{analysis.summary}"
+    level: "{meta.importance}"
+
+channels:
+  - name: to-judge
+    type: generic
+    url: http://hookjudge:8200/events
+    secret: ${JUDGE_INGEST_SECRET}
+    # normalized: the brain wants the event, not a card.
+    options: {payload: normalized}
+
+  - name: ops-feishu
+    type: feishu
+    url: ${FEISHU_WEBHOOK_URL}
+    # processed: the brain judged, the pipe dresses. This is the line that
+    # keeps Feishu's card schema out of the brain.
+    options: {payload: processed}
+
+routes:
+  - name: to-brain
+    source: inbound
+    send_to: [to-judge]
+
+  - name: judged-out
+    source: judge-notify
+    send_to: [ops-feishu]
+
+# Paired posture: the brain does the noise accounting (reuse, recovery), so
+# the pipe's own dedup stays OFF or the two would double-count and the brain's
+# paid-ratio would describe a stream it never saw.
+pipeline: [silence, routes]
