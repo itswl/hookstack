@@ -29,6 +29,7 @@ place: headline, identity breadcrumb, impact, links, footer.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 # Header colour by importance. Green whenever the alert has ENDED, whatever its
@@ -85,11 +86,36 @@ class Processed:
         """Identity as one readable line, not a label grid (which read cluttered)."""
         return " · ".join(f"{value}" for value in self.identity.values() if str(value).strip())
 
+    @staticmethod
+    def _stamp(value: Any) -> str:
+        """A brain sends an epoch; a person reads a clock.
+
+        meta.timestamp went into the card as the float it arrived as, so every
+        notification ended "· 1786037727.669673". Same format as the status
+        page (MM-DD HH:MM:SS, deployment-local) so one alert reads the same in
+        both places. A brain that already formatted its own string keeps it.
+        """
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return ""
+        try:
+            epoch = float(value)
+        except (TypeError, ValueError):
+            return str(value).strip()
+        # Milliseconds are common enough to be worth absorbing rather than
+        # rendering as a date in the year 58000.
+        if epoch > 1e11:
+            epoch /= 1000.0
+        try:
+            return time.strftime("%m-%d %H:%M:%S", time.localtime(epoch))
+        except (OverflowError, OSError, ValueError):
+            return ""
+
     def footer(self) -> str:
-        bits = [str(self.meta.get("source") or ""), str(self.analysis.get("event_type") or "")]
-        stamp = str(self.meta.get("timestamp") or "")
-        if stamp:
-            bits.append(stamp)
+        bits = [
+            str(self.meta.get("source") or ""),
+            str(self.analysis.get("event_type") or ""),
+            self._stamp(self.meta.get("timestamp")),
+        ]
         return " · ".join(b for b in bits if b)
 
     # ── per-vendor rendering ─────────────────────────────────────────────
