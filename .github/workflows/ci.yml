@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # One job: the suite is hermetic (no database service, no network, no model
+  # calls) and sub-second. scripts/gate.sh runs this exact list locally.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q hookjudge tests
+      - run: ruff check hookjudge tests
+      - run: ruff format --check hookjudge tests
+      - name: inline page JS parses
+        run: |
+          node -e '
+          const fs = require("fs");
+          const m = fs.readFileSync("hookjudge/status.html", "utf8").match(/<script>([\s\S]*)<\/script>/);
+          if (!m) { console.error("no inline script"); process.exit(1); }
+          new Function(m[1]);
+          console.log("status.html inline JS: OK");
+          '
+      - run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: hookjudge-ci:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: the built image boots and judges
+        run: |
+          docker run -d --name judge -p 8200:8200 -e HOOKJUDGE_PORT=8200 \
+            -e HOOKJUDGE_DB=/tmp/j.db hookjudge-ci:latest
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8200/healthz > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8200/healthz
+          curl -sf -X POST http://127.0.0.1:8200/events -H 'content-type: application/json' \
+            -d '{"meta":{"source":"ci"},"event":{"title":"ci smoke","body":"","level":"low"}}' | tee /tmp/o.json
+          grep -q '"accepted": *true' /tmp/o.json
+          sleep 2
+          curl -sf http://127.0.0.1:8200/status | tee /tmp/s.json
+          grep -q '"judged": *1' /tmp/s.json
+          docker logs judge | tail -20
