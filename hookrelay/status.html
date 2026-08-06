@@ -59,6 +59,15 @@
   .chip.sent { color: var(--ok); }
   .chip.dead { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
   .chip.queued { color: var(--warn); }
+  .compare { padding: 10px 14px 14px; border-top: 1px solid var(--border-soft); }
+  .compare h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600;
+                letter-spacing: .05em; text-transform: uppercase; }
+  .brains { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+  .brain { background: #0a0d13; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .brain .who { font-weight: 650; margin-bottom: 4px; }
+  .brain .lat { float: right; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .brain .verdict { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .brain .kv { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
   .trace { margin: 0; padding: 12px 14px; background: #0a0d13; color: #aeb7c4;
            font-family: var(--mono); font-size: 12px; overflow-x: auto; }
   .empty { color: var(--muted); padding: 30px 0; text-align: center; }
@@ -231,6 +240,8 @@
           '<span class="etime">' + esc(fmtTime(e.received_at)) + "</span>" +
         "</summary>" +
         (chips ? '<div class="chips">' + chips + "</div>" : "") +
+        '<div class="chips"><button class="btn tiny" data-compare="' + esc(e.id) + '">看这条的往返 / 各系统加工</button></div>' +
+        '<div class="compare" id="cmp-' + esc(e.id) + '" style="display:none"></div>' +
         '<pre class="trace">' + esc(JSON.stringify(e.steps || [], null, 2)) + "</pre>" +
       "</details>";
     }).join("");
@@ -350,12 +361,57 @@
       });
   });
 
+  function renderRoundTrip(box, trip) {
+    var origin = trip.origin || {};
+    var returns = trip.returns || [];
+    var fan = (origin.deliveries || []).map(function (d) {
+      return '<span class="chip ' + esc(d.status) + '">' + esc(d.channel) + " · " + esc(d.status) + "</span>";
+    }).join(" ");
+    var brains = returns.length
+      ? returns.map(function (r) {
+          var who = (r.fields && (r.fields.brain || r.source)) || r.source;
+          var extras = Object.keys(r.fields || {})
+            .filter(function (k) { return k !== "brain" && k !== "correlation_id"; })
+            .map(function (k) { return esc(k) + "=" + esc(r.fields[k]); }).join(" · ");
+          return '<div class="brain">' +
+            '<span class="lat">' + esc(r.latency_seconds) + "s</span>" +
+            '<div class="who"><span class="dot ' + esc(r.level) + '"></span> ' + esc(who) + "</div>" +
+            '<div class="verdict">' + esc(r.title || "(无标题)") + "</div>" +
+            '<div class="verdict">' + esc(r.body || "") + "</div>" +
+            (extras ? '<div class="kv">' + extras + "</div>" : "") +
+            '<div class="kv">level=' + esc(r.level) + " · #" + esc(r.id) + "</div></div>";
+        }).join("")
+      : '<div class="hint">还没有处理系统回传(它们要回引 correlation id 才能归到这条下面)</div>';
+    box.innerHTML = '<h4>原始事件 #' + esc(origin.id) + " · 扇出到</h4>" + (fan || '<span class="hint">未投递</span>') +
+      "<h4 style=\"margin-top:12px\">各系统的加工(" + returns.length + ")</h4>" +
+      '<div class="brains">' + brains + "</div>";
+  }
+
   // Delegated actions on the events panel (lift silence / retry dead).
   document.addEventListener("click", function (e) {
     var lift = e.target.closest("[data-lift-silence]");
     if (lift) {
       fetch("/silences/" + lift.getAttribute("data-lift-silence"), { method: "DELETE", headers: adminHeaders() })
         .then(function (res) { if (!res.ok) alert("解除失败:需要管理令牌(配置页设置)"); refresh(); });
+    }
+    var cmp = e.target.closest("[data-compare]");
+    if (cmp) {
+      e.preventDefault();
+      var id = cmp.getAttribute("data-compare");
+      var box = document.getElementById("cmp-" + id);
+      if (box.style.display !== "none") { box.style.display = "none"; return; }
+      box.style.display = "block";
+      box.innerHTML = '<span class="hint">加载中…</span>';
+      var headers = {};
+      var token = localStorage.getItem(TOKEN_KEY);
+      if (token) headers["X-Read-Token"] = token;
+      fetch("/trace/" + id, { headers: headers })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (trip) {
+          if (!trip) { box.innerHTML = '<span class="hint">取不到往返信息</span>'; return; }
+          renderRoundTrip(box, trip);
+        });
+      return;
     }
     var retry = e.target.closest("[data-retry-delivery]");
     if (retry) {
