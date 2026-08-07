@@ -8,13 +8,14 @@
 # `stub-4o-mini`. Put real credentials in .env to replace it.
 #
 # Both images build from local source — the GHCR image is private, so a
-# published tag would just fail to pull.
+# published tag would just fail to pull. hookjudge lives inside the hookrelay
+# repo, so the pipe's build context is the repo root three levels up.
 
 name: hookstack
 
 services:
   hookrelay:
-    build: ${HOOKRELAY_PATH:-../../../hookrelay}
+    build: ${HOOKRELAY_PATH:-../../..}
     container_name: hs-hookrelay
     environment:
       HOOKRELAY_HOST: 0.0.0.0

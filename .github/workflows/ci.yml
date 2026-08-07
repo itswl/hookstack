@@ -2,10 +2,17 @@ name: ci
 
 on:
   workflow_dispatch:
+  # The brain lives in hookjudge/ with its own workflow (ci-hookjudge.yml).
+  # Filtering here means a change to one service does not queue the other's
+  # jobs, and a red brain never stands between the pipe and a hotfix.
   pull_request:
+    paths-ignore:
+      - "hookjudge/**"
   push:
     branches:
       - main
+    paths-ignore:
+      - "hookjudge/**"
 
 permissions:
   contents: read
