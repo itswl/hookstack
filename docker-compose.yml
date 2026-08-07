@@ -16,7 +16,7 @@ name: hookstack
 
 services:
   hookrelay:
-    build: .
+    build: ./hookrelay
     container_name: hs-hookrelay
     environment:
       HOOKRELAY_HOST: 0.0.0.0
@@ -28,7 +28,7 @@ services:
     volumes:
       # Checked in and mounted read-only, so `up` needs no setup step. Point
       # HOOKRELAY_CONFIG at /data/config.yaml to use your own instead.
-      - ${HOOKRELAY_CONFIG_FILE:-./examples/stack.yaml}:/etc/hookrelay/config.yaml:ro
+      - ${HOOKRELAY_CONFIG_FILE:-./hookrelay/examples/stack.yaml}:/etc/hookrelay/config.yaml:ro
       - relay-data:/data
     # The whole .env is injected, so a new ${NAME} in the config only needs a
     # line in .env — no compose edit, no forgotten passthrough.
@@ -76,7 +76,7 @@ services:
     container_name: hs-sink
     command: ["python", "-u", "/examples/sink.py"]
     volumes:
-      - ./examples:/examples:ro
+      - ./hookrelay/examples:/examples:ro
     restart: unless-stopped
 
   # Canned verdicts over a real OpenAI-compatible endpoint, so the client, the
@@ -88,7 +88,7 @@ services:
     container_name: hs-stub-ai
     command: ["python", "-u", "/examples/stub_ai.py"]
     volumes:
-      - ./examples:/examples:ro
+      - ./hookrelay/examples:/examples:ro
     restart: unless-stopped
 
 volumes:
