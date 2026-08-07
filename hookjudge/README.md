@@ -2,11 +2,14 @@
 
 A brain behind a pipe. **It judges; it does nothing else.**
 
+Part of [hookstack](../README.md); the pipe is `hookrelay/` alongside it. Runs
+standalone all the same — its gate, Dockerfile and CI workflow are its own.
+
 An alert arrives already normalized. hookjudge decides what it means — a
 one-line summary, how important it is, what kind of event it is, what it
 touches — records that decision with what it cost, and hands it back. It never
 learns what Grafana sends or what a Feishu card looks like. Those are the
-pipe's job ([hookrelay](https://github.com/itswl/hookrelay)), and keeping them
+pipe's job ([hookrelay](../README.md), a sibling in this repo), and keeping them
 there is the entire point of this service existing separately.
 
 ```
