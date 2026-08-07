@@ -19,7 +19,7 @@ you ──► hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ─�
 | http://127.0.0.1:8200/ | the brain's ledger page (judged / paid ratio / cost / return failures) |
 | `docker compose logs -f sink` | what an operator would actually have received |
 
-The pipe's config is `examples/stack.yaml`, mounted read-only, so `up` needs no
+The pipe's config is `hookrelay/examples/stack.yaml`, mounted read-only, so `up` needs no
 setup step. Point `HOOKRELAY_CONFIG_FILE` at your own file to replace it.
 
 **A stub model is wired in by default.** Without one, every event lands on the
@@ -28,7 +28,7 @@ happens, hiding half the cost policy. The stub is not a model: it returns
 canned verdicts and reports itself as `stub-4o-mini`. Put real credentials in
 `.env` and it stops being used.
 
-Production does **not** use this file. `deploy/docker-compose.prod.yml` runs
+Production does **not** use this file. `hookrelay/deploy/docker-compose.prod.yml` runs
 the pipe alone, bound to loopback, on WebhookWise's docker network.
 
 ## Drive the whole cost policy
@@ -79,7 +79,7 @@ been broken:
    would see an alert at `high` and its recovery at `medium`.
 2. **Step 4's text contains no recovery word** (the description reads
    "已回落至 41%"). Alertmanager signals recovery with `status: resolved`, and
-   `level_map` turns that into `info` — so `examples/stack.yaml` carries
+   `level_map` turns that into `info` — so `hookrelay/examples/stack.yaml` carries
    `status` as a field, or the brain sees no sign of recovery at all.
 3. **Two different alerts must have two different identities** (visible on
    `/status`). If they all share one, the brain is parsing a shape the pipe is
@@ -88,7 +88,7 @@ been broken:
 
 ## Upstream conventions
 
-Two that are easy to get wrong, both encoded in `examples/stack.yaml`:
+Two that are easy to get wrong, both encoded in `hookrelay/examples/stack.yaml`:
 
 **Array paths use a dotted index.** `alerts.0.annotations.summary` resolves;
 `alerts[0].annotations.summary` returns nothing and does it silently, so the
