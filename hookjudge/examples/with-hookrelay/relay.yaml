@@ -1,0 +1,88 @@
+# The paired topology, verified end to end:
+#
+#   upstream ──► hookrelay /hook/inbound ──► hookjudge /events
+#                                                  │  (judges, 202 immediately)
+#   downstream ◄── hookrelay /hook/judge-notify ◄───┘
+#
+# Two doors on the pipe and one on the brain. The brain never learns what the
+# upstream sends or what the downstream expects.
+
+sources:
+  # The single front door. Every alert source posts here.
+  - name: inbound
+    secret: ${INBOUND_SECRET}
+    title: "{title}"
+    body: "{message}"
+    level: "{state}"
+    level_map: {alerting: high, ok: info}
+    fields:
+      env: "{env}"
+
+  # Alertmanager. Verified against hookrelay's own extractor, and it needs two
+  # conventions that are easy to get wrong:
+  #
+  #  1. Dotted INDEX for arrays — `alerts.0.annotations.summary`. Bracket
+  #     syntax (`alerts[0]...`) resolves to nothing, silently.
+  #  2. Carry `status` as a FIELD. Alertmanager signals recovery with
+  #     `status: resolved`, and level_map turns that into level `info` — so
+  #     without this field the brain sees no recovery marker anywhere (its
+  #     resolved body reads "已回落至 0.2%", which contains no recovery word)
+  #     and treats the resolve as a brand-new alert. The brain excludes state
+  #     fields from identity, so carrying it does not split the pair.
+  - name: alertmanager
+    secret: ${ALERTMANAGER_SECRET}
+    title: "{alerts.0.annotations.summary|alerts.0.labels.alertname|commonLabels.alertname}"
+    body: "{alerts.0.annotations.description|alerts.0.annotations.summary}"
+    level: "{alerts.0.status|status}"
+    level_map: {firing: high, resolved: info}
+    fields:
+      status: "{alerts.0.status|status}"
+      env: "{alerts.0.labels.env|commonLabels.env}"
+      service: "{alerts.0.labels.service}"
+      alertname: "{alerts.0.labels.alertname|commonLabels.alertname}"
+
+  # The return door: the brain posts its judgement back here. The extraction
+  # templates read the RESULT shape, not an upstream dialect.
+  - name: judge-notify
+    secret: ${JUDGE_RETURN_SECRET}
+    title: "{meta.alert_name}"
+    body: "{analysis.summary}"
+    level: "{meta.importance}"
+
+channels:
+  - name: to-judge
+    type: generic
+    url: http://hookjudge:8200/events
+    secret: ${JUDGE_INGEST_SECRET}
+    # normalized: the brain wants the event, not a card.
+    options: {payload: normalized}
+
+  - name: ops-feishu
+    type: feishu
+    url: ${FEISHU_WEBHOOK_URL}
+    # processed: the brain judged, the pipe dresses. This is the line that
+    # keeps Feishu's card schema out of the brain.
+    options: {payload: processed}
+
+routes:
+  # ORDER IS LOAD-BEARING. Routes accumulate: every matching route adds its
+  # channels unless one says stop. `to-brain` is source "*" so a new upstream
+  # door needs no route change — but "*" also matches judge-notify, so without
+  # this higher-priority stop the brain's own judgement would be fed back to
+  # the brain, judged again, returned again, forever. A pipe that loops is
+  # worse than a pipe that drops, because it looks busy.
+  - name: judged-out
+    source: judge-notify
+    send_to: [ops-feishu]
+    priority: 100
+    stop: true
+
+  - name: to-brain
+    source: "*"                 # every front door feeds the brain
+    send_to: [to-judge]
+    priority: 0
+
+# Paired posture: the brain does the noise accounting (reuse, recovery), so
+# the pipe's own dedup stays OFF or the two would double-count and the brain's
+# paid-ratio would describe a stream it never saw.
+pipeline: [silence, routes]

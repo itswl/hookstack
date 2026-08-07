@@ -1,0 +1,80 @@
+# The pipe's config for the local stack.
+#
+#   upstream ──► /hook/inbound | /hook/alertmanager ──► hookjudge
+#   sink ◄── /hook/judge-notify ◄── hookjudge
+#
+# Secrets are empty on purpose: this is a private docker network, and a local
+# trial should not need key management to show you the shape of the thing.
+
+sources:
+  # A plain JSON door — the easiest thing to curl.
+  - name: inbound
+    secret: ""
+    title: "{title}"
+    body: "{message}"
+    level: "{state}"
+    level_map: {alerting: high, ok: info}
+    fields:
+      env: "{env}"
+      status: "{state}"
+
+  # Alertmanager. Two conventions that are easy to get wrong:
+  #  1. dotted INDEX for arrays — `alerts[0]...` resolves to nothing, silently.
+  #  2. carry `status` as a FIELD: Alertmanager signals recovery with
+  #     status=resolved, level_map turns that into `info`, and its resolved
+  #     text contains no recovery word — so without this the brain sees no
+  #     recovery at all and judges the resolve as a brand-new alert.
+  - name: alertmanager
+    secret: ""
+    title: "{alerts.0.annotations.summary|alerts.0.labels.alertname|commonLabels.alertname}"
+    body: "{alerts.0.annotations.description|alerts.0.annotations.summary}"
+    level: "{alerts.0.status|status}"
+    level_map: {firing: high, resolved: info}
+    fields:
+      status: "{alerts.0.status|status}"
+      env: "{alerts.0.labels.env|commonLabels.env}"
+      service: "{alerts.0.labels.service}"
+      alertname: "{alerts.0.labels.alertname|commonLabels.alertname}"
+
+  # The return door: the brain posts its judgement back here.
+  - name: judge-notify
+    secret: ""
+    title: "{meta.alert_name}"
+    body: "{analysis.summary}"
+    level: "{meta.importance}"
+
+channels:
+  - name: to-judge
+    type: generic
+    url: http://hookjudge:8200/events
+    options: {payload: normalized}   # the brain wants the event, not a card
+
+  - name: ops-feishu
+    type: feishu
+    url: http://sink:9000/feishu
+    options: {payload: processed}    # the brain judged, the pipe dresses
+
+  - name: ops-dingtalk
+    type: dingtalk
+    url: http://sink:9000/dingtalk
+    options: {payload: processed}
+
+routes:
+  # ORDER IS LOAD-BEARING. Routes accumulate unless one stops, and `to-brain`
+  # is source "*" — which also matches judge-notify. Without this
+  # higher-priority stop, the brain's own judgement would be fed back to the
+  # brain, judged again, returned again, forever.
+  - name: judged-out
+    source: judge-notify
+    send_to: [ops-feishu, ops-dingtalk]
+    priority: 100
+    stop: true
+
+  - name: to-brain
+    source: "*"                      # every front door feeds the brain
+    send_to: [to-judge]
+    priority: 0
+
+# Paired posture: the brain does the noise accounting, so the pipe's dedup
+# stays OFF — otherwise both count and neither ledger describes reality.
+pipeline: [silence, routes]
