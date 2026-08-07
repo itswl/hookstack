@@ -1,4 +1,4 @@
-# The pipe's config for the local stack.
+# The pipe's config for the whole-stack compose at the repo root.
 #
 #   upstream ──► /hook/inbound | /hook/alertmanager ──► hookjudge
 #   sink ◄── /hook/judge-notify ◄── hookjudge
