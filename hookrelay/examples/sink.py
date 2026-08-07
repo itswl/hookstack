@@ -7,10 +7,16 @@ HTTP/1.1 with an accurate Content-Length on purpose: httpx keep-alive
 reuses connections, and a toy server that closes without answering (or
 answers without a length) shows up in the ledger as transport errors —
 we learned both the hard way.
+
+Threaded for the same reason, learned the third way: the pipe delivers to
+channels in PARALLEL, so a single-threaded server answers one connection while
+the other waits, times out and is RETRIED. The ledger still said `sent`, but
+the downstream had received the alert twice — a duplicate notification caused
+entirely by the toy on the receiving end.
 """
 
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 def render(data):
@@ -67,4 +73,4 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print("sink listening on :9000", flush=True)
-    HTTPServer(("0.0.0.0", 9000), Handler).serve_forever()
+    ThreadingHTTPServer(("0.0.0.0", 9000), Handler).serve_forever()
