@@ -6,13 +6,15 @@ on:
   # Filtering here means a change to one service does not queue the other's
   # jobs, and a red brain never stands between the pipe and a hotfix.
   pull_request:
-    paths-ignore:
-      - "hookjudge/**"
+    paths:
+      - "hookrelay/**"
+      - ".github/workflows/ci.yml"
   push:
     branches:
       - main
-    paths-ignore:
-      - "hookjudge/**"
+    paths:
+      - "hookrelay/**"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
@@ -23,6 +25,9 @@ jobs:
   # startup than it saves. scripts/gate.sh runs this exact list locally.
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hookrelay
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -79,7 +84,7 @@ jobs:
       # a deploy to surface.
       - uses: docker/build-push-action@v7
         with:
-          context: .
+          context: ./hookrelay
           load: true
           tags: hookrelay-ci:latest
           cache-from: type=gha

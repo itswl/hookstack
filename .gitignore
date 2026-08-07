@@ -1,7 +1,8 @@
+# Repo-wide. Each service also has its own for what only it produces.
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
 *.db
-config.yaml
 .env
 data/

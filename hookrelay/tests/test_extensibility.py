@@ -250,9 +250,12 @@ def test_gate_matches_ci():
     one requires adding it to the other in the same change."""
     from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent
-    gate = (root / "scripts" / "gate.sh").read_text()
-    ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+    here = Path(__file__).resolve().parent.parent
+    gate = (here / "scripts" / "gate.sh").read_text()
+    # hookrelay is one service in the hookstack repo, and GitHub only reads
+    # workflows from the repo ROOT — so the file this gate is pinned to lives
+    # one level up.
+    ci = (here.parent / ".github" / "workflows" / "ci.yml").read_text()
 
     for check in (
         "compileall -q hookrelay tests",

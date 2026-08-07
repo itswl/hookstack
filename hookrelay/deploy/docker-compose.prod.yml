@@ -3,7 +3,13 @@
 # by DNS name and it reaches WW's ingest the same way.
 #
 #   cd /opt/docker-compose/hookrelay
-#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+#   docker compose -f hookrelay/deploy/docker-compose.prod.yml up -d --build
+#
+# Paths are deliberately asymmetric: the BUILD context is this service's
+# directory, but `.env` and `data/` are read from the deployment root two
+# levels up. They are runtime state — the live ledger, config.yaml, plugins —
+# not source, and moving them when the source tree was reorganised would have
+# turned a directory rename into a production data migration.
 #
 # Differences from the laptop compose, each deliberate:
 #   - no sink toy service
@@ -19,9 +25,9 @@ services:
     ports:
       - "127.0.0.1:8100:8100"
     volumes:
-      - ../data:/data
+      - ../../data:/data
     env_file:
-      - ../.env
+      - ../../.env
     environment:
       HOOKRELAY_PLUGINS: /data/plugins
     restart: unless-stopped
