@@ -56,3 +56,13 @@ Each gate is run from its own directory:
 cd hookrelay && bash scripts/gate.sh
 cd hookjudge && bash scripts/gate.sh
 ```
+
+Neither gate can see the stack, so there is a third check that can:
+
+```bash
+bash scripts/stack-smoke.sh
+```
+
+Three workflows, and between them nothing at the root is uncovered:
+`ci` (pipe) · `ci-hookjudge` (brain) · `ci-stack` (both together, plus the
+docs and the compose files).
