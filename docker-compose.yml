@@ -88,7 +88,9 @@ services:
     container_name: hs-stub-ai
     command: ["python", "-u", "/examples/stub_ai.py"]
     volumes:
-      - ./hookrelay/examples:/examples:ro
+      # The brain's stand-in, so it lives with the brain — sink stands in for
+      # the pipe's downstreams and lives with the pipe.
+      - ./hookjudge/examples:/examples:ro
     restart: unless-stopped
 
 volumes:

@@ -1,12 +1,15 @@
 """An OpenAI-compatible endpoint that answers without a key or a bill.
 
+Threaded: the brain may judge several events at once, and a single-threaded
+stand-in turns that into timeouts that look like model failures.
+
 Enabled with `--profile stub-ai`. It exists so the PAID routes can be
 demonstrated: with no model configured every event lands on the rule floor and
 `reuse` never happens, which hides the half of the cost policy that matters.
 """
 
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 VERDICTS = {
     "支付": {
@@ -72,4 +75,4 @@ class Handler(BaseHTTPRequestHandler):
 
 
 print("stub-ai listening on :8300", flush=True)
-HTTPServer(("0.0.0.0", 8300), Handler).serve_forever()
+ThreadingHTTPServer(("0.0.0.0", 8300), Handler).serve_forever()

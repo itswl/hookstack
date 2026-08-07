@@ -69,6 +69,33 @@ routes {'ai': 2, 'reuse': 1, 'recovery': 1}
 One judgement reaches every downstream in its own dialect — the sink logs show
 the same verdict as a Feishu card and as DingTalk markdown.
 
+## Checking it
+
+```bash
+bash scripts/stack-smoke.sh          # build, drive every route, assert, tear down
+KEEP=1 bash scripts/stack-smoke.sh   # leave it up to poke at
+```
+
+Eighteen assertions, run in CI by `ci-stack`. They exist because neither
+service's own gate can see the stack: each stays green while the pipe cannot
+reach the brain, a compose path points at a directory that moved, or a stand-in
+starts with nothing wired to it.
+
+## The two stand-ins
+
+Neither ships. `hookrelay/deploy/docker-compose.prod.yml` has no trace of them.
+
+| | replaces | lives with |
+| --- | --- | --- |
+| `sink` | the Feishu/DingTalk/WeCom bots | `hookrelay/examples/sink.py` — it stands in for the pipe's downstreams |
+| `stub-ai` | the model provider | `hookjudge/examples/stub_ai.py` — it stands in for the brain's model |
+
+Both are threaded, which is not a detail: the pipe delivers to channels in
+parallel, and a single-threaded sink served one connection while the other
+timed out and was **retried** — so the downstream received the same alert
+twice. The ledger still said `sent`. A duplicate notification caused entirely
+by the toy on the receiving end, now asserted against.
+
 ## Three things worth watching
 
 Whether this is working correctly comes down to these, and each has genuinely

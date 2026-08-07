@@ -1,0 +1,41 @@
+name: ci-stack
+
+# Neither service's gate can see the stack. Each one stays green while the pipe
+# cannot reach the brain, the brain answers into the void, a compose path points
+# at a directory that moved, or a stand-in starts with nothing wired to it —
+# every one of which has happened here, and none of which either suite noticed.
+#
+# No paths filter on purpose: this is the integration test, so a change to
+# either service must run it. The root files it also covers — docker-compose.yml,
+# STACK.md, the READMEs — were previously covered by nothing at all.
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: every relative link in the docs resolves
+        run: python3 scripts/check-docs.py
+
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: the whole family comes up and judges correctly
+        run: bash scripts/stack-smoke.sh
+      - name: logs on failure
+        if: failure()
+        run: docker compose logs --tail 100
