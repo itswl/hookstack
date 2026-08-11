@@ -1,0 +1,170 @@
+# hookprobe
+
+A single-purpose deep-analysis agent runner. Fourth member of the hook\* family:
+
+| project | role |
+|---|---|
+| hookrelay | the pipe — adapts alert dialects in and out, content-blind |
+| hookjudge | the judge — one cheap verdict per alert |
+| WebhookWise | the comprehensive orchestrator — channels, dashboard, knowledge |
+| **hookprobe** | **the investigator — one read-only agent run per analysis task** |
+
+hookprobe replaces a full OpenClaw gateway on WebhookWise's deep-analysis leg.
+It accepts one task over the OpenClaw-compatible HTTP contract WebhookWise
+already speaks, runs one unattended agent session (Claude Agent SDK: built-in
+tools, MCP servers, web search, SKILL.md skills), and serves the final report
+to whoever polls for it. No channels, no device pairing, no chat history —
+and a run has a real terminal state, so the caller needs no stability
+heuristics.
+
+```
+WebhookWise ── POST /hooks/agent ──────────▶ hookprobe ── Claude Agent SDK
+     ▲                                        │  bash guard (read-only)
+     └──── GET /sessions/{key}/final ◀────────┘  MCP / WebSearch / skills
+             200 {isFinal: true, text}           /data: skills + results
+```
+
+## Contract
+
+| route | behavior |
+|---|---|
+| `POST /hooks/agent` | Body: `{message, sessionKey, timeoutSeconds, ...}` (extra OpenClaw fields accepted and ignored). Starts a run, idempotent per `sessionKey`. Returns `{runId, sessionKey}`. |
+| `GET /sessions/{key}/final` | `202` while running · `200 {"isFinal": true, "text", "messageCount"}` when done · `404` unknown (e.g. in-flight run lost to a restart). `isFinal` is always true on a 200. |
+| `POST /sessions/{key}/continue` | Body: `{message, timeoutSeconds?}`. Follow-up turn in the **same** engine session — full investigation context retained. `409` while a turn is in flight, `404` unknown. Poll `/final` again for the new answer. |
+| `GET /v1/runs` | Session list, newest first (summaries). |
+| `GET /v1/runs/{key}` | Full run record: status, error, cost, engine session id, all turns. |
+| `GET /ui` | The sessions page (below). Markup is served unauthenticated; the data calls it makes are not. |
+| `GET /healthz` | Liveness, unauthenticated. |
+
+Auth: `Authorization: Bearer $HOOKPROBE_TOKEN` on everything except `/healthz`.
+
+A run that fails (crash, timeout, empty output) still finishes the contract:
+`isFinal: true` with a well-formed report whose `root_cause` names the runner
+failure — the operator sees the error on the analysis card within one poll
+instead of waiting out the caller's timeout window.
+
+## Switching WebhookWise over
+
+WebhookWise needs no code change — point its OpenClaw endpoints here:
+
+```bash
+OPENCLAW_ENABLED=true
+OPENCLAW_GATEWAY_URL=http://hookprobe:8088     # trigger: {url}/hooks/agent
+OPENCLAW_HTTP_API_URL=http://hookprobe:8088    # poll:    {url}/sessions/{key}/final
+OPENCLAW_HOOKS_TOKEN=<same value as HOOKPROBE_TOKEN>
+```
+
+Because `/final` answers with `isFinal: true`, WebhookWise writes the result
+on the first confirming poll (`OPENCLAW_STABILITY_REQUIRED_HITS` becomes
+irrelevant). The deep-analysis prompt stays in WebhookWise — hookprobe is
+prompt-agnostic and runs whatever `message` it is handed.
+
+## Configuration
+
+| env | default | meaning |
+|---|---|---|
+| `HOOKPROBE_TOKEN` | *(empty = unauthenticated)* | Bearer token callers must present |
+| `HOOKPROBE_MODEL` | `claude-opus-5` | Model for the agent session |
+| `HOOKPROBE_MAX_TURNS` | `32` | Hard agent-loop budget per run |
+| `HOOKPROBE_MAX_CONCURRENT` | `2` | Parallel runs; the rest queue |
+| `HOOKPROBE_DEFAULT_TIMEOUT_SECONDS` | `900` | When the trigger omits `timeoutSeconds` |
+| `HOOKPROBE_MAX_TIMEOUT_SECONDS` | `1800` | Upper clamp on requested timeouts |
+| `HOOKPROBE_WORKDIR` | `/data` | Persistent workspace (skills, results) |
+| `HOOKPROBE_MCP_CONFIG` | *(unset)* | Path to an `.mcp.json`-shaped file of MCP servers |
+| `HOOKPROBE_HOST` / `HOOKPROBE_PORT` | `0.0.0.0` / `8088` | Bind address |
+| `ANTHROPIC_API_KEY` | — | Or `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` for a relay |
+
+## Security model
+
+Read-only is enforced in three layers, strongest first:
+
+1. **Credentials** — mount query-only credentials (read-only kubeconfig,
+   Prometheus/Loki endpoints, viewer tokens). This is the real boundary;
+   treat the other two as convenience.
+2. **Bash guard** — a PreToolUse hook denies mutating verbs of kubectl, helm,
+   docker/podman, systemctl, terraform, plus ssh/scp and `git push`. It errs
+   toward over-blocking. HTTP verbs are not policed (query APIs POST), and
+   cloud CLIs are too many to enumerate — scope their credentials instead.
+3. **Container** — non-root, disposable, nothing precious inside. The agent
+   may write freely in `/data` (scratch + skills); that is by design.
+
+## Skills — the runner gets smarter
+
+The deep-analysis prompt asks the agent to distill verified diagnostic paths
+into reusable SKILL.md runbooks. Those land in `/data/.claude/skills` on the
+persistent volume and are loaded into every later run. Back up the volume if
+you care about the accumulated experience. The skills directory is plain
+files — review it, prune bad runbooks, or `git init` it for history; anything
+written there instructs future runs, so treat it as part of your trust
+boundary.
+
+## Web UI — operate sessions from a browser
+
+`http://<host>:8088/ui` is a single self-contained page (no build step, no
+external assets): sessions on the left, the conversation on the right, a
+composer at the bottom. Paste the bearer token once (kept in localStorage).
+From there you can read any investigation turn by turn (reports are
+pretty-printed JSON, long alert payloads collapse), send follow-ups into a
+finished session, or hit **+ new session** to start a free-form investigation
+that never came through WebhookWise. Running turns poll and refresh in place.
+
+## Follow-up exploration — reuse the session
+
+Every finished run keeps its engine session (transcripts live under
+`$HOME/.claude` on the volume, so they survive restarts). Three ways in — the
+web UI above, or:
+
+```bash
+# 1. HTTP: another turn in the same investigation, then poll /final again
+curl -s -X POST localhost:8088/sessions/hook:deep-analysis:x:1/continue \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"message": "root_cause 说节点超卖 —— 查一下该节点的 allocatable 和邻居 Pod 的 requests 佐证"}'
+
+# 2. Terminal: interactive REPL with the full investigation context
+docker compose exec hookprobe sh -c 'cd /data && claude -r <engine_session_id>'
+#   (engine_session_id comes from GET /v1/runs/{key})
+```
+
+Follow-ups run under the same read-only guard and timeout clamps as first
+passes. A failed follow-up never erases the original answer — earlier finals
+are kept on the run record (`previous_texts`).
+
+## Run it
+
+From the repo root (the stack's demo compose deliberately does not include
+this service — it needs a real model key to be worth starting):
+
+```bash
+printf 'HOOKPROBE_TOKEN=change-me\nANTHROPIC_API_KEY=sk-ant-...\n' > .env
+docker compose -f hookprobe/deploy/docker-compose.yml up -d --build
+curl -s localhost:8088/healthz
+
+# Smoke test one run end to end:
+curl -s -X POST localhost:8088/hooks/agent \
+  -H "Authorization: Bearer change-me" -H 'Content-Type: application/json' \
+  -d '{"message": "Reply with exactly: {\"summary\": \"hookprobe smoke test ok\"}", "sessionKey": "smoke:1"}'
+curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/smoke:1/final
+```
+
+The stock image ships **no** diagnostic CLIs — extend it with the read-only
+tools your alerts actually need (see the commented `kubectl` example in the
+Dockerfile), and hand MCP servers to the agent via `HOOKPROBE_MCP_CONFIG`.
+
+## Development
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+bash scripts/gate.sh   # the exact CI list: compileall, ruff, page JS, pytest
+```
+
+Tests inject fake engines; nothing in the suite needs the SDK, an API key,
+or the network.
+
+## Non-goals (v1)
+
+- No completion callback yet — the caller polls. A `callbackUrl` on the
+  trigger is the natural next step once WebhookWise grows a receiver for it.
+- In-flight runs do not survive a restart (finished results do). The caller's
+  retry path covers this.
+- No queue durability beyond the process: this runner is one container behind
+  one orchestrator, not a job system.
