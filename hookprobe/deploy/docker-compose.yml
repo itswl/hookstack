@@ -1,0 +1,38 @@
+# Reference deployment — run from the repo root:
+#
+#   docker compose -f hookprobe/deploy/docker-compose.yml up -d --build
+#
+# Secrets come from .env at the invocation directory (the deployment root):
+#   HOOKPROBE_TOKEN=...      shared with WebhookWise's OPENCLAW_HOOKS_TOKEN
+#   ANTHROPIC_API_KEY=...    or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN for a relay
+#
+# The stack compose at the repo root deliberately does NOT include this
+# service: the pipe→brain demo is hermetic, while the investigator needs a
+# real model key and real read-only credentials to be worth starting.
+services:
+  hookprobe:
+    build:
+      context: ..
+    image: hookprobe:latest
+    container_name: hookprobe
+    restart: unless-stopped
+    environment:
+      HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      # HOOKPROBE_MCP_CONFIG: /config/mcp.json
+    ports:
+      - "8088:8088"
+    volumes:
+      # One volume: distilled skills (/data/.claude/skills), finished results,
+      # and $HOME (/data/home) with the resumable session transcripts.
+      - hookprobe-data:/data
+      # MCP servers the agent may query (same shape as .mcp.json):
+      # - ./mcp.json:/config/mcp.json:ro
+      # Read-only credentials are the real security boundary:
+      # - ./kubeconfig-readonly:/data/home/.kube/config:ro
+
+volumes:
+  hookprobe-data:
