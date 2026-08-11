@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hookprobe"
+version = "0.1.0"
+description = "Single-purpose deep-analysis agent runner: OpenClaw-compatible contract, Claude Agent SDK engine, read-only by construction."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "claude-agent-sdk>=0.1.0",
+]
+
+[tool.setuptools]
+packages = ["hookprobe"]
+
+[tool.setuptools.package-data]
+hookprobe = ["*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
