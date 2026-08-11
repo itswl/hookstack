@@ -1,0 +1,11 @@
+# Three runtime dependencies, chosen to stay three. The agent loop, built-in
+# tools, MCP client and SKILL.md loading all come from the Claude Agent SDK —
+# hookprobe itself is only a contract shell around one engine call.
+fastapi>=0.115
+uvicorn[standard]>=0.34
+claude-agent-sdk>=0.1.0
+
+# Test + lint (tests never import the SDK; they inject fake engines)
+pytest>=8.0
+httpx>=0.27
+ruff>=0.6
