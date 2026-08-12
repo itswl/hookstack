@@ -9,7 +9,9 @@ where a verdict is not enough. 中文总览（含全家截图）：[README.zh.md
 
 ```
 upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► lark / dingtalk / wecom / webhook
-              (adapts)      (judges)     (formats)
+              (adapts)  │   (judges)     (formats)
+                        └─► hookprobe ──► hookrelay ──► the same channels
+                            (investigates critical/high; opt-in, see STACK.md)
 ```
 
 | | what it does | docs |

@@ -20,6 +20,10 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "max_timeout_seconds": 10,
         "workdir": tmp_path,
         "mcp_config": None,
+        "event_secret": "",
+        "return_url": "",
+        "return_secret": "",
+        "escalate_levels": frozenset({"critical", "high"}),
         "host": "127.0.0.1",
         "port": 0,
     }

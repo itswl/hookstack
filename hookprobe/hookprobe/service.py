@@ -20,8 +20,20 @@ from typing import Any, Protocol
 from hookprobe.engine import EngineResult
 from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
+from hookprobe.wire import sign_timestamped
 
 logger = logging.getLogger("hookprobe.service")
+
+
+def _report_summary(text: str) -> str:
+    """The one paragraph a channel card shows; the full text stays on the run."""
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict) and parsed.get("summary"):
+            return str(parsed["summary"])[:800]
+    except (TypeError, ValueError):
+        pass
+    return text.strip()[:800]
 
 
 class Engine(Protocol):
@@ -89,7 +101,7 @@ class RunService:
         self._running: dict[str, asyncio.Task[None]] = {}
         self._stop_requested: set[str] = set()
 
-    def start(self, payload: dict[str, Any]) -> Run:
+    def start(self, payload: dict[str, Any], *, origin: str = "") -> Run:
         """Idempotent per sessionKey: re-triggering an existing run returns it."""
         session_key = str(payload.get("sessionKey") or "") or f"hookprobe:{uuid.uuid4()}"
         existing = self._store.get(session_key)
@@ -106,7 +118,9 @@ class RunService:
             run_id=uuid.uuid4().hex[:12],
             current_message=message,
             model=self._settings.model,
+            origin=origin,
         )
+        run.meta = dict(payload.get("_meta") or {})
         self._store.create(run)
         self._spawn(run, message, timeout_s, resume=None)
         return run
@@ -231,6 +245,7 @@ class RunService:
         run.text = result.text
         self._record_turn(run, result)
         self._store.finish(run)
+        self._schedule_return(run)
         logger.info(
             "run completed session=%s turns=%s cost_usd=%s",
             run.session_key,
@@ -244,7 +259,62 @@ class RunService:
         run.text = failure_report(reason)
         self._record_turn(run, result)
         self._store.finish(run)
+        self._schedule_return(run)
         logger.warning("run failed session=%s reason=%s", run.session_key, reason)
+
+    # -- the family loop: relay-born runs report back to the pipe ------------
+
+    def _schedule_return(self, run: Run) -> None:
+        if run.origin != "relay" or not self._settings.return_url:
+            return
+        task = asyncio.create_task(self._deliver_return(run))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _deliver_return(self, run: Run) -> None:
+        body = json.dumps(
+            {
+                "meta": {
+                    **run.meta,
+                    "session_key": run.session_key,
+                    "status": run.status,
+                    "cost_usd": run.cost_usd,
+                    "error": run.error,
+                },
+                "report": {"summary": _report_summary(run.text), "text": run.text},
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+
+        last_error = "unknown"
+        for attempt, delay in enumerate((0.0, 2.0, 5.0), start=1):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                status = await asyncio.to_thread(self._post_return, body)
+                if 200 <= status < 300:
+                    run.return_status = "sent"
+                    self._store.finish(run)
+                    logger.info("return delivered session=%s status=%s", run.session_key, status)
+                    return
+                last_error = f"HTTP {status}"
+            except OSError as exc:
+                last_error = str(exc) or type(exc).__name__
+            logger.warning(
+                "return delivery attempt %s failed session=%s error=%s", attempt, run.session_key, last_error
+            )
+        run.return_status = f"failed: {last_error}"
+        self._store.finish(run)
+
+    def _post_return(self, body: bytes) -> int:
+        import urllib.request
+
+        headers = {"Content-Type": "application/json", **sign_timestamped(self._settings.return_secret, body)}
+        request = urllib.request.Request(self._settings.return_url, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 — operator-configured URL
+            return int(response.status)
 
     def _record_turn(self, run: Run, result: EngineResult | None) -> None:
         run.turns.append(
