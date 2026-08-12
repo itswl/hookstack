@@ -43,11 +43,32 @@ sources:
     body: "{analysis.summary}"
     level: "{meta.importance}"
 
+  # The investigator's return door: hookprobe posts its finished report here.
+  # The summary is the card; the full report stays on the probe's session.
+  - name: probe-notify
+    secret: ""
+    title: "{meta.title} · 调查报告"
+    body: "{report.summary}"
+    level: "{meta.level}"
+    fields:
+      session: "{meta.session_key}"
+      probe_status: "{meta.status}"
+      cost_usd: "{meta.cost_usd}"
+
 channels:
   - name: to-judge
     type: generic
     url: http://hookjudge:8200/events
     options: {payload: normalized}   # the brain wants the event, not a card
+
+  # Resolved from the environment: the plain stack points this at the sink's
+  # /probe-standin (so the escalation SHAPE is visible without a model key),
+  # and `--profile probe` points it at the real investigator. See the
+  # hookprobe service in the root compose.
+  - name: to-probe
+    type: generic
+    url: ${HOOKPROBE_EVENT_URL}
+    options: {payload: normalized}   # the investigator wants the event too
 
   - name: ops-feishu
     type: feishu
@@ -64,11 +85,32 @@ routes:
   # is source "*" — which also matches judge-notify. Without this
   # higher-priority stop, the brain's own judgement would be fed back to the
   # brain, judged again, returned again, forever.
+  # The investigator's report goes straight to the channels — and must stop
+  # here: to-brain matches "*", and a report judged again would loop.
+  - name: probe-report-out
+    source: probe-notify
+    send_to: [ops-feishu, ops-dingtalk]
+    priority: 110
+    stop: true
+
   - name: judged-out
     source: judge-notify
     send_to: [ops-feishu, ops-dingtalk]
     priority: 100
     stop: true
+
+  # Escalation: the real front doors ALSO copy every event to the
+  # investigator. The pipe stays content-blind — whether an event deserves a
+  # paid investigation is the probe's own call (level gate, default
+  # critical/high), which is why these routes fan out and do not stop.
+  - name: escalate-inbound
+    source: inbound
+    send_to: [to-probe]
+    priority: 50
+  - name: escalate-alertmanager
+    source: alertmanager
+    send_to: [to-probe]
+    priority: 50
 
   - name: to-brain
     source: "*"                      # every front door feeds the brain

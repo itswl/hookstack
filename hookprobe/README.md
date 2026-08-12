@@ -29,6 +29,7 @@ WebhookWise ── POST /hooks/agent ──────────▶ hookprobe
 | route | behavior |
 |---|---|
 | `POST /hooks/agent` | Body: `{message, sessionKey, timeoutSeconds, ...}` (extra OpenClaw fields accepted and ignored). Starts a run, idempotent per `sessionKey`. Returns `{runId, sessionKey}`. |
+| `POST /hooks/event` | The family's escalation door: hookrelay's `to-probe` channel delivers normalized events here (`X-Hook-Signature` timestamped HMAC when `HOOKPROBE_EVENT_SECRET` is set). Levels outside `HOOKPROBE_ESCALATE_LEVELS` are acknowledged and skipped; the rest start an investigation, idempotent per `(source, event_id)` — a restatement storm funds one investigation, not N. |
 | `GET /sessions/{key}/final` | `202` while running · `200 {"isFinal": true, "text", "messageCount"}` when done · `404` unknown (e.g. in-flight run lost to a restart). `isFinal` is always true on a 200. |
 | `POST /sessions/{key}/continue` | Body: `{message, timeoutSeconds?}`. Follow-up turn in the **same** engine session — full investigation context retained. `409` while a turn is in flight, `404` unknown. Poll `/final` again for the new answer. |
 | `POST /sessions/{key}/stop` | Cancel the in-flight turn; it settles as a failed turn ("stopped by operator") within one poll. `409` when nothing is running. |
@@ -73,6 +74,10 @@ prompt-agnostic and runs whatever `message` it is handed.
 | `HOOKPROBE_MAX_TIMEOUT_SECONDS` | `1800` | Upper clamp on requested timeouts |
 | `HOOKPROBE_WORKDIR` | `/data` | Persistent workspace (skills, results) |
 | `HOOKPROBE_MCP_CONFIG` | *(unset)* | Path to an `.mcp.json`-shaped file of MCP servers |
+| `HOOKPROBE_EVENT_SECRET` | *(empty = unsigned)* | Verifies the pipe's deliveries to `/hooks/event` |
+| `HOOKPROBE_RETURN_URL` | *(unset = no return)* | Where event-door investigations report back — the pipe's `probe-notify` front door |
+| `HOOKPROBE_RETURN_SECRET` | *(empty = unsigned)* | Signs the return delivery (timestamped HMAC) |
+| `HOOKPROBE_ESCALATE_LEVELS` | `critical,high` | The only content judgement the investigator makes: which levels are worth a paid run |
 | `HOOKPROBE_HOST` / `HOOKPROBE_PORT` | `0.0.0.0` / `8088` | Bind address |
 | `ANTHROPIC_API_KEY` | — | Or `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` for a relay |
 
@@ -89,6 +94,22 @@ Read-only is enforced in three layers, strongest first:
    cloud CLIs are too many to enumerate — scope their credentials instead.
 3. **Container** — non-root, disposable, nothing precious inside. The agent
    may write freely in `/data` (scratch + skills); that is by design.
+
+## The family loop
+
+Inside hookstack the investigator is wired into the alert flow itself: the
+pipe's escalation routes copy every front-door event to `/hooks/event`, the
+probe decides by level whether an investigation is worth paying for, and the
+finished report POSTs back to the pipe's `probe-notify` door — dressed by the
+pipe and delivered to the same channels as the verdict. The pipe stays
+content-blind; the judge is untouched; failure still completes the loop (a
+stopped or crashed investigation reports itself). The plain demo compose
+points the escalation at the sink's `/probe-standin` so the shape is visible
+without a model key; `--profile probe` (plus `HOOKPROBE_EVENT_URL` in `.env`)
+swaps in the real investigator. First live run of the loop: a "host CPU high"
+alert came in, the judge ruled it medium within a second, and 3.7 minutes
+later the investigator's report landed on the same channels calling it a
+false alarm — with the one actionable finding named.
 
 ## Parallel subagents
 

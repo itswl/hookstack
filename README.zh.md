@@ -60,6 +60,8 @@ hookprobe 的出身要从 WebhookWise 说起：深度分析这条腿原本外接
 
 沉淀下来的东西都能在页面里直接管理。skills 视图列出全部 runbook（frontmatter 描述、包含的文件、修改时间），点开即渲染全文；memory 视图编辑环境记忆（workdir 下的 CLAUDE.md），写进去的集群拓扑、已知误报、命名规范会注入每一次调查。实测把「replayd 高 CPU 是本机慢性顽疾」写入记忆后，问它「replayd CPU 很高要不要当事故处理」，它准确回答不需要，并引用了这条背景——环境记忆真的到达了每一轮调查。
 
+调查员也接进了家族自己的告警流：管道的升级路由把每个前门事件复制一份到 `/hooks/event`，是否值得花钱调查由 probe 按级别自决（默认 critical/high），调查报告完成后回传管道的 `probe-notify` 前门，由管道打扮成卡片送进同样的渠道——管道保持内容盲，判官一行未动，失败的调查也会以报告形式走完闭环。默认演示 compose 把升级投递指向 sink 的替身路径（无需模型凭据即可看到升级的形状），`docker compose --profile probe up` 换成真调查员。首次实测闭环：一发「宿主机 CPU 持续高负载」告警，判官一秒内给出裁决，3.7 分钟后调查报告落到同一渠道——判定为误报，且点名了唯一可处置项。
+
 ![skills 浏览器：沉淀的诊断 runbook](docs/img/hookprobe-skills.png)
 
 ![环境记忆编辑器：CLAUDE.md 注入每一次调查](docs/img/hookprobe-memory.png)

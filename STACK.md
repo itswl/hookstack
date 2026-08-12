@@ -11,6 +11,19 @@ docker compose up -d --build
 you ──► hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ──► sink
         /hook/inbound            (judges)      /hook/judge-notify
         /hook/alertmanager
+             │
+             └──► hookprobe :8088 (investigates) ──► /hook/probe-notify ──► sink
+                  · every front-door event is copied here; the probe itself
+                    decides by level (critical/high) what is worth paying for
+                  · plain `up` delivers to the sink's /probe-standin instead,
+                    so the escalation shape is visible without a model key
+```
+
+The investigator joins with a real model key:
+
+```bash
+printf 'ANTHROPIC_API_KEY=sk-ant-...\nHOOKPROBE_EVENT_URL=http://hookprobe:8088/hooks/event\n' >> .env
+docker compose --profile probe up -d --build
 ```
 
 | where | what |
