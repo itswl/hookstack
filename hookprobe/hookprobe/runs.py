@@ -36,13 +36,16 @@ class Run:
     cost_usd: float | None = None
     created_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    # Which model this session's turns are requested on.
+    model: str = ""
     # Set once the engine reports back; the handle for follow-up turns.
     engine_session_id: str | None = None
     # The message of the turn currently in flight (or the last one asked).
     current_message: str = ""
     # Finished turns, oldest first: {"message", "text", "error", "run_id",
-    # "cost_usd", "finished_at"}. A failed follow-up appends a turn instead
-    # of erasing the answer somebody already read.
+    # "cost_usd", "finished_at", "usage", "model_usage", "duration_ms"}.
+    # A failed follow-up appends a turn instead of erasing the answer
+    # somebody already read.
     turns: list[dict] = field(default_factory=list)
 
     @property
