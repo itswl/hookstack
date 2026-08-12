@@ -1,0 +1,49 @@
+# Standalone deployment — the pipe alone, no family around it. Run from the
+# repo root:
+#
+#   docker compose --env-file .env \
+#     -f hookrelay/deploy/docker-compose.yml up -d --build
+#
+# `--env-file .env` matters: compose interpolates ${...} from the compose
+# file's own directory by default, and the ${HOOKRELAY_CONFIG_FILE:?} guard
+# below must read the deployment root's .env instead.
+#
+# The pipe is nothing without its config — sources, routes, channels — so the
+# config path is required, not defaulted: a pipe that silently starts with
+# demo routes would deliver your alerts to containers you are not running.
+# See hookrelay/examples/stack.yaml for the shape. Give an ABSOLUTE path
+# (e.g. HOOKRELAY_CONFIG_FILE=$PWD/config.yaml): compose resolves a relative
+# bind source against this file's directory, not your cwd — and a bare name
+# with no leading ./ is read as a named volume, not a path.
+
+name: hookrelay
+
+services:
+  hookrelay:
+    build:
+      context: ..
+    image: hookrelay:latest
+    container_name: hookrelay
+    environment:
+      HOOKRELAY_HOST: 0.0.0.0
+      HOOKRELAY_PORT: 8100
+      HOOKRELAY_DB: /data/hookrelay.db
+      HOOKRELAY_CONFIG: /etc/hookrelay/config.yaml
+      HOOKRELAY_WORKER_INTERVAL: "0.5"
+      HOOKRELAY_PLUGINS: /data/plugins
+    volumes:
+      - ${HOOKRELAY_CONFIG_FILE:?path to your config.yaml — sources, routes, channels}:/etc/hookrelay/config.yaml:ro
+      - relay-data:/data
+    # The whole .env is injected, so a ${NAME} in the config only needs a
+    # line in .env — no compose edit, no forgotten passthrough.
+    env_file:
+      - path: ../../.env
+        required: false
+    ports:
+      # Open so upstream monitors can reach the front door; change to
+      # "127.0.0.1:8100:8100" when senders are local or ssh-tunneled.
+      - "8100:8100"
+    restart: unless-stopped
+
+volumes:
+  relay-data:
