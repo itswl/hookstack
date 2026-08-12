@@ -75,7 +75,8 @@ class Store:
 
     @property
     def db(self) -> aiosqlite.Connection:
-        assert self._db is not None, "Store.open() was not called"
+        if self._db is None:
+            raise RuntimeError("Store.open() was not called")
         return self._db
 
     async def prior_verdict(
@@ -94,8 +95,9 @@ class Store:
         degraded or not.
         """
         route_clause = "" if any_route else " AND route = 'ai'"
+        # `route_clause` is one of two literals; the values are parametrized.
         cursor = await self.db.execute(
-            "SELECT summary, importance, event_type, impact_scope, model FROM judgements"
+            "SELECT summary, importance, event_type, impact_scope, model FROM judgements"  # nosec B608
             f" WHERE identity = ?{route_clause} AND received_at >= ? ORDER BY id DESC LIMIT 1",
             (identity, now - max(1, window_seconds)),
         )
@@ -155,7 +157,11 @@ class Store:
             params += [f"%{q}%", f"%{q}%"]
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(max(1, min(500, limit)))
-        cursor = await self.db.execute(f"SELECT * FROM judgements{where} ORDER BY id DESC LIMIT ?", tuple(params))
+        # `where` is built from constant clause fragments; values are parametrized.
+        cursor = await self.db.execute(
+            f"SELECT * FROM judgements{where} ORDER BY id DESC LIMIT ?",  # nosec B608
+            tuple(params),
+        )
         return [dict(row) for row in await cursor.fetchall()]
 
     async def summary(self, since: float) -> dict[str, Any]:

@@ -31,6 +31,7 @@ jobs:
       - run: python -m compileall -q hookjudge tests
       - run: ruff check hookjudge tests
       - run: ruff format --check hookjudge tests
+      - run: python -m bandit -q -r hookjudge
       - name: inline page JS parses
         run: |
           node -e '
@@ -41,6 +42,7 @@ jobs:
           console.log("status.html inline JS: OK");
           '
       - run: pytest -q
+      - run: python -m pip_audit --progress-spinner off
 
   docker:
     runs-on: ubuntu-latest

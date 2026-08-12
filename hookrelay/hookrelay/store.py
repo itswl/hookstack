@@ -108,7 +108,8 @@ class Store:
 
     @property
     def db(self) -> aiosqlite.Connection:
-        assert self._db is not None, "Store.open() was not called"
+        if self._db is None:
+            raise RuntimeError("Store.open() was not called")
         return self._db
 
     # ── events & decisions ────────────────────────────────────────────────
@@ -313,9 +314,10 @@ class Store:
         for start in range(0, len(ids), 500):
             chunk = ids[start : start + 500]
             marks = ",".join("?" for _ in chunk)
-            await self.db.execute(f"DELETE FROM deliveries WHERE event_id IN ({marks})", chunk)
-            await self.db.execute(f"DELETE FROM decisions WHERE event_id IN ({marks})", chunk)
-            await self.db.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk)
+            # `marks` is only "?" placeholders; the values are parametrized.
+            await self.db.execute(f"DELETE FROM deliveries WHERE event_id IN ({marks})", chunk)  # nosec B608
+            await self.db.execute(f"DELETE FROM decisions WHERE event_id IN ({marks})", chunk)  # nosec B608
+            await self.db.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk)  # nosec B608
         cursor = await self.db.execute("DELETE FROM silences WHERE until_ts < ?", (now,))
         silences = cursor.rowcount
         await self.db.commit()
@@ -363,8 +365,9 @@ class Store:
             params.append(int(before_id))
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(max(1, min(500, int(limit))))
+        # `where` is built from constant clause fragments; values are parametrized.
         cursor = await self.db.execute(
-            "SELECT e.id, e.source, e.received_at, e.title, e.level,"
+            "SELECT e.id, e.source, e.received_at, e.title, e.level,"  # nosec B608
             "       d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id"
             f"{where}"
