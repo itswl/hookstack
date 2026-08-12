@@ -1,6 +1,8 @@
-# Production shape: hookrelay as the single alert front door, joined to
-# WebhookWise's docker network so senders (Grafana / Alertmanager) reach it
-# by DNS name and it reaches WW's ingest the same way.
+# Production shape: hookrelay as the single alert front door, joined to the
+# docker network of the platform it feeds, so senders (Grafana / Alertmanager)
+# reach it by DNS name and it reaches that platform's ingest the same way.
+# The external network name below is this deployment's actual network — set
+# yours in the `networks:` block at the bottom.
 #
 #   cd /opt/docker-compose/hookrelay
 #   docker compose -f hookrelay/deploy/docker-compose.prod.yml up -d --build

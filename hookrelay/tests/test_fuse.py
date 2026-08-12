@@ -2,7 +2,7 @@
 
 Why this exists at all: the reference production deploy has a brain with its
 own ingress backpressure behind the relay, but a relay in front of something
-WITHOUT backpressure (WebhookWise-lite) must carry its own fuse. Content dedup
+WITHOUT backpressure (a lite brain) must carry its own fuse. Content dedup
 cannot do this job — a high-cardinality flood has no repeated payload.
 """
 

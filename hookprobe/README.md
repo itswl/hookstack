@@ -1,27 +1,28 @@
 # hookprobe
 
-A single-purpose deep-analysis agent runner. Fourth member of the hook\* family:
+A single-purpose deep-analysis agent runner. Third member of the hook\* family:
 
 | project | role |
 |---|---|
 | hookrelay | the pipe — adapts alert dialects in and out, content-blind |
 | hookjudge | the judge — one cheap verdict per alert |
-| WebhookWise | the comprehensive orchestrator — channels, dashboard, knowledge |
 | **hookprobe** | **the investigator — one read-only agent run per analysis task** |
 
-hookprobe replaces a full OpenClaw gateway on WebhookWise's deep-analysis leg.
-It accepts one task over the OpenClaw-compatible HTTP contract WebhookWise
-already speaks, runs one unattended agent session (Claude Agent SDK: built-in
-tools, MCP servers, web search, SKILL.md skills), and serves the final report
-to whoever polls for it. No channels, no device pairing, no chat history —
-and a run has a real terminal state, so the caller needs no stability
-heuristics.
+hookprobe is what you run instead of a full OpenClaw gateway when all you
+need from it is "take a task, run a tool-using agent, return the text". It
+accepts one task over an OpenClaw-compatible HTTP contract — any client that
+already integrates that gateway dialect as an analysis backend switches by
+changing a URL — runs one unattended agent session (Claude Agent SDK:
+built-in tools, MCP servers, web search, SKILL.md skills), and serves the
+final report to whoever polls for it. No channels, no device pairing, no chat
+history — and a run has a real terminal state, so the caller needs no
+stability heuristics.
 
 ```
-WebhookWise ── POST /hooks/agent ──────────▶ hookprobe ── Claude Agent SDK
-     ▲                                        │  bash guard (read-only)
-     └──── GET /sessions/{key}/final ◀────────┘  MCP / WebSearch / skills
-             200 {isFinal: true, text}           /data: skills + results
+caller ── POST /hooks/agent ───────────────▶ hookprobe ── Claude Agent SDK
+   ▲                                          │  bash guard (read-only)
+   └───── GET /sessions/{key}/final ◀─────────┘  MCP / WebSearch / skills
+            200 {isFinal: true, text}            /data: skills + results
 ```
 
 ## Contract
@@ -46,21 +47,23 @@ A run that fails (crash, timeout, empty output) still finishes the contract:
 failure — the operator sees the error on the analysis card within one poll
 instead of waiting out the caller's timeout window.
 
-## Switching WebhookWise over
+## Adopting it from an OpenClaw integration
 
-WebhookWise needs no code change — point its OpenClaw endpoints here:
+A client that already triggers analyses through an OpenClaw gateway needs no
+code change — point its gateway URL and hooks token here:
 
 ```bash
-OPENCLAW_ENABLED=true
-OPENCLAW_GATEWAY_URL=http://hookprobe:8088     # trigger: {url}/hooks/agent
-OPENCLAW_HTTP_API_URL=http://hookprobe:8088    # poll:    {url}/sessions/{key}/final
-OPENCLAW_HOOKS_TOKEN=<same value as HOOKPROBE_TOKEN>
+# wherever your client configures its OpenClaw endpoints:
+GATEWAY_URL=http://hookprobe:8088     # trigger: {url}/hooks/agent
+HTTP_API_URL=http://hookprobe:8088    # poll:    {url}/sessions/{key}/final
+HOOKS_TOKEN=<same value as HOOKPROBE_TOKEN>
 ```
 
-Because `/final` answers with `isFinal: true`, WebhookWise writes the result
-on the first confirming poll (`OPENCLAW_STABILITY_REQUIRED_HITS` becomes
-irrelevant). The deep-analysis prompt stays in WebhookWise — hookprobe is
-prompt-agnostic and runs whatever `message` it is handed.
+Because `/final` answers with `isFinal: true`, a poller can write the result
+on the first confirming read — any stability heuristics built against a
+moving answer simply never trigger. hookprobe is prompt-agnostic: the
+analysis prompt stays on the caller's side, and whatever `message` arrives is
+what runs.
 
 ## Configuration
 
@@ -205,8 +208,8 @@ or the network.
 
 ## Non-goals (v1)
 
-- No completion callback yet — the caller polls. A `callbackUrl` on the
-  trigger is the natural next step once WebhookWise grows a receiver for it.
+- OpenClaw-dialect triggers poll; there is no `callbackUrl` on that contract
+  yet. (Family event-door runs do report back — see The family loop.)
 - In-flight runs do not survive a restart (finished results do). The caller's
   retry path covers this.
 - No queue durability beyond the process: this runner is one container behind

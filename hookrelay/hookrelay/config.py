@@ -73,7 +73,7 @@ class Source:
     # Storm fuse (volume, not content — see hookrelay/fuse.py). 0 = no fuse.
     # Mandatory reading: a brain-paired deploy may rely on the brain's own
     # backpressure, but a relay in front of something WITHOUT backpressure
-    # (e.g. WebhookWise-lite) must carry its own fuse.
+    # (a brain without its own storm gate) must carry its own fuse.
     storm_threshold: int = 0
     storm_window_seconds: int = 60
     # Replay protection. require_timestamp refuses the legacy body-only
@@ -94,7 +94,7 @@ class Channel:
     # 0 = unlimited. Enforced at delivery time by deferring, never dropping.
     max_per_minute: int = 0
     # Outbound signature header name (generic type); lets hookrelay speak a
-    # receiver's dialect — e.g. X-Webhook-Signature to feed WebhookWise.
+    # receiver's dialect — e.g. X-Webhook-Signature for receivers that expect it.
     signature_header: str = "X-Hook-Signature"
     options: dict[str, Any] = field(default_factory=dict)
 

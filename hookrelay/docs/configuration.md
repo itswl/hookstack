@@ -49,9 +49,9 @@ The window is process-local by design: a restart resets it, which is correct
 for a fuse — it protects, it does not account.
 
 **When is it mandatory?** Whenever the thing behind the relay has no ingress
-backpressure of its own. A full WebhookWise has one (its own storm gate), so
-the reference production deploy runs without a fuse; **WebhookWise-lite does
-not** — put a fuse on every door in front of it. Signature verification always
+backpressure of its own. A comprehensive platform brain usually has one (its own
+storm gate), so a deploy in front of one can run without a fuse; **a lite
+brain does not** — put a fuse on every door in front of it. Signature verification always
 runs first, so an unsigned flood is rejected as unauthenticated and never
 consumes fuse budget.
 
@@ -117,7 +117,7 @@ posture: dedup here is a storm fuse for deployments with no brain behind the
 relay). Write it → the walk is exactly your list, in order. **Must contain
 `routes`.**
 
-**Paired with a brain (e.g. WebhookWise)?** Use `pipeline: [silence, routes]`
+**Paired with a comprehensive brain?** Use `pipeline: [silence, routes]`
 — the brain owns dedup/noise judgment and its accounting must stay truthful;
 the edge keeps only the valve. This is how the reference production deploy
 runs.
@@ -195,8 +195,8 @@ point of running two brains side by side.
 
 ```yaml
 routes:
-  - {name: fan-to-brains, source: inbound, send_to: [to-ww, to-ww-lite], stop: true}
-  - {name: ww-to-chat,    source: ww-notify,   send_to: [ops-feishu], stop: true}
+  - {name: fan-to-brains, source: inbound, send_to: [to-brain-a, to-brain-b], stop: true}
+  - {name: a-to-chat,     source: a-notify,    send_to: [ops-feishu], stop: true}
   # The shadow brain is gathered and compared, never delivered onward —
   # comparing two brains must not double every notification an operator gets.
   - {name: lite-compare,  source: lite-notify, send_to: [compare-log], stop: true}
@@ -215,8 +215,8 @@ answers "what does the slow one buy us":
 
 ```json
 {"origin": {"id": 86, "title": "充值金额单次超500报警", "deliveries": [...]},
- "returns": [{"fields": {"brain": "ww-lite"},    "level": "medium", "latency_seconds": 0.4},
-             {"fields": {"brain": "webhookwise"}, "level": "high",   "latency_seconds": 47.0}]}
+ "returns": [{"fields": {"brain": "brain-lite"}, "level": "medium", "latency_seconds": 0.4},
+             {"fields": {"brain": "brain-full"}, "level": "high",   "latency_seconds": 47.0}]}
 ```
 
 The status page shows it under each event ("看这条的往返 / 各系统加工").
@@ -250,10 +250,10 @@ channels:
     type: wecom                        # markdown; WeCom bots have no signing
     url: ${WECOM_WEBHOOK_URL}
 
-  - name: webhookwise                  # feed a brain downstream, zero code
+  - name: platform                     # feed a brain downstream, zero code
     type: generic                      # canonical JSON bytes, HMAC over EXACT wire bytes
-    url: https://your-ww/v1/webhook
-    secret: ${WW_SECRET}
+    url: https://your-platform/v1/webhook
+    secret: ${PLATFORM_SECRET}
     signature_header: X-Webhook-Signature   # speak the receiver's dialect
 
 routes:                                # walked by priority, highest first
@@ -266,7 +266,7 @@ routes:                                # walked by priority, highest first
 
   - name: everything-to-archive
     source: "*"
-    send_to: [webhookwise]
+    send_to: [platform]
     priority: 0
 ```
 
@@ -279,7 +279,7 @@ exponential backoff 30s·2ⁿ capped at 10 min, 8 attempts, then a visible
 `dead` with the last error. Feishu/DingTalk/WeCom in-body error codes
 (`code`/`errcode` ≠ 0) count as failures even on HTTP 200.
 
-### Raw mode — the WebhookWise split
+### Raw mode — the transparent-edge split
 
 Every channel type accepts:
 
@@ -291,16 +291,16 @@ options:
 
 Two recipes this enables:
 
-**Transparent edge (monitoring → hookrelay → WebhookWise)** — WW unchanged,
-its own per-ecosystem adapters keep working; hookrelay adds the ledger, storm
+**Transparent edge (monitoring → hookrelay → your platform)** — the platform
+unchanged, its own per-ecosystem adapters keep working; hookrelay adds the ledger, storm
 dedup and a named door in front:
 
 ```yaml
 channels:
-  - name: to-webhookwise
+  - name: to-platform
     type: generic
-    url: https://your-ww/v1/webhook/grafana     # WW's own per-source ingest
-    secret: ${WEBHOOKWISE_SECRET}
+    url: https://your-platform/v1/webhook/grafana   # the platform's per-source ingest
+    secret: ${PLATFORM_SECRET}
     signature_header: X-Webhook-Signature
     options: {payload: raw}
 # edge dedup must not swallow recoveries: put the state in the fingerprint
@@ -309,13 +309,13 @@ sources:
     fingerprint_fields: [title, state]
 ```
 
-**Finished payloads out (WebhookWise → hookrelay → 飞书)** — the brain builds
+**Finished payloads out (brain → hookrelay → 飞书)** — the brain builds
 the exact message (interactive cards with their callback buttons survive);
 hookrelay owns retry / rate limit / dead letters and injects bot signing only:
 
 ```yaml
 sources:
-  - name: ww-out
+  - name: brain-out
     secret: ${WW_OUT_SECRET}
 channels:
   - name: feishu-final
@@ -324,7 +324,7 @@ channels:
     secret: ${FEISHU_WEBHOOK_SECRET}
     options: {payload: raw, payload_path: notification}
 routes:
-  - {name: ww-to-feishu, source: ww-out, send_to: [feishu-final]}
+  - {name: brain-to-feishu, source: brain-out, send_to: [feishu-final]}
 ```
 
 `payload: raw` with a missing/empty path fails INTO the delivery ledger with a
