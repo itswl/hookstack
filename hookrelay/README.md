@@ -14,8 +14,8 @@ DingTalk / WeCom / generic HTTP — with retries, per-channel rate limits, and a
 dead-letter queue you can see.
 
 **What it deliberately is not**: an alerting system. No AI, no incidents, no
-SLA, no on-call. If an event needs *judgement*, put a brain (like WebhookWise)
-behind the generic channel. hookrelay only promises two things:
+SLA, no on-call. If an event needs *judgement*, put a brain (hookjudge, or any
+comprehensive platform) behind the generic channel. hookrelay only promises two things:
 
 1. **Every event leaves exactly one decision record** saying what happened and
    why — `routed` to which channels, or `skipped` with a named code
@@ -114,11 +114,11 @@ Response:
 Timeout / non-2xx / bad JSON → the stage's `on_error` policy, recorded in the
 trace either way.
 
-### Using WebhookWise with hookrelay
+### Pairing a comprehensive brain with hookrelay
 
 Two shapes, both zero-code:
-- **WebhookWise as downstream brain** (async): a `generic` channel with
-  `signature_header: X-Webhook-Signature` and WebhookWise's secret posts the
+- **A platform as downstream brain** (async): a `generic` channel with the
+  receiver's `signature_header` and secret posts the
   normalized event straight into its ingest — hookrelay fans out fast, the
   heavy analysis happens over there.
 - **Any scorer as a pipeline stage** (sync): the `http` contract above; point
@@ -147,8 +147,7 @@ Pipe *protections* — kept, but named for what they are:
 - **the STORM FUSE is volume protection**: per-door arrival limits
   (`storm_threshold`), catching the high-cardinality flood that content dedup
   structurally cannot. Soft stage keeps the account, hard stage (10×) protects
-  the account. Mandatory in front of anything without its own backpressure —
-  WebhookWise-lite, for instance.
+  the account. Mandatory in front of anything without its own backpressure.
 - **dedup is CONTENT protection**, not noise judgment: identical payloads
   inside a window. In a brain-paired deployment turn it OFF
   (`pipeline: [silence, routes]`) so the brain's own noise accounting stays
@@ -157,7 +156,7 @@ Pipe *protections* — kept, but named for what they are:
 
 Judgment features (`filter`, `set`, dedup-as-noise-control) exist for
 **standalone posture** — a small team with no brain that still wants
-webhook→飞书 with taste. In **paired posture** (a WebhookWise behind the
+webhook→飞书 with taste. In **paired posture** (a comprehensive brain behind the
 relay) they should all yield; the `http` processor is the doorway that keeps
 it honest — judgment gets *delegated*, never absorbed.
 

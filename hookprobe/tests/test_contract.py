@@ -1,8 +1,8 @@
-"""The contract WebhookWise's OpenClaw client actually exercises.
+"""The contract an OpenClaw-dialect client actually exercises.
 
-Payload shapes mirror services/analysis/openclaw_analysis.py (trigger) and
-services/analysis/openclaw_client.py (poll) in WebhookWise: change these
-tests only together with a WebhookWise-side change.
+Payload shapes mirror what such a client POSTs to trigger an analysis and
+how it polls /final; change these tests only together with the callers that
+speak this dialect.
 """
 
 import json
@@ -18,8 +18,8 @@ from tests.helpers import FakeEngine, GatedEngine, make_settings
 TOKEN = "secret-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
-# What analyze_with_openclaw() actually POSTs.
-WW_TRIGGER_PAYLOAD = {
+# What an OpenClaw-dialect client actually POSTs.
+TRIGGER_PAYLOAD = {
     "message": "...deep analysis prompt + alert payload...",
     "name": "deep-analysis",
     "sessionKey": "hook:deep-analysis:grafana:abc-123",
@@ -56,9 +56,9 @@ def test_healthz_is_open(tmp_path) -> None:
 
 def test_auth_is_required_on_contract_routes(tmp_path) -> None:
     with make_client(tmp_path, FakeEngine()) as client:
-        assert client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD).status_code == 401
+        assert client.post("/hooks/agent", json=TRIGGER_PAYLOAD).status_code == 401
         bad = {"Authorization": "Bearer wrong"}
-        assert client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=bad).status_code == 401
+        assert client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=bad).status_code == 401
         assert client.get("/sessions/x/final").status_code == 401
         assert client.get("/v1/runs/x", headers=bad).status_code == 401
 
@@ -66,13 +66,13 @@ def test_auth_is_required_on_contract_routes(tmp_path) -> None:
 def test_trigger_then_poll_roundtrip(tmp_path) -> None:
     engine = GatedEngine()
     with make_client(tmp_path, engine) as client:
-        trigger = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH)
+        trigger = client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH)
         assert trigger.status_code == 200
         body = trigger.json()
         assert body["runId"]
-        assert body["sessionKey"] == WW_TRIGGER_PAYLOAD["sessionKey"]
+        assert body["sessionKey"] == TRIGGER_PAYLOAD["sessionKey"]
 
-        # Still running: WebhookWise treats 202 as "analysis in progress".
+        # Still running: the poller treats 202 as "analysis in progress".
         pending = client.get(f"/sessions/{body['sessionKey']}/final", headers=AUTH)
         assert pending.status_code == 202
 
@@ -87,8 +87,8 @@ def test_trigger_then_poll_roundtrip(tmp_path) -> None:
 def test_retrigger_returns_same_run(tmp_path) -> None:
     engine = GatedEngine()
     with make_client(tmp_path, engine) as client:
-        first = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH).json()
-        second = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH).json()
+        first = client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH).json()
+        second = client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH).json()
         assert first["runId"] == second["runId"]
         engine.release.set()
         poll_until_final(client, first["sessionKey"])
@@ -108,7 +108,7 @@ def test_empty_message_is_400(tmp_path) -> None:
 
 def test_continue_endpoint_roundtrip(tmp_path) -> None:
     with make_client(tmp_path, FakeEngine()) as client:
-        body = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH).json()
+        body = client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH).json()
         key = body["sessionKey"]
         poll_until_final(client, key)
 
@@ -139,14 +139,14 @@ def test_run_list_and_ui_page(tmp_path) -> None:
         assert "hookprobe" in page.text
         assert client.get("/", follow_redirects=False).status_code in (302, 307)
 
-        client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH)
-        second = dict(WW_TRIGGER_PAYLOAD, sessionKey="web:manual-1", message="check disk usage on node-3")
+        client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH)
+        second = dict(TRIGGER_PAYLOAD, sessionKey="web:manual-1", message="check disk usage on node-3")
         client.post("/hooks/agent", json=second, headers=AUTH)
-        poll_until_final(client, WW_TRIGGER_PAYLOAD["sessionKey"])
+        poll_until_final(client, TRIGGER_PAYLOAD["sessionKey"])
         poll_until_final(client, "web:manual-1")
 
         runs = client.get("/v1/runs", headers=AUTH).json()
-        assert {r["session_key"] for r in runs} == {WW_TRIGGER_PAYLOAD["sessionKey"], "web:manual-1"}
+        assert {r["session_key"] for r in runs} == {TRIGGER_PAYLOAD["sessionKey"], "web:manual-1"}
         manual = next(r for r in runs if r["session_key"] == "web:manual-1")
         assert manual["status"] == "completed"
         assert manual["turn_count"] == 1
@@ -159,14 +159,14 @@ def test_run_list_and_ui_page(tmp_path) -> None:
 
 def test_run_list_includes_persisted_runs_after_restart(tmp_path) -> None:
     with make_client(tmp_path, FakeEngine()) as client:
-        client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH)
-        poll_until_final(client, WW_TRIGGER_PAYLOAD["sessionKey"])
+        client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH)
+        poll_until_final(client, TRIGGER_PAYLOAD["sessionKey"])
 
     # New app over the same results dir — the finished run must reappear.
     with make_client(tmp_path, FakeEngine()) as reborn:
         runs = reborn.get("/v1/runs", headers=AUTH).json()
-        assert [r["session_key"] for r in runs] == [WW_TRIGGER_PAYLOAD["sessionKey"]]
-        detail = reborn.get(f"/v1/runs/{WW_TRIGGER_PAYLOAD['sessionKey']}", headers=AUTH).json()
+        assert [r["session_key"] for r in runs] == [TRIGGER_PAYLOAD["sessionKey"]]
+        detail = reborn.get(f"/v1/runs/{TRIGGER_PAYLOAD['sessionKey']}", headers=AUTH).json()
         assert len(detail["turns"]) == 1
 
 
@@ -200,7 +200,7 @@ def test_skills_endpoints(tmp_path) -> None:
 def test_continue_while_running_is_409(tmp_path) -> None:
     engine = GatedEngine()
     with make_client(tmp_path, engine) as client:
-        body = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH).json()
+        body = client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH).json()
         conflict = client.post(f"/sessions/{body['sessionKey']}/continue", json={"message": "x"}, headers=AUTH)
         assert conflict.status_code == 409
         engine.release.set()
@@ -210,7 +210,7 @@ def test_continue_while_running_is_409(tmp_path) -> None:
 def test_stop_endpoint_settles_the_run(tmp_path) -> None:
     engine = GatedEngine()  # never released — stop is the only way out
     with make_client(tmp_path, engine) as client:
-        body = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH).json()
+        body = client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH).json()
         key = body["sessionKey"]
         assert client.post(f"/sessions/{key}/stop").status_code == 401
         assert client.post("/sessions/hook:nope/stop", headers=AUTH).status_code == 404
@@ -244,7 +244,7 @@ def test_memory_endpoints(tmp_path) -> None:
 
 def test_engine_failure_is_served_as_final_report(tmp_path) -> None:
     with make_client(tmp_path, FakeEngine(exc=RuntimeError("engine exploded"))) as client:
-        body = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH).json()
+        body = client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH).json()
         final = poll_until_final(client, body["sessionKey"])
         payload = final.json()
         assert payload["isFinal"] is True

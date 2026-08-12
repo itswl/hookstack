@@ -1,10 +1,9 @@
 """Orchestration: accept a trigger, run the engine once, remember the outcome.
 
 The failure shape is a deliberate choice: a run that dies (exception,
-timeout, empty output) still completes the WebhookWise contract — isFinal
-true, with a well-formed report whose root_cause says the runner failed.
-The operator sees the error on the analysis card within one poll instead of
-waiting out WebhookWise's full timeout window.
+timeout, empty output) still completes the contract — isFinal true, with a
+well-formed report whose root_cause says the runner failed. The caller sees
+the error within one poll instead of waiting out its own timeout window.
 """
 
 from __future__ import annotations
@@ -60,7 +59,7 @@ class NotResumableError(ValueError):
 
 
 def failure_report(reason: str) -> str:
-    """A minimal deep_analysis_report-shaped JSON so WebhookWise renders the failure."""
+    """A minimal report-shaped JSON so an OpenClaw-dialect caller renders the failure."""
     return json.dumps(
         {
             "summary": f"hookprobe run failed: {reason}",
@@ -78,7 +77,7 @@ def failure_report(reason: str) -> str:
             "recommendations": [
                 {
                     "priority": "P1",
-                    "action": "Retry the deep analysis from the WebhookWise dashboard",
+                    "action": "Retry the analysis from the caller's side",
                     "reason": "The failure was in the runner, not necessarily in the alert itself.",
                 }
             ],

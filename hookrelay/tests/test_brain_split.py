@@ -1,4 +1,4 @@
-"""The WebhookWise split: transparent edge in, finished payloads out, retention.
+"""The brain split: transparent edge in, finished payloads out, retention.
 
 Three promises this file pins:
   1. generic + payload:raw delivers the ORIGINAL inbound payload byte-for-

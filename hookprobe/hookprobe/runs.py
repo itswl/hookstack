@@ -1,9 +1,9 @@
 """Run state: an in-memory map plus one JSON file per finished run.
 
-In-flight runs die with the process — WebhookWise's poller then sees a 404,
-fails the record per its own policy, and the operator can re-trigger from
-the dashboard. Finished results are persisted to disk because they are the
-part somebody is still waiting to read.
+In-flight runs die with the process — the caller's poller then sees a 404,
+fails the record per its own policy, and the operator can re-trigger.
+Finished results are persisted to disk because they are the part somebody is
+still waiting to read.
 """
 
 from __future__ import annotations

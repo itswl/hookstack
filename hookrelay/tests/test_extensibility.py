@@ -170,7 +170,7 @@ class _StubClient:
 
 
 async def test_http_processor_applies_external_verdict(store):
-    """The WebhookWise-shaped integration: an external brain rewrites the
+    """The platform-shaped integration: an external brain rewrites the
     level and the rewritten event routes accordingly."""
     cfg = _pipeline_cfg(
         [
