@@ -51,7 +51,10 @@ CREATE TABLE IF NOT EXISTS deliveries (
     attempts INTEGER NOT NULL DEFAULT 0,
     next_attempt_at REAL NOT NULL,
     sent_at REAL,
-    last_error TEXT
+    last_error TEXT,
+    -- The exact body of the last attempt, as it left the socket. Body only,
+    -- never the headers: headers carry signatures and tokens.
+    sent_body TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_deliveries_due ON deliveries (status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS ix_deliveries_channel_sent ON deliveries (channel, sent_at);
@@ -100,6 +103,10 @@ class Store:
             await self._db.execute("ALTER TABLE events ADD COLUMN correlation_id TEXT")
         # Always, and only after the column is certain to exist.
         await self._db.execute("CREATE INDEX IF NOT EXISTS ix_events_correlation ON events (correlation_id)")
+        cursor = await self._db.execute("PRAGMA table_info(deliveries)")
+        delivery_columns = {str(row["name"]) for row in await cursor.fetchall()}
+        if "sent_body" not in delivery_columns:
+            await self._db.execute("ALTER TABLE deliveries ADD COLUMN sent_body TEXT")
 
     async def close(self) -> None:
         if self._db is not None:
@@ -189,23 +196,26 @@ class Store:
         await self.db.execute("UPDATE deliveries SET next_attempt_at = ? WHERE id = ?", (until, delivery_id))
         await self.db.commit()
 
-    async def mark_sent(self, delivery_id: int, now: float) -> None:
+    async def mark_sent(self, delivery_id: int, now: float, sent_body: str | None = None) -> None:
         await self.db.execute(
-            "UPDATE deliveries SET status = 'sent', sent_at = ?, last_error = NULL WHERE id = ?", (now, delivery_id)
+            "UPDATE deliveries SET status = 'sent', sent_at = ?, last_error = NULL, sent_body = ? WHERE id = ?",
+            (now, sent_body, delivery_id),
         )
         await self.db.commit()
 
-    async def mark_failed(self, delivery_id: int, attempts: int, error: str, next_at: float | None) -> None:
+    async def mark_failed(
+        self, delivery_id: int, attempts: int, error: str, next_at: float | None, sent_body: str | None = None
+    ) -> None:
         """next_at None = out of attempts → dead letter, visible forever."""
         if next_at is None:
             await self.db.execute(
-                "UPDATE deliveries SET status = 'dead', attempts = ?, last_error = ? WHERE id = ?",
-                (attempts, error[:500], delivery_id),
+                "UPDATE deliveries SET status = 'dead', attempts = ?, last_error = ?, sent_body = ? WHERE id = ?",
+                (attempts, error[:500], sent_body, delivery_id),
             )
         else:
             await self.db.execute(
-                "UPDATE deliveries SET attempts = ?, last_error = ?, next_attempt_at = ? WHERE id = ?",
-                (attempts, error[:500], next_at, delivery_id),
+                "UPDATE deliveries SET attempts = ?, last_error = ?, next_attempt_at = ?, sent_body = ? WHERE id = ?",
+                (attempts, error[:500], next_at, sent_body, delivery_id),
             )
         await self.db.commit()
 
@@ -280,7 +290,7 @@ class Store:
     async def _event_row(self, event_id: int) -> dict[str, Any] | None:
         cursor = await self.db.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.body, e.level, e.fields_json, e.correlation_id,"
-            "       d.outcome, d.skip_code, d.channels_json, d.steps_json"
+            "       e.payload_json, d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id WHERE e.id = ?",
             (event_id,),
         )
@@ -291,8 +301,12 @@ class Store:
         event["fields"] = json.loads(event.pop("fields_json") or "{}")
         event["channels"] = json.loads(event.pop("channels_json") or "[]")
         event["steps"] = json.loads(event.pop("steps_json") or "[]")
+        # Both halves of the forensic record: the payload exactly as received…
+        event["payload"] = json.loads(event.pop("payload_json") or "null")
         cursor = await self.db.execute(
-            "SELECT id, channel, status, attempts, last_error, sent_at FROM deliveries WHERE event_id = ? ORDER BY id",
+            # …and per delivery, the exact body that left the socket.
+            "SELECT id, channel, status, attempts, last_error, sent_at, sent_body"
+            " FROM deliveries WHERE event_id = ? ORDER BY id",
             (event_id,),
         )
         event["deliveries"] = [dict(r) for r in await cursor.fetchall()]

@@ -201,6 +201,7 @@ path, admin/read tokens, body-size cap, max attempts.
 |---|---|
 | `GET /` | the board: queue, breakers, fuse, silences, searchable events with full traces |
 | `GET /status?q=&source=&outcome=&before_id=&limit=` | the same as JSON (read token) |
+| `GET /trace/{event_id}` | one alert's whole journey — the original payload as received, every delivery with the exact body that left the socket (`sent_body`; body only, never headers), and what each brain sent back (read token) |
 | `GET /metrics` | Prometheus text: events by door/outcome, deliveries by channel/result, outbox depth, fuse and silences (read token) |
 | `POST /explain/{source}` | dry run — what WOULD this payload do; records nothing, delivers nothing (admin token) |
 | `GET/PUT /config`, `POST /config/reload` | the config file, validated-or-nothing, hot-applied (admin token) |

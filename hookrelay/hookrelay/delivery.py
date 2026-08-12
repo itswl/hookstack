@@ -126,17 +126,18 @@ async def _drain_channel(
             # another door: the return event can then be linked to this one.
             "_correlation_id": f"hr-{row['event_id']}",
         }
-        ok, detail = await channels.send(client, channel, message)
+        ok, detail, body = await channels.send(client, channel, message)
+        sent_body = body.decode("utf-8", "replace") if body is not None else None
         processed += 1
         if ok:
-            await store.mark_sent(row["id"], now)
+            await store.mark_sent(row["id"], now, sent_body)
             metrics.record_delivery(channel.name, "sent")
             if breaker is not None:
                 breaker.record_success(channel.name)
         else:
             attempts = row["attempts"] + 1
             next_at = None if attempts >= settings.max_attempts else now + backoff_delay(attempts)
-            await store.mark_failed(row["id"], attempts, detail, next_at)
+            await store.mark_failed(row["id"], attempts, detail, next_at, sent_body)
             metrics.record_delivery(channel.name, "dead" if next_at is None else "failed")
             if breaker is not None:
                 breaker.record_failure(channel.name, now)

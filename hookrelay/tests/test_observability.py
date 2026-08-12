@@ -128,7 +128,7 @@ async def test_dead_letters_alarm_through_the_worker(store, cfg, settings, monke
     )
 
     async def always_fail(client, channel, message):
-        return False, "http 500: nope"
+        return False, "http 500: nope", b"{}"
 
     monkeypatch.setattr(delivery_mod.channels, "send", always_fail)
     alarm = SelfAlarm("https://bot.example/hook", min_interval_seconds=0)
@@ -194,7 +194,7 @@ async def test_open_breaker_defers_without_burning_attempts(store, cfg, settings
     )
 
     async def always_fail(client, channel, message):
-        return False, "connection refused"
+        return False, "connection refused", b"{}"
 
     monkeypatch.setattr(delivery_mod.channels, "send", always_fail)
     breaker = CircuitBreaker(threshold=1, cooldown_seconds=600)
@@ -229,7 +229,7 @@ async def test_channels_drain_in_parallel_not_head_of_line(store, cfg, settings,
         if channel.name == "feishu-main":
             await asyncio.sleep(0.05)  # the hanging peer
         order.append(channel.name)
-        return True, "http 200"
+        return True, "http 200", b"{}"
 
     monkeypatch.setattr(delivery_mod.channels, "send", slow_feishu)
     await process_due(store, cfg, settings, object(), now=1001.0)

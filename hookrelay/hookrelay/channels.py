@@ -243,16 +243,21 @@ def build_request(channel: Channel, message: dict[str, Any], now: float | None =
     return builder(channel, message, now if now is not None else time.time())
 
 
-async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, Any]) -> tuple[bool, str]:
-    """Deliver one message. Returns (ok, detail) — never raises: a delivery
-    failure is a scheduling event for the caller, not an exception."""
+async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, Any]) -> tuple[bool, str, bytes | None]:
+    """Deliver one message. Returns (ok, detail, body) — never raises: a
+    delivery failure is a scheduling event for the caller, not an exception.
+
+    `body` is the exact octets posted (None when the builder refused), so the
+    ledger can keep what actually left the socket. The body only, never the
+    headers — headers carry signatures and tokens.
+    """
     try:
         url, payload, headers = build_request(channel, message)
     except (ValueError, TypeError, KeyError) as error:
         # A builder complaining about its inputs is a MISCONFIGURATION, and it
         # belongs in the delivery ledger with a name — not raised into the
         # worker, where one bad channel would stall every other delivery.
-        return False, f"build: {error.__class__.__name__}: {error}"
+        return False, f"build: {error.__class__.__name__}: {error}", None
     # Headers, never body: a receiver that dedupes needs a stable key, and a
     # brain that will hand work BACK to us needs something to quote so the two
     # halves of a round trip can be found together. Neither may perturb the
@@ -269,23 +274,30 @@ async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, A
             # included) actually keep, so the id survives to be echoed back.
             "X-Request-Id": str(correlation),
         }
+    if not isinstance(payload, bytes):
+        # One serialization for the wire AND the ledger: the copy the ledger
+        # keeps is byte-identical to the copy that was sent.
+        payload = json.dumps(payload, ensure_ascii=False).encode()
+        if "content-type" not in {key.lower() for key in headers}:
+            headers = {**headers, "content-type": "application/json"}
     try:
-        if isinstance(payload, bytes):
-            response = await client.post(url, content=payload, headers=headers)
-        else:
-            response = await client.post(url, json=payload, headers=headers)
+        response = await client.post(url, content=payload, headers=headers)
     except httpx.HTTPError as error:
-        return False, f"transport: {error.__class__.__name__}: {error}"
+        return False, f"transport: {error.__class__.__name__}: {error}", payload
     if response.status_code >= 300:
-        return False, f"http {response.status_code}: {response.text[:200]}"
+        return False, f"http {response.status_code}: {response.text[:200]}", payload
     # Feishu/DingTalk/WeCom answer 200 with an in-body error code — a 200 that
     # says "invalid sign" is still a failure, and pretending otherwise is how
     # dead webhooks stay invisible for weeks.
     try:
         data = response.json()
     except ValueError:
-        return True, f"http {response.status_code}"
+        return True, f"http {response.status_code}", payload
     for key in ("code", "errcode"):
         if isinstance(data, dict) and data.get(key) not in (None, 0):
-            return False, f"remote {key}={data.get(key)}: {str(data.get('msg') or data.get('errmsg'))[:200]}"
-    return True, f"http {response.status_code}"
+            return (
+                False,
+                f"remote {key}={data.get(key)}: {str(data.get('msg') or data.get('errmsg'))[:200]}",
+                payload,
+            )
+    return True, f"http {response.status_code}", payload
