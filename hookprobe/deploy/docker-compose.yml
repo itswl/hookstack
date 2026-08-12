@@ -1,14 +1,24 @@
-# Reference deployment — run from the repo root:
+# Standalone deployment — the investigator alone, no family around it. Run
+# from the repo root:
 #
-#   docker compose -f hookprobe/deploy/docker-compose.yml up -d --build
+#   docker compose --env-file .env \
+#     -f hookprobe/deploy/docker-compose.yml up -d --build
+#
+# `--env-file .env` matters: compose interpolates ${...} from the compose
+# file's own directory by default, and the ${HOOKPROBE_TOKEN:?} guard below
+# must read the deployment root's .env instead.
 #
 # Secrets come from .env at the invocation directory (the deployment root):
 #   HOOKPROBE_TOKEN=...      the bearer token your caller presents
-#   ANTHROPIC_API_KEY=...    or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN for a relay
+#   ANTHROPIC_API_KEY=...    or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN for
+#                            an Anthropic-dialect provider
 #
-# The stack compose at the repo root deliberately does NOT include this
-# service: the pipe→brain demo is hermetic, while the investigator needs a
-# real model key and real read-only credentials to be worth starting.
+# Where this file sits among the three composes: the repo-root stack compose
+# runs the whole demo family and includes this service behind `--profile
+# probe`; deploy/docker-compose.prod.yml is the production shape (platform
+# network, loopback-only admin port, state at the deployment root). This one
+# is the middle ground — one container, one named volume, port 8088 open for
+# whatever OpenClaw-dialect caller you point at it.
 services:
   hookprobe:
     build:
@@ -30,7 +40,13 @@ services:
       CLAUDE_CODE_SUBAGENT_MODEL: ${CLAUDE_CODE_SUBAGENT_MODEL:-}
       API_TIMEOUT_MS: ${API_TIMEOUT_MS:-}
       # HOOKPROBE_MCP_CONFIG: /config/mcp.json
+      # Wire the event door / report return to your own pipe if you have one:
+      HOOKPROBE_RETURN_URL: ${HOOKPROBE_RETURN_URL:-}
+      HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
+      HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
     ports:
+      # Open so remote callers can reach the contract; change to
+      # "127.0.0.1:8088:8088" when callers are local or ssh-tunneled.
       - "8088:8088"
     volumes:
       # One volume: distilled skills (/data/.claude/skills), finished results,
