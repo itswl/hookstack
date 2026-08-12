@@ -170,6 +170,33 @@ def test_run_list_includes_persisted_runs_after_restart(tmp_path) -> None:
         assert len(detail["turns"]) == 1
 
 
+def test_skills_endpoints(tmp_path) -> None:
+    skill_dir = tmp_path / ".claude" / "skills" / "gpu-card-alert-triage"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        '---\nname: gpu-card-alert-triage\ndescription: "Triage GPU card alerts"\n---\n\n'
+        "## Steps\n1. check nvidia-smi\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".claude" / "skills" / "not-a-skill").mkdir()  # no SKILL.md — ignored
+
+    with make_client(tmp_path, FakeEngine()) as client:
+        assert client.get("/v1/skills").status_code == 401
+
+        skills = client.get("/v1/skills", headers=AUTH).json()
+        assert [s["name"] for s in skills] == ["gpu-card-alert-triage"]
+        assert skills[0]["description"] == "Triage GPU card alerts"
+        assert "SKILL.md" in skills[0]["files"]
+
+        detail = client.get("/v1/skills/gpu-card-alert-triage", headers=AUTH).json()
+        assert "check nvidia-smi" in detail["content"]
+
+        # Names that could walk the filesystem never resolve.
+        assert client.get("/v1/skills/..", headers=AUTH).status_code == 404
+        assert client.get("/v1/skills/%2e%2e%2fsecrets", headers=AUTH).status_code == 404
+        assert client.get("/v1/skills/missing", headers=AUTH).status_code == 404
+
+
 def test_continue_while_running_is_409(tmp_path) -> None:
     engine = GatedEngine()
     with make_client(tmp_path, engine) as client:

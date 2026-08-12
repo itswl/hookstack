@@ -33,7 +33,9 @@ class FakeEngine:
         result: EngineResult | None = None,
         exc: Exception | None = None,
         delay: float = 0.0,
+        events: list[dict] | None = None,
     ) -> None:
+        self.events = events or []
         self.result = result or EngineResult(
             text='{"summary": "ok"}',
             message_count=3,
@@ -56,7 +58,7 @@ class FakeEngine:
         self.messages: list[str] = []
         self.resumes: list[str | None] = []
 
-    async def run(self, *, message: str, session_key: str, resume: str | None = None) -> EngineResult:
+    async def run(self, *, message: str, session_key: str, resume: str | None = None, on_event=None) -> EngineResult:
         self.calls += 1
         self.messages.append(message)
         self.resumes.append(resume)
@@ -65,6 +67,9 @@ class FakeEngine:
         try:
             if self.delay:
                 await asyncio.sleep(self.delay)
+            if on_event is not None:
+                for event in self.events:
+                    on_event(dict(event))
             if self.exc is not None:
                 raise self.exc
             return self.result
@@ -80,7 +85,7 @@ class GatedEngine:
         self.release = threading.Event()
         self.resumes: list[str | None] = []
 
-    async def run(self, *, message: str, session_key: str, resume: str | None = None) -> EngineResult:
+    async def run(self, *, message: str, session_key: str, resume: str | None = None, on_event=None) -> EngineResult:
         self.resumes.append(resume)
         while not self.release.is_set():
             await asyncio.sleep(0.01)
