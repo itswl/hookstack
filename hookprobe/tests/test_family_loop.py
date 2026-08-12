@@ -3,12 +3,13 @@
 import asyncio
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from fastapi.testclient import TestClient
 
 from hookprobe.app import create_app
-from hookprobe.runs import RunStore
+from hookprobe.runs import COMPLETED, Run, RunStore
 from hookprobe.service import RunService
 from hookprobe.wire import sign_timestamped, verify_timestamped
 from tests.helpers import FakeEngine, make_settings
@@ -140,6 +141,146 @@ def test_relay_born_runs_report_back(tmp_path) -> None:
         delivery["headers"].get("X-Hook-Signature"),
         delivery["headers"].get("X-Hook-Timestamp"),
     )
+
+
+# -- the budget breaker ------------------------------------------------------
+
+
+def _seed_spend(store: RunStore, cost: float, finished_at: float, key: str) -> None:
+    """A finished run whose one turn spent `cost` at `finished_at`."""
+    run = Run(session_key=key, run_id="seed", status=COMPLETED, text="t")
+    run.turns.append(
+        {
+            "message": "m",
+            "text": "t",
+            "error": None,
+            "run_id": "seed",
+            "cost_usd": cost,
+            "finished_at": finished_at,
+            "usage": None,
+            "model_usage": None,
+            "duration_ms": 1,
+            "events": [],
+        }
+    )
+    store.create(run)
+    store.finish(run)
+
+
+def _budget_client(tmp_path, engine, store: RunStore, **overrides) -> TestClient:
+    settings = make_settings(tmp_path, token=TOKEN, **overrides)
+    return TestClient(create_app(settings, RunService(settings, engine, store)))
+
+
+def test_spend_since_counts_only_the_window(tmp_path) -> None:
+    store = RunStore(tmp_path / "results")
+    now = time.time()
+    _seed_spend(store, 0.75, now, "old:recent")
+    _seed_spend(store, 5.0, now - 7200, "old:stale")
+    assert store.spend_since(now - 3600) == 0.75
+    assert store.spend_since(now - 8000) == 5.75
+
+
+def test_event_door_refuses_when_budget_exhausted(tmp_path) -> None:
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, 1.5, time.time(), "old:funded")
+    with _budget_client(tmp_path, engine, store, budget_usd=1.0) as client:
+        refused = client.post("/hooks/event", json=EVENT).json()
+        assert refused["status"] == "refused"
+        assert engine.calls == 0
+
+        detail = client.get(f"/v1/runs/{refused['sessionKey']}", headers=AUTH).json()
+        assert detail["status"] == "failed"
+        assert "预算熔断" in detail["text"]
+        assert detail["meta"]["title"] == EVENT["title"]
+        assert detail["cost_usd"] == 0.0
+
+        budget = client.get("/v1/budget", headers=AUTH).json()
+        assert budget["exhausted"] is True
+        assert budget["spent_usd"] == 1.5
+        assert budget["remaining_usd"] == 0.0
+
+
+def test_event_door_proceeds_under_budget(tmp_path) -> None:
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, 1.0, time.time(), "old:funded")
+    with _budget_client(tmp_path, engine, store, budget_usd=10.0) as client:
+        assert client.post("/hooks/event", json=EVENT).json()["status"] == "accepted"
+        for _ in range(100):
+            if client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()["status"] != "running":
+                break
+        assert engine.calls == 1
+
+
+def test_budget_ignores_spend_outside_window(tmp_path) -> None:
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, 5.0, time.time() - 7200, "old:stale")
+    with _budget_client(tmp_path, engine, store, budget_usd=1.0, budget_window_hours=1.0) as client:
+        assert client.post("/hooks/event", json=EVENT).json()["status"] == "accepted"
+
+
+def test_operator_paths_ignore_budget(tmp_path) -> None:
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, 2.0, time.time(), "old:funded")
+    with _budget_client(tmp_path, engine, store, budget_usd=1.0) as client:
+        response = client.post("/hooks/agent", json={"message": "manual ask"}, headers=AUTH)
+        assert response.status_code == 200
+        key = response.json()["sessionKey"]
+        for _ in range(100):
+            if client.get(f"/v1/runs/{key}", headers=AUTH).json()["status"] != "running":
+                break
+        assert engine.calls == 1
+
+
+def test_redelivery_of_funded_session_is_not_refused(tmp_path) -> None:
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    with _budget_client(tmp_path, engine, store, budget_usd=1.0) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+        assert first["status"] == "accepted"
+        for _ in range(100):
+            if client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()["status"] != "running":
+                break
+        # The completed run cost 0.5; push the window over budget, then redeliver.
+        _seed_spend(store, 5.0, time.time(), "old:extra")
+        again = client.post("/hooks/event", json=EVENT).json()
+        assert again["status"] == "accepted"
+        assert again["sessionKey"] == first["sessionKey"]
+        assert engine.calls == 1
+
+
+def test_refusal_reports_back_through_the_loop(tmp_path) -> None:
+    _Capture.received = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Capture)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}/hook/probe-notify"
+
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, 2.0, time.time(), "old:funded")
+    try:
+        with _budget_client(
+            tmp_path, FakeEngine(), store, budget_usd=1.0, return_url=url, return_secret="ret-secret"
+        ) as client:
+            refused = client.post("/hooks/event", json=EVENT).json()
+            assert refused["status"] == "refused"
+            for _ in range(300):
+                detail = client.get(f"/v1/runs/{refused['sessionKey']}", headers=AUTH).json()
+                if detail["return_status"]:
+                    break
+                time.sleep(0.01)
+            assert detail["return_status"] == "sent"
+    finally:
+        server.shutdown()
+
+    assert len(_Capture.received) == 1
+    payload = json.loads(_Capture.received[0]["body"])
+    assert payload["meta"]["status"] == "failed"
+    assert payload["meta"]["title"] == EVENT["title"]
+    assert "预算熔断" in payload["report"]["summary"]
 
 
 def test_api_born_runs_do_not_report_back(tmp_path) -> None:

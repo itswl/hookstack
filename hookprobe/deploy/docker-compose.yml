@@ -47,6 +47,9 @@ services:
       HOOKPROBE_RETURN_URL: ${HOOKPROBE_RETURN_URL:-}
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
+      # Window spend >= budget refuses new escalations (report card says why):
+      HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
+      HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
     ports:
       # Open so remote callers can reach the contract; change to
       # "127.0.0.1:8088:8088" when callers are local or ssh-tunneled.
