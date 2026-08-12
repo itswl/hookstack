@@ -87,7 +87,12 @@ class RunService:
             raise ValueError("message must not be empty")
 
         timeout_s = self._clamp_timeout(payload.get("timeoutSeconds"))
-        run = Run(session_key=session_key, run_id=uuid.uuid4().hex[:12], current_message=message)
+        run = Run(
+            session_key=session_key,
+            run_id=uuid.uuid4().hex[:12],
+            current_message=message,
+            model=self._settings.model,
+        )
         self._store.create(run)
         self._spawn(run, message, timeout_s, resume=None)
         return run
@@ -113,6 +118,7 @@ class RunService:
 
         timeout_s = self._clamp_timeout(payload.get("timeoutSeconds"))
         run.status = RUNNING
+        run.model = run.model or self._settings.model  # backfill for pre-model records
         run.run_id = uuid.uuid4().hex[:12]
         run.text = ""
         run.error = None
@@ -170,12 +176,12 @@ class RunService:
         if result.session_id:
             run.engine_session_id = result.session_id
         if result.error:
-            self._fail(run, result.error)
+            self._fail(run, result.error, result)
             return
 
         run.status = COMPLETED
         run.text = result.text
-        self._record_turn(run)
+        self._record_turn(run, result)
         self._store.finish(run)
         logger.info(
             "run completed session=%s turns=%s cost_usd=%s",
@@ -184,15 +190,15 @@ class RunService:
             result.cost_usd,
         )
 
-    def _fail(self, run: Run, reason: str) -> None:
+    def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:
         run.status = FAILED
         run.error = reason
         run.text = failure_report(reason)
-        self._record_turn(run)
+        self._record_turn(run, result)
         self._store.finish(run)
         logger.warning("run failed session=%s reason=%s", run.session_key, reason)
 
-    def _record_turn(self, run: Run) -> None:
+    def _record_turn(self, run: Run, result: EngineResult | None) -> None:
         run.turns.append(
             {
                 "message": run.current_message,
@@ -201,5 +207,8 @@ class RunService:
                 "run_id": run.run_id,
                 "cost_usd": run.cost_usd,
                 "finished_at": time.time(),
+                "usage": result.usage if result else None,
+                "model_usage": result.model_usage if result else None,
+                "duration_ms": result.duration_ms if result else None,
             }
         )

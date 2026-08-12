@@ -30,6 +30,11 @@ def test_successful_run_completes(tmp_path) -> None:
         assert done.text == '{"summary": "ok"}'
         assert done.message_count == 3
         assert done.cost_usd == 0.5
+        assert done.model == "claude-opus-5"
+        # The engine's accounting lands on the turn record for the UI to show.
+        assert done.turns[0]["usage"]["output_tokens"] == 34
+        assert done.turns[0]["model_usage"] == {"claude-opus-5": {"inputTokens": 12}}
+        assert done.turns[0]["duration_ms"] == 1234
 
     asyncio.run(scenario())
 

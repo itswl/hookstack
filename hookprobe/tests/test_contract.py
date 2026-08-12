@@ -150,7 +150,11 @@ def test_run_list_and_ui_page(tmp_path) -> None:
         manual = next(r for r in runs if r["session_key"] == "web:manual-1")
         assert manual["status"] == "completed"
         assert manual["turn_count"] == 1
+        assert manual["model"] == "claude-opus-5"
         assert manual["title"].startswith("check disk usage")
+
+        detail = client.get("/v1/runs/web:manual-1", headers=AUTH).json()
+        assert detail["turns"][0]["usage"]["input_tokens"] == 12
 
 
 def test_run_list_includes_persisted_runs_after_restart(tmp_path) -> None:
