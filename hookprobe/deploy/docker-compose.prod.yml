@@ -1,0 +1,75 @@
+# Production shape: hookprobe as a read-only investigator on the docker
+# network of the platform it serves, so any OpenClaw-dialect caller — the
+# pipe's escalation route, a monitoring platform's deep-analysis leg — reaches
+# it by DNS name (`hookprobe:8088`) without another hop. The external network
+# name below is this deployment's actual network — set yours in the
+# `networks:` block at the bottom.
+#
+#   cd /srv/hookrelay
+#   docker compose --env-file .env \
+#     -f hookprobe/deploy/docker-compose.prod.yml up -d --build
+#
+# `--env-file .env` is not decoration: compose interpolates ${...} from the
+# compose FILE's directory by default, and the ${HOOKPROBE_TOKEN:?} guard
+# below must read the deployment root's .env instead.
+#
+# Paths follow the same rule as the pipe's prod file: the BUILD context is
+# this service's directory, while `.env` and `probe-data/` are read from the
+# deployment root two levels up. Skills, session transcripts and results are
+# runtime state, not source — they must survive a source-tree reorganisation.
+#
+# Differences from deploy/docker-compose.yml (standalone), each deliberate:
+#   - host port bound to 127.0.0.1 only: callers live on the docker network;
+#     the binding exists so an ssh tunnel can reach the /ui operator console
+#   - HOOKPROBE_TOKEN is required, not defaulted — a prod investigator that
+#     silently starts without auth would take anyone's tasks. Model
+#     credentials come from .env: ANTHROPIC_API_KEY, or the Anthropic-dialect
+#     trio (ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / model aliases)
+#   - state is a bind mount at the deployment root, not a named volume, so
+#     the accumulated runbooks and transcripts sit in plain sight for
+#     backup and review
+
+services:
+  hookprobe:
+    build:
+      context: ..
+    image: hookprobe:latest
+    container_name: hookprobe
+    ports:
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - ../../probe-data:/data
+      # Read-only credentials are the real security boundary — mount only
+      # query-grade identities:
+      # - ../../secrets/kubeconfig-readonly:/data/home/.kube/config:ro
+      # MCP servers the agent may query (same shape as .mcp.json):
+      # - ../../probe-mcp.json:/config/mcp.json:ro
+    env_file:
+      - ../../.env
+    environment:
+      HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      # The pipe's report door on the same network. Only runs that arrived
+      # through /hooks/event ever deliver here; callers that poll /final
+      # are unaffected.
+      HOOKPROBE_RETURN_URL: ${HOOKPROBE_RETURN_URL:-http://hookrelay:8100/hook/probe-notify}
+      HOOKPROBE_ESCALATE_LEVELS: ${HOOKPROBE_ESCALATE_LEVELS:-critical,high}
+      HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
+      HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
+      # HOOKPROBE_MCP_CONFIG: /config/mcp.json
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      # Any Anthropic-dialect provider: map the engine's model aliases here.
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: ${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${ANTHROPIC_DEFAULT_SONNET_MODEL:-}
+      ANTHROPIC_DEFAULT_OPUS_MODEL: ${ANTHROPIC_DEFAULT_OPUS_MODEL:-}
+      CLAUDE_CODE_SUBAGENT_MODEL: ${CLAUDE_CODE_SUBAGENT_MODEL:-}
+      API_TIMEOUT_MS: ${API_TIMEOUT_MS:-}
+    restart: unless-stopped
+
+networks:
+  default:
+    name: webhookwise_webhook_net
+    external: true
