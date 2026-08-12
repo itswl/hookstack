@@ -49,6 +49,7 @@ service more than the others.
 ```
 hookstack/
 ├── docker-compose.yml        the pipe + brain demo, one command
+├── deploy/                   the three services together, real credentials
 ├── STACK.md
 ├── hookrelay/               the pipe
 │   ├── hookrelay/           package
@@ -57,7 +58,7 @@ hookstack/
 │   └── README.md
 ├── hookjudge/               the brain
 │   ├── hookjudge/           package
-│   ├── tests/  scripts/
+│   ├── tests/  scripts/  deploy/
 │   ├── Dockerfile  pyproject.toml  requirements.txt
 │   └── README.md
 ├── hookprobe/               the investigator
@@ -67,6 +68,14 @@ hookstack/
 │   └── README.md
 └── .github/workflows/       ci.yml (pipe) · ci-hookjudge.yml (brain) · ci-hookprobe.yml (investigator)
 ```
+
+Every service also deploys the same way: `<service>/deploy/docker-compose.yml`
+runs it standalone, `deploy/docker-compose.yml` at the root runs the three
+together with real credentials, and the root `docker-compose.yml` stays the
+zero-credential demo. All are run from the repo root with
+`docker compose --env-file .env -f <file> up -d --build`; the two
+`docker-compose.prod.yml` files under `hookrelay/deploy/` and
+`hookprobe/deploy/` are the shapes joined to a platform's own docker network.
 
 Each gate is run from its own directory:
 
