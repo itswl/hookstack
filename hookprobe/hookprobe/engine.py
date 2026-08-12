@@ -166,7 +166,18 @@ class ClaudeAgentEngine:
                         text_parts.append(block.text)
                         emit({"type": "text", "text": block.text[:500]})
                     elif isinstance(block, ToolUseBlock):
-                        emit({"type": "tool_use", "name": block.name, "detail": _tool_detail(block.input)})
+                        event: dict[str, Any] = {
+                            "type": "tool_use",
+                            "name": block.name,
+                            "detail": _tool_detail(block.input),
+                        }
+                        # The plan checklist is worth keeping structured — the
+                        # UI renders it as a live todo list.
+                        if block.name == "TodoWrite" and isinstance(block.input, dict):
+                            todos = block.input.get("todos")
+                            if isinstance(todos, list):
+                                event["todos"] = todos[:20]
+                        emit(event)
                 if text_parts:
                     last_text = "\n".join(text_parts)
             elif isinstance(msg, ResultMessage):

@@ -207,6 +207,41 @@ def test_continue_while_running_is_409(tmp_path) -> None:
         poll_until_final(client, body["sessionKey"])
 
 
+def test_stop_endpoint_settles_the_run(tmp_path) -> None:
+    engine = GatedEngine()  # never released — stop is the only way out
+    with make_client(tmp_path, engine) as client:
+        body = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH).json()
+        key = body["sessionKey"]
+        assert client.post(f"/sessions/{key}/stop").status_code == 401
+        assert client.post("/sessions/hook:nope/stop", headers=AUTH).status_code == 404
+
+        stopping = client.post(f"/sessions/{key}/stop", headers=AUTH)
+        assert stopping.status_code == 200
+
+        final = poll_until_final(client, key)
+        report = json.loads(final.json()["text"])
+        assert "stopped by operator" in report["summary"]
+        # Nothing left to stop now.
+        assert client.post(f"/sessions/{key}/stop", headers=AUTH).status_code == 409
+
+
+def test_memory_endpoints(tmp_path) -> None:
+    with make_client(tmp_path, FakeEngine()) as client:
+        assert client.get("/v1/memory").status_code == 401
+        empty = client.get("/v1/memory", headers=AUTH).json()
+        assert empty["content"] == ""
+
+        saved = client.put("/v1/memory", json={"content": "# env\nprod cluster lives in cn-north"}, headers=AUTH)
+        assert saved.status_code == 200 and saved.json()["saved"] is True
+        back = client.get("/v1/memory", headers=AUTH).json()
+        assert "cn-north" in back["content"]
+        assert back["path"].endswith("CLAUDE.md")
+
+        assert client.put("/v1/memory", json={"content": 42}, headers=AUTH).status_code == 400
+        too_big = "x" * (256 * 1024 + 1)
+        assert client.put("/v1/memory", json={"content": too_big}, headers=AUTH).status_code == 413
+
+
 def test_engine_failure_is_served_as_final_report(tmp_path) -> None:
     with make_client(tmp_path, FakeEngine(exc=RuntimeError("engine exploded"))) as client:
         body = client.post("/hooks/agent", json=WW_TRIGGER_PAYLOAD, headers=AUTH).json()

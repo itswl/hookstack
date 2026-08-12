@@ -26,8 +26,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from hookprobe import __version__
 from hookprobe.runs import Run
-from hookprobe.service import NotResumableError, RunBusyError, RunService
+from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
+
+_MEMORY_MAX_BYTES = 256 * 1024
 
 _UI_PAGE = Path(__file__).with_name("ui.html")
 
@@ -115,6 +117,46 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
         return asdict(run)
+
+    @app.post("/sessions/{session_key}/stop", dependencies=[Depends(require_token)])
+    async def stop_session(session_key: str) -> dict[str, Any]:
+        """Cancel the in-flight turn; it settles as a failed turn within a poll."""
+        try:
+            run = service.stop(session_key)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except NoTurnRunningError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"status": "stopping", "sessionKey": run.session_key}
+
+    # Environment memory: {workdir}/CLAUDE.md is loaded into every engine
+    # session (setting_sources includes "project"), so facts written here —
+    # topology, known false alarms, naming conventions — reach every
+    # investigation from its first turn.
+    @app.get("/v1/memory", dependencies=[Depends(require_token)])
+    async def memory_read() -> dict[str, Any]:
+        path = settings.workdir / "CLAUDE.md"
+        content = ""
+        if path.is_file():
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"memory unreadable: {exc}") from exc
+        return {"content": content, "path": str(path)}
+
+    @app.put("/v1/memory", dependencies=[Depends(require_token)])
+    async def memory_write(payload: dict[str, Any]) -> dict[str, Any]:
+        content = payload.get("content")
+        if not isinstance(content, str):
+            raise HTTPException(status_code=400, detail="content must be a string")
+        raw = content.encode("utf-8")
+        if len(raw) > _MEMORY_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"memory exceeds {_MEMORY_MAX_BYTES} bytes")
+        path = settings.workdir / "CLAUDE.md"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(raw)
+        tmp.replace(path)
+        return {"saved": True, "bytes": len(raw)}
 
     @app.get("/v1/skills", dependencies=[Depends(require_token)])
     async def skills_list() -> list[dict[str, Any]]:

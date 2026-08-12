@@ -31,6 +31,8 @@ WebhookWise ── POST /hooks/agent ──────────▶ hookprobe
 | `POST /hooks/agent` | Body: `{message, sessionKey, timeoutSeconds, ...}` (extra OpenClaw fields accepted and ignored). Starts a run, idempotent per `sessionKey`. Returns `{runId, sessionKey}`. |
 | `GET /sessions/{key}/final` | `202` while running · `200 {"isFinal": true, "text", "messageCount"}` when done · `404` unknown (e.g. in-flight run lost to a restart). `isFinal` is always true on a 200. |
 | `POST /sessions/{key}/continue` | Body: `{message, timeoutSeconds?}`. Follow-up turn in the **same** engine session — full investigation context retained. `409` while a turn is in flight, `404` unknown. Poll `/final` again for the new answer. |
+| `POST /sessions/{key}/stop` | Cancel the in-flight turn; it settles as a failed turn ("stopped by operator") within one poll. `409` when nothing is running. |
+| `GET/PUT /v1/memory` | The environment memory — `{workdir}/CLAUDE.md`, loaded into every engine session. Facts every investigation should start from: topology, known false alarms, conventions. |
 | `GET /v1/runs` | Session list, newest first (summaries). |
 | `GET /v1/runs/{key}` | Full run record: status, error, cost, engine session id, all turns. |
 | `GET /ui` | The sessions page (below). Markup is served unauthenticated; the data calls it makes are not. |
@@ -103,10 +105,13 @@ boundary.
 `http://<host>:8088/ui` is a single self-contained page (no build step, no
 external assets): sessions on the left, the conversation on the right, a
 composer at the bottom. Paste the bearer token once (kept in localStorage).
-From there you can read any investigation turn by turn (reports are
-pretty-printed JSON, long alert payloads collapse), send follow-ups into a
-finished session, or hit **+ new session** to start a free-form investigation
-that never came through WebhookWise. Running turns poll and refresh in place.
+From there you can read any investigation turn by turn (JSON reports
+pretty-print, Markdown answers render, long alert payloads collapse), watch a
+running turn's live process feed (tool calls, narration, the plan checklist),
+**Stop** a runaway turn, send follow-ups into a finished session, or hit
+**+ new session** for a free-form investigation. **skills** browses the
+distilled runbooks; **memory** edits the environment memory (CLAUDE.md) that
+every investigation starts from.
 
 ## Follow-up exploration — reuse the session
 
