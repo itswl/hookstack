@@ -160,8 +160,9 @@ async def test_a_non_object_payload_fails_into_the_ledger():
     with pytest.raises(TypeError, match="not an object"):
         build_request(_channel("feishu"), message, now=0.0)
 
-    ok, detail = await channels_mod.send(object(), _channel("feishu"), message)
+    ok, detail, body = await channels_mod.send(object(), _channel("feishu"), message)
     assert ok is False and "build:" in detail
+    assert body is None  # nothing was built, so there are no bytes to keep
 
 
 def test_missing_optional_blocks_render_without_holes():
