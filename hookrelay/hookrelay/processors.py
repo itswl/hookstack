@@ -11,7 +11,7 @@ Built-ins:
     set      — static mutation (level/title/body/fields), optionally guarded
     filter   — drop events matching conditions, with a named skip_code
     http     — POST the event to an EXTERNAL processor (a brain like
-               WebhookWise, a scorer, anything speaking the tiny contract)
+               hookjudge, a scorer, anything speaking the tiny contract)
                and apply its verdict/enrichment
 
 The pipeline ORDER is config, so "dedup on the raw title, then let the brain

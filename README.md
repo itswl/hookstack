@@ -24,14 +24,16 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 The split is the point: a brain that renders Feishu cards has to know Feishu's
 card schema, then WeCom's, then DingTalk's. That work belongs to the pipe, and
 moving it there is what lets a brain be replaced — or compared against another
-one — without touching either edge. WebhookWise is the other brain, and it
-stays comprehensive; hookjudge's minimalism is the contrast, not a criticism.
+one — without touching either edge. hookjudge is deliberately the smallest
+brain that can hold up its end of that bargain.
 
-hookprobe serves that comprehensive brain: when WebhookWise wants a deep
-analysis it used to call a full OpenClaw gateway, and now it calls the
-investigator — same HTTP contract, one unattended read-only agent session per
-alert, and none of the gateway around it. It is not in the demo flow above
-because it needs a real model key to be worth starting.
+hookprobe answers a different question than the judge: not "does this deserve
+attention" but "what actually happened". One unattended read-only agent
+session per alert, with none of the gateway product usually wrapped around
+that capability — it speaks the OpenClaw trigger/poll dialect, so anything
+that already integrates such a gateway as an analysis backend can switch by
+changing a URL. In this stack it is opt-in (see STACK.md): it needs a real
+model key to be worth starting.
 
 Each service has its own gate, its own Dockerfile and its own CI workflow, so a
 change to one does not queue the other's jobs.

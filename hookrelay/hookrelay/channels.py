@@ -199,13 +199,12 @@ def build_generic(channel: Channel, message: dict[str, Any], now: float) -> Buil
 
     normalized (default): hookrelay's event summary.
     payload: raw — the ORIGINAL inbound payload, verbatim in content. This is
-    what makes hookrelay a TRANSPARENT edge: point the url at WebhookWise's
-    /v1/webhook/{source} and the brain receives exactly what the monitoring
-    system sent, unchanged, with hookrelay's ledger in between.
+    what makes hookrelay a TRANSPARENT edge: point the url at your platform's
+    ingest and the brain receives exactly what the monitoring system sent, unchanged, with hookrelay's ledger in between.
 
     The signature covers EXACTLY the bytes returned, and the header NAME is
     configurable (signature_header) so hookrelay can speak a receiver's
-    dialect — X-Webhook-Signature feeds WebhookWise's ingest directly.
+    dialect — X-Webhook-Signature for a receiver that expects that name.
     """
     processed = _processed(channel, message)
     if processed is not None:

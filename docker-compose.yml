@@ -10,7 +10,7 @@
 #           /hook/alertmanager
 #
 # Production does NOT use this file — see deploy/docker-compose.prod.yml, which
-# runs the pipe alone, bound to loopback, on WebhookWise's network.
+# runs the pipe alone, bound to loopback, on the network of the platform it feeds.
 
 name: hookstack
 

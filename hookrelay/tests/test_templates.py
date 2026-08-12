@@ -256,7 +256,7 @@ def test_any_of_selector_claims_either_variant():
 
 
 def test_a_real_ecosystem_spec_is_expressible():
-    """The migration test: WebhookWise's aws_health adapter, written as a pipe
+    """The migration test: a platform's aws_health adapter, written as a pipe
     template. Its identity choice (eventTypeCode, NOT eventArn — the arn is
     per-occurrence and would defeat dedup) survives the move."""
     cfg = Config.from_dict(

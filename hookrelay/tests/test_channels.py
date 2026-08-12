@@ -71,7 +71,7 @@ def test_generic_forwards_the_normalized_event_signed(cfg):
 
 def test_foreign_receiver_keeps_the_body_only_form(cfg):
     """A receiver with its own dialect (custom signature header — e.g.
-    WebhookWise's X-Webhook-Signature) must get exactly what it verifies:
+    an X-Webhook-Signature receiver) must get exactly what it verifies:
     body-only, no timestamp we invented for it."""
     from hookrelay.config import Channel
 

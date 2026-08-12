@@ -94,14 +94,14 @@ async def test_the_ledger_gathers_both_brains_under_one_alert(store):
         store,
         cfg,
         cfg.sources["lite-notify"],
-        _return_payload(brain="ww-lite", importance="medium", summary="规则判定:金额阈值", correlation=correlation),
+        _return_payload(brain="brain-lite", importance="medium", summary="规则判定:金额阈值", correlation=correlation),
         now=1000.4,
     )
     await handle_hook(
         store,
         cfg,
         cfg.sources["ww-notify"],
-        _return_payload(brain="webhookwise", importance="high", summary="AI:疑似批量刷单", correlation=correlation),
+        _return_payload(brain="brain-full", importance="high", summary="AI:疑似批量刷单", correlation=correlation),
         now=1047.0,
     )
 
@@ -112,10 +112,10 @@ async def test_the_ledger_gathers_both_brains_under_one_alert(store):
 
     # Both readings, side by side, with how long each took.
     by_brain = {r["fields"]["brain"]: r for r in trip["returns"]}
-    assert set(by_brain) == {"ww-lite", "webhookwise"}
-    assert by_brain["ww-lite"]["level"] == "medium" and by_brain["ww-lite"]["latency_seconds"] == 0.4
-    assert by_brain["webhookwise"]["level"] == "high" and by_brain["webhookwise"]["latency_seconds"] == 47.0
-    assert "刷单" in by_brain["webhookwise"]["body"]
+    assert set(by_brain) == {"brain-lite", "brain-full"}
+    assert by_brain["brain-lite"]["level"] == "medium" and by_brain["brain-lite"]["latency_seconds"] == 0.4
+    assert by_brain["brain-full"]["level"] == "high" and by_brain["brain-full"]["latency_seconds"] == 47.0
+    assert "刷单" in by_brain["brain-full"]["body"]
 
 
 async def test_the_group_assembles_from_either_end(store):
@@ -128,7 +128,7 @@ async def test_the_group_assembles_from_either_end(store):
         store,
         cfg,
         cfg.sources["ww-notify"],
-        _return_payload(brain="webhookwise", importance="high", summary="s", correlation=correlation),
+        _return_payload(brain="brain-full", importance="high", summary="s", correlation=correlation),
         now=1047.0,
     )
 

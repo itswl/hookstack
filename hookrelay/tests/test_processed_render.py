@@ -22,7 +22,7 @@ RESULT = {
         "alert_name": "示例充值超限告警",
         "source": "grafana",
         "importance": "high",
-        "brain": "webhookwise",
+        "brain": "brain-full",
         "correlation_id": "hr-86",
         "timestamp": "2026-08-07 10:32:50",
         "is_recovery": False,
@@ -165,7 +165,7 @@ async def test_a_non_object_payload_fails_into_the_ledger():
 
 
 def test_missing_optional_blocks_render_without_holes():
-    """Brains differ: ww-lite has no impact analysis and no KB. Its result must
+    """Brains differ: a lite brain has no impact analysis and no KB. Its result must
     still produce a clean card, not one with empty sections."""
     lean = {"meta": {"alert_name": "磁盘将满", "importance": "medium", "source": "lite"}, "analysis": {"summary": "s"}}
     _url, payload, _headers = build_request(_channel("feishu"), _message(lean), now=0.0)
