@@ -35,7 +35,18 @@ class FakeEngine:
         delay: float = 0.0,
     ) -> None:
         self.result = result or EngineResult(
-            text='{"summary": "ok"}', message_count=3, cost_usd=0.5, session_id="sdk-session-1"
+            text='{"summary": "ok"}',
+            message_count=3,
+            cost_usd=0.5,
+            session_id="sdk-session-1",
+            usage={
+                "input_tokens": 12,
+                "output_tokens": 34,
+                "cache_read_input_tokens": 56,
+                "cache_creation_input_tokens": 7,
+            },
+            model_usage={"claude-opus-5": {"inputTokens": 12}},
+            duration_ms=1234,
         )
         self.exc = exc
         self.delay = delay

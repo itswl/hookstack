@@ -33,13 +33,16 @@ _UI_PAGE = Path(__file__).with_name("ui.html")
 
 def _summary(run: Run) -> dict[str, Any]:
     title = (run.turns[0]["message"] if run.turns else run.current_message) or ""
+    turn_costs = [t.get("cost_usd") for t in run.turns if t.get("cost_usd")]
     return {
         "session_key": run.session_key,
         "status": run.status,
         "created_at": run.created_at,
         "finished_at": run.finished_at,
         "turn_count": len(run.turns) + (0 if run.finished else 1),
-        "cost_usd": run.cost_usd,
+        # The session's whole bill, not the last turn's.
+        "cost_usd": sum(turn_costs) if turn_costs else run.cost_usd,
+        "model": run.model,
         "engine_session_id": run.engine_session_id,
         "title": title[:120],
     }
