@@ -127,15 +127,55 @@ def test_process_events_land_on_the_turn(tmp_path) -> None:
             events=[
                 {"type": "tool_use", "name": "Bash", "detail": "kubectl get pods -n prod"},
                 {"type": "text", "text": "checking pod states"},
+                {
+                    "type": "tool_use",
+                    "name": "TodoWrite",
+                    "detail": "",
+                    "todos": [{"content": "check nodes", "status": "pending"}],
+                },
             ]
         )
         service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
         service.start({"message": "analyze", "sessionKey": "hook:events"})
         done = await _wait_finished(service, "hook:events")
         events = done.turns[0]["events"]
-        assert [e["type"] for e in events] == ["tool_use", "text"]
+        assert [e["type"] for e in events] == ["tool_use", "text", "tool_use"]
         assert events[0]["name"] == "Bash"
         assert events[0]["ts"] > 0  # service stamps arrival time
+        assert events[2]["todos"] == [{"content": "check nodes", "status": "pending"}]
+
+    asyncio.run(scenario())
+
+
+def test_stop_cancels_the_running_turn(tmp_path) -> None:
+    from tests.helpers import GatedEngine
+
+    async def scenario() -> None:
+        engine = GatedEngine()  # never released — only stop can end this turn
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.start({"message": "analyze", "sessionKey": "hook:stopme"})
+        await asyncio.sleep(0.05)  # let the task actually start
+        service.stop("hook:stopme")
+        done = await _wait_finished(service, "hook:stopme")
+        assert done.status == FAILED
+        assert done.error == "stopped by operator"
+        report = json.loads(done.text)
+        assert "stopped by operator" in report["summary"]
+
+    asyncio.run(scenario())
+
+
+def test_stop_guards(tmp_path) -> None:
+    from hookprobe.service import NoTurnRunningError
+
+    async def scenario() -> None:
+        service = RunService(make_settings(tmp_path), FakeEngine(), RunStore(tmp_path / "results"))
+        with pytest.raises(LookupError):
+            service.stop("hook:never")
+        service.start({"message": "analyze", "sessionKey": "hook:done"})
+        await _wait_finished(service, "hook:done")
+        with pytest.raises(NoTurnRunningError):
+            service.stop("hook:done")
 
     asyncio.run(scenario())
 

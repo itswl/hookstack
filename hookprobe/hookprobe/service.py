@@ -39,6 +39,10 @@ class RunBusyError(RuntimeError):
     """The session already has a turn in flight."""
 
 
+class NoTurnRunningError(RuntimeError):
+    """Stop was asked for, but nothing is in flight."""
+
+
 class NotResumableError(ValueError):
     """The run left no engine session behind to resume."""
 
@@ -82,6 +86,8 @@ class RunService:
         self._store = store
         self._semaphore = asyncio.Semaphore(settings.max_concurrent)
         self._tasks: set[asyncio.Task[None]] = set()
+        self._running: dict[str, asyncio.Task[None]] = {}
+        self._stop_requested: set[str] = set()
 
     def start(self, payload: dict[str, Any]) -> Run:
         """Idempotent per sessionKey: re-triggering an existing run returns it."""
@@ -135,11 +141,31 @@ class RunService:
         self._spawn(run, message, timeout_s, resume=run.engine_session_id)
         return run
 
+    def stop(self, session_key: str) -> Run:
+        """Cancel the in-flight turn; it finishes as a failed turn, not a hang."""
+        run = self._store.get(session_key)
+        if run is None:
+            raise LookupError("session not found")
+        task = self._running.get(session_key)
+        if run.finished or task is None:
+            raise NoTurnRunningError("no turn is in flight for this session")
+        self._stop_requested.add(session_key)
+        task.cancel()
+        return run
+
     def _spawn(self, run: Run, message: str, timeout_s: int, *, resume: str | None) -> None:
         run.events = []
+        self._stop_requested.discard(run.session_key)
         task = asyncio.create_task(self._execute(run, message, timeout_s, resume=resume))
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._running[run.session_key] = task
+
+        def _done(t: asyncio.Task[None], key: str = run.session_key) -> None:
+            self._tasks.discard(t)
+            if self._running.get(key) is t:
+                del self._running[key]
+
+        task.add_done_callback(_done)
 
     def get(self, session_key: str) -> Run | None:
         return self._store.get(session_key)
@@ -180,6 +206,12 @@ class RunService:
             self._fail(run, f"timed out after {timeout_s}s")
             return
         except asyncio.CancelledError:
+            if run.session_key in self._stop_requested:
+                # Operator hit Stop: cancellation IS the intended outcome, so
+                # swallow it and let the run settle as an ordinary failure.
+                self._stop_requested.discard(run.session_key)
+                self._fail(run, "stopped by operator")
+                return
             self._fail(run, "cancelled during shutdown")
             raise
         except Exception as exc:  # noqa: BLE001 — the run must always reach a final state
