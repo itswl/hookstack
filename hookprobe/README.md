@@ -104,7 +104,11 @@ Inside hookstack the investigator is wired into the alert flow itself: the
 pipe's escalation routes copy every front-door event to `/hooks/event`, the
 probe decides by level whether an investigation is worth paying for, and the
 finished report POSTs back to the pipe's `probe-notify` door — dressed by the
-pipe and delivered to the same channels as the verdict. The pipe stays
+pipe and delivered to the same channels as the verdict. Escalated
+investigations also open the case files first: the task brief tells the agent
+to grep `/data/results/` for earlier investigations of the same alert and
+report how the last verdict held up — a recurrence gets "first seen 101
+minutes ago, verdict matched, the P1 was not acted on", not a fresh start. The pipe stays
 content-blind; the judge is untouched; failure still completes the loop (a
 stopped or crashed investigation reports itself). The plain demo compose
 points the escalation at the sink's `/probe-standin` so the shape is visible
