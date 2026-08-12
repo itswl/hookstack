@@ -40,6 +40,8 @@
   .event summary { list-style: none; cursor: pointer; padding: 10px 14px;
                    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .event summary::-webkit-details-marker { display: none; }
+  .wire summary { cursor: pointer; color: #8b95a7; font-size: 12px; margin-top: 6px; }
+  .wire[open] summary { color: #aeb7c4; }
   .event[open] summary { border-bottom: 1px solid var(--border-soft); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
   .dot.high, .dot.critical { background: var(--bad); }
@@ -361,12 +363,27 @@
       });
   });
 
+  function prettyBody(s) {
+    try { return JSON.stringify(JSON.parse(s), null, 2); } catch (_e) { return s; }
+  }
+
   function renderRoundTrip(box, trip) {
     var origin = trip.origin || {};
     var returns = trip.returns || [];
     var fan = (origin.deliveries || []).map(function (d) {
       return '<span class="chip ' + esc(d.status) + '">' + esc(d.channel) + " · " + esc(d.status) + "</span>";
     }).join(" ");
+    // The forensic record, both directions: the payload exactly as received,
+    // and per channel the exact body that left the socket. Collapsed — the
+    // chips answer "did it go"; these answer "what exactly went".
+    var received = origin.payload == null ? "" :
+      '<details class="wire"><summary>收到的原始载荷</summary>' +
+      '<pre class="trace">' + esc(JSON.stringify(origin.payload, null, 2)) + "</pre></details>";
+    var sentBodies = (origin.deliveries || []).filter(function (d) { return d.sent_body; })
+      .map(function (d) {
+        return '<details class="wire"><summary>' + esc(d.channel) + " · 发出的 body</summary>" +
+          '<pre class="trace">' + esc(prettyBody(d.sent_body)) + "</pre></details>";
+      }).join("");
     var brains = returns.length
       ? returns.map(function (r) {
           var who = (r.fields && (r.fields.brain || r.source)) || r.source;
@@ -383,6 +400,7 @@
         }).join("")
       : '<div class="hint">还没有处理系统回传(它们要回引 correlation id 才能归到这条下面)</div>';
     box.innerHTML = '<h4>原始事件 #' + esc(origin.id) + " · 扇出到</h4>" + (fan || '<span class="hint">未投递</span>') +
+      received + sentBodies +
       "<h4 style=\"margin-top:12px\">各系统的加工(" + returns.length + ")</h4>" +
       '<div class="brains">' + brains + "</div>";
   }
