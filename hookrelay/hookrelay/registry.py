@@ -68,7 +68,8 @@ def load_plugins(directory: str | Path) -> list[str]:
         return loaded
     for path in sorted(root.glob("*.py")):
         spec = importlib.util.spec_from_file_location(f"hookrelay_plugin_{path.stem}", path)
-        assert spec is not None and spec.loader is not None
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load plugin {path}")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         loaded.append(path.stem)
