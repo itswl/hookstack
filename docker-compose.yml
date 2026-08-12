@@ -25,6 +25,11 @@ services:
       HOOKRELAY_CONFIG: /etc/hookrelay/config.yaml
       HOOKRELAY_WORKER_INTERVAL: "0.5"
       HOOKRELAY_PLUGINS: /data/plugins
+      # Where the escalation route delivers. Default: the sink wearing a
+      # /probe-standin path, so the plain stack shows the escalation shape
+      # without a model key. With `--profile probe`, set in .env:
+      #   HOOKPROBE_EVENT_URL=http://hookprobe:8088/hooks/event
+      HOOKPROBE_EVENT_URL: ${HOOKPROBE_EVENT_URL:-http://sink:9000/probe-standin}
     volumes:
       # Checked in and mounted read-only, so `up` needs no setup step. Point
       # HOOKRELAY_CONFIG at /data/config.yaml to use your own instead.
@@ -93,6 +98,31 @@ services:
       - ./hookjudge/examples:/examples:ro
     restart: unless-stopped
 
+  # The investigator is opt-in: it needs a real model key to be worth
+  # starting, so the plain `up` stays hermetic. Join it to the family with:
+  #   ANTHROPIC_API_KEY=sk-ant-... docker compose --profile probe up -d --build
+  # High/critical alerts then ALSO get a deep read-only investigation, whose
+  # report returns through the pipe's probe-notify door to the same channels.
+  hookprobe:
+    build: ./hookprobe
+    container_name: hs-hookprobe
+    profiles: ["probe"]
+    environment:
+      HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-}
+      HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+    volumes:
+      - probe-data:/data
+    ports:
+      - "127.0.0.1:8088:8088"
+    restart: unless-stopped
+    depends_on:
+      - hookrelay
+
 volumes:
   relay-data:
   judge-data:
+  probe-data:
