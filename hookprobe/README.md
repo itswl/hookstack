@@ -177,12 +177,19 @@ are kept on the run record (`previous_texts`).
 
 ## Run it
 
-From the repo root (the stack's demo compose deliberately does not include
-this service — it needs a real model key to be worth starting):
+Three composes, three shapes: the repo-root stack compose runs the demo
+family and includes this service behind `--profile probe`;
+`deploy/docker-compose.yml` runs the investigator standalone;
+`deploy/docker-compose.prod.yml` is the production shape — joined to the
+docker network of the platform it serves, admin port on loopback only,
+state bind-mounted at the deployment root for backup and review.
+
+Standalone, from the repo root:
 
 ```bash
 printf 'HOOKPROBE_TOKEN=change-me\nANTHROPIC_API_KEY=sk-ant-...\n' > .env
-docker compose -f hookprobe/deploy/docker-compose.yml up -d --build
+docker compose --env-file .env \
+  -f hookprobe/deploy/docker-compose.yml up -d --build
 curl -s localhost:8088/healthz
 
 # Smoke test one run end to end:
