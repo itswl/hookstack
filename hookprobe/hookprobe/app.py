@@ -1,6 +1,7 @@
 """HTTP surface: the OpenClaw-compatible contract WebhookWise already speaks.
 
 POST /hooks/agent               -> {"runId": ...}                  (trigger)
+POST /hooks/event               -> the pipe's escalation door      (family)
 GET  /sessions/{key}/final      -> 200 isFinal:true / 202 / 404    (poll)
 POST /sessions/{key}/continue   -> follow-up turn, same session    (explore)
 GET  /v1/runs                   -> session list, newest first      (UI)
@@ -16,18 +17,32 @@ confirming poll instead of running its stability heuristics.
 from __future__ import annotations
 
 import hmac
+import json
 import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from hookprobe import __version__
 from hookprobe.runs import Run
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
+from hookprobe.wire import verify_timestamped
+
+_EVENT_MESSAGE = """针对下面这条告警做一次只读深度调查：定位根因、评估影响、给出按优先级排序的处置建议。\
+最终输出一份简明的中文 Markdown 报告，结论先行；报告第一段是一句话结论，供通知卡片直接引用。
+
+告警来源: {source}
+级别: {level}
+标题: {title}
+正文: {body}
+附加字段:
+```json
+{fields}
+```"""
 
 _MEMORY_MAX_BYTES = 256 * 1024
 
@@ -117,6 +132,56 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
         return asdict(run)
+
+    # The family's event door: hookrelay's to-probe channel (generic,
+    # payload: normalized) delivers judged-worthy alerts here. The pipe stays
+    # content-blind, so the escalation judgement lives on this side: only
+    # levels in escalate_levels start a paid investigation, everything else
+    # is acknowledged and skipped. Idempotent per (source, event_id) — a storm
+    # of restatements funds one investigation, not N.
+    @app.post("/hooks/event")
+    async def event_door(request: Request) -> dict[str, Any]:
+        raw = await request.body()
+        if not verify_timestamped(
+            settings.event_secret,
+            raw,
+            request.headers.get("X-Hook-Signature"),
+            request.headers.get("X-Hook-Timestamp"),
+        ):
+            raise HTTPException(status_code=401, detail="bad signature")
+        try:
+            event = json.loads(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="body is not JSON") from exc
+        if not isinstance(event, dict):
+            raise HTTPException(status_code=400, detail="body is not an object")
+
+        level = str(event.get("level") or "").lower()
+        title = str(event.get("title") or "").strip()
+        if level not in settings.escalate_levels:
+            return {"status": "skipped", "reason": f"level {level or 'unknown'} below escalation bar"}
+        if not title:
+            raise HTTPException(status_code=400, detail="event has no title")
+
+        source = str(event.get("source") or "unknown")
+        event_id = event.get("event_id")
+        session_key = f"probe:{source}:{event_id if event_id is not None else title[:80]}"
+        message = _EVENT_MESSAGE.format(
+            source=source,
+            level=level,
+            title=title,
+            body=str(event.get("body") or "")[:4000],
+            fields=json.dumps(event.get("fields") or {}, ensure_ascii=False, indent=1),
+        )
+        run = service.start(
+            {
+                "message": message,
+                "sessionKey": session_key,
+                "_meta": {"title": title, "level": level, "source": source, "event_id": event_id},
+            },
+            origin="relay",
+        )
+        return {"status": "accepted", "sessionKey": run.session_key, "runId": run.run_id}
 
     @app.post("/sessions/{session_key}/stop", dependencies=[Depends(require_token)])
     async def stop_session(session_key: str) -> dict[str, Any]:
