@@ -27,6 +27,8 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "budget_usd": 0.0,
         "budget_window_hours": 24.0,
         "retention_days": 0,
+        "alarm_url": "",
+        "alarm_min_interval_seconds": 600,
         "host": "127.0.0.1",
         "port": 0,
     }

@@ -61,6 +61,9 @@ services:
       # Case files and transcripts older than this are pruned daily. 0 keeps
       # everything — the case files are the agent's episodic memory.
       HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
+      # Direct self-alarm when report returns exhaust their retries:
+      HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
+      HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
       # Set BOTH in production — this network is shared with the platform.
       # Unsigned, the event door takes anyone's escalations and anyone can
       # impersonate the investigator's reports. One line of .env each.

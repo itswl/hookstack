@@ -366,6 +366,49 @@ def test_refusal_reports_back_through_the_loop(tmp_path) -> None:
     assert "预算熔断" in payload["report"]["summary"]
 
 
+def test_failed_return_fires_the_self_alarm(tmp_path) -> None:
+    """When the pipe refuses the report, the news travels around it."""
+    _Capture.received = []
+    alarm_server = ThreadingHTTPServer(("127.0.0.1", 0), _Capture)
+    threading.Thread(target=alarm_server.serve_forever, daemon=True).start()
+    alarm_url = f"http://127.0.0.1:{alarm_server.server_port}/bot"
+
+    async def scenario() -> None:
+        settings = make_settings(
+            tmp_path,
+            return_url="http://127.0.0.1:9/hook/probe-notify",  # nothing listens here
+            alarm_url=alarm_url,
+        )
+        service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+        service._return_delays = (0.0, 0.0, 0.0)  # collapse the backoff for the test
+        service.start(
+            {"message": "investigate", "sessionKey": "probe:inbound:41", "_meta": {"title": "T", "level": "high"}},
+            origin="relay",
+        )
+        run = None
+        for _ in range(300):
+            run = service.get("probe:inbound:41")
+            if run is not None and run.return_status:
+                break
+            await asyncio.sleep(0.01)
+        assert run is not None and run.return_status.startswith("failed")
+        for _ in range(100):
+            if _Capture.received:
+                break
+            await asyncio.sleep(0.01)
+        assert service.return_failure_count() == 1
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        alarm_server.shutdown()
+
+    assert len(_Capture.received) == 1
+    alarm = json.loads(_Capture.received[0]["body"])
+    assert "调查报告回传失败" in alarm["content"]["text"]
+    assert "probe:inbound:41" in alarm["content"]["text"]
+
+
 def test_api_born_runs_do_not_report_back(tmp_path) -> None:
     _Capture.received = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Capture)

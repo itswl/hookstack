@@ -71,6 +71,10 @@ services:
       HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_AI_MODEL:-}
       HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:-0.00015}
       HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:-0.0006}
+      # Direct self-alarm when a return goes dead — the pipe is the broken
+      # link at that moment, so this posts straight to a bot/collector URL.
+      HOOKJUDGE_ALARM_URL: ${HOOKJUDGE_ALARM_URL:-}
+      HOOKJUDGE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKJUDGE_ALARM_MIN_INTERVAL_SECONDS:-}
     volumes:
       - judge-data:/data
     ports:
@@ -92,6 +96,9 @@ services:
       # Case files and transcripts older than this are pruned daily. 0 keeps
       # everything — the case files are the agent's episodic memory.
       HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
+      # Direct self-alarm when report returns exhaust their retries:
+      HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
+      HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
       # Wire signatures for both directions of the family loop. Empty means
       # unsigned doors — fine on this file's own private network, wrong on a
       # shared one. Each is one line of .env; set both when in doubt.
