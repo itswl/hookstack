@@ -1,10 +1,13 @@
 # Running the whole family
 
 The pipe and the brain, plus a downstream you can read and a stub model, in
-one command.
+one command. Every step and every expected output below was re-verified from a
+clean slate — no images, no volumes, no ledger history — on a plain local
+Docker before this page was last rewritten.
 
 ```bash
-docker compose up -d --build
+docker compose down -v --remove-orphans   # start from nothing (deletes ledgers)
+docker compose up -d --build              # relay :8100 · judge :8200 · sink · stub
 ```
 
 ```
@@ -28,7 +31,7 @@ docker compose --profile probe up -d --build
 
 | where | what |
 | --- | --- |
-| http://127.0.0.1:8100/ | the pipe's ledger page |
+| http://127.0.0.1:8100/ | the pipe's ledger page (queued / delivered / dead letters, per-event decision chains) |
 | http://127.0.0.1:8200/ | the brain's ledger page (judged / paid ratio / cost / return failures) |
 | `docker compose logs -f sink` | what an operator would actually have received |
 
@@ -68,6 +71,10 @@ fire alertmanager '{"status":"resolved","commonLabels":{"alertname":"DiskWillFil
   "annotations":{"summary":"k8s 节点磁盘使用率 93%","description":"已回落至 41%"}}]}'
 ```
 
+Every `fire` answers with its routing trace — the first one reads
+`"outcome":"routed","channels":["to-probe","to-judge"]`: copied to the
+investigator's door and sent to the brain, in one decision.
+
 `curl -s http://127.0.0.1:8200/status` then shows:
 
 ```
@@ -80,8 +87,12 @@ routes {'ai': 2, 'reuse': 1, 'recovery': 1}
 #4 RECOVERY  recovery  high      $0         k8s 节点磁盘使用率 93%   <- inherits #3's high
 ```
 
-One judgement reaches every downstream in its own dialect — the sink logs show
-the same verdict as a Feishu card and as DingTalk markdown.
+And the pipe's own ledger closes the books: **16 delivered, 0 queued, 0 dead**
+— per front-door event one copy to `to-judge` and one to `to-probe` (4 + 4),
+per judgement one Feishu card and one DingTalk message (4 + 4). One judgement
+reaches every downstream in its own dialect — the sink logs show the same
+verdict rendered both ways, plus the four normalized events that landed on
+`/probe-standin`.
 
 ## Checking it
 
@@ -90,10 +101,10 @@ bash scripts/stack-smoke.sh          # build, drive every route, assert, tear do
 KEEP=1 bash scripts/stack-smoke.sh   # leave it up to poke at
 ```
 
-Eighteen assertions, run in CI by `ci-stack`. They exist because neither
+Nineteen assertions, run in CI by `ci-stack`. They exist because neither
 service's own gate can see the stack: each stays green while the pipe cannot
-reach the brain, a compose path points at a directory that moved, or a stand-in
-starts with nothing wired to it.
+reach the brain, a compose path points at a directory that moved, or a
+stand-in starts with nothing wired to it.
 
 ## The two stand-ins
 
@@ -101,7 +112,7 @@ Neither ships. `hookrelay/deploy/docker-compose.prod.yml` has no trace of them.
 
 | | replaces | lives with |
 | --- | --- | --- |
-| `sink` | the Feishu/DingTalk/WeCom bots | `hookrelay/examples/sink.py` — it stands in for the pipe's downstreams |
+| `sink` | the Feishu/DingTalk/WeCom bots — and, on `/probe-standin`, the investigator | `hookrelay/examples/sink.py` — it stands in for the pipe's downstreams |
 | `stub-ai` | the model provider | `hookjudge/examples/stub_ai.py` — it stands in for the brain's model |
 
 Both are threaded, which is not a detail: the pipe delivers to channels in
@@ -143,7 +154,7 @@ not split the firing/resolved pair into two conditions.
 
 ```bash
 docker compose down          # keep the ledgers
-docker compose down -v       # delete them too
+docker compose down -v       # delete them too — the next `up` starts from nothing
 ```
 
 ## Known gaps
