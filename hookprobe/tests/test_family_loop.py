@@ -146,6 +146,85 @@ def test_relay_born_runs_report_back(tmp_path) -> None:
     )
 
 
+# -- restart accounting ------------------------------------------------------
+
+
+def test_spawn_checkpoints_the_run_to_disk(tmp_path) -> None:
+    """The stub is written before the engine starts — that is the crash record."""
+    from tests.helpers import GatedEngine
+
+    results = tmp_path / "results"
+
+    async def scenario() -> None:
+        engine = GatedEngine()
+        service = RunService(make_settings(tmp_path), engine, RunStore(results))
+        service.start({"message": "m", "sessionKey": "probe:x:1"})
+        for _ in range(100):
+            if (results / "probe:x:1.json").exists():
+                break
+            await asyncio.sleep(0.01)
+        data = json.loads((results / "probe:x:1.json").read_text())
+        assert data["status"] == "running"
+        engine.release.set()
+        for _ in range(300):
+            run = service.get("probe:x:1")
+            if run is not None and run.finished:
+                break
+            await asyncio.sleep(0.01)
+        assert json.loads((results / "probe:x:1.json").read_text())["status"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_restart_sweep_reports_orphans_through_the_loop(tmp_path) -> None:
+    _Capture.received = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Capture)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}/hook/probe-notify"
+    results = tmp_path / "results"
+
+    # What the disk looks like after a crash: a checkpointed run, no process.
+    from hookprobe.runs import Run as _Run
+
+    orphan = _Run(session_key="probe:inbound:31", run_id="r1", origin="relay", current_message="investigate")
+    orphan.meta = {"title": "支付网关 5xx", "level": "high", "source": "inbound", "event_id": 31}
+    RunStore(results).checkpoint(orphan)
+
+    async def next_boot() -> None:
+        settings = make_settings(tmp_path, return_url=url, return_secret="ret-secret")
+        service = RunService(settings, FakeEngine(), RunStore(results))
+        assert service.sweep_orphans() == 1
+        run = None
+        for _ in range(300):
+            run = service.get("probe:inbound:31")
+            if run is not None and run.return_status:
+                break
+            await asyncio.sleep(0.01)
+        assert run is not None and run.status == "failed"
+        assert run.return_status == "sent"
+
+    try:
+        asyncio.run(next_boot())
+    finally:
+        server.shutdown()
+
+    payload = json.loads(_Capture.received[0]["body"])
+    assert payload["meta"]["status"] == "failed"
+    assert payload["meta"]["alert_name"] == "支付网关 5xx · 调查报告"
+    assert "interrupted by a restart" in payload["report"]["summary"]
+
+
+def test_app_startup_sweeps_orphans(tmp_path) -> None:
+    from hookprobe.runs import Run as _Run
+
+    orphan = _Run(session_key="probe:x:9", run_id="r9", current_message="m")
+    RunStore(tmp_path / "results").checkpoint(orphan)
+    with make_client(tmp_path, FakeEngine()) as client:
+        detail = client.get("/v1/runs/probe:x:9", headers=AUTH).json()
+        assert detail["status"] == "failed"
+        assert "restart" in detail["error"]
+
+
 # -- the budget breaker ------------------------------------------------------
 
 

@@ -50,6 +50,9 @@ services:
       # Window spend >= budget refuses new escalations (report card says why):
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
       HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
+      # Case files and transcripts older than this are pruned daily. 0 keeps
+      # everything — the case files are the agent's episodic memory.
+      HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
     ports:
       # Open so remote callers can reach the contract; change to
       # "127.0.0.1:8088:8088" when callers are local or ssh-tunneled.

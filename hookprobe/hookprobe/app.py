@@ -16,9 +16,11 @@ of running stability heuristics against a moving answer.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import re
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from hookprobe import __version__
+from hookprobe.retention import prune
 from hookprobe.runs import Run
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
@@ -85,7 +88,32 @@ def _summary(run: Run) -> dict[str, Any]:
 
 
 def create_app(settings: Settings, service: RunService) -> FastAPI:
-    app = FastAPI(title="hookprobe", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        # A restart must not orphan the loop: runs a previous process left
+        # mid-flight settle as failures that report themselves.
+        service.sweep_orphans()
+
+        async def retention_loop() -> None:
+            while True:
+                await asyncio.to_thread(prune, settings.workdir, Path.home(), settings.retention_days)
+                await asyncio.sleep(86400)
+
+        pruner = asyncio.create_task(retention_loop()) if settings.retention_days > 0 else None
+        try:
+            yield
+        finally:
+            if pruner is not None:
+                pruner.cancel()
+
+    app = FastAPI(
+        title="hookprobe",
+        version=__version__,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        lifespan=lifespan,
+    )
 
     def require_token(authorization: str | None = Header(default=None)) -> None:
         if not settings.token:
@@ -304,6 +332,15 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
-        return {"status": "ok", "version": __version__, "active_runs": service.active_count()}
+        running, queued = service.turn_counts()
+        return {
+            "status": "ok",
+            "version": __version__,
+            "active_runs": service.active_count(),
+            # Slot arithmetic: `running` holds a semaphore slot; `queued` is
+            # started but waiting for one. A storm shows up here first.
+            "running_turns": running,
+            "queued_turns": queued,
+        }
 
     return app

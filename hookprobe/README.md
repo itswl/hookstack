@@ -81,6 +81,9 @@ what runs.
 | `HOOKPROBE_RETURN_URL` | *(unset = no return)* | Where event-door investigations report back — the pipe's `probe-notify` front door |
 | `HOOKPROBE_RETURN_SECRET` | *(empty = unsigned)* | Signs the return delivery (timestamped HMAC) |
 | `HOOKPROBE_ESCALATE_LEVELS` | `critical,high` | The only content judgement the investigator makes: which levels are worth a paid run |
+| `HOOKPROBE_BUDGET_USD` | `0` *(off)* | Window spend ceiling for the event door; refusals report themselves. `GET /v1/budget` shows the arithmetic |
+| `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24` | The sliding window the budget is measured over |
+| `HOOKPROBE_RETENTION_DAYS` | `0` *(keep all)* | Case files and transcripts older than this are pruned daily; skills and memory are never touched |
 | `HOOKPROBE_HOST` / `HOOKPROBE_PORT` | `0.0.0.0` / `8088` | Bind address |
 | `ANTHROPIC_API_KEY` | — | Or `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` for a relay |
 
@@ -122,7 +125,9 @@ never gated, and `GET /v1/budget` shows the window's arithmetic. The figure
 counts recorded turns only, so in-flight runs can overshoot by at most
 `max_concurrent` investigations: it is a brake, not an invoice. The pipe stays
 content-blind; the judge is untouched; failure still completes the loop (a
-stopped or crashed investigation reports itself). The plain demo compose
+stopped, crashed, budget-refused — or restart-orphaned — investigation
+reports itself: runs are checkpointed at spawn, and the next boot sweeps
+whatever a dead process left mid-flight into failure reports). The plain demo compose
 points the escalation at the sink's `/probe-standin` so the shape is visible
 without a model key; `--profile probe` (plus `HOOKPROBE_EVENT_URL` in `.env`)
 swaps in the real investigator. First live run of the loop: a "host CPU high"
