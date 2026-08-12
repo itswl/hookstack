@@ -87,16 +87,22 @@ def main() -> int:
         check("已恢复" in sink, "the recovery card says so in its headline")
         check("msgtype" in sink, "a second dialect was rendered from the same judgement")
 
-        # Four judgements dressed for two channels. More than eight means a
-        # delivery was retried, and a retry that the downstream already
-        # received is a duplicate alert to whoever is on call. The stand-in
-        # caused exactly this by being single-threaded while the pipe delivers
-        # to channels in parallel.
+        # Four judgements dressed for two channels (8), plus each front-door
+        # event copied once to the investigator's stand-in (4). More than
+        # twelve means a delivery was retried, and a retry that the downstream
+        # already received is a duplicate alert to whoever is on call. The
+        # stand-in caused exactly this by being single-threaded while the pipe
+        # delivers to channels in parallel.
         deliveries = sink.count("delivery on")
         check(
-            deliveries == 8,
+            deliveries == 12,
             "no downstream received the same alert twice",
-            f"expected 8 deliveries, saw {deliveries}",
+            f"expected 12 deliveries, saw {deliveries}",
+        )
+        check(
+            sink.count("delivery on /probe-standin") == 4,
+            "every front-door event was copied to the investigator's stand-in",
+            f"saw {sink.count('delivery on /probe-standin')}",
         )
 
     print()

@@ -36,12 +36,24 @@ class Settings:
     workdir: Path
     mcp_config: Path | None
 
+    # The family loop. event_secret verifies what the pipe delivers to
+    # /hooks/event; return_url is where finished investigations from that
+    # door report back (the pipe's probe-notify front door), signed with
+    # return_secret. escalate_levels is the only judgement the investigator
+    # makes about whether an event deserves a paid investigation — the pipe
+    # stays content-blind on purpose.
+    event_secret: str
+    return_url: str
+    return_secret: str
+    escalate_levels: frozenset[str]
+
     host: str
     port: int
 
     @classmethod
     def load(cls) -> Settings:
         mcp = os.environ.get("HOOKPROBE_MCP_CONFIG", "").strip()
+        levels = os.environ.get("HOOKPROBE_ESCALATE_LEVELS", "critical,high")
         return cls(
             token=os.environ.get("HOOKPROBE_TOKEN", ""),
             model=os.environ.get("HOOKPROBE_MODEL", "claude-opus-5"),
@@ -51,6 +63,10 @@ class Settings:
             max_timeout_seconds=max(1, _int("HOOKPROBE_MAX_TIMEOUT_SECONDS", 1800)),
             workdir=Path(os.environ.get("HOOKPROBE_WORKDIR", "/data")),
             mcp_config=Path(mcp) if mcp else None,
+            event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
+            return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
+            return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),
+            escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
             host=os.environ.get("HOOKPROBE_HOST", "0.0.0.0"),
             port=_int("HOOKPROBE_PORT", 8088),
         )

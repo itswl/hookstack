@@ -38,6 +38,14 @@ class Run:
     finished_at: float | None = None
     # Which model this session's turns are requested on.
     model: str = ""
+    # Where the run came from: "" (API/UI) or "relay" (the pipe's event door —
+    # these report back to the pipe when they finish).
+    origin: str = ""
+    # Outcome of the return delivery for relay-born runs: "", "sent", "failed: …".
+    return_status: str = ""
+    # What the event door knew about the alert (title/level/source/event_id) —
+    # echoed back to the pipe so its probe-notify source can dress the report.
+    meta: dict = field(default_factory=dict)
     # Set once the engine reports back; the handle for follow-up turns.
     engine_session_id: str | None = None
     # The message of the turn currently in flight (or the last one asked).
