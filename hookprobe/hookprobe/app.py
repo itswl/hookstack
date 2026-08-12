@@ -341,6 +341,8 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             # started but waiting for one. A storm shows up here first.
             "running_turns": running,
             "queued_turns": queued,
+            # Reports that never reached the pipe — alert on this going up.
+            "return_failures": service.return_failure_count(),
         }
 
     return app

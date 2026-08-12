@@ -27,6 +27,8 @@ def settings(**overrides: Any) -> Settings:
             worker_interval_seconds=0.01,
             reuse_window_seconds=3600,
             retention_days=30,
+            alarm_url="",
+            alarm_min_interval_seconds=600,
             ai_base_url="https://ai.example/v1",
             ai_api_key="k",
             ai_model="test-model",

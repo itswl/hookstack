@@ -139,6 +139,11 @@ class RunService:
         self._running: dict[str, asyncio.Task[None]] = {}
         self._stop_requested: set[str] = set()
         self._in_slot = 0
+        # Return-retry pacing, an instance attr so tests can collapse it.
+        self._return_delays: tuple[float, ...] = (0.0, 2.0, 5.0)
+        # Self-alarm throttle state (see _alarm_return_failure).
+        self._alarm_last_sent = 0.0
+        self._alarm_suppressed = 0
 
     def start(self, payload: dict[str, Any], *, origin: str = "") -> Run:
         """Idempotent per sessionKey: re-triggering an existing run returns it."""
@@ -293,6 +298,11 @@ class RunService:
         """(turns holding a slot, turns waiting for one)."""
         return self._in_slot, max(0, len(self._running) - self._in_slot)
 
+    def return_failure_count(self) -> int:
+        """Runs whose report never reached the pipe — the number an external
+        monitor should alert on if the self-alarm URL is not configured."""
+        return sum(1 for run in self._store.list_runs(limit=1000) if run.return_status.startswith("failed"))
+
     def _clamp_timeout(self, raw: Any) -> int:
         try:
             timeout_s = int(raw)
@@ -412,7 +422,7 @@ class RunService:
         ).encode()
 
         last_error = "unknown"
-        for attempt, delay in enumerate((0.0, 2.0, 5.0), start=1):
+        for attempt, delay in enumerate(self._return_delays, start=1):
             if delay:
                 await asyncio.sleep(delay)
             try:
@@ -430,6 +440,42 @@ class RunService:
             )
         run.return_status = f"failed: {last_error}"
         self._store.finish(run)
+        await self._alarm_return_failure(run, last_error)
+
+    async def _alarm_return_failure(self, run: Run, error: str) -> None:
+        """Who watches the watchman: the pipe is the broken link right now, so
+        the news travels around it — straight to a bot/collector URL. Rate
+        limited, the suppressed count folds into the next message, and it
+        never raises: an alarm failure must not become a delivery failure."""
+        if not self._settings.alarm_url:
+            return
+        now = time.time()
+        if now - self._alarm_last_sent < self._settings.alarm_min_interval_seconds:
+            self._alarm_suppressed += 1
+            return
+        held = self._alarm_suppressed
+        self._alarm_suppressed = 0
+        self._alarm_last_sent = now
+        text = f"[hookprobe] 调查报告回传失败\n会话: {run.session_key}\n原因: {error[:200]}"
+        if held:
+            text += f"\n(另有 {held} 条在静默窗口内被折叠)"
+        body = json.dumps({"msg_type": "text", "content": {"text": text}}, ensure_ascii=False).encode()
+        try:
+            await asyncio.to_thread(self._post_alarm, body)
+        except Exception:  # noqa: BLE001 — an alarm must never raise into delivery
+            self._alarm_last_sent = 0.0  # let the next failure try again
+
+    def _post_alarm(self, body: bytes) -> None:
+        import urllib.request
+
+        request = urllib.request.Request(
+            self._settings.alarm_url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5):  # noqa: S310 — operator URL  # nosec B310
+            pass
 
     def _post_return(self, body: bytes) -> int:
         import urllib.request
