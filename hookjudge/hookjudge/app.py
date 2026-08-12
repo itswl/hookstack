@@ -27,6 +27,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
+from hookjudge.alarm import SelfAlarm
 from hookjudge.contract import Incoming, Outgoing
 from hookjudge.judge import ai_verdict, reuse_verdict, rule_verdict
 from hookjudge.settings import Settings
@@ -59,6 +60,7 @@ def verify_signature(secret: str, body: bytes, provided: str | None, timestamp: 
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings.load()
     store = Store(app_settings.db_path)
+    alarm = SelfAlarm(app_settings.alarm_url, app_settings.alarm_min_interval_seconds)
 
     async def _judge_and_record(client: httpx.AsyncClient, event: Incoming) -> int:
         """One event, one verdict, one row. Never raises into the caller."""
@@ -89,6 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         does, and only to one address — fan-out is the pipe's job."""
         if not app_settings.return_url:
             await store.mark_return(int(row["id"]), "dead", int(row["return_attempts"]), "HOOKJUDGE_RETURN_URL 未配置")
+            await alarm.dead_return(client, title=str(row["title"]), error="HOOKJUDGE_RETURN_URL 未配置", now=now)
             return
         event = Incoming(
             source=str(row["source"]),
@@ -130,6 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             error = f"transport: {exc.__class__.__name__}"
         status = "queued" if attempts < app_settings.return_max_attempts else "dead"
         await store.mark_return(int(row["id"]), status, attempts, error)
+        if status == "dead":
+            await alarm.dead_return(client, title=str(row["title"]), error=error, now=now)
 
     async def _worker() -> None:
         """Reads the client from app.state rather than capturing it.
