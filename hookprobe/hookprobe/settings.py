@@ -62,6 +62,11 @@ class Settings:
     budget_usd: float
     budget_window_hours: float
 
+    # Volume retention (days): case files and engine transcripts older than
+    # this are pruned daily. 0 keeps everything — the case files are the
+    # agent's episodic memory, so deletion is a choice, never a surprise.
+    retention_days: int
+
     host: str
     port: int
 
@@ -84,6 +89,9 @@ class Settings:
             escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
             budget_usd=max(0.0, _float("HOOKPROBE_BUDGET_USD", 0.0)),
             budget_window_hours=max(0.1, _float("HOOKPROBE_BUDGET_WINDOW_HOURS", 24.0)),
-            host=os.environ.get("HOOKPROBE_HOST", "0.0.0.0"),
+            retention_days=max(0, _int("HOOKPROBE_RETENTION_DAYS", 0)),
+            # Bind-all is the right default inside a container; every compose
+            # in this repo maps the host side to loopback where it matters.
+            host=os.environ.get("HOOKPROBE_HOST", "0.0.0.0"),  # nosec B104
             port=_int("HOOKPROBE_PORT", 8088),
         )
