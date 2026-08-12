@@ -89,6 +89,12 @@ services:
       # Window spend >= budget refuses new escalations (report card says why).
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
       HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
+      # Case files and transcripts older than this are pruned daily. 0 keeps
+      # everything — the case files are the agent's episodic memory.
+      HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
+      # Wire signatures for both directions of the family loop. Empty means
+      # unsigned doors — fine on this file's own private network, wrong on a
+      # shared one. Each is one line of .env; set both when in doubt.
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

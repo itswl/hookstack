@@ -58,6 +58,12 @@ services:
       # escalations, each refusal reporting itself to the channels. 0 = off.
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
       HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
+      # Case files and transcripts older than this are pruned daily. 0 keeps
+      # everything — the case files are the agent's episodic memory.
+      HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
+      # Set BOTH in production — this network is shared with the platform.
+      # Unsigned, the event door takes anyone's escalations and anyone can
+      # impersonate the investigator's reports. One line of .env each.
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
       # HOOKPROBE_MCP_CONFIG: /config/mcp.json

@@ -1,9 +1,11 @@
-"""Run state: an in-memory map plus one JSON file per finished run.
+"""Run state: an in-memory map plus one JSON file per run.
 
-In-flight runs die with the process — the caller's poller then sees a 404,
-fails the record per its own policy, and the operator can re-trigger.
-Finished results are persisted to disk because they are the part somebody is
-still waiting to read.
+Finished results are persisted because they are the part somebody is still
+waiting to read. In-flight runs are checkpointed at spawn for a different
+reason: their live state (task, events) dies with the process, but the FACT
+that an investigation was running must not — a relay-born run has no poller
+on the other side, only a pipe waiting for a report. After a restart the
+service sweeps these orphans into failed runs that report themselves.
 """
 
 from __future__ import annotations
@@ -82,6 +84,13 @@ class RunStore:
 
     def finish(self, run: Run) -> None:
         run.finished_at = time.time()
+        self._write(run)
+
+    def checkpoint(self, run: Run) -> None:
+        """Persist an in-flight run, so a restart can settle it instead of losing it."""
+        self._write(run)
+
+    def _write(self, run: Run) -> None:
         self._runs[run.session_key] = run
         path = self._results_dir / _filename(run.session_key)
         tmp = path.with_suffix(".tmp")
