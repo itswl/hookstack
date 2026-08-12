@@ -15,6 +15,9 @@ $PY -m ruff check hookjudge tests
 step "ruff format --check"
 $PY -m ruff format --check hookjudge tests
 
+step "bandit (static security scan)"
+$PY -m bandit -q -r hookjudge
+
 step "inline page JS parses"
 node -e '
 const fs = require("fs");
@@ -26,5 +29,8 @@ console.log("status.html inline JS: OK");
 
 step "pytest"
 $PY -m pytest -q
+
+step "pip-audit (known-vulnerable dependencies)"
+$PY -m pip_audit --progress-spinner off
 
 printf '\n\033[1;32mGATE GREEN\033[0m — matches the CI job.\n'

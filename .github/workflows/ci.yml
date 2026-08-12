@@ -40,6 +40,7 @@ jobs:
       - run: python -m compileall -q hookrelay tests
       - run: ruff check hookrelay tests
       - run: ruff format --check hookrelay tests
+      - run: python -m bandit -q -r hookrelay
       # Node ships pre-installed on GitHub-hosted ubuntu runners.
       - name: inline page JS parses
         run: |
@@ -73,6 +74,7 @@ jobs:
           print(f"{len(cfg.sources)} sources, {len(cfg.channels)} channels, {len(cfg.routes)} routes")
           PYEOF
       - run: pytest -q
+      - run: python -m pip_audit --progress-spinner off
 
   docker:
     runs-on: ubuntu-latest

@@ -189,7 +189,8 @@ class HttpProcessor:
             "received_at": ctx.now,
         }
         try:
-            assert rt.http_client is not None, "http processor needs a client"
+            if rt.http_client is None:
+                raise RuntimeError("http processor needs a client")
             response = await rt.http_client.post(
                 str(options["url"]),
                 json=request_body,
