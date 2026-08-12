@@ -159,12 +159,26 @@ function fmtTok(n) {
   n = Number(n) || 0;
   return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n);
 }
+function modelLabel(mu) {
+  // The engine bills every model that ran, including tiny helpers (session
+  // titles run on haiku). Lead with the model that did the work, fold the
+  // helpers in as aux with their own bill so the split is obvious.
+  const entries = Object.entries(mu || {}).map(([name, v]) => ({
+    name: name.replace(/^claude-/, "").replace(/-\d{8}$/, ""),
+    cost: Number((v || {}).costUSD ?? (v || {}).cost_usd ?? 0),
+    out: Number((v || {}).outputTokens ?? (v || {}).output_tokens ?? 0),
+  }));
+  if (!entries.length) return "";
+  entries.sort((a, b) => b.cost - a.cost || b.out - a.out);
+  const aux = entries.slice(1).map((e) => (e.cost ? `${e.name} $${e.cost.toFixed(4)}` : e.name));
+  return entries[0].name + (aux.length ? ` (aux: ${aux.join(", ")})` : "");
+}
 function statsHtml(t) {
   const u = t.usage || {};
   const pick = (a, b) => (u[a] != null ? u[a] : u[b]); // engine reports snake_case; tolerate camelCase
   const bits = [];
-  const models = t.model_usage ? Object.keys(t.model_usage) : [];
-  if (models.length) bits.push(models.map((m) => m.replace(/^claude-/, "")).join(" + "));
+  const label = modelLabel(t.model_usage);
+  if (label) bits.push(label);
   const tin = pick("input_tokens", "inputTokens"), tout = pick("output_tokens", "outputTokens");
   const cr = pick("cache_read_input_tokens", "cacheReadInputTokens");
   const cw = pick("cache_creation_input_tokens", "cacheCreationInputTokens");
