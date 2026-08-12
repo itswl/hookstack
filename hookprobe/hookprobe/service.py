@@ -90,6 +90,45 @@ def failure_report(reason: str) -> str:
     )
 
 
+def budget_report(spent: float, budget: float, window_hours: float) -> str:
+    """A report-shaped refusal, so the family loop completes without an engine run."""
+    summary = (
+        f"预算熔断：最近 {window_hours:g} 小时的调查花费已达 ${spent:.2f}（预算 ${budget:.2f}），"
+        "本条告警未启动深度调查。判官的裁决不受影响；"
+        "预算窗口滑动或调高 HOOKPROBE_BUDGET_USD 后自动恢复。"
+    )
+    return json.dumps(
+        {
+            "summary": summary,
+            "root_cause": {
+                "status": "not_investigated",
+                "description": "The investigation budget for the current window is exhausted; "
+                "the run was refused before the engine started.",
+            },
+            "evidence": [],
+            "impact": {
+                "scope": "analysis pipeline",
+                "severity": "none",
+                "description": "Only the deep investigation was skipped; the alert and its verdict are unaffected.",
+            },
+            "timeline": [],
+            "recommendations": [
+                {
+                    "priority": "P2",
+                    "action": "Raise HOOKPROBE_BUDGET_USD or wait for the window to slide, "
+                    "then re-send the event if the alert still matters",
+                    "reason": "The breaker refuses new autonomous investigations; it does not queue them.",
+                }
+            ],
+            "unknowns": ["No investigation was run for this alert."],
+            "assumptions": [],
+            "next_checks": [],
+            "confidence": 0.0,
+        },
+        ensure_ascii=False,
+    )
+
+
 class RunService:
     def __init__(self, settings: Settings, engine: Engine, store: RunStore) -> None:
         self._settings = settings
@@ -179,6 +218,45 @@ class RunService:
                 del self._running[key]
 
         task.add_done_callback(_done)
+
+    def budget_state(self) -> tuple[float, float] | None:
+        """(spent_in_window, budget) — None when the breaker is disabled."""
+        if self._settings.budget_usd <= 0:
+            return None
+        cutoff = time.time() - self._settings.budget_window_hours * 3600
+        return self._store.spend_since(cutoff), self._settings.budget_usd
+
+    def refuse_for_budget(self, payload: dict[str, Any], *, origin: str, spent: float) -> Run:
+        """Settle the session as a refused run — no engine, cost 0, loop completed.
+
+        Idempotent like start(): if the session already exists (an earlier,
+        funded investigation), that run is returned untouched.
+        """
+        session_key = str(payload.get("sessionKey") or "") or f"hookprobe:{uuid.uuid4()}"
+        existing = self._store.get(session_key)
+        if existing is not None:
+            return existing
+        run = Run(
+            session_key=session_key,
+            run_id=uuid.uuid4().hex[:12],
+            current_message=str(payload.get("message") or ""),
+            model=self._settings.model,
+            origin=origin,
+        )
+        run.meta = dict(payload.get("_meta") or {})
+        self._store.create(run)
+        run.status = FAILED
+        run.error = (
+            f"refused: budget exhausted (${spent:.2f} of ${self._settings.budget_usd:.2f} "
+            f"in the last {self._settings.budget_window_hours:g}h)"
+        )
+        run.cost_usd = 0.0
+        run.text = budget_report(spent, self._settings.budget_usd, self._settings.budget_window_hours)
+        self._record_turn(run, None)
+        self._store.finish(run)
+        self._schedule_return(run)
+        logger.warning("run refused session=%s reason=%s", run.session_key, run.error)
+        return run
 
     def get(self, session_key: str) -> Run | None:
         return self._store.get(session_key)
