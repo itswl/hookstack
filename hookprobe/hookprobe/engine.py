@@ -46,6 +46,12 @@ class EngineResult:
     error: str | None = None
     # The SDK session id — the handle for resuming this investigation later.
     session_id: str | None = None
+    # Raw accounting from the engine, stored as-is: token usage for the turn,
+    # the per-model breakdown (whose keys name the models that actually ran),
+    # and wall-clock duration.
+    usage: dict[str, Any] | None = None
+    model_usage: dict[str, Any] | None = None
+    duration_ms: int | None = None
 
 
 async def _bash_guard_hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
@@ -139,10 +145,15 @@ class ClaudeAgentEngine:
             error = f"engine reported {getattr(result, 'subtype', 'error')}"
         elif not text:
             error = "engine returned an empty result"
+        usage = getattr(result, "usage", None)
+        model_usage = getattr(result, "model_usage", None)
         return EngineResult(
             text=text,
             message_count=message_count,
             cost_usd=getattr(result, "total_cost_usd", None),
             error=error,
             session_id=getattr(result, "session_id", None),
+            usage=dict(usage) if isinstance(usage, dict) else None,
+            model_usage=dict(model_usage) if isinstance(model_usage, dict) else None,
+            duration_ms=getattr(result, "duration_ms", None),
         )

@@ -49,6 +49,7 @@ details.q summary{cursor:pointer;color:var(--dim);white-space:normal}
 .a pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;
        white-space:pre-wrap;word-break:break-word;margin:0;font-family:var(--mono);font-size:12.5px}
 .a.err pre{border-color:var(--red)}
+.stats{color:var(--dim);font-size:11px;font-family:var(--mono);margin-top:5px;padding-left:2px}
 .pending{color:var(--amber);padding:8px 12px;font-size:13px}
 .pending::after{content:"…";animation:dots 1.2s steps(3,end) infinite}
 @keyframes dots{0%{content:""}33%{content:"."}66%{content:".."}100%{content:"..."}}
@@ -82,6 +83,7 @@ details.q summary{cursor:pointer;color:var(--dim);white-space:normal}
 "use strict";
 const $ = (s) => document.querySelector(s);
 let sel = null;
+let composeMode = false; // "+ new session" pressed: keep the pane free until they send
 let detailTimer = null;
 
 const tokenEl = $("#token");
@@ -126,17 +128,21 @@ async function refreshList() {
         <div class="meta">
           <span class="badge ${esc(x.status)}">${esc(x.status)}</span>
           <span>${x.turn_count} turn${x.turn_count > 1 ? "s" : ""}</span>
+          ${x.model ? `<span>${esc(String(x.model).replace(/^claude-/, ""))}</span>` : ""}
           ${x.cost_usd ? `<span>$${Number(x.cost_usd).toFixed(3)}</span>` : ""}
           <span>${fmtTime(x.created_at)}</span>
         </div>
       </div>`).join("");
     el.querySelectorAll(".item").forEach((n) => (n.onclick = () => select(n.dataset.key)));
-    if (!sel && runs.length) select(runs[0].session_key); // land on the latest investigation
+    // Land on the latest investigation, but never steal the pane from a
+    // deliberate "+ new session".
+    if (!sel && !composeMode && runs.length) select(runs[0].session_key);
   } catch (e) { $("#hint").textContent = e.message; }
 }
 
 async function select(key) {
   sel = key;
+  composeMode = false;
   $("#hint").textContent = "";
   refreshList();
   await renderDetail(true);
@@ -149,9 +155,29 @@ function qHtml(m) {
   }
   return `<div class="q">${esc(m)}</div>`;
 }
+function fmtTok(n) {
+  n = Number(n) || 0;
+  return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n);
+}
+function statsHtml(t) {
+  const u = t.usage || {};
+  const pick = (a, b) => (u[a] != null ? u[a] : u[b]); // engine reports snake_case; tolerate camelCase
+  const bits = [];
+  const models = t.model_usage ? Object.keys(t.model_usage) : [];
+  if (models.length) bits.push(models.map((m) => m.replace(/^claude-/, "")).join(" + "));
+  const tin = pick("input_tokens", "inputTokens"), tout = pick("output_tokens", "outputTokens");
+  const cr = pick("cache_read_input_tokens", "cacheReadInputTokens");
+  const cw = pick("cache_creation_input_tokens", "cacheCreationInputTokens");
+  if (tin != null) bits.push(`in ${fmtTok(tin)}`);
+  if (tout != null) bits.push(`out ${fmtTok(tout)}`);
+  if (cr != null || cw != null) bits.push(`cache ${fmtTok(cr)}r/${fmtTok(cw)}w`);
+  if (t.cost_usd != null) bits.push(`$${Number(t.cost_usd).toFixed(4)}`);
+  if (t.duration_ms != null) bits.push(`${(t.duration_ms / 1000).toFixed(1)}s`);
+  return bits.length ? `<div class="stats">${esc(bits.join("  ·  "))}</div>` : "";
+}
 function turnHtml(t) {
   return `<div class="turn">${qHtml(t.message)}
-    <div class="a ${t.error ? "err" : ""}"><pre>${esc(pretty(t.text || ""))}</pre></div></div>`;
+    <div class="a ${t.error ? "err" : ""}"><pre>${esc(pretty(t.text || ""))}</pre></div>${statsHtml(t)}</div>`;
 }
 
 async function renderDetail(startPolling) {
@@ -163,7 +189,9 @@ async function renderDetail(startPolling) {
   }
   const run = await r.json();
   $("#meta").textContent =
-    `${run.session_key} · ${run.status} · engine session ${run.engine_session_id || "—"}` +
+    `${run.session_key} · ${run.status}` +
+    (run.model ? ` · ${run.model}` : "") +
+    ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");
   const parts = (run.turns || []).map(turnHtml);
   if (run.status === "running") {
@@ -189,6 +217,7 @@ async function renderDetail(startPolling) {
 
 $("#new").onclick = () => {
   sel = null;
+  composeMode = true;
   clearInterval(detailTimer);
   refreshList();
   $("#meta").textContent = "new session";
@@ -219,6 +248,7 @@ $("#composer").onsubmit = async (ev) => {
         { method: "POST", body: JSON.stringify({ message: msg, sessionKey: key }) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
       sel = key;
+      composeMode = false;
     }
     $("#msg").value = "";
     await refreshList();
