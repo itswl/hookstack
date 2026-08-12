@@ -36,6 +36,11 @@ class Settings:
     return_max_attempts: int
     worker_interval_seconds: float
 
+    # Direct self-alarm for returns that go DEAD: the pipe is the broken
+    # link at that moment, so this posts straight to a bot/collector URL.
+    alarm_url: str
+    alarm_min_interval_seconds: int
+
     # Reuse window: how long one identity's verdict answers for restatements.
     reuse_window_seconds: int
     retention_days: int
@@ -59,6 +64,8 @@ class Settings:
             return_secret=os.environ.get("HOOKJUDGE_RETURN_SECRET", ""),
             return_max_attempts=_int("HOOKJUDGE_RETURN_MAX_ATTEMPTS", 6),
             worker_interval_seconds=_float("HOOKJUDGE_WORKER_INTERVAL", 1.0),
+            alarm_url=os.environ.get("HOOKJUDGE_ALARM_URL", ""),
+            alarm_min_interval_seconds=_int("HOOKJUDGE_ALARM_MIN_INTERVAL_SECONDS", 600),
             reuse_window_seconds=_int("HOOKJUDGE_REUSE_WINDOW_SECONDS", 3600),
             retention_days=_int("HOOKJUDGE_RETENTION_DAYS", 30),
             ai_base_url=os.environ.get("HOOKJUDGE_AI_BASE_URL", ""),

@@ -67,6 +67,12 @@ class Settings:
     # agent's episodic memory, so deletion is a choice, never a surprise.
     retention_days: int
 
+    # Direct self-alarm for report returns that exhaust their retries: the
+    # pipe is the broken link at that moment, so this posts straight to a
+    # bot/collector URL, touching nothing on the path that failed.
+    alarm_url: str
+    alarm_min_interval_seconds: int
+
     host: str
     port: int
 
@@ -90,6 +96,8 @@ class Settings:
             budget_usd=max(0.0, _float("HOOKPROBE_BUDGET_USD", 0.0)),
             budget_window_hours=max(0.1, _float("HOOKPROBE_BUDGET_WINDOW_HOURS", 24.0)),
             retention_days=max(0, _int("HOOKPROBE_RETENTION_DAYS", 0)),
+            alarm_url=os.environ.get("HOOKPROBE_ALARM_URL", "").strip(),
+            alarm_min_interval_seconds=_int("HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS", 600),
             # Bind-all is the right default inside a container; every compose
             # in this repo maps the host side to loopback where it matters.
             host=os.environ.get("HOOKPROBE_HOST", "0.0.0.0"),  # nosec B104
