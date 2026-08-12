@@ -16,6 +16,7 @@ confirming poll instead of running its stability heuristics.
 from __future__ import annotations
 
 import hmac
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,22 @@ from hookprobe.service import NotResumableError, RunBusyError, RunService
 from hookprobe.settings import Settings
 
 _UI_PAGE = Path(__file__).with_name("ui.html")
+
+# Directory names only — no separators, no leading dot, so a crafted skill
+# name can never walk out of the skills directory.
+_SKILL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$")
+
+
+def _skill_description(text: str) -> str:
+    """Best-effort description from SKILL.md frontmatter."""
+    if not text.startswith("---"):
+        return ""
+    for line in text.splitlines()[1:40]:
+        if line.strip() == "---":
+            break
+        if line.startswith("description:"):
+            return line.split(":", 1)[1].strip().strip("\"'")[:200]
+    return ""
 
 
 def _summary(run: Run) -> dict[str, Any]:
@@ -98,6 +115,42 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
         return asdict(run)
+
+    @app.get("/v1/skills", dependencies=[Depends(require_token)])
+    async def skills_list() -> list[dict[str, Any]]:
+        skills_dir = settings.workdir / ".claude" / "skills"
+        out: list[dict[str, Any]] = []
+        if not skills_dir.is_dir():
+            return out
+        for entry in sorted(skills_dir.iterdir()):
+            manifest = entry / "SKILL.md"
+            if not (entry.is_dir() and manifest.is_file()):
+                continue
+            try:
+                text = manifest.read_text(encoding="utf-8")
+                stat = manifest.stat()
+                files = sorted(f.name for f in entry.iterdir() if f.is_file())[:20]
+            except OSError:
+                continue
+            out.append(
+                {
+                    "name": entry.name,
+                    "description": _skill_description(text),
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                    "files": files,
+                }
+            )
+        return out
+
+    @app.get("/v1/skills/{name}", dependencies=[Depends(require_token)])
+    async def skill_detail(name: str) -> dict[str, Any]:
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        manifest = settings.workdir / ".claude" / "skills" / name / "SKILL.md"
+        if not manifest.is_file():
+            raise HTTPException(status_code=404, detail="skill not found")
+        return {"name": name, "content": manifest.read_text(encoding="utf-8")}
 
     # The page itself carries no data — every call it makes presents the
     # bearer token, so serving the markup unauthenticated is safe.
