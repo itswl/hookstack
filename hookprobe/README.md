@@ -90,6 +90,23 @@ Read-only is enforced in three layers, strongest first:
 3. **Container** — non-root, disposable, nothing precious inside. The agent
    may write freely in `/data` (scratch + skills); that is by design.
 
+## Parallel subagents
+
+The engine's Task tool is enabled: a cascading incident can fan out into
+parallel sub-investigations, each appearing in the process feed as a `Task`
+event. Hooks apply inside subagents too, so the bash guard binds them the
+same as the main loop.
+
+## Browser evidence (optional)
+
+Give the agent an interactive browser for dashboards that have no API: copy
+`deploy/mcp.example.json` (a headless Playwright MCP server), point
+`HOOKPROBE_MCP_CONFIG` at it, and uncomment the chromium block in the
+Dockerfile so the image ships the browser. One caution: a browser can click
+and submit on any page it can reach — the bash guard does not see browser
+actions, so point it at read-only dashboards and viewer accounts; `--isolated`
+keeps it from retaining any profile state between runs.
+
 ## Skills — the runner gets smarter
 
 The deep-analysis prompt asks the agent to distill verified diagnostic paths
