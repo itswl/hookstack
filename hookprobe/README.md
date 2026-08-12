@@ -108,7 +108,19 @@ pipe and delivered to the same channels as the verdict. Escalated
 investigations also open the case files first: the task brief tells the agent
 to grep `/data/results/` for earlier investigations of the same alert and
 report how the last verdict held up — a recurrence gets "first seen 101
-minutes ago, verdict matched, the P1 was not acted on", not a fresh start. The pipe stays
+minutes ago, verdict matched, the P1 was not acted on", not a fresh start.
+
+The event door is also where the budget breaker lives, because it is the one
+path that spends money without a human asking. Set `HOOKPROBE_BUDGET_USD`
+(with `HOOKPROBE_BUDGET_WINDOW_HOURS`, default 24): once the window's
+recorded spend reaches the budget, new escalations are refused — but a
+refusal is not a silent drop. It settles as a report-shaped run and returns
+through the same loop, so the channels say *why* there is no investigation
+("预算熔断……"). Idempotency still holds (a redelivered, already-funded event
+is never refused), operator paths — `/hooks/agent`, follow-ups, the UI — are
+never gated, and `GET /v1/budget` shows the window's arithmetic. The figure
+counts recorded turns only, so in-flight runs can overshoot by at most
+`max_concurrent` investigations: it is a brake, not an invoice. The pipe stays
 content-blind; the judge is untouched; failure still completes the loop (a
 stopped or crashed investigation reports itself). The plain demo compose
 points the escalation at the sink's `/probe-standin` so the shape is visible

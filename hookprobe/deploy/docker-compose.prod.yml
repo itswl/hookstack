@@ -54,6 +54,10 @@ services:
       # are unaffected.
       HOOKPROBE_RETURN_URL: ${HOOKPROBE_RETURN_URL:-http://hookrelay:8100/hook/probe-notify}
       HOOKPROBE_ESCALATE_LEVELS: ${HOOKPROBE_ESCALATE_LEVELS:-critical,high}
+      # Production wants a ceiling: window spend >= budget refuses new
+      # escalations, each refusal reporting itself to the channels. 0 = off.
+      HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
+      HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
       # HOOKPROBE_MCP_CONFIG: /config/mcp.json

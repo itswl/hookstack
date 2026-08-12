@@ -95,6 +95,23 @@ class RunStore:
     def active_count(self) -> int:
         return sum(1 for run in self._runs.values() if not run.finished)
 
+    def spend_since(self, cutoff: float) -> float:
+        """Recorded model spend across all origins from turns finished after `cutoff`.
+
+        In-flight turns have no recorded cost yet, so the figure trails reality
+        by at most max_concurrent unfinished runs — the breaker reading it is
+        a brake, not an invoice.
+        """
+        self._scan_disk_once()
+        total = 0.0
+        for run in self._runs.values():
+            for turn in run.turns:
+                finished = turn.get("finished_at")
+                cost = turn.get("cost_usd")
+                if finished and cost and finished >= cutoff:
+                    total += float(cost)
+        return total
+
     def list_runs(self, limit: int = 100) -> list[Run]:
         """Newest first, including finished runs persisted by earlier processes."""
         self._scan_disk_once()
