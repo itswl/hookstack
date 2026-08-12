@@ -115,7 +115,7 @@ async def test_dead_delivery_can_be_requeued(file_client, monkeypatch):
     assert hooked.json()["outcome"] == "routed"
 
     async def always_fail(client, channel, message):
-        return False, "http 500: nope"
+        return False, "http 500: nope", b"{}"
 
     monkeypatch.setattr(delivery_mod.channels, "send", always_fail)
     # Ride to dead (max_attempts=3) by advancing the clock far each round.
