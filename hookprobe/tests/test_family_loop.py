@@ -132,8 +132,11 @@ def test_relay_born_runs_report_back(tmp_path) -> None:
     assert len(_Capture.received) == 1
     delivery = _Capture.received[0]
     payload = json.loads(delivery["body"])
-    assert payload["meta"]["title"] == "支付网关 5xx"
+    # The processed dialect: what the pipe's renderers actually dress.
+    assert payload["meta"]["alert_name"] == "支付网关 5xx · 调查报告"
+    assert payload["meta"]["importance"] == "high"
     assert payload["meta"]["status"] == "completed"
+    assert payload["analysis"]["summary"] == "ok"
     assert payload["report"]["summary"] == "ok"  # extracted from the JSON answer
     assert verify_timestamped(
         "ret-secret",
@@ -279,7 +282,8 @@ def test_refusal_reports_back_through_the_loop(tmp_path) -> None:
     assert len(_Capture.received) == 1
     payload = json.loads(_Capture.received[0]["body"])
     assert payload["meta"]["status"] == "failed"
-    assert payload["meta"]["title"] == EVENT["title"]
+    assert payload["meta"]["alert_name"] == f"{EVENT['title']} · 调查报告"
+    assert "预算熔断" in payload["analysis"]["summary"]
     assert "预算熔断" in payload["report"]["summary"]
 
 
