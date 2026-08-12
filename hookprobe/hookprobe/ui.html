@@ -22,6 +22,8 @@ header h1 span{color:var(--dim);font-weight:400}
 #token{margin-left:auto;background:var(--bg);border:1px solid var(--line);color:var(--text);
        border-radius:6px;padding:5px 8px;width:230px;font-family:var(--mono);font-size:12px}
 #token.bad{border-color:var(--red)}
+#budget{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:10px;padding:3px 8px;white-space:nowrap}
+#budget.hot{color:var(--red);border-color:var(--red)}
 button{background:#21262d;border:1px solid #30363d;color:var(--text);border-radius:6px;padding:5px 12px;cursor:pointer;font-size:13px}
 button:hover{border-color:var(--accent)}
 button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
@@ -107,6 +109,7 @@ details.proc-past summary{cursor:pointer;color:var(--dim);font-size:12px}
   <button id="new">+ new session</button>
   <button id="skillsBtn">skills</button>
   <button id="memBtn">memory</button>
+  <span id="budget" hidden></span>
   <input id="token" placeholder="bearer token" autocomplete="off">
 </header>
 <main>
@@ -501,8 +504,21 @@ $("#composer").onsubmit = async (ev) => {
 
 if (location.hash === "#skills") openSkills();
 else if (location.hash === "#memory") openMemory();
+async function refreshBudget() {
+  const el = $("#budget");
+  try {
+    const b = await (await api("/v1/budget")).json();
+    if (!b.enabled) { el.hidden = true; return; }
+    el.hidden = false;
+    el.textContent = `budget $${Number(b.spent_usd).toFixed(2)} / $${Number(b.budget_usd).toFixed(2)}`;
+    el.classList.toggle("hot", !!b.exhausted);
+  } catch { el.hidden = true; }
+}
+
 refreshList();
 setInterval(refreshList, 5000);
+refreshBudget();
+setInterval(refreshBudget, 15000);
 </script>
 </body>
 </html>

@@ -138,6 +138,7 @@ class RunService:
         self._tasks: set[asyncio.Task[None]] = set()
         self._running: dict[str, asyncio.Task[None]] = {}
         self._stop_requested: set[str] = set()
+        self._in_slot = 0
 
     def start(self, payload: dict[str, Any], *, origin: str = "") -> Run:
         """Idempotent per sessionKey: re-triggering an existing run returns it."""
@@ -208,6 +209,9 @@ class RunService:
     def _spawn(self, run: Run, message: str, timeout_s: int, *, resume: str | None) -> None:
         run.events = []
         self._stop_requested.discard(run.session_key)
+        # Checkpoint before the task exists: if the process dies mid-flight,
+        # the next boot's sweep finds this stub and completes the loop.
+        self._store.checkpoint(run)
         task = asyncio.create_task(self._execute(run, message, timeout_s, resume=resume))
         self._tasks.add(task)
         self._running[run.session_key] = task
@@ -218,6 +222,24 @@ class RunService:
                 del self._running[key]
 
         task.add_done_callback(_done)
+
+    def sweep_orphans(self) -> int:
+        """Settle runs a previous process left mid-flight, at startup.
+
+        Live state does not survive a restart, but a relay-born investigation
+        has no poller on the other side — only a pipe waiting for probe-notify.
+        Silence would break "failure completes the loop", so every orphan
+        becomes a failed run that reports itself like any other failure.
+        """
+        swept = 0
+        for run in self._store.list_runs(limit=1000):
+            if run.finished or run.session_key in self._running:
+                continue
+            self._fail(run, "interrupted by a restart before the investigation finished")
+            swept += 1
+        if swept:
+            logger.warning("swept %s orphaned run(s) left by a previous process", swept)
+        return swept
 
     def budget_state(self) -> tuple[float, float] | None:
         """(spent_in_window, budget) — None when the breaker is disabled."""
@@ -267,6 +289,10 @@ class RunService:
     def active_count(self) -> int:
         return self._store.active_count()
 
+    def turn_counts(self) -> tuple[int, int]:
+        """(turns holding a slot, turns waiting for one)."""
+        return self._in_slot, max(0, len(self._running) - self._in_slot)
+
     def _clamp_timeout(self, raw: Any) -> int:
         try:
             timeout_s = int(raw)
@@ -289,10 +315,16 @@ class RunService:
             # The semaphore sits outside the timeout: a queued run's clock
             # starts when it gets a slot, not while it waits for one.
             async with self._semaphore:
-                result = await asyncio.wait_for(
-                    self._engine.run(message=message, session_key=run.session_key, resume=resume, on_event=on_event),
-                    timeout=timeout_s,
-                )
+                self._in_slot += 1
+                try:
+                    result = await asyncio.wait_for(
+                        self._engine.run(
+                            message=message, session_key=run.session_key, resume=resume, on_event=on_event
+                        ),
+                        timeout=timeout_s,
+                    )
+                finally:
+                    self._in_slot -= 1
         except TimeoutError:
             self._fail(run, f"timed out after {timeout_s}s")
             return
@@ -404,7 +436,7 @@ class RunService:
 
         headers = {"Content-Type": "application/json", **sign_timestamped(self._settings.return_secret, body)}
         request = urllib.request.Request(self._settings.return_url, data=body, headers=headers, method="POST")
-        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 — operator-configured URL
+        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 — operator URL  # nosec B310
             return int(response.status)
 
     def _record_turn(self, run: Run, result: EngineResult | None) -> None:

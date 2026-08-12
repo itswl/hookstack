@@ -115,6 +115,9 @@ services:
       # new escalations are refused (with a report card saying why). 0 = off.
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
       HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
+      # Case files and transcripts older than this are pruned daily. 0 keeps
+      # everything — the case files are the agent's episodic memory.
+      HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
