@@ -5,7 +5,7 @@
 [![ci-hookprobe](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml)
 
 Two services that split one job in half, and an investigator for the alerts
-where a verdict is not enough.
+where a verdict is not enough. 中文总览（含全家截图）：[README.zh.md](README.zh.md)。
 
 ```
 upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► lark / dingtalk / wecom / webhook
