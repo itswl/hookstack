@@ -14,6 +14,13 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     # Inbound: callers authenticate with a single bearer token (an
@@ -47,6 +54,14 @@ class Settings:
     return_secret: str
     escalate_levels: frozenset[str]
 
+    # The budget breaker, guarding the only path that spends money without a
+    # human asking: once the window's recorded spend reaches budget_usd, the
+    # event door refuses NEW investigations (each refusal still reports
+    # itself through the family loop). 0 disables. Operator-driven doors
+    # (/hooks/agent, continue, the UI) are never gated.
+    budget_usd: float
+    budget_window_hours: float
+
     host: str
     port: int
 
@@ -67,6 +82,8 @@ class Settings:
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),
             escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
+            budget_usd=max(0.0, _float("HOOKPROBE_BUDGET_USD", 0.0)),
+            budget_window_hours=max(0.1, _float("HOOKPROBE_BUDGET_WINDOW_HOURS", 24.0)),
             host=os.environ.get("HOOKPROBE_HOST", "0.0.0.0"),
             port=_int("HOOKPROBE_PORT", 8088),
         )

@@ -111,6 +111,10 @@ services:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      # Budget breaker for the autonomous door: window spend >= budget means
+      # new escalations are refused (with a report card saying why). 0 = off.
+      HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
+      HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
