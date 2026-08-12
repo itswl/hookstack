@@ -349,16 +349,30 @@ class RunService:
         task.add_done_callback(self._tasks.discard)
 
     async def _deliver_return(self, run: Run) -> None:
+        summary = _report_summary(run.text)
+        alert_title = str(run.meta.get("title") or run.session_key)
         body = json.dumps(
             {
+                # The PROCESSED-EVENT dialect (hookrelay/processed.py): the
+                # investigator is a brain, and a brain hands the pipe its
+                # RESULT in the one shape every channel renderer knows how to
+                # dress. Speaking anything else renders as an empty card.
                 "meta": {
-                    **run.meta,
+                    "alert_name": f"{alert_title} · 调查报告",
+                    "source": str(run.meta.get("source") or "hookprobe"),
+                    "importance": str(run.meta.get("level") or "medium"),
+                    "event_id": run.meta.get("event_id"),
+                    "brain": "hookprobe",
+                    "timestamp": time.time(),
+                    # The loop's own facts, for the pipe's fields and ledger:
                     "session_key": run.session_key,
                     "status": run.status,
                     "cost_usd": run.cost_usd,
                     "error": run.error,
                 },
-                "report": {"summary": _report_summary(run.text), "text": run.text},
+                "analysis": {"summary": summary, "event_type": "深度调查"},
+                "identity": {"session": run.session_key},
+                "report": {"summary": summary, "text": run.text},
             },
             ensure_ascii=False,
             sort_keys=True,

@@ -45,11 +45,14 @@ sources:
 
   # The investigator's return door: hookprobe posts its finished report here.
   # The summary is the card; the full report stays on the probe's session.
+  # The investigator speaks the same PROCESSED-EVENT dialect as the judge
+  # (meta.alert_name / analysis.summary), so `payload: processed` channels
+  # dress its reports without knowing who wrote them.
   - name: probe-notify
     secret: ""
-    title: "{meta.title} · 调查报告"
-    body: "{report.summary}"
-    level: "{meta.level}"
+    title: "{meta.alert_name}"
+    body: "{analysis.summary}"
+    level: "{meta.importance}"
     fields:
       session: "{meta.session_key}"
       probe_status: "{meta.status}"
