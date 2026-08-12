@@ -22,15 +22,31 @@ trap cleanup EXIT
 step "config is valid"
 docker compose config >/dev/null
 echo "stack compose parses"
-# The production compose reads .env from the deployment root, which a fresh
-# checkout does not have. Validate it when the file is there and say so when it
-# is not — the alternative is marking it `required: false`, which would weaken
-# production so that CI could pass. Wrong way round.
+# The standalone files and the family file guard their required variables
+# with ${...:?}. Feed placeholders in a subshell so `config` exercises each
+# file itself, not whatever this checkout's .env happens to contain.
+(
+  # Must LOOK like a path (leading ./) or compose reads it as a named
+  # volume; `config` does not check that the file exists.
+  export HOOKRELAY_CONFIG_FILE=./config.yaml
+  export HOOKJUDGE_RETURN_URL=http://hookrelay:8100/hook/judge-notify
+  export HOOKPROBE_TOKEN=placeholder
+  docker compose -f hookrelay/deploy/docker-compose.yml config >/dev/null
+  docker compose -f hookjudge/deploy/docker-compose.yml config >/dev/null
+  docker compose -f hookprobe/deploy/docker-compose.yml config >/dev/null
+  docker compose -f deploy/docker-compose.yml config >/dev/null
+)
+echo "standalone and family composes parse"
+# The production composes read .env from the deployment root, which a fresh
+# checkout does not have. Validate them when the file is there and say so when
+# it is not — the alternative is marking it `required: false`, which would
+# weaken production so that CI could pass. Wrong way round.
 if [ -f .env ]; then
   docker compose -f hookrelay/deploy/docker-compose.prod.yml config >/dev/null
-  echo "production compose parses"
+  docker compose --env-file .env -f hookprobe/deploy/docker-compose.prod.yml config >/dev/null
+  echo "production composes parse"
 else
-  echo "production compose skipped — no .env in this checkout"
+  echo "production composes skipped — no .env in this checkout"
 fi
 
 step "build and start"

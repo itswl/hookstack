@@ -19,6 +19,9 @@
 # network, loopback-only admin port, state at the deployment root). This one
 # is the middle ground — one container, one named volume, port 8088 open for
 # whatever OpenClaw-dialect caller you point at it.
+
+name: hookprobe
+
 services:
   hookprobe:
     build:
