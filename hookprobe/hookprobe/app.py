@@ -1,4 +1,4 @@
-"""HTTP surface: the OpenClaw-compatible contract WebhookWise already speaks.
+"""HTTP surface: an OpenClaw-compatible contract, plus the family's own doors.
 
 POST /hooks/agent               -> {"runId": ...}                  (trigger)
 POST /hooks/event               -> the pipe's escalation door      (family)
@@ -10,8 +10,8 @@ GET  /ui                        -> the sessions page, unauthenticated markup
 GET  /healthz                   -> liveness, unauthenticated
 
 isFinal is always true on a 200: a run is either still going (202) or done.
-That single guarantee is what lets WebhookWise write the result on the first
-confirming poll instead of running its stability heuristics.
+That single guarantee lets a poller trust the first confirming read instead
+of running stability heuristics against a moving answer.
 """
 
 from __future__ import annotations

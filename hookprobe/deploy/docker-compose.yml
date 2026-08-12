@@ -3,7 +3,7 @@
 #   docker compose -f hookprobe/deploy/docker-compose.yml up -d --build
 #
 # Secrets come from .env at the invocation directory (the deployment root):
-#   HOOKPROBE_TOKEN=...      shared with WebhookWise's OPENCLAW_HOOKS_TOKEN
+#   HOOKPROBE_TOKEN=...      the bearer token your caller presents
 #   ANTHROPIC_API_KEY=...    or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN for a relay
 #
 # The stack compose at the repo root deliberately does NOT include this

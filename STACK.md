@@ -42,7 +42,8 @@ canned verdicts and reports itself as `stub-4o-mini`. Put real credentials in
 `.env` and it stops being used.
 
 Production does **not** use this file. `hookrelay/deploy/docker-compose.prod.yml` runs
-the pipe alone, bound to loopback, on WebhookWise's docker network.
+the pipe alone, bound to loopback, joined to the docker network of whatever
+platform it feeds.
 
 ## Drive the whole cost policy
 
