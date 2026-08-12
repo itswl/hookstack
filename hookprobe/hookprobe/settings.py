@@ -16,10 +16,10 @@ def _int(name: str, default: int) -> int:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    # Inbound: WebhookWise authenticates with a single bearer token (the value
-    # it already holds as OPENCLAW_HOOKS_TOKEN). Empty = accept anyone, which
-    # is a decision for a private compose network, never a default to drift
-    # into.
+    # Inbound: callers authenticate with a single bearer token (an
+    # OpenClaw-dialect client presents its hooks token here). Empty = accept
+    # anyone, which is a decision for a private compose network, never a
+    # default to drift into.
     token: str
 
     # Engine: which Claude model runs the investigation and how hard the
