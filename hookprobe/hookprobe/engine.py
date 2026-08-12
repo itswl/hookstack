@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,19 @@ async def _bash_guard_hook(input_data: dict[str, Any], tool_use_id: str | None, 
     }
 
 
+def _tool_detail(tool_input: Any) -> str:
+    """One line saying what a tool call is about, for the live process feed."""
+    data = tool_input if isinstance(tool_input, dict) else {}
+    for key in ("command", "file_path", "pattern", "query", "url", "path", "skill", "description"):
+        value = data.get(key)
+        if value:
+            return str(value)[:300]
+    try:
+        return json.dumps(data, ensure_ascii=False)[:200]
+    except (TypeError, ValueError):
+        return ""
+
+
 def _load_mcp_servers(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {}
@@ -92,7 +106,14 @@ class ClaudeAgentEngine:
         self._mcp_servers = _load_mcp_servers(settings.mcp_config)
         (self._workdir / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
 
-    async def run(self, *, message: str, session_key: str, resume: str | None = None) -> EngineResult:
+    async def run(
+        self,
+        *,
+        message: str,
+        session_key: str,
+        resume: str | None = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> EngineResult:
         # Imported here so the HTTP service (and its tests) never needs the SDK.
         from claude_agent_sdk import (
             AssistantMessage,
@@ -100,8 +121,17 @@ class ClaudeAgentEngine:
             HookMatcher,
             ResultMessage,
             TextBlock,
+            ToolUseBlock,
             query,
         )
+
+        def emit(event: dict[str, Any]) -> None:
+            if on_event is None:
+                return
+            try:
+                on_event(event)
+            except Exception:  # noqa: BLE001 — a broken observer must not kill the run
+                logger.exception("on_event callback failed")
 
         options = ClaudeAgentOptions(
             cwd=str(self._workdir),
@@ -130,9 +160,15 @@ class ClaudeAgentEngine:
         async for msg in query(prompt=message, options=options):
             message_count += 1
             if isinstance(msg, AssistantMessage):
-                text = "\n".join(b.text for b in msg.content if isinstance(b, TextBlock) and b.text)
-                if text:
-                    last_text = text
+                text_parts: list[str] = []
+                for block in msg.content:
+                    if isinstance(block, TextBlock) and block.text:
+                        text_parts.append(block.text)
+                        emit({"type": "text", "text": block.text[:500]})
+                    elif isinstance(block, ToolUseBlock):
+                        emit({"type": "tool_use", "name": block.name, "detail": _tool_detail(block.input)})
+                if text_parts:
+                    last_text = "\n".join(text_parts)
             elif isinstance(msg, ResultMessage):
                 result = msg
 

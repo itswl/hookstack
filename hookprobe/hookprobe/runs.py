@@ -43,10 +43,13 @@ class Run:
     # The message of the turn currently in flight (or the last one asked).
     current_message: str = ""
     # Finished turns, oldest first: {"message", "text", "error", "run_id",
-    # "cost_usd", "finished_at", "usage", "model_usage", "duration_ms"}.
-    # A failed follow-up appends a turn instead of erasing the answer
-    # somebody already read.
+    # "cost_usd", "finished_at", "usage", "model_usage", "duration_ms",
+    # "events"}. A failed follow-up appends a turn instead of erasing the
+    # answer somebody already read.
     turns: list[dict] = field(default_factory=list)
+    # The in-flight turn's process feed (tool calls + narration), reset at
+    # each spawn; moved onto the turn record when it finishes.
+    events: list[dict] = field(default_factory=list)
 
     @property
     def finished(self) -> bool:

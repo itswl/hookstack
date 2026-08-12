@@ -121,6 +121,25 @@ def test_concurrency_cap_is_respected(tmp_path) -> None:
     asyncio.run(scenario())
 
 
+def test_process_events_land_on_the_turn(tmp_path) -> None:
+    async def scenario() -> None:
+        engine = FakeEngine(
+            events=[
+                {"type": "tool_use", "name": "Bash", "detail": "kubectl get pods -n prod"},
+                {"type": "text", "text": "checking pod states"},
+            ]
+        )
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.start({"message": "analyze", "sessionKey": "hook:events"})
+        done = await _wait_finished(service, "hook:events")
+        events = done.turns[0]["events"]
+        assert [e["type"] for e in events] == ["tool_use", "text"]
+        assert events[0]["name"] == "Bash"
+        assert events[0]["ts"] > 0  # service stamps arrival time
+
+    asyncio.run(scenario())
+
+
 def test_continue_run_resumes_engine_session(tmp_path) -> None:
     async def scenario() -> None:
         engine = FakeEngine()

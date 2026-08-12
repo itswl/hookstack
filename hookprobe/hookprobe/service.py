@@ -14,6 +14,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from hookprobe.engine import EngineResult
@@ -24,7 +25,14 @@ logger = logging.getLogger("hookprobe.service")
 
 
 class Engine(Protocol):
-    async def run(self, *, message: str, session_key: str, resume: str | None = None) -> EngineResult: ...
+    async def run(
+        self,
+        *,
+        message: str,
+        session_key: str,
+        resume: str | None = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> EngineResult: ...
 
 
 class RunBusyError(RuntimeError):
@@ -128,6 +136,7 @@ class RunService:
         return run
 
     def _spawn(self, run: Run, message: str, timeout_s: int, *, resume: str | None) -> None:
+        run.events = []
         task = asyncio.create_task(self._execute(run, message, timeout_s, resume=resume))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -152,12 +161,19 @@ class RunService:
 
     async def _execute(self, run: Run, message: str, timeout_s: int, *, resume: str | None = None) -> None:
         logger.info("run start session=%s timeout=%ss resume=%s", run.session_key, timeout_s, resume or "-")
+
+        def on_event(event: dict[str, Any]) -> None:
+            event["ts"] = time.time()
+            run.events.append(event)
+            if len(run.events) > 400:  # bound memory and the result file
+                del run.events[: len(run.events) - 400]
+
         try:
             # The semaphore sits outside the timeout: a queued run's clock
             # starts when it gets a slot, not while it waits for one.
             async with self._semaphore:
                 result = await asyncio.wait_for(
-                    self._engine.run(message=message, session_key=run.session_key, resume=resume),
+                    self._engine.run(message=message, session_key=run.session_key, resume=resume, on_event=on_event),
                     timeout=timeout_s,
                 )
         except TimeoutError:
@@ -210,5 +226,6 @@ class RunService:
                 "usage": result.usage if result else None,
                 "model_usage": result.model_usage if result else None,
                 "duration_ms": result.duration_ms if result else None,
+                "events": list(run.events),
             }
         )
