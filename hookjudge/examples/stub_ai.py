@@ -9,6 +9,7 @@ demonstrated: with no model configured every event lands on the rule floor and
 """
 
 import json
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 VERDICTS = {
@@ -39,6 +40,26 @@ DEFAULT = {
 }
 
 
+def _fallback(prompt: str) -> dict:
+    """Echo the inbound level instead of inventing a downgrade.
+
+    The judge's prompt carries the event as JSON, level included. A stand-in
+    that answers "medium" to an alert that arrived as high is demonstrating a
+    silent downgrade nobody chose — an investigator's report called that out
+    in a live run. Unknown levels still land on medium.
+    """
+    match = re.search(r'"level":\s*"([a-z]+)"', prompt)
+    level = {"warning": "medium"}.get(match.group(1), match.group(1)) if match else ""
+    if level in ("critical", "high", "medium", "low"):
+        return {
+            "summary": f"桩模型未匹配到预设判断，保守沿用原级别 {level}",
+            "importance": level,
+            "event_type": "",
+            "impact_scope": "影响范围未知",
+        }
+    return DEFAULT
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -53,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
             str(m.get("content") or "") for m in request.get("messages") or [] if m.get("role") == "user"
         )
 
-        verdict = next((v for k, v in VERDICTS.items() if k in prompt), DEFAULT)
+        verdict = next((v for k, v in VERDICTS.items() if k in prompt), None) or _fallback(prompt)
         print(f"[stub-ai] {verdict['importance']:<8} {verdict['summary'][:48]}", flush=True)
 
         body = json.dumps(
