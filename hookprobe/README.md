@@ -177,12 +177,14 @@ are kept on the run record (`previous_texts`).
 
 ## Run it
 
-Three composes, three shapes: the repo-root stack compose runs the demo
-family and includes this service behind `--profile probe`;
-`deploy/docker-compose.yml` runs the investigator standalone;
-`deploy/docker-compose.prod.yml` is the production shape — joined to the
-docker network of the platform it serves, admin port on loopback only,
-state bind-mounted at the deployment root for backup and review.
+Four composes, four shapes: the repo-root stack compose runs the demo
+family and includes this service behind `--profile probe`; the repo-root
+`deploy/docker-compose.yml` runs the real family (pipe + brain +
+investigator, no demo containers); `deploy/docker-compose.yml` here runs
+the investigator standalone; `deploy/docker-compose.prod.yml` is the
+production shape — joined to the docker network of the platform it serves,
+admin port on loopback only, state bind-mounted at the deployment root for
+backup and review.
 
 Standalone, from the repo root:
 

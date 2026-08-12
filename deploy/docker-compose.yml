@@ -1,0 +1,116 @@
+# The three services together, for real — no stub model, no sink. The compose
+# at the repo root is the self-contained demo; this file is the family with
+# its own credentials. Run from the repo root:
+#
+#   docker compose --env-file .env \
+#     -f deploy/docker-compose.yml up -d --build
+#
+# `--env-file .env` matters: compose interpolates ${...} from the compose
+# file's own directory by default, and the ${...:?} guards below must read
+# the deployment root's .env instead.
+#
+# What .env must carry, and why:
+#   HOOKRELAY_CONFIG_FILE=...   your pipe config — see hookrelay/examples/
+#                               stack.yaml for the shape, but write real
+#                               channels: its demo ones post to containers
+#                               this file deliberately does not run. Use an
+#                               ABSOLUTE path (e.g. $PWD/config.yaml):
+#                               compose resolves a relative bind source
+#                               against this file's directory, not your cwd
+#   HOOKPROBE_TOKEN=...         the investigator refuses to start without auth
+#   HOOKJUDGE_AI_*              optional — empty means every event walks the
+#                               free routes down to the rule floor
+#   ANTHROPIC_API_KEY=...       or the Anthropic-dialect trio + model aliases
+#
+# Ports are asymmetric on purpose: only the pipe faces the outside world;
+# the judge's and the investigator's admin pages stay on loopback for ssh
+# tunnels. Inside the network everyone reaches everyone by DNS name.
+
+name: hookstack-family
+
+services:
+  hookrelay:
+    build: ../hookrelay
+    image: hookrelay:latest
+    container_name: hookrelay
+    environment:
+      HOOKRELAY_HOST: 0.0.0.0
+      HOOKRELAY_PORT: 8100
+      HOOKRELAY_DB: /data/hookrelay.db
+      HOOKRELAY_CONFIG: /etc/hookrelay/config.yaml
+      HOOKRELAY_WORKER_INTERVAL: "0.5"
+      HOOKRELAY_PLUGINS: /data/plugins
+      # Where an escalation route delivers, if your config references it.
+      HOOKPROBE_EVENT_URL: ${HOOKPROBE_EVENT_URL:-http://hookprobe:8088/hooks/event}
+    volumes:
+      - ${HOOKRELAY_CONFIG_FILE:?path to your config.yaml — sources, routes, channels}:/etc/hookrelay/config.yaml:ro
+      - relay-data:/data
+    # The whole .env is injected, so a ${NAME} in the config only needs a
+    # line in .env — no compose edit, no forgotten passthrough.
+    env_file:
+      - path: ../.env
+        required: false
+    ports:
+      - "8100:8100"
+    restart: unless-stopped
+
+  hookjudge:
+    build: ../hookjudge
+    image: hookjudge:latest
+    container_name: hookjudge
+    environment:
+      HOOKJUDGE_HOST: 0.0.0.0
+      HOOKJUDGE_PORT: 8200
+      HOOKJUDGE_DB: /data/hookjudge.db
+      # One outbound address, and it is the pipe. Fan-out is not its business.
+      HOOKJUDGE_RETURN_URL: http://hookrelay:8100/hook/judge-notify
+      HOOKJUDGE_WORKER_INTERVAL: "0.5"
+      HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
+      HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:-}
+      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:-}
+      HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_AI_MODEL:-}
+      HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:-0.00015}
+      HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:-0.0006}
+    volumes:
+      - judge-data:/data
+    ports:
+      - "127.0.0.1:8200:8200"
+    restart: unless-stopped
+
+  hookprobe:
+    build: ../hookprobe
+    image: hookprobe:latest
+    container_name: hookprobe
+    environment:
+      HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
+      HOOKPROBE_ESCALATE_LEVELS: ${HOOKPROBE_ESCALATE_LEVELS:-critical,high}
+      HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
+      HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      # Any Anthropic-dialect provider: map the engine's model aliases here.
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: ${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${ANTHROPIC_DEFAULT_SONNET_MODEL:-}
+      ANTHROPIC_DEFAULT_OPUS_MODEL: ${ANTHROPIC_DEFAULT_OPUS_MODEL:-}
+      CLAUDE_CODE_SUBAGENT_MODEL: ${CLAUDE_CODE_SUBAGENT_MODEL:-}
+      API_TIMEOUT_MS: ${API_TIMEOUT_MS:-}
+      # HOOKPROBE_MCP_CONFIG: /config/mcp.json
+    volumes:
+      - probe-data:/data
+      # Read-only credentials are the real security boundary — mount only
+      # query-grade identities:
+      # - ../secrets/kubeconfig-readonly:/data/home/.kube/config:ro
+    ports:
+      - "127.0.0.1:8088:8088"
+    restart: unless-stopped
+    depends_on:
+      - hookrelay
+
+volumes:
+  relay-data:
+  judge-data:
+  probe-data:
