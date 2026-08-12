@@ -86,6 +86,9 @@ services:
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
       HOOKPROBE_ESCALATE_LEVELS: ${HOOKPROBE_ESCALATE_LEVELS:-critical,high}
+      # Window spend >= budget refuses new escalations (report card says why).
+      HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
+      HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

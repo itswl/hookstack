@@ -175,14 +175,30 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             body=str(event.get("body") or "")[:4000],
             fields=json.dumps(event.get("fields") or {}, ensure_ascii=False, indent=1),
         )
-        run = service.start(
-            {
-                "message": message,
-                "sessionKey": session_key,
-                "_meta": {"title": title, "level": level, "source": source, "event_id": event_id},
-            },
-            origin="relay",
-        )
+        payload = {
+            "message": message,
+            "sessionKey": session_key,
+            "_meta": {"title": title, "level": level, "source": source, "event_id": event_id},
+        }
+
+        # The budget breaker guards this door only — the one path that spends
+        # money without a human asking. A refusal is not a silent drop: it
+        # settles as a report-shaped run and returns through the family loop,
+        # so the channels say WHY there is no investigation. Redelivery of an
+        # already-funded session stays idempotent and is never refused.
+        state = service.budget_state()
+        if state is not None:
+            spent, limit = state
+            if spent >= limit and service.get(session_key) is None:
+                run = service.refuse_for_budget(payload, origin="relay", spent=spent)
+                return {
+                    "status": "refused",
+                    "reason": "budget exhausted",
+                    "sessionKey": run.session_key,
+                    "runId": run.run_id,
+                }
+
+        run = service.start(payload, origin="relay")
         return {"status": "accepted", "sessionKey": run.session_key, "runId": run.run_id}
 
     @app.post("/sessions/{session_key}/stop", dependencies=[Depends(require_token)])
@@ -260,6 +276,21 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if not manifest.is_file():
             raise HTTPException(status_code=404, detail="skill not found")
         return {"name": name, "content": manifest.read_text(encoding="utf-8")}
+
+    @app.get("/v1/budget", dependencies=[Depends(require_token)])
+    async def budget() -> dict[str, Any]:
+        state = service.budget_state()
+        if state is None:
+            return {"enabled": False}
+        spent, limit = state
+        return {
+            "enabled": True,
+            "budget_usd": limit,
+            "window_hours": settings.budget_window_hours,
+            "spent_usd": round(spent, 6),
+            "remaining_usd": round(max(0.0, limit - spent), 6),
+            "exhausted": spent >= limit,
+        }
 
     # The page itself carries no data — every call it makes presents the
     # bearer token, so serving the markup unauthenticated is safe.
