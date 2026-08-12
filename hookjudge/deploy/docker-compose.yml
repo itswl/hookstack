@@ -1,0 +1,47 @@
+# Standalone deployment — the brain alone, no family around it. Run from the
+# repo root:
+#
+#   docker compose --env-file .env \
+#     -f hookjudge/deploy/docker-compose.yml up -d --build
+#
+# `--env-file .env` matters: compose interpolates ${...} from the compose
+# file's own directory by default, and the ${HOOKJUDGE_RETURN_URL:?} guard
+# below must read the deployment root's .env instead.
+#
+# The return address is required, not defaulted: the judge has exactly one
+# outbound door, and a brain that starts without it judges into the void.
+# The AI credentials are optional on purpose — leave them empty and every
+# event walks the free routes down to the rule floor, which is a working
+# (if blunt) judge; set them and recovery/reuse/ai/rule becomes the cost
+# policy it is meant to be.
+
+name: hookjudge
+
+services:
+  hookjudge:
+    build:
+      context: ..
+    image: hookjudge:latest
+    container_name: hookjudge
+    environment:
+      HOOKJUDGE_HOST: 0.0.0.0
+      HOOKJUDGE_PORT: 8200
+      HOOKJUDGE_DB: /data/hookjudge.db
+      HOOKJUDGE_RETURN_URL: ${HOOKJUDGE_RETURN_URL:?where verdicts go — your pipe's judge-notify door}
+      HOOKJUDGE_WORKER_INTERVAL: "0.5"
+      HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
+      HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:-}
+      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:-}
+      HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_AI_MODEL:-}
+      HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:-0.00015}
+      HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:-0.0006}
+    volumes:
+      - judge-data:/data
+    ports:
+      # Open so a remote pipe can reach the judge; change to
+      # "127.0.0.1:8200:8200" when the caller is local or ssh-tunneled.
+      - "8200:8200"
+    restart: unless-stopped
+
+volumes:
+  judge-data:

@@ -90,6 +90,8 @@ docker compose --profile probe up -d --build
 open http://127.0.0.1:8088/ui
 ```
 
+演示之外，部署排版是统一的：`<服务>/deploy/docker-compose.yml` 单独跑任何一个服务，仓库根的 `deploy/docker-compose.yml` 用真实凭据把三个一起拉起（无 stub、无 sink，管道配置和各家密钥来自部署根的 .env），都从仓库根以 `docker compose --env-file .env -f <文件> up -d --build` 运行；`hookrelay/deploy/` 与 `hookprobe/deploy/` 下的 `docker-compose.prod.yml` 则是接入平台既有 docker 网络的生产形态。
+
 ## 现状与下一步
 
 现状：三个服务同仓各自独立，CI 全绿；调查员的每一个能力（合同、续用、过程流、Stop、账单、Markdown、环境记忆、skills 沉淀与浏览、并行子代理、浏览器取证、家族闭环）都经过真实运行验证，本文档的截图即证据；供应商无关也验证过了——同一镜像不改一行代码，换一组环境变量就从 Anthropic 官方端点切到了 DeepSeek 的方言端点。下一步按序推进：给镜像装上告警真实需要的只读 CLI 并搬迁 MCP 配置；部署到生产环境接真实告警流；把升级级别、费用预算按实际噪声水位调准。
