@@ -33,6 +33,8 @@ from hookprobe.settings import Settings
 from hookprobe.wire import verify_timestamped
 
 _EVENT_MESSAGE = """针对下面这条告警做一次只读深度调查：定位根因、评估影响、给出按优先级排序的处置建议。\
+开工前先翻案卷：用 Grep/Read 查 /data/results/ 下的历史调查记录，若发现同类告警的过往结论，\
+在报告中引用并对比（上次的判定是什么、这次是否吻合）。\
 最终输出一份简明的中文 Markdown 报告，结论先行；报告第一段是一句话结论，供通知卡片直接引用。
 
 告警来源: {source}
