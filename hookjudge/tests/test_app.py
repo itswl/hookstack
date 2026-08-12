@@ -59,6 +59,8 @@ def _settings(tmp_path, **overrides: Any) -> Settings:
             worker_interval_seconds=0.01,
             reuse_window_seconds=3600,
             retention_days=30,
+            alarm_url="",
+            alarm_min_interval_seconds=600,
             ai_base_url="",
             ai_api_key="",
             ai_model="m",
@@ -301,3 +303,54 @@ def test_gate_matches_ci():
     ):
         assert check in gate, f"gate.sh is missing {check!r}"
         assert check in ci, f"ci.yml is missing {check!r}"
+
+
+class DualSink:
+    """Return door that always 500s, alarm door that accepts — the exact
+    situation the self-alarm exists for."""
+
+    def __init__(self) -> None:
+        self.returns = 0
+        self.alarms: list[str] = []
+
+    async def post(self, url: str, **kwargs: Any) -> Any:
+        status = 200
+        if "alarm.example" in url:
+            self.alarms.append(str(((kwargs.get("json") or {}).get("content") or {}).get("text")))
+        else:
+            self.returns += 1
+            status = 500
+
+        class _R:
+            status_code = status
+            text = "{}"
+
+        return _R()
+
+
+async def test_dead_return_fires_the_self_alarm(tmp_path, monkeypatch):
+    """When the pipe is the broken link, the news travels around it — once,
+    with later dead letters folded, and never as a worker exception."""
+    app = create_app(settings=_settings(tmp_path, return_max_attempts=1, alarm_url="https://alarm.example/bot"))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        client.app = app  # type: ignore[attr-defined]
+        sink = DualSink()
+        monkeypatch.setattr(app.state, "client", sink)
+
+        await client.post("/events", json=EVENT)
+        second = dict(EVENT, event=dict(EVENT["event"], title="另一条也会死"))
+        await client.post("/events", json=second)
+
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if sink.returns >= 2 and sink.alarms:
+                break
+
+        assert sink.returns >= 2, "both returns were attempted and refused"
+        assert len(sink.alarms) == 1, "the second dead letter folds into the window, not the channel"
+        assert "裁决回传进入死信" in sink.alarms[0]
+        assert "充值金额单次超500报警" in sink.alarms[0]
