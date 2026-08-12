@@ -32,6 +32,7 @@ jobs:
       - run: python -m compileall -q hookprobe tests
       - run: ruff check hookprobe tests
       - run: ruff format --check hookprobe tests
+      - run: python -m bandit -q -r hookprobe
       - name: sessions page inline JS parses
         run: |
           node -e '
@@ -42,6 +43,7 @@ jobs:
           console.log("ui.html inline JS: OK");
           '
       - run: pytest -q
+      - run: python -m pip_audit --progress-spinner off
 
   docker:
     runs-on: ubuntu-latest
