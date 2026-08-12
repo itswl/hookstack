@@ -21,6 +21,13 @@ RUN apt-get update \
 #       "https://dl.k8s.io/release/v1.31.4/bin/linux/$(dpkg --print-architecture)/kubectl" \
 #     && chmod +x /usr/local/bin/kubectl
 
+# Optional: browser evidence via the Playwright MCP server (wire it with
+# deploy/mcp.example.json -> HOOKPROBE_MCP_CONFIG). Baking chromium and its
+# system deps into the image (~400 MB) means first navigation downloads
+# nothing at runtime:
+# RUN npx -y playwright@latest install --with-deps chromium \
+#     && npm cache clean --force
+
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY hookprobe ./hookprobe

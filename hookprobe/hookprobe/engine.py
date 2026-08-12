@@ -24,7 +24,8 @@ logger = logging.getLogger("hookprobe.engine")
 # The agent may write freely inside its own disposable workspace (scratch
 # scripts, distilled SKILL.md runbooks). "Read-only" applies to the systems
 # it investigates, enforced by the bash guard plus the credentials mounted
-# into the container.
+# into the container. Task enables parallel sub-investigations for cascading
+# incidents; hooks (and so the bash guard) apply inside subagents too.
 _ALLOWED_TOOLS = [
     "Bash",
     "Read",
@@ -36,6 +37,8 @@ _ALLOWED_TOOLS = [
     "WebFetch",
     "TodoWrite",
     "Skill",
+    "Task",
+    "Agent",  # the CLI's current name for the subagent tool; keep both spellings
 ]
 
 
