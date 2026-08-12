@@ -21,6 +21,9 @@ $PY -m ruff check hookrelay tests
 step "ruff format --check"
 $PY -m ruff format --check hookrelay tests
 
+step "bandit (static security scan)"
+$PY -m bandit -q -r hookrelay
+
 step "inline page JS parses"
 node -e '
 const fs = require("fs");
@@ -59,5 +62,8 @@ PYEOF
 
 step "pytest"
 $PY -m pytest -q
+
+step "pip-audit (known-vulnerable dependencies)"
+$PY -m pip_audit --progress-spinner off
 
 printf '\n\033[1;32mGATE GREEN\033[0m — matches the CI job.\n'

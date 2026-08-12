@@ -25,7 +25,7 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples" / "plugins"
 @pytest.fixture(scope="module", autouse=True)
 def load_example_plugins():
     """Load the shipped examples once; tolerate re-registration across runs."""
-    if "github" not in registry.SOURCE_ADAPTERS:
+    if "github" not in registry.SOURCE_ADAPTERS or "aws-sns" not in registry.SOURCE_ADAPTERS:
         registry.load_plugins(EXAMPLES)
 
 
@@ -59,6 +59,123 @@ def test_github_adapter_speaks_the_github_dialect():
 
     extracted = adapter.parse(source, {"repository": {"full_name": "a/b"}, "head_commit": {"message": "fix"}})
     assert extracted["title"] == "a/b" and extracted["body"] == "fix"
+
+
+def _sns_ns() -> dict:
+    """The plugin module's namespace, reached through its registered class —
+    load_plugins does not put plugin modules on sys.modules."""
+    return type(registry.SOURCE_ADAPTERS["aws-sns"]).parse.__globals__
+
+
+def _sns_cfg() -> Config:
+    return Config.from_dict(
+        {
+            "sources": [
+                {
+                    "name": "cloudwatch",
+                    "adapter": "aws-sns",
+                    "secret": "",
+                    "title": "{AlarmName}",
+                    "body": "{NewStateReason}",
+                    "level": "{NewStateValue}",
+                    "level_map": {"ALARM": "high", "OK": "info"},
+                }
+            ],
+            "channels": [{"name": "sink", "type": "generic", "url": "https://sink.example/in"}],
+            "routes": [{"name": "all", "source": "*", "send_to": ["sink"]}],
+        }
+    )
+
+
+def test_sns_notification_unwraps_the_message_string(monkeypatch):
+    """The whole reason the adapter exists: templates reach INSIDE Message."""
+    monkeypatch.setitem(_sns_ns(), "_verify_pki", lambda payload: True)
+    adapter = registry.SOURCE_ADAPTERS["aws-sns"]
+    source = _sns_cfg().sources["cloudwatch"]
+    alarm = {"AlarmName": "HighCPU", "NewStateValue": "ALARM", "NewStateReason": "cpu 97% for 5m"}
+    payload = {"Type": "Notification", "Message": json.dumps(alarm), "TopicArn": "arn:aws:sns:x:1:t"}
+
+    extracted = adapter.parse(source, payload)
+    assert extracted["title"] == "HighCPU"
+    assert extracted["body"] == "cpu 97% for 5m"
+    assert extracted["level"] == "high"
+
+
+def test_sns_handshake_is_pinned_to_sns_hosts(monkeypatch):
+    from fastapi import HTTPException
+
+    ns = _sns_ns()
+    monkeypatch.setitem(ns, "_verify_pki", lambda payload: True)
+    adapter = registry.SOURCE_ADAPTERS["aws-sns"]
+    source = _sns_cfg().sources["cloudwatch"]
+
+    assert ns["_url_is_sns"]("https://sns.us-east-1.amazonaws.com/confirm?x=1")
+    assert not ns["_url_is_sns"]("http://sns.us-east-1.amazonaws.com/confirm")  # not https
+    assert not ns["_url_is_sns"]("https://evil.example/confirm")
+
+    with pytest.raises(HTTPException) as refused:
+        adapter.parse(source, {"Type": "SubscriptionConfirmation", "SubscribeURL": "https://evil.example/c"})
+    assert refused.value.status_code == 400
+
+    fetched: list[str] = []
+    monkeypatch.setitem(ns, "_fetch", lambda url: fetched.append(url) or b"ok")
+    with pytest.raises(HTTPException) as confirmed:
+        adapter.parse(
+            source,
+            {"Type": "SubscriptionConfirmation", "SubscribeURL": "https://sns.us-east-1.amazonaws.com/c"},
+        )
+    assert confirmed.value.status_code == 202
+    assert fetched == ["https://sns.us-east-1.amazonaws.com/c"]
+
+
+def test_sns_pki_signature_roundtrip():
+    """Real verification against a self-signed cert — no network, no mocks."""
+    cryptography = pytest.importorskip("cryptography")  # noqa: F841
+    import datetime
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding, rsa
+    from cryptography.x509 import CertificateBuilder, Name, NameAttribute, random_serial_number
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = Name([NameAttribute(NameOID.COMMON_NAME, "sns.amazonaws.com")])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+
+    ns = _sns_ns()
+    cert_url = "https://sns.us-east-1.amazonaws.com/test-cert.pem"
+    ns["_CERT_CACHE"][cert_url] = cert.public_bytes(serialization.Encoding.PEM)
+
+    payload = {
+        "Type": "Notification",
+        "Message": '{"AlarmName":"X"}',
+        "MessageId": "m-1",
+        "Timestamp": "2026-08-12T00:00:00Z",
+        "TopicArn": "arn:aws:sns:x:1:t",
+        "SignatureVersion": "1",
+        "SigningCertURL": cert_url,
+    }
+    fields = ns["_SIGNED_FIELDS"]["Notification"]
+    string_to_sign = "".join(f"{k}\n{payload[k]}\n" for k in fields if payload.get(k) is not None)
+    import base64
+
+    payload["Signature"] = base64.b64encode(
+        key.sign(string_to_sign.encode(), padding.PKCS1v15(), hashes.SHA1())
+    ).decode()
+
+    assert ns["_verify_pki"](payload) is True
+    tampered = dict(payload, Message='{"AlarmName":"Y"}')
+    assert ns["_verify_pki"](tampered) is False
 
 
 def test_custom_channel_type_from_example_plugin():
@@ -261,10 +378,12 @@ def test_gate_matches_ci():
         "compileall -q hookrelay tests",
         "ruff check hookrelay tests",
         "ruff format --check hookrelay tests",
+        "bandit -q -r hookrelay",
         "status.html",
         "examples/plugins",
         "config.example.yaml",
         "pytest -q",
+        "pip_audit",
     ):
         assert check in gate, f"gate.sh is missing {check!r}"
         assert check in ci, f"ci.yml is missing {check!r}"
