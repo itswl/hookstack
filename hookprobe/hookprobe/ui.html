@@ -838,6 +838,7 @@ curl -X POST ${base}/sessions/my:task:1/stop -H ...</pre>
 <li><b>接一个 MCP</b>：编辑 <code>/data/mcp.json</code>（支持市场 config.json 方言，enabled:false 会被跳过），system 页确认，下次运行生效</li>
 <li><b>控制会话看到哪些技能</b>：<code>HOOKPROBE_SKILLS</code> 白名单（大库防淹）；层的开关是 <code>HOOKPROBE_SETTING_SOURCES</code></li>
 <li><b>查"它到底干了什么"</b>：audit 视图按会话过滤；单次运行的过程流在 sessions 里点开 process · N steps</li>
+<li><b>定时巡检</b>：宿主 crontab 定时往管道前门 POST 一条「巡检」事件即可 — 升级门会把它变成一次主动调查，报告走同样的渠道；每次巡检都是新案卷，且会引用上一次的发现</li>
 </ul>
 <p class="dim">更完整的设计与部署说明见仓库 hookprobe/README.md 与根目录 README.zh.md。</p>
 </div>`;

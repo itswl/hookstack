@@ -164,7 +164,7 @@ services:
   # A self-scraping Prometheus, so the investigator's prometheus MCP has
   # something real to query. Opt-in with the investigator; useless alone.
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.13.2
     container_name: hs-prometheus
     profiles: ["probe"]
     ports:
