@@ -38,16 +38,19 @@ from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyErro
 from hookprobe.settings import Settings
 from hookprobe.wire import verify_timestamped
 
-_EVENT_MESSAGE = """针对下面这条告警做一次只读深度调查：定位根因、评估影响、给出按优先级排序的处置建议。\
-开工前先翻案卷：用 Grep/Read 查 /data/results/ 下的历史调查记录，若发现同类告警的过往结论，\
-在报告中引用并对比（上次的判定是什么、这次是否吻合）。\
-最终输出一份简明的中文 Markdown 报告，结论先行；报告第一段是一句话结论，供通知卡片直接引用。
+_EVENT_MESSAGE = """Run one read-only investigation of the alert below: find the root cause, \
+assess the impact, and give remediation steps in priority order.
+Open the case files first: Grep/Read /data/results/ for earlier investigations of the same \
+alert, and if you find one, cite it and compare — what was the previous verdict, does this \
+one agree.
+Answer with a short Markdown report, conclusion first: the opening paragraph is a \
+one-sentence conclusion a notification card can quote verbatim.
 
-告警来源: {source}
-级别: {level}
-标题: {title}
-正文: {body}
-附加字段:
+Source: {source}
+Level: {level}
+Title: {title}
+Body: {body}
+Fields:
 ```json
 {fields}
 ```"""

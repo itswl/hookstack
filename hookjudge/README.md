@@ -154,7 +154,7 @@ All environment, one flat object (`hookjudge/settings.py`), no layers.
 | `HOOKJUDGE_AI_PRICE_IN_PER_1K` / `_OUT_PER_1K` | `0.0` | so the ledger can price tokens |
 
 Leave the AI variables empty and the service still works: every event lands on
-the rule floor and says `AI 未配置`.
+the rule floor and says `AI not configured`.
 
 The prompt in `hookjudge/judge.py` is Chinese on purpose. These alerts are
 Chinese and the summaries are read by Chinese-speaking operators, so the model

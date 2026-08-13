@@ -185,13 +185,13 @@ async def test_explain_reports_a_miss_as_clearly_as_a_hit(file_client):
 
 async def test_ledger_search_filters_and_paginates(file_client):
     for i in range(6):
-        await file_client.post("/hook/test", json={"title": f"事件 {i}" if i % 2 else f"other {i}"})
+        await file_client.post("/hook/test", json={"title": f"ledger event {i}" if i % 2 else f"other {i}"})
 
     all_events = (await file_client.get("/status", params={"limit": 100})).json()["recent"]
     assert len(all_events) == 6
 
-    matched = (await file_client.get("/status", params={"q": "事件"})).json()["recent"]
-    assert len(matched) == 3 and all("事件" in e["title"] for e in matched)
+    matched = (await file_client.get("/status", params={"q": "ledger"})).json()["recent"]
+    assert len(matched) == 3 and all("ledger" in e["title"] for e in matched)
 
     by_source = (await file_client.get("/status", params={"source": "test"})).json()["recent"]
     assert len(by_source) == 6

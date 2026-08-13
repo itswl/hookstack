@@ -115,128 +115,134 @@
 <div class="wrap">
   <header>
     <h1>hookrelay</h1>
-    <span class="sub">每条消息有交代,每次投递有结局</span>
-    <span class="stamp" id="stamp">加载中…</span>
+    <span class="sub">every message accounted for, every delivery with an outcome</span>
+    <span class="stamp" id="stamp">loading…</span>
   </header>
 
   <div class="tokenbar" id="tokenbar">
     <input id="tokenInput" type="password" placeholder="X-Read-Token">
-    <button id="tokenSave">进入</button>
+    <button id="tokenSave">enter</button>
   </div>
 
   <div class="tabs">
-    <button class="tab active" data-tab="events">事件</button>
-    <button class="tab" data-tab="config">配置</button>
-    <button class="tab" data-tab="help">帮助</button>
+    <button class="tab active" data-tab="events">events</button>
+    <button class="tab" data-tab="config">config</button>
+    <button class="tab" data-tab="help">help</button>
   </div>
 
   <div id="panel-events">
   <div class="cards">
-    <div class="card"><div class="label">排队中</div><div class="value" id="cQueued">–</div></div>
-    <div class="card"><div class="label">已送达</div><div class="value" id="cSent">–</div></div>
-    <div class="card" id="deadCard"><div class="label">死信</div><div class="value" id="cDead">–</div></div>
+    <div class="card"><div class="label">queued</div><div class="value" id="cQueued">–</div></div>
+    <div class="card"><div class="label">delivered</div><div class="value" id="cSent">–</div></div>
+    <div class="card" id="deadCard"><div class="label">dead letters</div><div class="value" id="cDead">–</div></div>
   </div>
 
   <div id="silences"></div>
 
-  <h2>最近事件 · 点开看决策链</h2>
+  <h2>Recent events · open one for its decision chain</h2>
   <div class="row">
-    <input id="fSearch" placeholder="搜标题/正文" style="flex:1">
-    <input id="fSource" placeholder="来源" style="width:130px">
+    <input id="fSearch" placeholder="search title / body" style="flex:1">
+    <input id="fSource" placeholder="source" style="width:130px">
     <select id="fOutcome" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;">
-      <option value="">全部结局</option>
+      <option value="">any outcome</option>
       <option value="routed">routed</option>
       <option value="skipped">skipped</option>
     </select>
-    <button class="btn" id="fApply">搜索</button>
-    <button class="btn" id="fClear">清空</button>
+    <button class="btn" id="fApply">search</button>
+    <button class="btn" id="fClear">clear</button>
   </div>
   <div id="events"><div class="empty">…</div></div>
-  <div class="row"><button class="btn" id="loadMore" style="display:none">加载更早</button></div>
+  <div class="row"><button class="btn" id="loadMore" style="display:none">load earlier</button></div>
   </div><!-- /panel-events -->
 
   <div id="panel-config" style="display:none">
     <div class="row">
-      <input id="adminToken" type="password" placeholder="X-Admin-Token(仅存本机 localStorage)" style="flex:1">
-      <button class="btn" id="adminSave">记住</button>
+      <input id="adminToken" type="password" placeholder="X-Admin-Token (kept in this browser only)" style="flex:1">
+      <button class="btn" id="adminSave">remember</button>
     </div>
 
-    <h2>config.yaml · 文件即真源,这里只是它的编辑器</h2>
-    <textarea class="editor" id="cfgEditor" spellcheck="false" placeholder="加载中…"></textarea>
+    <h2>config.yaml · the file is the source of truth; this is just its editor</h2>
+    <textarea class="editor" id="cfgEditor" spellcheck="false" placeholder="loading…"></textarea>
     <div class="row">
-      <button class="btn primary" id="cfgSave">校验并保存(热生效)</button>
-      <button class="btn" id="cfgReload">从文件重载</button>
-      <span class="hint">校验不过 = 什么都不改;秘密请写 ${ENV} 引用,值放 .env</span>
+      <button class="btn primary" id="cfgSave">validate and save (hot)</button>
+      <button class="btn" id="cfgReload">reload from file</button>
+      <span class="hint">invalid = nothing changes. Reference secrets as ${ENV} and keep the values in .env</span>
     </div>
     <div class="msg" id="cfgMsg"></div>
 
-    <h2>干跑:这段载荷会怎么走?</h2>
+    <h2>Dry run: where would this payload go?</h2>
     <div class="row">
-      <input id="exSource" placeholder="来源名(门)" style="width:170px">
-      <span class="hint">不验签、不记账、不投递</span>
+      <input id="exSource" placeholder="source name (door)" style="width:170px">
+      <span class="hint">no signature check, nothing recorded, nothing delivered</span>
     </div>
-    <textarea class="editor" id="exPayload" spellcheck="false" style="min-height:120px" placeholder='{"title":"试试","state":"alerting"}'></textarea>
-    <div class="row"><button class="btn primary" id="exRun">解释</button></div>
+    <textarea class="editor" id="exPayload" spellcheck="false" style="min-height:120px" placeholder='{"title":"try me","state":"alerting"}'></textarea>
+    <div class="row"><button class="btn primary" id="exRun">explain</button></div>
     <pre class="trace" id="exResult" style="display:none"></pre>
 
-    <h2>新建静音</h2>
+    <h2>New silence</h2>
     <div class="row">
-      <input id="silSource" placeholder="来源名,或 * 表示全部" style="width:200px">
+      <input id="silSource" placeholder="source name, or * for all" style="width:200px">
       <input id="silMinutes" type="number" value="60" min="1" style="width:90px">
-      <span class="hint">分钟</span>
-      <input id="silNote" placeholder="备注(可选)" style="flex:1">
-      <button class="btn primary" id="silCreate">静音</button>
+      <span class="hint">minutes</span>
+      <input id="silNote" placeholder="note (optional)" style="flex:1">
+      <button class="btn primary" id="silCreate">silence</button>
     </div>
     <div class="msg" id="silMsg"></div>
   </div><!-- /panel-config -->
 
   <div id="panel-help" style="display:none" class="hp">
-    <h2>这是什么</h2>
-    <p>hookrelay 是家族<b>唯一的告警前门</b>，也是唯一的出口 — 管道。它把各家监控的方言适配成
-    统一事件，按路由送去处理系统（判官/调查员），再把回来的结果打扮成各渠道的卡片投递出去。
-    它<b>刻意不理解内容</b>：判断是大脑们的事，管道只负责「每条消息有交代，每次投递有结局」。</p>
+    <h2>What this is</h2>
+    <p>hookrelay is the family's <b>only front door</b> for alerts, and its only way out — the pipe.
+    It adapts every monitoring dialect into one normalized event, routes it to the processing
+    systems (the judge, the investigator), then dresses whatever comes back into each channel's
+    card format and delivers it. It is <b>deliberately content-blind</b>: judgement belongs to the
+    brains, and the pipe answers for the mechanics — every message accounted for, every delivery
+    with an outcome.</p>
 
-    <h2>一条告警的旅程</h2>
-    <pre>上游 POST /hook/{source}
-  → 提取(模板+level_map) → 门(去重/静音/风暴熔断)
-  → 路由(按优先级累积，stop 截断) → 渠道(按类型渲染)
-  → 投递(重试退避，死信可见+自告警) → 账本(决策链+收发双向原文)</pre>
+    <h2>One alert's journey</h2>
+    <pre>upstream POST /hook/{source}
+  -> extract (templates + level_map) -> gates (dedup / silence / storm fuse)
+  -> routes (accumulate by priority, stop truncates) -> channels (render per type)
+  -> delivery (retry with backoff, dead letters visible + self-alarm)
+  -> ledger (decision chain + the bytes of both directions)</pre>
 
-    <h2>读这块板子</h2>
+    <h2>Reading this board</h2>
     <table>
-      <tr><th>区域</th><th>怎么读</th></tr>
-      <tr><td>三张卡</td><td>排队=在等投递；死信&gt;0 应当有人看（配了 <code>HOOKRELAY_ALARM_URL</code> 会自动报警）</td></tr>
-      <tr><td>事件行</td><td>点开=完整决策链：哪些路由被考虑、为何命中/跳过、投递到哪。「对比」按钮拉 <code>/trace</code> 往返视图：原始载荷、每渠道发出的 body、各大脑的回件</td></tr>
-      <tr><td>配置 tab</td><td>config.yaml 的编辑器（文件才是真源）：校验通过才落盘，热加载不重启。需要 admin token</td></tr>
+      <tr><th>Area</th><th>How to read it</th></tr>
+      <tr><td>The three cards</td><td>Queued = waiting to be delivered. Dead letters &gt; 0 deserves a human — with <code>HOOKRELAY_ALARM_URL</code> set it alarms on its own</td></tr>
+      <tr><td>An event row</td><td>Open it for the full decision chain: which routes were considered, why each matched or was skipped, where it was delivered. The round-trip button pulls <code>/trace</code>: the payload as received, the exact body sent per channel, and what each brain sent back</td></tr>
+      <tr><td>The config tab</td><td>An editor for config.yaml (the file is the source of truth): it only writes when validation passes, and applies hot — no restart. Needs the admin token</td></tr>
     </table>
 
-    <h2>API 速查</h2>
-    <p class="muted">地址按部署形态：家族容器网络内用 <code>http://hookrelay:8100</code>，宿主机用回环映射 <code>http://127.0.0.1:8100</code>。读接口带 <code>X-Read-Token</code>，管理接口带 <code>X-Admin-Token</code>（都在页面里记住过就不用手填）。</p>
+    <h2>API quick reference</h2>
+    <p class="muted">Addresses depend on where you are: inside the family's docker network use <code>http://hookrelay:8100</code>; from the host, the loopback mapping <code>http://127.0.0.1:8100</code>. Read endpoints take <code>X-Read-Token</code>, admin endpoints <code>X-Admin-Token</code> — remember either one on the page and you never type it again.</p>
     <table>
-      <tr><th>端点</th><th>用途</th></tr>
-      <tr><td><code>POST /hook/{source}</code></td><td>前门。source 在 config.yaml 里声明（含签名/模板/级别映射）</td></tr>
-      <tr><td><code>GET /status</code> · <code>GET /trace/{id}</code></td><td>板子的数据源 / 一条告警的完整往返（含双向原文取证）</td></tr>
-      <tr><td><code>POST /explain/{source}</code></td><td>干跑：这个载荷「会」发生什么 — 不记账不投递（admin）</td></tr>
-      <tr><td><code>GET/PUT /config</code> · <code>POST /config/reload</code></td><td>配置读改与热加载（admin）</td></tr>
-      <tr><td><code>POST /silences</code> · <code>DELETE /silences/{id}</code></td><td>静音阀（admin）</td></tr>
-      <tr><td><code>POST /deliveries/{id}/retry</code></td><td>死信的第二次机会（admin）</td></tr>
-      <tr><td><code>GET /metrics</code></td><td>Prometheus 文本：事件/投递/积压/熔断（read token）</td></tr>
+      <tr><th>Endpoint</th><th>Purpose</th></tr>
+      <tr><td><code>POST /hook/{source}</code></td><td>The front door. Each source is declared in config.yaml with its signature, templates and level map</td></tr>
+      <tr><td><code>GET /status</code> · <code>GET /trace/{id}</code></td><td>What this board reads / one alert's whole round trip, including the bytes of both directions</td></tr>
+      <tr><td><code>POST /explain/{source}</code></td><td>Dry run: what this payload WOULD do — nothing recorded, nothing delivered (admin)</td></tr>
+      <tr><td><code>GET/PUT /config</code> · <code>POST /config/reload</code></td><td>Read, replace and hot-reload the config (admin)</td></tr>
+      <tr><td><code>POST /silences</code> · <code>DELETE /silences/{id}</code></td><td>The silence valve (admin)</td></tr>
+      <tr><td><code>POST /deliveries/{id}/retry</code></td><td>A dead letter's second chance (admin)</td></tr>
+      <tr><td><code>GET /metrics</code></td><td>Prometheus text: events, deliveries, outbox depth, fuse state (read token)</td></tr>
     </table>
 
-    <h2>配置要点（config.yaml）</h2>
+    <h2>The config that matters (config.yaml)</h2>
     <table>
-      <tr><th>概念</th><th>一句话</th></tr>
-      <tr><td>sources</td><td>每个门的签名密钥、提取模板（占位符抽标题/正文/级别）、<code>level_map</code> 统一各家用词。配置里的 <code>${NAME}</code> 从 .env 展开 — 加变量不用改 compose</td></tr>
-      <tr><td>routes</td><td><b>顺序即语义</b>：按优先级从高到低累积匹配，<code>stop: true</code> 截断。回传路由（judge-notify/probe-notify）优先级最高并 stop，防止结果被再次加工</td></tr>
-      <tr><td>channels</td><td><code>payload: normalized</code> 发标准事件（给大脑）；<code>processed</code> 把大脑结果渲染成飞书/钉钉卡片；<code>raw</code> 透传原始载荷</td></tr>
-      <tr><td>防噪三件套</td><td>指纹去重（fingerprint_fields + 窗口）、静音、风暴熔断（按量不按内容）</td></tr>
-      <tr><td>保留</td><td><code>HOOKRELAY_RETENTION_DAYS</code>（默认 14）连账本一起清</td></tr>
+      <tr><th>Concept</th><th>In one line</th></tr>
+      <tr><td>sources</td><td>Per door: the signing secret, extraction templates (placeholders pull title/body/level) and <code>level_map</code> to normalize each vendor's wording. A <code>${NAME}</code> in the config expands from .env — adding one needs no compose edit</td></tr>
+      <tr><td>routes</td><td><b>Order is meaning</b>: matches accumulate from highest priority down, and <code>stop: true</code> truncates. The return routes (judge-notify / probe-notify) sit highest and stop, so a result is never processed a second time</td></tr>
+      <tr><td>channels</td><td><code>payload: normalized</code> sends the standard event (for a brain); <code>processed</code> renders a brain's result as a Feishu/DingTalk card; <code>raw</code> passes the original payload through</td></tr>
+      <tr><td>Noise control</td><td>Fingerprint dedup (fingerprint_fields + window), silences, and the storm fuse (volume, not content)</td></tr>
+      <tr><td>Retention</td><td><code>HOOKRELAY_RETENTION_DAYS</code> (14 by default) prunes the ledger with everything else</td></tr>
     </table>
 
-    <h2>在家族里的位置</h2>
-    <p>升级路由把每个前门事件复制给调查员（<code>${HOOKPROBE_EVENT_URL}</code>）；判官与调查员的
-    结果走各自回传门回来，说同一种「大脑结果方言」，管道统一穿衣送渠道。管道自己坏了怎么办 —
-    死信自告警直发 <code>HOOKRELAY_ALARM_URL</code>，绕开刚坏掉的那套栈。</p>
+    <h2>Its place in the family</h2>
+    <p>The escalation routes copy every front-door event to the investigator
+    (<code>${HOOKPROBE_EVENT_URL}</code>). The judge and the investigator both return through their
+    own doors speaking the same brain-result dialect, and the pipe dresses both for the channels.
+    And when the pipe itself is what broke, the dead-letter self-alarm posts straight to
+    <code>HOOKRELAY_ALARM_URL</code>, around the stack that just failed.</p>
   </div>
 </div>
 
@@ -265,17 +271,17 @@
 
     var silences = data.silences || [];
     document.getElementById("silences").innerHTML = silences.length
-      ? "<h2>生效中的静音</h2>" + silences.map(function (s) {
+      ? "<h2>Active silences</h2>" + silences.map(function (s) {
           return '<div class="silence">#' + esc(s.id) + " · " + esc(s.source) +
-            ' · 至 ' + esc(fmtTime(s.until_ts)) +
+            ' · until ' + esc(fmtTime(s.until_ts)) +
             (s.note ? ' · <span class="note">' + esc(s.note) + "</span>" : "") +
-            ' <button class="btn tiny" data-lift-silence="' + esc(s.id) + '">解除</button></div>';
+            ' <button class="btn tiny" data-lift-silence="' + esc(s.id) + '">lift</button></div>';
         }).join("")
       : "";
 
     var events = data.recent || [];
     if (!events.length) {
-      document.getElementById("events").innerHTML = '<div class="empty">还没有事件 — 投一条试试:examples/try.sh</div>';
+      document.getElementById("events").innerHTML = '<div class="empty">no events yet — send one with examples/try.sh</div>';
       return;
     }
     document.getElementById("loadMore").style.display = events.length >= filters.limit ? "" : "none";
@@ -287,7 +293,7 @@
         var extra = d.status === "dead" || d.last_error
           ? ' title="' + esc(d.last_error || "") + '"' : "";
         var retryBtn = d.status === "dead"
-          ? ' <button class="btn tiny" data-retry-delivery="' + esc(d.id) + '">重试</button>' : "";
+          ? ' <button class="btn tiny" data-retry-delivery="' + esc(d.id) + '">retry</button>' : "";
         return '<span class="chip ' + esc(d.status) + '"' + extra + ">" +
           esc(d.channel) + " · " + esc(d.status) + (d.attempts ? " ×" + esc(d.attempts) : "") + "</span>" + retryBtn;
       }).join("");
@@ -300,7 +306,7 @@
           '<span class="etime">' + esc(fmtTime(e.received_at)) + "</span>" +
         "</summary>" +
         (chips ? '<div class="chips">' + chips + "</div>" : "") +
-        '<div class="chips"><button class="btn tiny" data-compare="' + esc(e.id) + '">看这条的往返 / 各系统加工</button></div>' +
+        '<div class="chips"><button class="btn tiny" data-compare="' + esc(e.id) + '">round trip · what each system made of it</button></div>' +
         '<div class="compare" id="cmp-' + esc(e.id) + '" style="display:none"></div>' +
         '<pre class="trace">' + esc(JSON.stringify(e.steps || [], null, 2)) + "</pre>" +
       "</details>";
@@ -325,7 +331,7 @@
     fetch(statusQuery(), { headers: headers }).then(function (res) {
       if (res.status === 401) {
         document.getElementById("tokenbar").classList.add("show");
-        document.getElementById("stamp").textContent = "需要读取令牌";
+        document.getElementById("stamp").textContent = "read token required";
         return null;
       }
       document.getElementById("tokenbar").classList.remove("show");
@@ -333,9 +339,9 @@
     }).then(function (data) {
       if (!data) return;
       render(data);
-      document.getElementById("stamp").textContent = "刷新于 " + new Date().toTimeString().slice(0, 8);
+      document.getElementById("stamp").textContent = "refreshed " + new Date().toTimeString().slice(0, 8);
     }).catch(function () {
-      document.getElementById("stamp").textContent = "连接失败,重试中…";
+      document.getElementById("stamp").textContent = "connection failed, retrying…";
     });
   }
 
@@ -375,18 +381,18 @@
   adminInput.value = localStorage.getItem(ADMIN_KEY) || "";
   document.getElementById("adminSave").addEventListener("click", function () {
     localStorage.setItem(ADMIN_KEY, adminInput.value.trim());
-    showMsg("cfgMsg", true, "令牌已保存在本机");
+    showMsg("cfgMsg", true, "token saved in this browser");
     loadConfig();
   });
 
   // ── config editor: GET → edit → PUT (validate-or-nothing) ──
   function loadConfig() {
     fetch("/config", { headers: adminHeaders() }).then(function (res) {
-      if (res.status === 403) { showMsg("cfgMsg", false, "需要管理令牌(.env 里的 HOOKRELAY_ADMIN_TOKEN)"); return null; }
+      if (res.status === 403) { showMsg("cfgMsg", false, "admin token required (HOOKRELAY_ADMIN_TOKEN in .env)"); return null; }
       if (!res.ok) { return res.json().then(function (d) { showMsg("cfgMsg", false, d.detail || res.status); return null; }); }
       return res.json();
     }).then(function (data) {
-      if (data) { document.getElementById("cfgEditor").value = data.yaml; showMsg("cfgMsg", true, "已加载 " + data.path); }
+      if (data) { document.getElementById("cfgEditor").value = data.yaml; showMsg("cfgMsg", true, "loaded " + data.path); }
     });
   }
   document.getElementById("cfgSave").addEventListener("click", function () {
@@ -394,18 +400,18 @@
       .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
       .then(function (r) {
         if (r.ok) {
-          showMsg("cfgMsg", true, "已保存并热生效\nsources: " + r.d.sources.join(", ") +
+          showMsg("cfgMsg", true, "saved and applied\nsources: " + r.d.sources.join(", ") +
             "\npipeline: " + r.d.pipeline.join(" → ") + "\nroutes: " + r.d.routes.join(", "));
           refresh();
-        } else { showMsg("cfgMsg", false, "校验失败,未做任何更改:\n" + r.d.detail); }
+        } else { showMsg("cfgMsg", false, "validation failed, nothing changed:\n" + r.d.detail); }
       });
   });
   document.getElementById("cfgReload").addEventListener("click", function () {
     fetch("/config/reload", { method: "POST", headers: adminHeaders() })
       .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
       .then(function (r) {
-        if (r.ok) { showMsg("cfgMsg", true, "已从文件重载"); loadConfig(); refresh(); }
-        else { showMsg("cfgMsg", false, r.d.detail || "重载失败"); }
+        if (r.ok) { showMsg("cfgMsg", true, "reloaded from file"); loadConfig(); refresh(); }
+        else { showMsg("cfgMsg", false, r.d.detail || "reload failed"); }
       });
   });
 
@@ -421,7 +427,7 @@
       })
     }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
       .then(function (r) {
-        showMsg("silMsg", r.ok, r.ok ? ("已静音 #" + r.d.id + " · " + r.d.source) : (r.d.detail || "失败"));
+        showMsg("silMsg", r.ok, r.ok ? ("silenced #" + r.d.id + " · " + r.d.source) : (r.d.detail || "failed"));
         refresh();
       });
   });
@@ -440,11 +446,11 @@
     // and per channel the exact body that left the socket. Collapsed — the
     // chips answer "did it go"; these answer "what exactly went".
     var received = origin.payload == null ? "" :
-      '<details class="wire"><summary>收到的原始载荷</summary>' +
+      '<details class="wire"><summary>payload as received</summary>' +
       '<pre class="trace">' + esc(JSON.stringify(origin.payload, null, 2)) + "</pre></details>";
     var sentBodies = (origin.deliveries || []).filter(function (d) { return d.sent_body; })
       .map(function (d) {
-        return '<details class="wire"><summary>' + esc(d.channel) + " · 发出的 body</summary>" +
+        return '<details class="wire"><summary>' + esc(d.channel) + " · body sent</summary>" +
           '<pre class="trace">' + esc(prettyBody(d.sent_body)) + "</pre></details>";
       }).join("");
     var brains = returns.length
@@ -456,15 +462,15 @@
           return '<div class="brain">' +
             '<span class="lat">' + esc(r.latency_seconds) + "s</span>" +
             '<div class="who"><span class="dot ' + esc(r.level) + '"></span> ' + esc(who) + "</div>" +
-            '<div class="verdict">' + esc(r.title || "(无标题)") + "</div>" +
+            '<div class="verdict">' + esc(r.title || "(untitled)") + "</div>" +
             '<div class="verdict">' + esc(r.body || "") + "</div>" +
             (extras ? '<div class="kv">' + extras + "</div>" : "") +
             '<div class="kv">level=' + esc(r.level) + " · #" + esc(r.id) + "</div></div>";
         }).join("")
-      : '<div class="hint">还没有处理系统回传(它们要回引 correlation id 才能归到这条下面)</div>';
-    box.innerHTML = '<h4>原始事件 #' + esc(origin.id) + " · 扇出到</h4>" + (fan || '<span class="hint">未投递</span>') +
+      : '<div class="hint">no processing system has returned yet — they must quote the correlation id to group here</div>';
+    box.innerHTML = '<h4>Original event #' + esc(origin.id) + " · fanned out to</h4>" + (fan || '<span class="hint">not delivered</span>') +
       received + sentBodies +
-      "<h4 style=\"margin-top:12px\">各系统的加工(" + returns.length + ")</h4>" +
+      "<h4 style=\"margin-top:12px\">what each system made of it (" + returns.length + ")</h4>" +
       '<div class="brains">' + brains + "</div>";
   }
 
@@ -473,7 +479,7 @@
     var lift = e.target.closest("[data-lift-silence]");
     if (lift) {
       fetch("/silences/" + lift.getAttribute("data-lift-silence"), { method: "DELETE", headers: adminHeaders() })
-        .then(function (res) { if (!res.ok) alert("解除失败:需要管理令牌(配置页设置)"); refresh(); });
+        .then(function (res) { if (!res.ok) alert("lift failed: admin token required (set it on the config tab)"); refresh(); });
     }
     var cmp = e.target.closest("[data-compare]");
     if (cmp) {
@@ -482,14 +488,14 @@
       var box = document.getElementById("cmp-" + id);
       if (box.style.display !== "none") { box.style.display = "none"; return; }
       box.style.display = "block";
-      box.innerHTML = '<span class="hint">加载中…</span>';
+      box.innerHTML = '<span class="hint">loading…</span>';
       var headers = {};
       var token = localStorage.getItem(TOKEN_KEY);
       if (token) headers["X-Read-Token"] = token;
       fetch("/trace/" + id, { headers: headers })
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (trip) {
-          if (!trip) { box.innerHTML = '<span class="hint">取不到往返信息</span>'; return; }
+          if (!trip) { box.innerHTML = '<span class="hint">round trip unavailable</span>'; return; }
           renderRoundTrip(box, trip);
         });
       return;
@@ -497,7 +503,7 @@
     var retry = e.target.closest("[data-retry-delivery]");
     if (retry) {
       fetch("/deliveries/" + retry.getAttribute("data-retry-delivery") + "/retry", { method: "POST", headers: adminHeaders() })
-        .then(function (res) { if (!res.ok) alert("重试失败:需要管理令牌(配置页设置)"); refresh(); });
+        .then(function (res) { if (!res.ok) alert("retry failed: admin token required (set it on the config tab)"); refresh(); });
     }
   });
 
@@ -532,7 +538,7 @@
     }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
       .then(function (r) {
         box.style.display = "block";
-        box.textContent = r.ok ? JSON.stringify(r.d, null, 2) : ("失败: " + (r.d.detail || "未知"));
+        box.textContent = r.ok ? JSON.stringify(r.d, null, 2) : ("failed: " + (r.d.detail || "unknown"));
       });
   });
 

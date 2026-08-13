@@ -69,13 +69,13 @@ fire() {
 }
 
 step "drive every route"
-fire inbound '{"title":"支付网关 5xx 比例 8.1%","message":"gateway-2 近 5 分钟 5xx 8.1%","state":"alerting","env":"prod"}'
+fire inbound '{"title":"Payment gateway 5xx rate 8.1%","message":"gateway-2 5xx at 8.1% over 5 minutes","state":"alerting","env":"prod"}'
 sleep 4
-fire inbound '{"title":"支付网关 5xx 比例 8.1%","message":"gateway-2 近 5 分钟 5xx 8.4%","state":"alerting","env":"prod"}'
+fire inbound '{"title":"Payment gateway 5xx rate 8.1%","message":"gateway-2 5xx at 8.4% over 5 minutes","state":"alerting","env":"prod"}'
 sleep 4
-fire alertmanager '{"status":"firing","commonLabels":{"alertname":"DiskWillFill","env":"prod"},"alerts":[{"status":"firing","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},"annotations":{"summary":"k8s 节点磁盘使用率 93%","description":"node-3 /var 剩余 7%"}}]}'
+fire alertmanager '{"status":"firing","commonLabels":{"alertname":"DiskWillFill","env":"prod"},"alerts":[{"status":"firing","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},"annotations":{"summary":"k8s node disk usage 93%","description":"node-3 /var has 7% free"}}]}'
 sleep 4
-fire alertmanager '{"status":"resolved","commonLabels":{"alertname":"DiskWillFill","env":"prod"},"alerts":[{"status":"resolved","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},"annotations":{"summary":"k8s 节点磁盘使用率 93%","description":"已回落至 41%"}}]}'
+fire alertmanager '{"status":"resolved","commonLabels":{"alertname":"DiskWillFill","env":"prod"},"alerts":[{"status":"resolved","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},"annotations":{"summary":"k8s node disk usage 93%","description":"fell back to 41%"}}]}'
 
 step "wait for the far end"
 # Wait on the LAST link, not a midpoint. The brain's ledger reaching four only

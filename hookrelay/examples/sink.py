@@ -31,7 +31,7 @@ def render(data):
 
     card = data["card"]
     header = card.get("header") or {}
-    lines = [f"飞书卡片 [{header.get('template')}]  {(header.get('title') or {}).get('content', '')}"]
+    lines = [f"feishu card [{header.get('template')}]  {(header.get('title') or {}).get('content', '')}"]
     for element in card.get("elements") or []:
         if element.get("tag") == "note":
             text = (element.get("elements") or [{}])[0].get("content", "")

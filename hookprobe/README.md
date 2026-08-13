@@ -119,7 +119,7 @@ path that spends money without a human asking. Set `HOOKPROBE_BUDGET_USD`
 recorded spend reaches the budget, new escalations are refused — but a
 refusal is not a silent drop. It settles as a report-shaped run and returns
 through the same loop, so the channels say *why* there is no investigation
-("预算熔断……"). Idempotency still holds (a redelivered, already-funded event
+("Budget breaker open…"). Idempotency still holds (a redelivered, already-funded event
 is never refused), operator paths — `/hooks/agent`, follow-ups, the UI — are
 never gated, and `GET /v1/budget` shows the window's arithmetic. The figure
 counts recorded turns only, so in-flight runs can overshoot by at most
@@ -147,7 +147,7 @@ the report lands on the same channels as any alert:
 # host crontab: a daily 09:00 patrol through the pipe's front door
 0 9 * * * curl -sf -X POST http://127.0.0.1:8100/hook/inbound \
   -H 'content-type: application/json' \
-  -d '{"title":"每日例行巡检","message":"对基础设施做一次只读健康巡检：主机资源、关键端口、家族服务自检；发现异常按优先级列出，无异常也要说明检查了什么","state":"alerting","env":"prod"}'
+  -d '{"title":"Daily patrol","message":"Run a read-only health patrol of the infrastructure: host resources, key ports, the family services own checks. List anything abnormal in priority order; if all is well, say what you checked","state":"alerting","env":"prod"}'
 ```
 
 Each firing is a new event id, so each patrol is its own investigation with
@@ -265,7 +265,7 @@ web UI above, or:
 # 1. HTTP: another turn in the same investigation, then poll /final again
 curl -s -X POST localhost:8088/sessions/hook:deep-analysis:x:1/continue \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"message": "root_cause 说节点超卖 —— 查一下该节点的 allocatable 和邻居 Pod 的 requests 佐证"}'
+  -d '{"message": "root_cause says the node is oversubscribed — check that node allocatable and the neighbour pods requests back that up"}'
 
 # 2. Terminal: interactive REPL with the full investigation context
 docker compose exec hookprobe sh -c 'cd /data && claude -r <engine_session_id>'

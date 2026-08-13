@@ -161,7 +161,7 @@ def test_agents_config_and_prompt_append_loaders(tmp_path) -> None:
     agents_file.write_text(
         json.dumps(
             {
-                "db-specialist": {"description": "DB 调查", "prompt": "你是数据库专家", "model": "inherit"},
+                "db-specialist": {"description": "DB work", "prompt": "You are a DB specialist", "model": "inherit"},
                 "broken": {"prompt": "no description"},
             }
         )
@@ -174,11 +174,12 @@ def test_agents_config_and_prompt_append_loaders(tmp_path) -> None:
     # Convention path: {workdir}/system-prompt.md, read fresh, optional.
     settings = make_settings(tmp_path)
     assert _system_prompt_append(settings) == ""
-    (tmp_path / "system-prompt.md").write_text("结论先行。\n")
-    assert _system_prompt_append(settings) == "结论先行。"
+    (tmp_path / "system-prompt.md").write_text("Conclusion first.\n")
+    assert _system_prompt_append(settings) == "Conclusion first."
     explicit = tmp_path / "sop.md"
-    explicit.write_text("先取数再下结论")
-    assert _system_prompt_append(make_settings(tmp_path, system_prompt_append=explicit)) == "先取数再下结论"
+    explicit.write_text("Fetch data before concluding")
+    tuned = make_settings(tmp_path, system_prompt_append=explicit)
+    assert _system_prompt_append(tuned) == "Fetch data before concluding"
 
 
 def test_audit_hook_writes_a_flight_record(tmp_path) -> None:
@@ -270,7 +271,7 @@ def _ops_client(tmp_path, monkeypatch, **overrides):
 
 def test_agents_endpoints_mirror_the_skills_story(tmp_path, monkeypatch) -> None:
     agents_config = tmp_path / "agents.json"
-    agents_config.write_text(json.dumps({"pinned": {"description": "配置钉死的角色", "prompt": "p"}}))
+    agents_config.write_text(json.dumps({"pinned": {"description": "a config-pinned role", "prompt": "p"}}))
     client, workdir, home = _ops_client(
         tmp_path, monkeypatch, setting_sources=("user", "project"), agents_config=agents_config
     )
@@ -308,8 +309,8 @@ def test_system_prompt_roundtrip_and_config_redaction(tmp_path, monkeypatch) -> 
     )
     with client:
         assert client.get("/v1/system-prompt", headers=AUTH).json()["content"] == ""
-        client.put("/v1/system-prompt", json={"content": "先取数再下结论。"}, headers=AUTH)
-        assert (workdir / "system-prompt.md").read_text() == "先取数再下结论。"
+        client.put("/v1/system-prompt", json={"content": "Fetch data before concluding."}, headers=AUTH)
+        assert (workdir / "system-prompt.md").read_text() == "Fetch data before concluding."
 
         config = client.get("/v1/config", headers=AUTH).json()
         assert config["system_prompt"]["active"] is True
