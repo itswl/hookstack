@@ -1,5 +1,6 @@
 """Operational surfaces: retention pruning and the health slot arithmetic."""
 
+import json
 import os
 import time
 
@@ -150,3 +151,51 @@ def test_skill_editing_is_copy_on_write_over_the_user_layer(tmp_path, monkeypatc
 
         assert client.delete("/v1/skills/host-lib", headers=AUTH).status_code == 403
         assert client.delete("/v1/skills/never-was", headers=AUTH).status_code == 404
+
+
+def test_agents_config_and_prompt_append_loaders(tmp_path) -> None:
+    from hookprobe.engine import _load_agents_raw, _system_prompt_append
+    from tests.helpers import make_settings
+
+    agents_file = tmp_path / "agents.json"
+    agents_file.write_text(
+        json.dumps(
+            {
+                "db-specialist": {"description": "DB 调查", "prompt": "你是数据库专家", "model": "inherit"},
+                "broken": {"prompt": "no description"},
+            }
+        )
+    )
+    agents = _load_agents_raw(agents_file)
+    assert set(agents) == {"db-specialist"}, "entries without description+prompt are dropped"
+    assert agents["db-specialist"]["model"] == "inherit"
+    assert _load_agents_raw(tmp_path / "missing.json") == {}
+
+    # Convention path: {workdir}/system-prompt.md, read fresh, optional.
+    settings = make_settings(tmp_path)
+    assert _system_prompt_append(settings) == ""
+    (tmp_path / "system-prompt.md").write_text("结论先行。\n")
+    assert _system_prompt_append(settings) == "结论先行。"
+    explicit = tmp_path / "sop.md"
+    explicit.write_text("先取数再下结论")
+    assert _system_prompt_append(make_settings(tmp_path, system_prompt_append=explicit)) == "先取数再下结论"
+
+
+def test_audit_hook_writes_a_flight_record(tmp_path) -> None:
+    import asyncio
+
+    from hookprobe.engine import _audit_hook
+
+    hook = _audit_hook(tmp_path / "audit", "probe:inbound:7")
+    asyncio.run(
+        hook(
+            {"tool_name": "Bash", "tool_input": {"command": "df -h"}, "tool_response": {"is_error": False}},
+            "tu_1",
+            None,
+        )
+    )
+    files = list((tmp_path / "audit").glob("*.jsonl"))
+    assert len(files) == 1
+    line = json.loads(files[0].read_text().strip())
+    assert line["session"] == "probe:inbound:7"
+    assert line["tool"] == "Bash" and line["detail"] == "df -h" and line["error"] is False
