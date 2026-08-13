@@ -693,7 +693,7 @@ async function openSystem() {
     const servers = Object.entries(mcp.servers || {});
     const mcpHtml = servers.length
       ? servers.map(([name, s]) => kvGrid([
-          [name, [s.command, ...(s.args || [])].filter(Boolean).join(" ") || s.url || s.type || ""],
+          [name + (s.disabled ? " (disabled)" : ""), [s.command, ...(s.args || [])].filter(Boolean).join(" ") || s.url || s.type || ""],
           ["env keys", (s.env_keys || []).join(", ") || "(none)"],
         ])).join("")
       : `<div class="mem-tip">no MCP servers configured${mcp.config ? ` in ${esc(mcp.config)}` : " — set HOOKPROBE_MCP_CONFIG"} · edits apply to the next run, no restart</div>`;
