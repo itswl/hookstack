@@ -60,6 +60,11 @@ class Run:
     # The in-flight turn's process feed (tool calls + narration), reset at
     # each spawn; moved onto the turn record when it finishes.
     events: list[dict] = field(default_factory=list)
+    # What the engine resolved to put in front of the model for the current
+    # turn — model, skill layers, subagent roles, prompt/memory digests, MCP
+    # servers. Recorded because those files live on a mutable volume: without
+    # it, a report cannot be explained once the volume has moved on.
+    inputs: dict = field(default_factory=dict)
 
     @property
     def finished(self) -> bool:
