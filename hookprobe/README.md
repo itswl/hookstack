@@ -295,7 +295,11 @@ Three more surfaces shape a run, all optional:
   (project and user layers both), or pin roles in deployment config with
   `HOOKPROBE_AGENTS_CONFIG` (JSON: name → {description, prompt, tools?,
   model?, skills?}). The main agent delegates to them through the Task
-  tool; the bash guard binds them the same as the main loop.
+  tool; the bash guard binds them the same as the main loop. A fresh
+  volume is seeded once with three readable examples (log-analyst,
+  metrics-analyst, net-diagnostician) so the format teaches itself —
+  edit or delete them freely, the `.defaults-seeded` marker keeps reboots
+  from re-writing your choices.
 - **Audit trail** — every tool call in every run (subagents included)
   appends one JSONL line to `{workdir}/audit/YYYY-MM-DD.jsonl`: timestamp,
   session, tool, one-line detail, error flag. The run's event feed is the
