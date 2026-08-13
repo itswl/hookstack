@@ -250,9 +250,28 @@ curl -s -X POST localhost:8088/hooks/agent \
 curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/smoke:1/final
 ```
 
-The stock image ships **no** diagnostic CLIs — extend it with the read-only
-tools your alerts actually need (see the commented `kubectl` example in the
-Dockerfile), and hand MCP servers to the agent via `HOOKPROBE_MCP_CONFIG`.
+The image ships a lean read-only diagnostic core (procps, jq, iproute2,
+dnsutils, netcat, lsof — what any investigation reaches for first and what
+marketplace runbooks assume exists); domain CLIs stay opt-in behind
+commented Dockerfile blocks (`kubectl`, postgres/mysql/redis clients). Hand
+MCP servers to the agent via `HOOKPROBE_MCP_CONFIG`.
+
+Three more surfaces shape a run, all optional:
+
+- **System prompt append** — drop operator methodology into
+  `{workdir}/system-prompt.md` (or point `HOOKPROBE_SYSTEM_PROMPT_APPEND`
+  at a file). It is appended to the engine's own system prompt and read
+  fresh at every run, so edits apply without a restart.
+- **Named subagent roles** — `.claude/agents/*.md` files load like skills
+  (project and user layers both), or pin roles in deployment config with
+  `HOOKPROBE_AGENTS_CONFIG` (JSON: name → {description, prompt, tools?,
+  model?, skills?}). The main agent delegates to them through the Task
+  tool; the bash guard binds them the same as the main loop.
+- **Audit trail** — every tool call in every run (subagents included)
+  appends one JSONL line to `{workdir}/audit/YYYY-MM-DD.jsonl`: timestamp,
+  session, tool, one-line detail, error flag. The run's event feed is the
+  live view; this is the uncapped, greppable account across runs, pruned
+  by the same retention window as case files.
 
 ## Development
 

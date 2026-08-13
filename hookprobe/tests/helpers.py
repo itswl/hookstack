@@ -22,6 +22,8 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "mcp_config": None,
         "setting_sources": ("project",),
         "skills": "",
+        "system_prompt_append": None,
+        "agents_config": None,
         "event_secret": "",
         "return_url": "",
         "return_secret": "",
