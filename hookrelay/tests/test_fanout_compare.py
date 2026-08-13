@@ -20,7 +20,7 @@ import pytest
 from hookrelay.config import Config
 from hookrelay.pipeline import handle_hook
 
-ALERT = {"title": "示例充值超500告警", "message": "用户 42 充值 920", "state": "alerting"}
+ALERT = {"title": "Single top-up over 500", "message": "account 42 topped up 920", "state": "alerting"}
 
 # One door in, two brains out, one return door per brain. The shadow brain's
 # reading deliberately does NOT continue to the chat group — comparing two
@@ -94,14 +94,18 @@ async def test_the_ledger_gathers_both_brains_under_one_alert(store):
         store,
         cfg,
         cfg.sources["lite-notify"],
-        _return_payload(brain="brain-lite", importance="medium", summary="规则判定:金额阈值", correlation=correlation),
+        _return_payload(
+            brain="brain-lite", importance="medium", summary="rule verdict: amount threshold", correlation=correlation
+        ),
         now=1000.4,
     )
     await handle_hook(
         store,
         cfg,
         cfg.sources["ww-notify"],
-        _return_payload(brain="brain-full", importance="high", summary="AI:疑似批量刷单", correlation=correlation),
+        _return_payload(
+            brain="brain-full", importance="high", summary="AI: looks like coordinated abuse", correlation=correlation
+        ),
         now=1047.0,
     )
 
@@ -115,7 +119,7 @@ async def test_the_ledger_gathers_both_brains_under_one_alert(store):
     assert set(by_brain) == {"brain-lite", "brain-full"}
     assert by_brain["brain-lite"]["level"] == "medium" and by_brain["brain-lite"]["latency_seconds"] == 0.4
     assert by_brain["brain-full"]["level"] == "high" and by_brain["brain-full"]["latency_seconds"] == 47.0
-    assert "刷单" in by_brain["brain-full"]["body"]
+    assert "coordinated abuse" in by_brain["brain-full"]["body"]
 
 
 async def test_the_group_assembles_from_either_end(store):

@@ -37,9 +37,9 @@ class SelfAlarm:
         held = self._suppressed
         self._suppressed = 0
         self._last_sent = now
-        text = f"[hookjudge] 裁决回传进入死信\n事件: {title[:80]}\n原因: {error[:200]}"
+        text = f"[hookjudge] verdict return dead-lettered\nalert: {title[:80]}\nreason: {error[:200]}"
         if held:
-            text += f"\n(另有 {held} 条在静默窗口内被折叠)"
+            text += f"\n({held} more folded into this one during the quiet window)"
         # Feishu bot text shape doubles as a readable generic JSON body.
         try:
             await client.post(self._url, json={"msg_type": "text", "content": {"text": text}}, timeout=5.0)

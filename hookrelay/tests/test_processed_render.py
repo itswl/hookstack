@@ -19,7 +19,7 @@ from hookrelay.processed import Processed
 
 RESULT = {
     "meta": {
-        "alert_name": "示例充值超500告警",
+        "alert_name": "Single top-up over 500",
         "source": "grafana",
         "importance": "high",
         "brain": "brain-full",
@@ -28,13 +28,13 @@ RESULT = {
         "is_recovery": False,
     },
     "analysis": {
-        "summary": "9 分钟内连续 3 次大额充值,涉及两个用户",
+        "summary": "three large top-ups in nine minutes across two accounts",
         "event_type": "business",
-        "impact_scope": "影响范围限于触发告警通知,未观察到对服务的直接影响",
+        "impact_scope": "limited to the notification itself; no direct service impact observed",
     },
-    "identity": {"project": "demo-alarm", "env": "prod", "rule": "示例充值超500告警"},
-    "links": [{"text": "大额充值处置预案", "url": "https://kb.example/runbook/42"}],
-    "actions": [{"text": "确认接手", "value": {"signed": "opaque-token"}, "style": "primary"}],
+    "identity": {"project": "demo-alarm", "env": "prod", "rule": "Single top-up over 500"},
+    "links": [{"text": "Large top-up runbook", "url": "https://kb.example/runbook/42"}],
+    "actions": [{"text": "Acknowledge", "value": {"signed": "opaque-token"}, "style": "primary"}],
 }
 
 
@@ -69,19 +69,19 @@ def test_feishu_gets_a_card_with_every_block_and_the_buttons():
     assert payload["msg_type"] == "interactive"
     header = payload["card"]["header"]
     assert header["template"] == "red", "high importance earns red"
-    assert "示例充值超500告警" in header["title"]["content"]
+    assert "Single top-up over 500" in header["title"]["content"]
 
     blocks = json.dumps(payload["card"]["elements"], ensure_ascii=False)
-    assert "9 分钟内连续 3 次大额充值" in blocks, "the headline carries the summary"
+    assert "three large top-ups in nine minutes" in blocks, "the headline carries the summary"
     assert "demo-alarm · prod" in blocks, "identity reads as a breadcrumb, not a label grid"
-    assert "**影响**" in blocks and "未观察到对服务的直接影响" in blocks
-    assert "大额充值处置预案" in blocks, "the runbook arrives WITH the alert"
+    assert "**Impact**" in blocks and "no direct service impact observed" in blocks
+    assert "Large top-up runbook" in blocks, "the runbook arrives WITH the alert"
     assert "grafana · business" in blocks, "footer is de-emphasised metadata"
 
     # Interactive callbacks are Feishu-only, and the value stays opaque —
     # signing identity is the brain's judgement, not the pipe's formatting.
     action = next(e for e in payload["card"]["elements"] if e.get("tag") == "action")
-    assert action["actions"][0]["text"]["content"] == "确认接手"
+    assert action["actions"][0]["text"]["content"] == "Acknowledge"
     assert action["actions"][0]["value"] == {"signed": "opaque-token"}
 
 
@@ -92,29 +92,29 @@ def test_a_recovery_is_green_and_says_so_first():
     _url, payload, _headers = build_request(_channel("feishu"), _message(recovered), now=0.0)
 
     assert payload["card"]["header"]["template"] == "green"
-    assert payload["card"]["header"]["title"]["content"].startswith("✅ 已恢复")
+    assert payload["card"]["header"]["title"]["content"].startswith("✅ Resolved")
 
 
 def test_periodic_reminder_is_labelled_in_the_headline():
     reminder = json.loads(json.dumps(RESULT))
     reminder["meta"]["is_periodic_reminder"] = True
     _url, payload, _headers = build_request(_channel("feishu"), _message(reminder), now=0.0)
-    assert payload["card"]["header"]["title"]["content"].startswith("🔁 未处理提醒")
+    assert payload["card"]["header"]["title"]["content"].startswith("🔁 Still open")
 
 
 def test_dingtalk_and_wecom_get_their_own_markdown_without_dead_buttons():
     _url, ding, _h = build_request(_channel("dingtalk"), _message(), now=1700000000.0)
     assert ding["msgtype"] == "markdown"
     text = ding["markdown"]["text"]
-    assert text.startswith("### 📡 示例充值超500告警"), "DingTalk wants a heading"
-    assert "🔴 高" in text and "9 分钟内连续" in text
-    assert "大额充值处置预案" in text, "links survive where buttons cannot"
+    assert text.startswith("### 📡 Single top-up over 500"), "DingTalk wants a heading"
+    assert "🔴 HIGH" in text and "three large top-ups" in text
+    assert "Large top-up runbook" in text, "links survive where buttons cannot"
     assert "signed" not in text, "a button with no callback channel is worse than none"
 
     _url, wecom, _h = build_request(_channel("wecom"), _message(), now=0.0)
     content = wecom["markdown"]["content"]
-    assert content.startswith("**📡 示例充值超500告警**"), "WeCom renders bold, not #"
-    assert "**影响**" in content
+    assert content.startswith("**📡 Single top-up over 500**"), "WeCom renders bold, not #"
+    assert "**Impact**" in content
 
 
 def test_generic_receives_the_structure_itself_signed():
@@ -144,7 +144,7 @@ def test_one_judgement_reaches_four_dialects_unchanged_in_meaning():
         rendered[kind] = payload.decode() if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False)
 
     for kind, text in rendered.items():
-        assert "9 分钟内连续 3 次大额充值" in text, f"{kind} lost the summary"
+        assert "three large top-ups in nine minutes" in text, f"{kind} lost the summary"
         assert "kb.example/runbook/42" in text, f"{kind} lost the runbook"
     # And they are genuinely different renderings, not one shape reused.
     assert len({rendered["feishu"], rendered["dingtalk"], rendered["wecom"]}) == 3
@@ -168,10 +168,13 @@ async def test_a_non_object_payload_fails_into_the_ledger():
 def test_missing_optional_blocks_render_without_holes():
     """Brains differ: a lite brain has no impact analysis and no KB. Its result must
     still produce a clean card, not one with empty sections."""
-    lean = {"meta": {"alert_name": "磁盘将满", "importance": "medium", "source": "lite"}, "analysis": {"summary": "s"}}
+    lean = {
+        "meta": {"alert_name": "Disk about to fill", "importance": "medium", "source": "lite"},
+        "analysis": {"summary": "s"},
+    }
     _url, payload, _headers = build_request(_channel("feishu"), _message(lean), now=0.0)
     blocks = json.dumps(payload["card"]["elements"], ensure_ascii=False)
-    assert "影响" not in blocks and "相关文档" not in blocks
+    assert "Impact" not in blocks and "Runbooks" not in blocks
     assert "s" in blocks and payload["card"]["header"]["template"] == "orange"
 
 

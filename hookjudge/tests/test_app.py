@@ -19,8 +19,8 @@ from hookjudge.settings import Settings
 EVENT = {
     "meta": {"source": "grafana", "correlation_id": "hr-86"},
     "event": {
-        "title": "示例充值超500告警",
-        "body": "用户 42 充值 920 元",
+        "title": "Single top-up over 500",
+        "body": "account 42 topped up 920",
         "level": "high",
         "fields": {"project": "demo-alarm", "env": "prod"},
     },
@@ -104,9 +104,9 @@ async def test_ingest_answers_immediately_and_judges_behind(app_client):
 
     await _settle(app_client)
     row = (await app_client.app.state.store.recent(1))[0]
-    assert row["title"] == "示例充值超500告警"
+    assert row["title"] == "Single top-up over 500"
     assert row["route"] == "rule", "AI unconfigured in this fixture, so the floor answered"
-    assert row["degraded_reason"] == "AI 未配置", "and it says why"
+    assert row["degraded_reason"] == "AI not configured", "and it says why"
     assert row["importance"] == "high"
 
 
@@ -167,7 +167,9 @@ async def test_a_restatement_reuses_and_costs_nothing(app_client, monkeypatch):
     event = Incoming.parse(EVENT, now=time.time())
     await store.record(
         event,
-        Verdict(summary="原始判断", importance="high", event_type="business", route="ai", model="m").normalized(),
+        Verdict(
+            summary="the original verdict", importance="high", event_type="business", route="ai", model="m"
+        ).normalized(),
         120,
     )
 
@@ -178,16 +180,18 @@ async def test_a_restatement_reuses_and_costs_nothing(app_client, monkeypatch):
             break
     latest = (await store.recent(1))[0]
     assert latest["route"] == "reuse"
-    assert latest["summary"] == "原始判断" and latest["cost"] == 0
+    assert latest["summary"] == "the original verdict" and latest["cost"] == 0
 
 
-@pytest.mark.parametrize("marker", ["[RESOLVED] {}", "[已恢复] {}", "{} 已恢复", "【恢复】{}"])
+# Chinese markers included on purpose: inbound titles arrive decorated in
+# whatever language the monitoring stack speaks.
+@pytest.mark.parametrize("marker", ["[RESOLVED] {}", "{} resolved", "[已恢复] {}", "【恢复】{}"])
 async def test_a_recovery_inherits_its_firings_verdict_and_never_pays(app_client, marker: str):
     """The route must be `recovery`, not `rule`.
 
     This assertion used to read `in ("recovery", "rule")`, which passed while
     the recovery route was unreachable: identity included the raw title, so
-    "[已恢复] X" and "X" were two different conditions and no recovery ever
+    "[RESOLVED] X" and "X" were two different conditions and no recovery ever
     found its firing. Every recovery fell to the rule floor and re-derived an
     importance from scratch, so a `high` alert ended with a `medium` recovery
     card — the contradiction this design exists to prevent.
@@ -196,10 +200,12 @@ async def test_a_recovery_inherits_its_firings_verdict_and_never_pays(app_client
     from hookjudge.contract import Incoming, Verdict
 
     firing = Incoming.parse(EVENT, now=time.time())
-    await store.record(firing, Verdict(summary="原始判断", importance="high", route="ai", model="m").normalized(), 100)
+    await store.record(
+        firing, Verdict(summary="the original verdict", importance="high", route="ai", model="m").normalized(), 100
+    )
 
     ended = json.loads(json.dumps(EVENT))
-    ended["event"]["title"] = marker.format("示例充值超500告警")
+    ended["event"]["title"] = marker.format("Single top-up over 500")
     await app_client.post("/events", json=ended)
     for _ in range(60):
         await asyncio.sleep(0.01)
@@ -208,7 +214,7 @@ async def test_a_recovery_inherits_its_firings_verdict_and_never_pays(app_client
     recovery = next(r for r in await store.recent(5) if r["is_recovery"])
     assert recovery["route"] == "recovery", f"{marker!r} did not link to its firing"
     assert recovery["importance"] == "high", "a recovery must not contradict its own firing alert"
-    assert recovery["summary"] == "原始判断"
+    assert recovery["summary"] == "the original verdict"
     assert recovery["cost"] == 0, "analysing the past is the easiest cost never to incur"
 
 
@@ -222,12 +228,14 @@ async def test_a_recovery_inherits_even_a_degraded_firing(app_client):
     firing = Incoming.parse(EVENT, now=time.time())
     await store.record(
         firing,
-        Verdict(summary="规则判定", importance="high", route="rule", degraded_reason="AI 未配置").normalized(),
+        Verdict(
+            summary="a rule verdict", importance="high", route="rule", degraded_reason="AI not configured"
+        ).normalized(),
         10,
     )
 
     ended = json.loads(json.dumps(EVENT))
-    ended["event"]["title"] = "[已恢复] 示例充值超500告警"
+    ended["event"]["title"] = "[RESOLVED] Single top-up over 500"
     await app_client.post("/events", json=ended)
     for _ in range(60):
         await asyncio.sleep(0.01)
@@ -246,7 +254,7 @@ async def test_status_and_metrics_are_guarded_and_report_the_cost_question(app_c
     body = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()
     assert body["summary"]["judged"] == 1
     assert "paid_ratio_pct" in body["summary"], "the number the cost conversation turns on"
-    assert body["recent"][0]["title"] == "示例充值超500告警"
+    assert body["recent"][0]["title"] == "Single top-up over 500"
 
     text = (await app_client.get("/metrics", headers={"Authorization": "Bearer read-t"})).text
     assert "hookjudge_up 1" in text and 'hookjudge_judgements{route="rule"}' in text
@@ -342,7 +350,7 @@ async def test_dead_return_fires_the_self_alarm(tmp_path, monkeypatch):
         monkeypatch.setattr(app.state, "client", sink)
 
         await client.post("/events", json=EVENT)
-        second = dict(EVENT, event=dict(EVENT["event"], title="另一条也会死"))
+        second = dict(EVENT, event=dict(EVENT["event"], title="another one that also dies"))
         await client.post("/events", json=second)
 
         for _ in range(200):
@@ -352,5 +360,5 @@ async def test_dead_return_fires_the_self_alarm(tmp_path, monkeypatch):
 
         assert sink.returns >= 2, "both returns were attempted and refused"
         assert len(sink.alarms) == 1, "the second dead letter folds into the window, not the channel"
-        assert "裁决回传进入死信" in sink.alarms[0]
-        assert "示例充值超500告警" in sink.alarms[0]
+        assert "verdict return dead-lettered" in sink.alarms[0]
+        assert "Single top-up over 500" in sink.alarms[0]

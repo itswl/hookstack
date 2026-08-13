@@ -82,7 +82,7 @@ async def test_status_page_is_served_and_selfcontained(client):
     response = await client.get("/")
     assert response.status_code == 200
     html = response.text
-    assert "hookrelay" in html and "决策链" in html
+    assert "hookrelay" in html and "decision chain" in html
     # Self-contained shell: no external scripts/styles (CSP-friendly, offline-safe).
     assert "http://" not in html.replace("http://127.0.0.1", "") or True
     assert "<script src=" not in html and 'rel="stylesheet"' not in html

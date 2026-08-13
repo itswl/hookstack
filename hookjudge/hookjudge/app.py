@@ -80,7 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # An ended condition with nothing to reuse: rules, not a model. The
             # question "how bad is it" is moot once it is over, and paying to
             # analyse the past is the easiest cost to never incur.
-            verdict = rule_verdict(event, degraded_reason="恢复告警不单独分析")
+            verdict = rule_verdict(event, degraded_reason="recovery alerts are not analysed on their own")
         else:
             verdict = await ai_verdict(client, app_settings, event)
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -90,8 +90,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Hand one judgement back to the pipe. The only delivery this service
         does, and only to one address — fan-out is the pipe's job."""
         if not app_settings.return_url:
-            await store.mark_return(int(row["id"]), "dead", int(row["return_attempts"]), "HOOKJUDGE_RETURN_URL 未配置")
-            await alarm.dead_return(client, title=str(row["title"]), error="HOOKJUDGE_RETURN_URL 未配置", now=now)
+            await store.mark_return(
+                int(row["id"]), "dead", int(row["return_attempts"]), "HOOKJUDGE_RETURN_URL is not configured"
+            )
+            await alarm.dead_return(
+                client, title=str(row["title"]), error="HOOKJUDGE_RETURN_URL is not configured", now=now
+            )
             return
         event = Incoming(
             source=str(row["source"]),

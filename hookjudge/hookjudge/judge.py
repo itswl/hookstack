@@ -14,9 +14,10 @@ Four routes, tried in this order, and the order is the cost policy:
              a downgraded judgement that hides its downgrade is worse than a
              missing one.
 
-The prompt is Chinese on purpose: these alerts are Chinese and the summary is
-read by Chinese-speaking operators, so the model must answer in the language
-of the room. That is a product decision, not display copy.
+Everything this service emits is English. The keyword sets below are the one
+exception and not display copy at all: they are patterns matched against
+INBOUND alert text, which arrives in whatever language the monitoring stack
+speaks, so they stay bilingual.
 """
 
 from __future__ import annotations
@@ -29,28 +30,98 @@ import httpx
 
 from hookjudge.contract import ROUTE_AI, ROUTE_RECOVERY, ROUTE_REUSE, ROUTE_RULE, Incoming, Verdict
 
-_SYSTEM_PROMPT = """你是运维告警分析助手。读一条告警,输出严格的 JSON,不要任何解释文字。
+_SYSTEM_PROMPT = """You judge operations alerts. Read one alert and answer with strict JSON only,
+no prose around it.
 
-字段:
-  summary       一句话说清发生了什么(中文,不超过 60 字,写事实不写套话)
-  importance    critical / high / medium / low 四选一
-  event_type    business / infrastructure / security / deploy / test 之一
-  impact_scope  影响范围;判断不了就写"影响范围未知"
+Fields:
+  summary       one sentence on what happened (<= 30 words, facts only, no filler)
+  importance    exactly one of: critical / high / medium / low
+  event_type    one of: business / infrastructure / security / deploy / test
+  impact_scope  who or what is affected; write "unknown" when the alert does not say
 
-判断口径:
-  - 只依据告警内容判断,不要猜测未提供的信息
-  - 业务金额、支付、账号安全类默认不低于 high
-  - 磁盘/内存/CPU 等容量类看阈值紧迫程度
-  - 明显的测试、演练、"请忽略"类告警一律 low
+How to judge:
+  - judge only from the alert content; never invent details it does not contain
+  - money, payments and account security default to high or above
+  - capacity alerts (disk / memory / CPU) scale with how close the threshold is
+  - obvious tests, drills and "please ignore" alerts are always low
 """
 
-_RULE_HIGH = ("充值", "提现", "支付", "订单", "余额", "资金", "安全", "攻击", "泄露", "宕机", "不可用", "down")
-_RULE_LOW = ("测试", "请忽略", "演练", "test", "demo", "staging")
+# Keyword matchers, applied to INBOUND alert text — patterns, not display copy.
+# Alerts arrive in whatever language the monitoring stack speaks, so the sets
+# stay bilingual: dropping the Chinese patterns would silently downgrade every
+# Chinese payment/security alert to medium on the rule floor.
+_RULE_HIGH = (
+    "payment",
+    "topup",
+    "top-up",
+    "withdraw",
+    "order",
+    "balance",
+    "funds",
+    "security",
+    "attack",
+    "breach",
+    "leak",
+    "outage",
+    "unavailable",
+    "down",
+    "充值",
+    "提现",
+    "支付",
+    "订单",
+    "余额",
+    "资金",
+    "安全",
+    "攻击",
+    "泄露",
+    "宕机",
+    "不可用",
+)
+_RULE_LOW = ("test", "demo", "staging", "drill", "please ignore", "测试", "请忽略", "演练")
 _TYPE_HINTS = (
-    ("business", ("充值", "提现", "支付", "订单", "余额", "交易")),
-    ("security", ("安全", "攻击", "泄露", "入侵", "越权")),
-    ("deploy", ("发布", "部署", "deploy", "release", "回滚")),
-    ("infrastructure", ("磁盘", "内存", "cpu", "节点", "集群", "证书", "网络", "数据库")),
+    (
+        "business",
+        (
+            "payment",
+            "topup",
+            "top-up",
+            "withdraw",
+            "order",
+            "balance",
+            "transaction",
+            "充值",
+            "提现",
+            "支付",
+            "订单",
+            "余额",
+            "交易",
+        ),
+    ),
+    (
+        "security",
+        ("security", "attack", "breach", "leak", "intrusion", "privilege", "安全", "攻击", "泄露", "入侵", "越权"),
+    ),
+    ("deploy", ("deploy", "release", "rollback", "发布", "部署", "回滚")),
+    (
+        "infrastructure",
+        (
+            "disk",
+            "memory",
+            "cpu",
+            "node",
+            "cluster",
+            "certificate",
+            "network",
+            "database",
+            "磁盘",
+            "内存",
+            "节点",
+            "集群",
+            "证书",
+            "网络",
+            "数据库",
+        ),
+    ),
 )
 
 
@@ -78,10 +149,10 @@ def rule_verdict(event: Incoming, *, degraded_reason: str = "") -> Verdict:
             break
 
     return Verdict(
-        summary=event.title or "(无标题告警)",
+        summary=event.title or "(untitled alert)",
         importance=importance,
         event_type=event_type,
-        impact_scope="影响范围未知(规则判定)",
+        impact_scope="unknown (rule verdict)",
         route=ROUTE_RULE,
         degraded_reason=degraded_reason,
     ).normalized()
@@ -106,7 +177,7 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) -> Verdict:
     """Ask the model. Any failure returns a rule verdict that SAYS it degraded."""
     if not settings.ai_api_key or not settings.ai_base_url:
-        return rule_verdict(event, degraded_reason="AI 未配置")
+        return rule_verdict(event, degraded_reason="AI not configured")
 
     context = {
         "source": event.source,
@@ -134,13 +205,13 @@ async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) 
         response.raise_for_status()
         body = response.json()
     except Exception as error:  # noqa: BLE001 — every failure lands on the same floor
-        return rule_verdict(event, degraded_reason=f"AI 调用失败: {error.__class__.__name__}")
+        return rule_verdict(event, degraded_reason=f"AI call failed: {error.__class__.__name__}")
 
     choices = body.get("choices") or []
     content = str(((choices[0] if choices else {}).get("message") or {}).get("content") or "")
     parsed = _extract_json(content)
     if not parsed or not str(parsed.get("summary") or "").strip():
-        return rule_verdict(event, degraded_reason="AI 返回无法解析")
+        return rule_verdict(event, degraded_reason="AI answer unparseable")
 
     usage = body.get("usage") or {}
     tokens_in = int(usage.get("prompt_tokens") or 0)
