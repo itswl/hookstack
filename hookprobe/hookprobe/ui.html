@@ -574,7 +574,11 @@ async function renderAgents() {
         '<div class="empty">no agents yet — drop .claude/agents/*.md on the volume, mount a host library, or pin roles via HOOKPROBE_AGENTS_CONFIG. The main agent delegates to them through the Task tool.</div>';
       return;
     }
-    $("#turns").innerHTML = agents.map((a) => `
+    $("#turns").innerHTML = `
+      <div class="mem-tip">主 agent 在调查中用 Task 工具把子任务委派给这些角色 — 每个角色是一个
+      .claude/agents/*.md 文件（frontmatter 定 name/description/tools，正文就是它的提示词）。
+      点开可读可改可删，改动下一次运行生效；默认三个角色是首启播种的示例，照着抄一个就是新角色。</div>` +
+      agents.map((a) => `
       <div class="skill" data-name="${esc(a.name)}">
         <div class="skill-name">${esc(a.name)}<span class="skill-layer ${esc(a.source)}">${esc(a.source)}</span></div>
         <div class="skill-desc">${esc(a.description || "(no description)")}</div>
