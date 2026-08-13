@@ -80,7 +80,15 @@ zero-credential demo. All are run from the repo root with
 `docker-compose.prod.yml` files under `hookrelay/deploy/` and
 `hookprobe/deploy/` are the shapes joined to a platform's own docker network.
 
-Each gate is run from its own directory:
+Each gate is run from its own directory, against that service's own venv — the
+tool versions are pinned in its `requirements.txt`, which is what keeps the gate
+and CI from disagreeing:
+
+```bash
+cd hookprobe
+python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt  # once
+bash scripts/gate.sh
+```
 
 ```bash
 cd hookrelay && bash scripts/gate.sh

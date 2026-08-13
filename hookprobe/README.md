@@ -325,6 +325,36 @@ production shape — joined to the docker network of the platform it serves,
 admin port on loopback only, state bind-mounted at the deployment root for
 backup and review.
 
+**Pairing is the caller's job, and a compose file's rather than a command's.**
+A caller reaches this service by name (`http://hookprobe:8088`), which means
+docker DNS, which means both containers on one network. Two ways to arrange that,
+and only one of them is right for a shared service:
+
+The caller joins this service's network. It depends on the investigator already,
+so the dependency runs the way it already runs, and this service keeps standing
+alone — which is what lets it serve a second caller, or none:
+
+```yaml
+# in the CALLER's compose
+services:
+  its-worker:
+    networks: [its-own-net, investigator]   # list its own again: naming any
+networks:                                   # network opts out of the others
+  investigator:
+    name: hookstack_default                 # or whatever `docker network ls` says
+    external: true
+```
+
+The other way round — this service joining the caller's network — is what
+`deploy/docker-compose.prod.yml` does, and there it is correct: that file is one
+installation's deployment, pinned to the platform it was written for. Do not put
+it in the demo family's compose or a local override. A service that cannot start
+until its consumer is running has the dependency backwards.
+
+Either way, declare it. `docker network connect` does the job once and survives a
+restart but not a recreate, so the next `up --build` takes the leg down silently
+and the caller only finds out when an analysis stops coming back.
+
 Standalone, from the repo root:
 
 ```bash
