@@ -56,6 +56,17 @@ aside{width:330px;border-right:1px solid var(--line);background:var(--panel);fle
 .audit-row .a-tool{color:var(--amber);flex-shrink:0;min-width:70px}
 .audit-row .a-detail{color:var(--text);word-break:break-all}
 .audit-row.err .a-tool{color:var(--red)}
+.help{max-width:860px;font-size:13.5px;line-height:1.65}
+.help h2{font-size:15px;margin:20px 0 8px;color:var(--text)}
+.help h2:first-child{margin-top:0}
+.help p{margin:6px 0;color:var(--text)}
+.help .dim{color:var(--dim)}
+.help table{border-collapse:collapse;margin:8px 0;width:100%}
+.help th,.help td{border:1px solid var(--line);padding:6px 10px;text-align:left;font-size:12.5px;vertical-align:top}
+.help th{color:var(--dim);font-weight:600;background:var(--panel)}
+.help code{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:var(--mono);font-size:12px}
+.help pre{background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.5}
+.help li{margin:3px 0}
 .badge.running{color:var(--amber)}
 .badge.completed{color:var(--green)}
 .badge.failed{color:var(--red)}
@@ -142,6 +153,7 @@ button.danger{color:var(--red);border-color:var(--red)}
   <button id="promptBtn">prompt</button>
   <button id="sysBtn">system</button>
   <button id="auditBtn">audit</button>
+  <button id="helpBtn">help</button>
   <span id="budget" hidden></span>
   <input id="token" placeholder="bearer token" autocomplete="off">
 </header>
@@ -439,6 +451,7 @@ $("#memBtn").onclick = () => openMemory();
 $("#promptBtn").onclick = () => openPrompt();
 $("#sysBtn").onclick = () => openSystem();
 $("#auditBtn").onclick = () => openAudit("");
+$("#helpBtn").onclick = () => openHelp();
 $("#q").oninput = () => refreshList();
 
 $("#stopBtn").onclick = async () => {
@@ -750,6 +763,86 @@ async function openAudit(filter) {
   auditTimer = setInterval(load, 8000);
 }
 
+// ── help: one page for a new operator or an AI driving the API ──────────
+function openHelp() {
+  leaveSessions("help");
+  $("#meta").textContent = "help · hookprobe 是什么、怎么用 · 人和 AI 都从这页开始";
+  const base = location.origin;
+  $("#turns").innerHTML = `<div class="help">
+<h2>这是什么</h2>
+<p>hookprobe 是一个<b>只读的告警调查员</b>：收到一条值得深挖的告警，就跑一次带工具的
+agent 调查（查日志、查指标、翻案卷、必要时开浏览器），产出一份结论先行的中文报告。
+它通常接在 hookstack 家族里 — 管道(hookrelay)把重要告警复制过来，调查完的报告经管道
+送回飞书/钉钉等渠道；也可以被任何 OpenClaw 方言的调用方直接驱动。</p>
+
+<h2>三步上手</h2>
+<p>1. 右上角粘贴 <b>bearer token</b>（存 localStorage，只需一次）。<br>
+2. 点 <b>+ new session</b>，用一句话描述要调查什么（例：「对本容器做一次健康巡检，结论先行」）。<br>
+3. 运行中可看实时过程流、随时 <b>Stop</b>；完成后底部输入框就是<b>追问</b> — 同一引擎会话续跑，第一轮的证据全都还在。</p>
+
+<h2>七个视图</h2>
+<table>
+<tr><th>视图</th><th>看什么 / 改什么</th></tr>
+<tr><td><b>sessions</b></td><td>所有调查：逐轮对话、账单行（模型/token/费用/耗时）、过程流回放；relay 来源的会话带回传徽章。侧栏可过滤</td></tr>
+<tr><td><b>skills</b></td><td>诊断 runbook（SKILL.md）。分层：project=卷上可编辑，user=宿主库只读；保存永远落 project 层（写时复制）。agent 沉淀的经验也在这里</td></tr>
+<tr><td><b>agents</b></td><td>子代理角色（.claude/agents/*.md）。主 agent 用 Task 工具把子任务委派给它们；默认三个播种示例照着抄就是新角色</td></tr>
+<tr><td><b>memory</b></td><td>环境记忆（CLAUDE.md）：拓扑、已知误报、命名规范 — 每次调查开工前注入</td></tr>
+<tr><td><b>prompt</b></td><td>系统提示词追加：运维方法论，保存后下一次运行即生效</td></tr>
+<tr><td><b>system</b></td><td>运行时全景：模型/预算/保留/层/各配置路径（密钥只显 set/unset）+ MCP servers + 健康计数</td></tr>
+<tr><td><b>audit</b></td><td>飞行记录仪：每次工具调用一行（含子代理），按会话过滤，8 秒自动跟随</td></tr>
+</table>
+
+<h2>API 速查（给 AI 或脚本）</h2>
+<p class="dim">鉴权：所有请求带 <code>Authorization: Bearer &lt;token&gt;</code>。轮询语义：/final 返回 202=还在跑，200 时 <code>isFinal</code> 恒为 true — 读到即可信，不需要稳定性判断。</p>
+<pre># 发起一次调查（OpenClaw 兼容合同）
+curl -X POST ${base}/hooks/agent -H "Authorization: Bearer $TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"message":"调查内容…","sessionKey":"my:task:1","timeoutSeconds":900}'
+
+# 轮询结果（202=进行中；200 => {"isFinal":true,"text":"报告全文"}）
+curl ${base}/sessions/my:task:1/final -H "Authorization: Bearer $TOKEN"
+
+# 追问同一会话 / 停止在跑的轮次
+curl -X POST ${base}/sessions/my:task:1/continue -H ... -d '{"message":"补充问题"}'
+curl -X POST ${base}/sessions/my:task:1/stop -H ...</pre>
+<table>
+<tr><th>管理端点</th><th>用途</th></tr>
+<tr><td><code>GET /v1/runs</code> · <code>GET /v1/runs/{key}</code></td><td>会话列表 / 完整运行记录（含事件流与账单）</td></tr>
+<tr><td><code>GET/PUT/DELETE /v1/skills[/{name}]</code></td><td>技能浏览与写时复制编辑</td></tr>
+<tr><td><code>GET/PUT/DELETE /v1/agents[/{name}]</code></td><td>子代理角色，同上语义</td></tr>
+<tr><td><code>GET/PUT /v1/memory</code> · <code>/v1/system-prompt</code></td><td>环境记忆 / 方法论，保存即热生效</td></tr>
+<tr><td><code>GET /v1/mcp</code> · <code>/v1/config</code> · <code>/v1/budget</code> · <code>/v1/audit</code></td><td>MCP 清单（env 只给键名）/ 配置快照 / 预算账 / 审计尾部</td></tr>
+<tr><td><code>GET /healthz</code>（免鉴权）</td><td>存活 + 并发/排队/回传失败计数，给外部监控轮询</td></tr>
+</table>
+
+<h2>文件地图（/data 卷 = 全部经验，备份它就够）</h2>
+<table>
+<tr><th>路径</th><th>是什么</th></tr>
+<tr><td><code>results/*.json</code></td><td>案卷：每次调查全记录 — 也是情节记忆（新调查会先 grep 同类旧案）</td></tr>
+<tr><td><code>.claude/skills/</code> · <code>.claude/agents/</code></td><td>技能与角色（project 层）。宿主库以只读挂载出现在 user 层</td></tr>
+<tr><td><code>CLAUDE.md</code> · <code>system-prompt.md</code> · <code>mcp.json</code></td><td>环境记忆 / 方法论 / MCP 配置 — 三个都每次运行现读</td></tr>
+<tr><td><code>audit/*.jsonl</code></td><td>审计账本；<code>home/</code> 下是可续跑的会话 transcript</td></tr>
+</table>
+
+<h2>安全模型（为什么敢让它自主跑）</h2>
+<p>只读三层：<b>只读凭据</b>（真正的边界，挂进容器的都是查询型身份）→ <b>bash 守卫</b>
+（拦截 kubectl/systemctl/terraform 等的变更动词，子代理内同样生效）→ <b>一次性容器</b>（非 root）。
+外加：<b>预算熔断</b>（窗口花费达上限后升级门拒收新调查，拒绝也发卡片说明）、<b>幂等</b>
+（同一告警的风暴只养一次调查）、<b>失败有交代</b>（超时/崩溃/重启/熔断都会落一份报告走完闭环）。</p>
+
+<h2>常见任务菜谱</h2>
+<ul>
+<li><b>装一个市场技能</b>：下载 ZIP 解压进 <code>/data/.claude/skills/&lt;名&gt;/</code>（删掉 __MACOSX），下次运行自动加载 — 装之前先读它，技能会指挥持有你凭据的 agent</li>
+<li><b>加一个角色</b>：agents 视图打开任一默认角色 → 照抄改名 → 保存；或直接放 .md 文件</li>
+<li><b>接一个 MCP</b>：编辑 <code>/data/mcp.json</code>（支持市场 config.json 方言，enabled:false 会被跳过），system 页确认，下次运行生效</li>
+<li><b>控制会话看到哪些技能</b>：<code>HOOKPROBE_SKILLS</code> 白名单（大库防淹）；层的开关是 <code>HOOKPROBE_SETTING_SOURCES</code></li>
+<li><b>查"它到底干了什么"</b>：audit 视图按会话过滤；单次运行的过程流在 sessions 里点开 process · N steps</li>
+</ul>
+<p class="dim">更完整的设计与部署说明见仓库 hookprobe/README.md 与根目录 README.zh.md。</p>
+</div>`;
+  $("#turns").scrollTop = 0;
+}
+
 $("#msg").addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") $("#composer").requestSubmit();
 });
@@ -795,6 +888,7 @@ else if (location.hash.startsWith("#agents")) {
 else if (location.hash === "#memory") openMemory();
 else if (location.hash === "#prompt") openPrompt();
 else if (location.hash === "#system") openSystem();
+else if (location.hash === "#help") openHelp();
 else if (location.hash.startsWith("#audit")) {
   openAudit(decodeURIComponent(location.hash.slice("#audit".length).replace(/^\//, "")));
 }
