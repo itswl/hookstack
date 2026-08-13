@@ -406,13 +406,36 @@ function eventHtml(e) {
   if (e.type === "text") return `<div class="ev ev-narr">${esc(e.text)}</div>`;
   return "";
 }
+// What the model was actually given. The prompt is assembled from files on a
+// mutable volume, so the record of which ones were in force is the only way to
+// explain a report later.
+function inputsHtml(inputs) {
+  const i = inputs || {};
+  if (!i.model) return "";
+  const fact = (f) => (f ? `${f.sha256} · ${f.bytes}B` : "none");
+  const layer = (names) => (names && names.length ? names.join(", ") : "none");
+  const rows = [
+    ["model", i.model + (i.resumed ? " · resumed" : "")],
+    ["skills", `filter ${i.skills?.filter ?? "—"}` +
+      (i.skills?.project ? ` · project: ${layer(i.skills.project)}` : "") +
+      (i.skills?.user ? ` · host: ${layer(i.skills.user)}` : "")],
+    ["roles", `files: ${layer(i.agents?.files)} · config: ${layer(i.agents?.config)}`],
+    ["mcp", layer(i.mcp_servers)],
+    ["memory", fact(i.memory)],
+    ["prompt append", fact(i.system_prompt_append)],
+  ];
+  return `<details class="proc-past"><summary>inputs · what the model was given</summary>
+    <div class="proc">${rows
+      .map(([k, v]) => `<div class="ev"><span class="ev-tool">${esc(k)}</span>${esc(String(v))}</div>`)
+      .join("")}</div></details>`;
+}
 function turnHtml(t) {
   const evs = t.events || [];
   const proc = evs.length
     ? `<details class="proc-past"><summary>process · ${evs.length} steps</summary>
          <div class="proc">${evs.map(eventHtml).join("")}</div></details>`
     : "";
-  return `<div class="turn">${qHtml(t.message)}${proc}
+  return `<div class="turn">${qHtml(t.message)}${inputsHtml(t.inputs)}${proc}
     <div class="a ${t.error ? "err" : ""}">${answerHtml(t.text)}</div>${statsHtml(t)}</div>`;
 }
 
@@ -433,7 +456,7 @@ async function renderDetail(startPolling) {
   if (run.status === "running") {
     const live = (run.events || []).map(eventHtml).join("");
     parts.push(
-      `<div class="turn">${qHtml(run.current_message)}` +
+      `<div class="turn">${qHtml(run.current_message)}${inputsHtml(run.inputs)}` +
       (live ? `<div class="proc">${live}</div>` : "") +
       `<div class="pending">investigating</div></div>`,
     );
@@ -856,6 +879,26 @@ that: the <b>budget breaker</b> (once the window's spend hits the ceiling the ev
 investigations — and says so on a card), <b>idempotency</b> (an alert storm funds one investigation,
 not N), and <b>failure completes the loop</b> (timeout, crash, restart or refusal all return a
 report).</p>
+
+<h2>Loop hygiene (the run's context and bill)</h2>
+<p>Two advisory guards plus one record — none is a security boundary, all exist because an unattended
+run cannot notice it is wasting itself.</p>
+<table>
+<tr><td><b>repeat reminder</b></td><td>On the <code>HOOKPROBE_REPEAT_REMINDER_AT</code>-th identical
+call (3rd by default, and every multiple after) the tool result carries a note: change approach, or
+record what stays unknown and move on. The budget breaker stops spending after the fact; this is the
+nudge before it costs.</td></tr>
+<tr><td><b>command deadlines</b></td><td><code>HOOKPROBE_BASH_TIMEOUT_MS</code> /
+<code>HOOKPROBE_BASH_MAX_TIMEOUT_MS</code> cap a single command, so a curl at an unreachable host
+cannot hold a slot until the whole run times out.</td></tr>
+<tr><td><b>inputs record</b></td><td>Every turn records what it was given — model, skill layers and
+names, roles, MCP servers, and digests of the environment memory and appended methodology. Those
+files live on a mutable volume; a stale line in <code>CLAUDE.md</code> once made every report come
+back in the wrong language while the request looked identical. Open <b>inputs · what the model was
+given</b> on any turn.</td></tr>
+</table>
+<p>Oversized tool output needs no guard here: the harness saves the full copy under the session's
+<code>tool-results/</code> and hands the model a short preview plus that path.</p>
 
 <h2>Recipes</h2>
 <ul>
