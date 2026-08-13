@@ -96,6 +96,12 @@ services:
       # Case files and transcripts older than this are pruned daily. 0 keeps
       # everything — the case files are the agent's episodic memory.
       HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
+      # Skill layers: "project" (distilled, on the volume) is always on;
+      # add "user" to also load a host library mounted at
+      # /data/home/.claude/skills. HOOKPROBE_SKILLS pins the session's
+      # skill list (comma names or "all") so a big library cannot flood it.
+      HOOKPROBE_SETTING_SOURCES: ${HOOKPROBE_SETTING_SOURCES:-}
+      HOOKPROBE_SKILLS: ${HOOKPROBE_SKILLS:-}
       # Direct self-alarm when report returns exhaust their retries:
       HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
       HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
@@ -117,6 +123,9 @@ services:
       # HOOKPROBE_MCP_CONFIG: /config/mcp.json
     volumes:
       - probe-data:/data
+      # A host skills library as the read-only user layer — mount ONLY the
+      # skills subdir, never the whole ~/.claude (credentials live there):
+      # - ~/.claude/skills:/data/home/.claude/skills:ro
       # Read-only credentials are the real security boundary — mount only
       # query-grade identities:
       # - ../secrets/kubeconfig-readonly:/data/home/.kube/config:ro

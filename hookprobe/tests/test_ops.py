@@ -56,3 +56,56 @@ def test_healthz_slot_arithmetic(tmp_path) -> None:
             time.sleep(0.01)
         assert (health["running_turns"], health["queued_turns"]) == (2, 1)
         engine.release.set()
+
+
+def test_skills_filter_expression() -> None:
+    from hookprobe.engine import _skills_filter
+
+    assert _skills_filter("") is None
+    assert _skills_filter("all") == "all"
+    assert _skills_filter("a, b ,c") == ["a", "b", "c"]
+
+
+def test_setting_sources_parse(monkeypatch) -> None:
+    from hookprobe.settings import Settings
+
+    monkeypatch.setenv("HOOKPROBE_SETTING_SOURCES", "user, project, bogus")
+    assert Settings.load().setting_sources == ("user", "project")
+    monkeypatch.setenv("HOOKPROBE_SETTING_SOURCES", "bogus,,")
+    assert Settings.load().setting_sources == ("project",), "nonsense falls back to project"
+
+
+def test_skills_browser_shows_only_loaded_layers(tmp_path, monkeypatch) -> None:
+    """The browser mirrors the engine: the user layer appears exactly when
+    the engine would load it."""
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from tests.helpers import FakeEngine
+
+    workdir = tmp_path / "wd"
+    home = tmp_path / "home"
+    (workdir / ".claude" / "skills" / "distilled").mkdir(parents=True)
+    (workdir / ".claude" / "skills" / "distilled" / "SKILL.md").write_text(
+        "---\nname: distilled\ndescription: ours\n---\n"
+    )
+    (home / ".claude" / "skills" / "host-lib").mkdir(parents=True)
+    (home / ".claude" / "skills" / "host-lib" / "SKILL.md").write_text(
+        "---\nname: host-lib\ndescription: from the host\n---\n"
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    def client_with(sources):
+        settings = make_settings(workdir, token=TOKEN, setting_sources=sources)
+        return TestClient(create_app(settings, RunService(settings, FakeEngine(), RunStore(workdir / "results"))))
+
+    with client_with(("project",)) as client:
+        names = {s["name"] for s in client.get("/v1/skills", headers=AUTH).json()}
+        assert names == {"distilled"}, "user layer hidden while the engine would not load it"
+
+    with client_with(("user", "project")) as client:
+        listed = {s["name"]: s["layer"] for s in client.get("/v1/skills", headers=AUTH).json()}
+        assert listed == {"distilled": "project", "host-lib": "user"}
+        detail = client.get("/v1/skills/host-lib", headers=AUTH).json()
+        assert detail["layer"] == "user" and "from the host" in detail["content"]
