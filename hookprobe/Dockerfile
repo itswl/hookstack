@@ -42,8 +42,14 @@ COPY pyproject.toml README.md ./
 COPY hookprobe ./hookprobe
 RUN pip install .
 
+# The layout is seeded in the image so a FRESH named volume inherits it with the
+# right ownership. This is not cosmetic: mounting a host skills library at
+# /data/home/.claude/skills makes Docker create the missing parents itself, as
+# root — and then the non-root app cannot write $HOME/.claude/projects, so the
+# engine keeps no transcripts and every follow-up turn dies with "No
+# conversation found". Seeding the directories first keeps that mount harmless.
 RUN useradd --create-home --uid 10001 hookprobe \
-    && mkdir -p /data \
+    && mkdir -p /data/home/.claude/projects /data/.claude/skills /data/.claude/agents /data/results \
     && chown -R hookprobe:hookprobe /data
 USER hookprobe
 # HOME lives on the volume: the engine keeps session transcripts in
