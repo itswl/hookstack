@@ -108,9 +108,7 @@ def _verify_pki(payload: dict) -> bool:
     fields = _SIGNED_FIELDS.get(str(payload.get("Type") or ""))
     if not fields:
         return False
-    string_to_sign = "".join(
-        f"{name}\n{payload[name]}\n" for name in fields if payload.get(name) is not None
-    )
+    string_to_sign = "".join(f"{name}\n{payload[name]}\n" for name in fields if payload.get(name) is not None)
     digest = hashes.SHA256() if str(payload.get("SignatureVersion")) == "2" else hashes.SHA1()  # noqa: S303  # nosec B303
     try:
         certificate = load_pem_x509_certificate(_fetch(cert_url))

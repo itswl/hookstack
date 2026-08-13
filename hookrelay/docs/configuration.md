@@ -149,7 +149,7 @@ pipeline:
 |---|---|
 | `level: high` | exact match |
 | `level: [high, critical]` | membership |
-| `title: {contains: 数据库}` | substring |
+| `title: {contains: database}` | substring |
 
 Keys available: `source`, `level`, `title`, plus every extracted `fields` key.
 All conditions in one `when` must match (AND).
@@ -214,12 +214,12 @@ return, get the same view), with each brain's **latency** — the number that
 answers "what does the slow one buy us":
 
 ```json
-{"origin": {"id": 86, "title": "示例充值超500告警", "deliveries": [...]},
+{"origin": {"id": 86, "title": "Single top-up over 500", "deliveries": [...]},
  "returns": [{"fields": {"brain": "brain-lite"}, "level": "medium", "latency_seconds": 0.4},
              {"fields": {"brain": "brain-full"}, "level": "high",   "latency_seconds": 47.0}]}
 ```
 
-The status page shows it under each event ("看这条的往返 / 各系统加工").
+The status page shows it under each event (the round-trip panel).
 
 Two standing limits on processors, both deliberate:
 
@@ -242,7 +242,7 @@ channels:
     max_per_minute: 20                 # rate limit DEFERS (reschedules), never drops
 
   - name: ops-dingtalk
-    type: dingtalk                     # markdown; secret = 加签 (query-string sign)
+    type: dingtalk                     # markdown; secret = query-string signing
     url: ${DINGTALK_WEBHOOK_URL}
     secret: ${DINGTALK_WEBHOOK_SECRET}
 
@@ -309,7 +309,7 @@ sources:
     fingerprint_fields: [title, state]
 ```
 
-**Finished payloads out (brain → hookrelay → 飞书)** — the brain builds
+**Finished payloads out (brain → hookrelay → Feishu)** — the brain builds
 the exact message (interactive cards with their callback buttons survive);
 hookrelay owns retry / rate limit / dead letters and injects bot signing only:
 

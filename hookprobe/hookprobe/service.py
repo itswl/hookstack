@@ -93,9 +93,10 @@ def failure_report(reason: str) -> str:
 def budget_report(spent: float, budget: float, window_hours: float) -> str:
     """A report-shaped refusal, so the family loop completes without an engine run."""
     summary = (
-        f"预算熔断：最近 {window_hours:g} 小时的调查花费已达 ${spent:.2f}（预算 ${budget:.2f}），"
-        "本条告警未启动深度调查。判官的裁决不受影响；"
-        "预算窗口滑动或调高 HOOKPROBE_BUDGET_USD 后自动恢复。"
+        f"Budget breaker open: investigations have spent ${spent:.2f} in the last "
+        f"{window_hours:g}h (budget ${budget:.2f}), so this alert was NOT investigated. "
+        "The judge's verdict is unaffected. Investigations resume when the window slides "
+        "or HOOKPROBE_BUDGET_USD is raised."
     )
     return json.dumps(
         {
@@ -400,7 +401,7 @@ class RunService:
                 # RESULT in the one shape every channel renderer knows how to
                 # dress. Speaking anything else renders as an empty card.
                 "meta": {
-                    "alert_name": f"{alert_title} · 调查报告",
+                    "alert_name": f"{alert_title} · investigation",
                     "source": str(run.meta.get("source") or "hookprobe"),
                     "importance": str(run.meta.get("level") or "medium"),
                     "event_id": run.meta.get("event_id"),
@@ -412,7 +413,7 @@ class RunService:
                     "cost_usd": run.cost_usd,
                     "error": run.error,
                 },
-                "analysis": {"summary": summary, "event_type": "深度调查"},
+                "analysis": {"summary": summary, "event_type": "investigation"},
                 "identity": {"session": run.session_key},
                 "report": {"summary": summary, "text": run.text},
             },
@@ -456,9 +457,9 @@ class RunService:
         held = self._alarm_suppressed
         self._alarm_suppressed = 0
         self._alarm_last_sent = now
-        text = f"[hookprobe] 调查报告回传失败\n会话: {run.session_key}\n原因: {error[:200]}"
+        text = f"[hookprobe] report return failed\nsession: {run.session_key}\nreason: {error[:200]}"
         if held:
-            text += f"\n(另有 {held} 条在静默窗口内被折叠)"
+            text += f"\n({held} more folded into this one during the quiet window)"
         body = json.dumps({"msg_type": "text", "content": {"text": text}}, ensure_ascii=False).encode()
         try:
             await asyncio.to_thread(self._post_alarm, body)

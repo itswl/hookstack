@@ -21,7 +21,7 @@ from hookrelay.pipeline import handle_hook
 from hookrelay.store import Store
 
 GRAFANA_RAW = {
-    "title": "磁盘将满",
+    "title": "Disk about to fill",
     "message": "/data 92%",
     "state": "alerting",
     "evalMatches": [{"metric": "disk", "value": 92.3}],
@@ -33,7 +33,7 @@ def _msg(payload):
     return {
         "event_id": 9,
         "source": "grafana",
-        "title": "磁盘将满",
+        "title": "Disk about to fill",
         "body": "/data 92%",
         "level": "high",
         "fields": {},
@@ -63,14 +63,14 @@ def test_generic_normalized_never_leaks_the_raw_payload():
     channel = Channel(name="mirror", type="generic", url="https://m.example")
     _url, body, _headers = build_request(channel, _msg(GRAFANA_RAW), now=0.0)
     sent = json.loads(body.decode())
-    assert "payload" not in sent and sent["title"] == "磁盘将满"
+    assert "payload" not in sent and sent["title"] == "Disk about to fill"
 
 
 def test_feishu_raw_preserves_the_brains_card_and_injects_signing():
     card = {
         "msg_type": "interactive",
         "card": {
-            "header": {"title": {"tag": "plain_text", "content": "事故 #12"}},
+            "header": {"title": {"tag": "plain_text", "content": "incident #12"}},
             "elements": [{"tag": "action", "actions": [{"tag": "button", "value": {"incident_id": 12}}]}],
         },
     }
