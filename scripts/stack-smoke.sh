@@ -8,6 +8,11 @@
 #
 #   bash scripts/stack-smoke.sh            # build, test, tear down
 #   KEEP=1 bash scripts/stack-smoke.sh     # leave it running to poke at
+#   FORCE=1 bash scripts/stack-smoke.sh    # yes, wipe the existing probe volume
+#
+# It begins and ends with `docker compose down -v`. On CI that is free; on a
+# laptop it deletes the investigator's skills, memory and case files, so the
+# opening wipe refuses when that volume already exists.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -56,6 +61,29 @@ else
 fi
 
 step "build and start"
+# `down -v` is how this smoke gets a clean slate, and on CI it destroys nothing.
+# On a laptop the same command eats the investigator's volume: distilled skills,
+# the environment memory, every case file it recalls from — and takes the demo
+# probe down with it, which is somebody's live dependency the moment anything is
+# pointed at it. So the wipe asks first when there is state to lose. FORCE=1
+# says "I know, do it".
+# Matched by suffix, not by "<directory>_probe-data": the project is named in
+# the compose file (`name: hookstack`), so deriving it from the checkout's
+# directory name looks right, silently matches nothing, and wipes the volume it
+# was written to protect. It did exactly that once.
+PROBE_VOLUMES=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E '_probe-data$' || true)
+if [ "${FORCE:-0}" != "1" ] && [ -n "$PROBE_VOLUMES" ]; then
+  printf '\033[1;31mrefusing to wipe an existing investigator volume\033[0m\n\n'
+  printf 'This smoke starts with `docker compose down -v`. That deletes:\n\n'
+  printf '  %s\n' $PROBE_VOLUMES
+  printf '    — distilled skills, the environment memory, every case file\n'
+  printf '  the relay and judge ledgers alongside it\n\n'
+  printf 'and takes the demo probe down with them, which is a live dependency\n'
+  printf 'when something else is pointed at it.\n\n'
+  printf 'Run it in a scratch checkout, or accept the loss:\n\n'
+  printf '  FORCE=1 bash scripts/stack-smoke.sh\n'
+  exit 1
+fi
 docker compose down -v >/dev/null 2>&1 || true
 docker compose up -d --build >/dev/null
 
