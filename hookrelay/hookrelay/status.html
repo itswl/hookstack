@@ -78,6 +78,14 @@
   .tab { background: none; border: 0; color: var(--muted); padding: 8px 14px; cursor: pointer;
          font: inherit; border-bottom: 2px solid transparent; }
   .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .hp { max-width: 880px; font-size: 13.5px; line-height: 1.65; }
+  .hp h2 { margin-top: 22px; }
+  .hp table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  .hp th, .hp td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 12.5px; vertical-align: top; }
+  .hp th { color: var(--muted); background: var(--panel); font-weight: 600; }
+  .hp code { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; }
+  .hp pre { background: #0a0d13; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+  .hp .muted { color: var(--muted); }
   .btn { background: var(--surface); border: 1px solid var(--border); color: var(--text);
          border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -119,6 +127,7 @@
   <div class="tabs">
     <button class="tab active" data-tab="events">事件</button>
     <button class="tab" data-tab="config">配置</button>
+    <button class="tab" data-tab="help">帮助</button>
   </div>
 
   <div id="panel-events">
@@ -180,6 +189,55 @@
     </div>
     <div class="msg" id="silMsg"></div>
   </div><!-- /panel-config -->
+
+  <div id="panel-help" style="display:none" class="hp">
+    <h2>这是什么</h2>
+    <p>hookrelay 是家族<b>唯一的告警前门</b>，也是唯一的出口 — 管道。它把各家监控的方言适配成
+    统一事件，按路由送去处理系统（判官/调查员），再把回来的结果打扮成各渠道的卡片投递出去。
+    它<b>刻意不理解内容</b>：判断是大脑们的事，管道只负责「每条消息有交代，每次投递有结局」。</p>
+
+    <h2>一条告警的旅程</h2>
+    <pre>上游 POST /hook/{source}
+  → 提取(模板+level_map) → 门(去重/静音/风暴熔断)
+  → 路由(按优先级累积，stop 截断) → 渠道(按类型渲染)
+  → 投递(重试退避，死信可见+自告警) → 账本(决策链+收发双向原文)</pre>
+
+    <h2>读这块板子</h2>
+    <table>
+      <tr><th>区域</th><th>怎么读</th></tr>
+      <tr><td>三张卡</td><td>排队=在等投递；死信&gt;0 应当有人看（配了 <code>HOOKRELAY_ALARM_URL</code> 会自动报警）</td></tr>
+      <tr><td>事件行</td><td>点开=完整决策链：哪些路由被考虑、为何命中/跳过、投递到哪。「对比」按钮拉 <code>/trace</code> 往返视图：原始载荷、每渠道发出的 body、各大脑的回件</td></tr>
+      <tr><td>配置 tab</td><td>config.yaml 的编辑器（文件才是真源）：校验通过才落盘，热加载不重启。需要 admin token</td></tr>
+    </table>
+
+    <h2>API 速查</h2>
+    <p class="muted">地址按部署形态：家族容器网络内用 <code>http://hookrelay:8100</code>，宿主机用回环映射 <code>http://127.0.0.1:8100</code>。读接口带 <code>X-Read-Token</code>，管理接口带 <code>X-Admin-Token</code>（都在页面里记住过就不用手填）。</p>
+    <table>
+      <tr><th>端点</th><th>用途</th></tr>
+      <tr><td><code>POST /hook/{source}</code></td><td>前门。source 在 config.yaml 里声明（含签名/模板/级别映射）</td></tr>
+      <tr><td><code>GET /status</code> · <code>GET /trace/{id}</code></td><td>板子的数据源 / 一条告警的完整往返（含双向原文取证）</td></tr>
+      <tr><td><code>POST /explain/{source}</code></td><td>干跑：这个载荷「会」发生什么 — 不记账不投递（admin）</td></tr>
+      <tr><td><code>GET/PUT /config</code> · <code>POST /config/reload</code></td><td>配置读改与热加载（admin）</td></tr>
+      <tr><td><code>POST /silences</code> · <code>DELETE /silences/{id}</code></td><td>静音阀（admin）</td></tr>
+      <tr><td><code>POST /deliveries/{id}/retry</code></td><td>死信的第二次机会（admin）</td></tr>
+      <tr><td><code>GET /metrics</code></td><td>Prometheus 文本：事件/投递/积压/熔断（read token）</td></tr>
+    </table>
+
+    <h2>配置要点（config.yaml）</h2>
+    <table>
+      <tr><th>概念</th><th>一句话</th></tr>
+      <tr><td>sources</td><td>每个门的签名密钥、提取模板（占位符抽标题/正文/级别）、<code>level_map</code> 统一各家用词。配置里的 <code>${NAME}</code> 从 .env 展开 — 加变量不用改 compose</td></tr>
+      <tr><td>routes</td><td><b>顺序即语义</b>：按优先级从高到低累积匹配，<code>stop: true</code> 截断。回传路由（judge-notify/probe-notify）优先级最高并 stop，防止结果被再次加工</td></tr>
+      <tr><td>channels</td><td><code>payload: normalized</code> 发标准事件（给大脑）；<code>processed</code> 把大脑结果渲染成飞书/钉钉卡片；<code>raw</code> 透传原始载荷</td></tr>
+      <tr><td>防噪三件套</td><td>指纹去重（fingerprint_fields + 窗口）、静音、风暴熔断（按量不按内容）</td></tr>
+      <tr><td>保留</td><td><code>HOOKRELAY_RETENTION_DAYS</code>（默认 14）连账本一起清</td></tr>
+    </table>
+
+    <h2>在家族里的位置</h2>
+    <p>升级路由把每个前门事件复制给调查员（<code>${HOOKPROBE_EVENT_URL}</code>）；判官与调查员的
+    结果走各自回传门回来，说同一种「大脑结果方言」，管道统一穿衣送渠道。管道自己坏了怎么办 —
+    死信自告警直发 <code>HOOKRELAY_ALARM_URL</code>，绕开刚坏掉的那套栈。</p>
+  </div>
 </div>
 
 <script>
@@ -294,9 +352,14 @@
       var which = tab.getAttribute("data-tab");
       document.getElementById("panel-events").style.display = which === "events" ? "" : "none";
       document.getElementById("panel-config").style.display = which === "config" ? "" : "none";
+      document.getElementById("panel-help").style.display = which === "help" ? "" : "none";
       if (which === "config") loadConfig();
     });
   });
+
+  if (location.hash === "#help") {
+    document.querySelector('.tab[data-tab="help"]').click();
+  }
 
   function adminHeaders() {
     var token = localStorage.getItem(ADMIN_KEY) || "";
