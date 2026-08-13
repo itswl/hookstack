@@ -179,7 +179,8 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     # content-blind, so the escalation judgement lives on this side: only
     # levels in escalate_levels start a paid investigation, everything else
     # is acknowledged and skipped. Idempotent per (source, event_id) — a storm
-    # of restatements funds one investigation, not N.
+    # of the SAME event id funds one investigation, not N (a restatement with a
+    # new id is a new investigation — the budget breaker is the backstop).
     @app.post("/hooks/event")
     async def event_door(request: Request) -> dict[str, Any]:
         raw = await request.body()
