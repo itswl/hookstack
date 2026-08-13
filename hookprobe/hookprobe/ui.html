@@ -29,7 +29,11 @@ button:hover{border-color:var(--accent)}
 button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
 button:disabled{opacity:.45;cursor:default}
 main{flex:1;display:flex;min-height:0}
-aside{width:330px;border-right:1px solid var(--line);overflow-y:auto;background:var(--panel);flex-shrink:0}
+aside{width:330px;border-right:1px solid var(--line);background:var(--panel);flex-shrink:0;display:flex;flex-direction:column}
+#q{margin:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--text);
+   padding:5px 9px;font-size:12px}
+#q:focus{outline:none;border-color:var(--accent)}
+#list{flex:1;overflow-y:auto}
 .item{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;border-left:2px solid transparent}
 .item:hover{background:#1c2128}
 .item.sel{background:#152238;border-left-color:var(--accent)}
@@ -37,6 +41,21 @@ aside{width:330px;border-right:1px solid var(--line);overflow-y:auto;background:
 .item .title{color:var(--dim);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
 .item .meta{display:flex;gap:8px;font-size:11px;color:var(--dim);margin-top:4px;align-items:center;flex-wrap:wrap}
 .badge{padding:0 7px;border-radius:10px;font-size:11px;border:1px solid currentColor}
+.flag{padding:0 6px;border-radius:9px;font-size:10px;border:1px solid var(--line);color:var(--dim);font-family:var(--mono)}
+.flag.sent{color:var(--green);border-color:var(--green)}
+.flag.retfail{color:var(--red);border-color:var(--red)}
+.kv-grid{display:grid;grid-template-columns:230px 1fr;gap:5px 16px;font-size:12.5px;margin:6px 0 18px}
+.kv-grid .k{color:var(--dim);font-family:var(--mono);font-size:12px}
+.kv-grid .v{font-family:var(--mono);font-size:12px;word-break:break-all}
+.subhead{color:var(--text);font-size:13px;font-weight:600;margin:14px 0 6px}
+.audit-bar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.audit-bar input{background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--text);padding:5px 9px;font-size:12px;width:280px}
+.audit-row{display:flex;gap:10px;font-family:var(--mono);font-size:11.5px;padding:3px 0;border-bottom:1px solid #161b22;align-items:baseline}
+.audit-row .ts{color:var(--dim);flex-shrink:0}
+.audit-row .a-session{color:var(--accent);flex-shrink:0;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.audit-row .a-tool{color:var(--amber);flex-shrink:0;min-width:70px}
+.audit-row .a-detail{color:var(--text);word-break:break-all}
+.audit-row.err .a-tool{color:var(--red)}
 .badge.running{color:var(--amber)}
 .badge.completed{color:var(--green)}
 .badge.failed{color:var(--red)}
@@ -118,12 +137,19 @@ button.danger{color:var(--red);border-color:var(--red)}
   <h1>hookprobe <span>· sessions</span></h1>
   <button id="new">+ new session</button>
   <button id="skillsBtn">skills</button>
+  <button id="agentsBtn">agents</button>
   <button id="memBtn">memory</button>
+  <button id="promptBtn">prompt</button>
+  <button id="sysBtn">system</button>
+  <button id="auditBtn">audit</button>
   <span id="budget" hidden></span>
   <input id="token" placeholder="bearer token" autocomplete="off">
 </header>
 <main>
-  <aside id="list"><div class="empty">loading…</div></aside>
+  <aside>
+    <input id="q" placeholder="filter sessions…" autocomplete="off">
+    <div id="list"><div class="empty">loading…</div></div>
+  </aside>
   <section>
     <div id="meta"></div>
     <div id="turns"><div class="empty">select a session on the left, or start a new one</div></div>
@@ -239,17 +265,27 @@ function answerHtml(text) {
 }
 function fmtTime(ts) { return ts ? new Date(ts * 1000).toLocaleString() : ""; }
 
+function returnFlag(x) {
+  if (x.origin !== "relay") return "";
+  if ((x.return_status || "").startsWith("failed")) return '<span class="flag retfail">return failed</span>';
+  if (x.return_status === "sent") return '<span class="flag sent">returned</span>';
+  return '<span class="flag">relay</span>';
+}
+
 async function refreshList() {
   try {
-    const runs = await (await api("/v1/runs")).json();
+    let runs = await (await api("/v1/runs")).json();
+    const q = ($("#q").value || "").toLowerCase();
+    if (q) runs = runs.filter((x) => (x.session_key + " " + (x.title || "")).toLowerCase().includes(q));
     const el = $("#list");
-    if (!runs.length) { el.innerHTML = '<div class="empty">no sessions yet</div>'; return; }
+    if (!runs.length) { el.innerHTML = `<div class="empty">${q ? "no sessions match" : "no sessions yet"}</div>`; return; }
     el.innerHTML = runs.map((x) => `
       <div class="item ${x.session_key === sel ? "sel" : ""}" data-key="${esc(x.session_key)}">
         <div class="key">${esc(x.session_key)}</div>
         <div class="title">${esc(x.title || "")}</div>
         <div class="meta">
           <span class="badge ${esc(x.status)}">${esc(x.status)}</span>
+          ${returnFlag(x)}
           <span>${x.turn_count} turn${x.turn_count > 1 ? "s" : ""}</span>
           ${x.model ? `<span>${esc(String(x.model).replace(/^claude-/, ""))}</span>` : ""}
           ${x.cost_usd ? `<span>$${Number(x.cost_usd).toFixed(3)}</span>` : ""}
@@ -398,7 +434,12 @@ $("#new").onclick = () => {
 };
 
 $("#skillsBtn").onclick = () => openSkills();
+$("#agentsBtn").onclick = () => openAgents();
 $("#memBtn").onclick = () => openMemory();
+$("#promptBtn").onclick = () => openPrompt();
+$("#sysBtn").onclick = () => openSystem();
+$("#auditBtn").onclick = () => openAudit("");
+$("#q").oninput = () => refreshList();
 
 $("#stopBtn").onclick = async () => {
   if (!sel) return;
@@ -518,6 +559,191 @@ function editSkill(name, content) {
   };
 }
 
+// ── agents: the same layered, copy-on-write story as skills ─────────────
+async function openAgents() {
+  leaveSessions("agents");
+  await renderAgents();
+}
+
+async function renderAgents() {
+  try {
+    const agents = await (await api("/v1/agents")).json();
+    $("#meta").textContent = `subagent roles · ${agents.length} agent${agents.length === 1 ? "" : "s"} · .claude/agents + HOOKPROBE_AGENTS_CONFIG`;
+    if (!agents.length) {
+      $("#turns").innerHTML =
+        '<div class="empty">no agents yet — drop .claude/agents/*.md on the volume, mount a host library, or pin roles via HOOKPROBE_AGENTS_CONFIG. The main agent delegates to them through the Task tool.</div>';
+      return;
+    }
+    $("#turns").innerHTML = agents.map((a) => `
+      <div class="skill" data-name="${esc(a.name)}">
+        <div class="skill-name">${esc(a.name)}<span class="skill-layer ${esc(a.source)}">${esc(a.source)}</span></div>
+        <div class="skill-desc">${esc(a.description || "(no description)")}</div>
+        ${a.modified ? `<div class="skill-meta">${fmtTime(a.modified)}</div>` : ""}
+      </div>`).join("");
+    $("#turns").scrollTop = 0;
+    $("#turns").querySelectorAll(".skill").forEach((n) => (n.onclick = () => renderAgent(n.dataset.name)));
+  } catch (e) { $("#hint").textContent = e.message; }
+}
+
+async function renderAgent(name) {
+  const r = await api("/v1/agents/" + encodeURIComponent(name));
+  if (!r.ok) { $("#hint").textContent = "agent not found"; return; }
+  const a = await r.json();
+  $("#meta").textContent = `agent · ${name} · ${a.source}`;
+  const note = a.source === "user"
+    ? '<span class="skill-note">host library, read-only — saving stores a project copy that shadows it</span>'
+    : a.source === "config"
+      ? '<span class="skill-note">pinned by HOOKPROBE_AGENTS_CONFIG — edit the config file</span>'
+      : "";
+  const body = a.source === "config"
+    ? '<div class="md"><pre class="code"><code>' + esc(a.content) + "</code></pre></div>"
+    : mdToHtml((a.content || "").replace(/^---[\s\S]*?\n---\n/, ""));
+  $("#turns").innerHTML =
+    `<div class="skill-bar"><span class="skill-back">← all agents</span><span class="spacer"></span>${note}` +
+    (a.source !== "config" ? '<button id="agentEdit">edit</button>' : "") +
+    (a.source === "project" ? '<button id="agentDelete" class="danger">delete</button>' : "") +
+    `</div>` + body;
+  $("#turns").scrollTop = 0;
+  $("#turns").querySelector(".skill-back").onclick = () => renderAgents();
+  const ed = $("#agentEdit");
+  if (ed) ed.onclick = () => editAgent(name, a.content || "");
+  const del = $("#agentDelete");
+  if (del) del.onclick = async () => {
+    if (!confirm(`delete agent "${name}"?`)) return;
+    const resp = await api("/v1/agents/" + encodeURIComponent(name), { method: "DELETE" });
+    if (resp.ok) renderAgents();
+    else $("#hint").textContent = "delete failed (" + resp.status + ")";
+  };
+}
+
+function editAgent(name, content) {
+  $("#meta").textContent = `agent · ${name}.md · editing (saves to the project layer)`;
+  $("#turns").innerHTML = `
+    <div class="skill-bar"><span class="skill-back">← cancel</span></div>
+    <textarea id="skillSrc" spellcheck="false"></textarea>
+    <div class="mem-bar"><button id="agentSave" class="primary">Save</button><span id="agentStatus"></span></div>`;
+  $("#skillSrc").value = content;
+  $("#turns").querySelector(".skill-back").onclick = () => renderAgent(name);
+  $("#agentSave").onclick = async () => {
+    try {
+      const r = await api("/v1/agents/" + encodeURIComponent(name), {
+        method: "PUT",
+        body: JSON.stringify({ content: $("#skillSrc").value }),
+      });
+      if (r.ok) { renderAgent(name); return; }
+      $("#agentStatus").textContent = "save failed (" + r.status + ")";
+    } catch (e) { $("#agentStatus").textContent = e.message; }
+  };
+}
+
+// ── system prompt: the memory editor pattern, for methodology ───────────
+async function openPrompt() {
+  leaveSessions("prompt");
+  try {
+    const p = await (await api("/v1/system-prompt")).json();
+    $("#meta").textContent = `system prompt append · ${p.path} · read fresh at every run`;
+    $("#turns").innerHTML = `
+      <div class="mem-tip">Operator methodology appended to the engine's own system prompt — investigation
+      style, evidence rules, reporting conventions. Applies to the NEXT run the moment you save.</div>
+      <textarea id="memEdit" spellcheck="false"></textarea>
+      <div class="mem-bar"><button id="promptSave" class="primary">Save</button><span id="promptStatus"></span></div>`;
+    $("#memEdit").value = p.content || "";
+    $("#turns").scrollTop = 0;
+    $("#promptSave").onclick = async () => {
+      try {
+        const r = await api("/v1/system-prompt", { method: "PUT", body: JSON.stringify({ content: $("#memEdit").value }) });
+        $("#promptStatus").textContent = r.ok ? "saved" : "save failed (" + r.status + ")";
+        if (r.ok) setTimeout(() => { $("#promptStatus").textContent = ""; }, 2500);
+      } catch (e) { $("#promptStatus").textContent = e.message; }
+    };
+  } catch (e) { $("#hint").textContent = e.message; }
+}
+
+// ── system: runtime knobs, MCP servers, health — one page ───────────────
+function kvGrid(pairs) {
+  return '<div class="kv-grid">' + pairs.map(([k, v]) =>
+    `<span class="k">${esc(k)}</span><span class="v">${esc(v == null ? "—" : String(v))}</span>`).join("") + "</div>";
+}
+
+async function openSystem() {
+  leaveSessions("system");
+  try {
+    const [config, mcp, health] = await Promise.all([
+      (await api("/v1/config")).json(),
+      (await api("/v1/mcp")).json(),
+      (await fetch("/healthz")).json(),
+    ]);
+    $("#meta").textContent = "system · runtime configuration (secrets shown as set/unset, never values)";
+    const knobs = kvGrid([
+      ["model", config.model],
+      ["max_turns / max_concurrent", `${config.max_turns} / ${config.max_concurrent}`],
+      ["timeouts (default / max)", `${config.default_timeout_seconds}s / ${config.max_timeout_seconds}s`],
+      ["escalate_levels", (config.escalate_levels || []).join(", ")],
+      ["budget", config.budget_usd ? `$${config.budget_usd} / ${config.budget_window_hours}h` : "off"],
+      ["retention_days", config.retention_days || "keep everything"],
+      ["setting_sources", (config.setting_sources || []).join(", ")],
+      ["skills filter", config.skills_filter || "engine default"],
+      ["system prompt", `${config.system_prompt.path}${config.system_prompt.active ? " (active)" : " (absent)"}`],
+      ["agents_config", config.agents_config],
+      ["mcp_config", config.mcp_config],
+      ["return_url", config.return_url],
+      ["self-alarm / event secret / return secret", `${config.alarm_configured ? "set" : "—"} / ${config.event_secret_set ? "set" : "—"} / ${config.return_secret_set ? "set" : "—"}`],
+      ["workdir", config.workdir],
+    ]);
+    const servers = Object.entries(mcp.servers || {});
+    const mcpHtml = servers.length
+      ? servers.map(([name, s]) => kvGrid([
+          [name, [s.command, ...(s.args || [])].filter(Boolean).join(" ") || s.url || s.type || ""],
+          ["env keys", (s.env_keys || []).join(", ") || "(none)"],
+        ])).join("")
+      : `<div class="mem-tip">no MCP servers configured${mcp.config ? ` in ${esc(mcp.config)}` : " — set HOOKPROBE_MCP_CONFIG"} · edits apply to the next run, no restart</div>`;
+    const healthHtml = kvGrid([
+      ["active runs", health.active_runs],
+      ["turns running / queued", `${health.running_turns} / ${health.queued_turns}`],
+      ["report returns failed", health.return_failures],
+    ]);
+    $("#turns").innerHTML =
+      '<div class="subhead">runtime</div>' + knobs +
+      '<div class="subhead">mcp servers</div>' + mcpHtml +
+      '<div class="subhead">health</div>' + healthHtml;
+    $("#turns").scrollTop = 0;
+  } catch (e) { $("#hint").textContent = e.message; }
+}
+
+// ── audit: the flight recorder, filterable, following while open ─────────
+let auditTimer = null;
+
+async function openAudit(filter) {
+  leaveSessions("audit");
+  clearInterval(auditTimer);
+  $("#meta").textContent = "audit · every tool call in every run, subagents included · {workdir}/audit/*.jsonl";
+  $("#turns").innerHTML = `
+    <div class="audit-bar">
+      <input id="auditQ" placeholder="filter by session…" autocomplete="off">
+      <span class="skill-note" id="auditCount"></span>
+    </div>
+    <div id="auditRows"></div>`;
+  $("#auditQ").value = filter || "";
+  const load = async () => {
+    if (viewMode !== "audit") { clearInterval(auditTimer); return; }
+    try {
+      const q = encodeURIComponent($("#auditQ").value || "");
+      const d = await (await api("/v1/audit?limit=300" + (q ? "&session=" + q : ""))).json();
+      $("#auditCount").textContent = `${d.count} calls (newest last)`;
+      $("#auditRows").innerHTML = d.entries.map((e) => `
+        <div class="audit-row ${e.error ? "err" : ""}">
+          <span class="ts">${fmtTime(e.ts)}</span>
+          <span class="a-session">${esc(e.session)}</span>
+          <span class="a-tool">${esc(e.tool)}</span>
+          <span class="a-detail">${esc(e.detail || "")}</span>
+        </div>`).join("") || '<div class="empty">no tool calls recorded yet — the recorder writes when tools actually run</div>';
+    } catch (e) { $("#hint").textContent = e.message; }
+  };
+  $("#auditQ").oninput = load;
+  await load();
+  auditTimer = setInterval(load, 8000);
+}
+
 $("#msg").addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") $("#composer").requestSubmit();
 });
@@ -555,7 +781,17 @@ if (location.hash.startsWith("#skills")) {
   if (deepLink) { leaveSessions("skills"); renderSkill(deepLink); }
   else openSkills();
 }
+else if (location.hash.startsWith("#agents")) {
+  const agentLink = decodeURIComponent(location.hash.slice("#agents".length).replace(/^\//, ""));
+  if (agentLink) { leaveSessions("agents"); renderAgent(agentLink); }
+  else openAgents();
+}
 else if (location.hash === "#memory") openMemory();
+else if (location.hash === "#prompt") openPrompt();
+else if (location.hash === "#system") openSystem();
+else if (location.hash.startsWith("#audit")) {
+  openAudit(decodeURIComponent(location.hash.slice("#audit".length).replace(/^\//, "")));
+}
 async function refreshBudget() {
   const el = $("#budget");
   try {
