@@ -767,7 +767,7 @@ async function openAudit(filter) {
 function openHelp() {
   leaveSessions("help");
   $("#meta").textContent = "help · hookprobe 是什么、怎么用 · 人和 AI 都从这页开始";
-  const base = location.origin;
+  const base = "http://hookprobe:8088";
   $("#turns").innerHTML = `<div class="help">
 <h2>这是什么</h2>
 <p>hookprobe 是一个<b>只读的告警调查员</b>：收到一条值得深挖的告警，就跑一次带工具的
@@ -793,7 +793,8 @@ agent 调查（查日志、查指标、翻案卷、必要时开浏览器），�
 </table>
 
 <h2>API 速查（给 AI 或脚本）</h2>
-<p class="dim">鉴权：所有请求带 <code>Authorization: Bearer &lt;token&gt;</code>。轮询语义：/final 返回 202=还在跑，200 时 <code>isFinal</code> 恒为 true — 读到即可信，不需要稳定性判断。</p>
+<p class="dim">鉴权：所有请求带 <code>Authorization: Bearer &lt;token&gt;</code>。轮询语义：/final 返回 202=还在跑，200 时 <code>isFinal</code> 恒为 true — 读到即可信，不需要稳定性判断。<br>
+示例用<b>家族容器网络内</b>的地址 <code>http://hookprobe:8088</code>；在宿主机上把它换成回环映射 <code>http://127.0.0.1:8088</code>。</p>
 <pre># 发起一次调查（OpenClaw 兼容合同）
 curl -X POST ${base}/hooks/agent -H "Authorization: Bearer $TOKEN" \\
   -H "Content-Type: application/json" \\

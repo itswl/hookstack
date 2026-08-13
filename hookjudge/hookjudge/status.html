@@ -16,6 +16,13 @@
   header h1 { font-size:18px; margin:0; }
   header .sub, header .stamp { color:var(--muted); font-size:12px; }
   header .stamp { margin-left:auto; font-family:var(--mono); }
+  .hp { max-width: 860px; font-size: 13.5px; line-height: 1.65; margin-bottom: 26px; }
+  .hp h2 { font-size: 14px; margin: 18px 0 6px; }
+  .hp table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  .hp th, .hp td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 12.5px; vertical-align: top; }
+  .hp th { color: var(--muted); font-weight: 600; }
+  .hp code { border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; }
+  .hp .muted-p { color: var(--muted); font-size: 12.5px; }
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px; }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
   .card .label { color:var(--muted); font-size:12px; margin-bottom:4px; }
@@ -51,8 +58,43 @@
   <header>
     <h1>hookjudge</h1>
     <span class="sub">只判断：一条事件，一个裁决，一笔账</span>
+    <a href="#" id="helpLink" class="sub" style="text-decoration:none">帮助</a>
     <span class="stamp" id="stamp">加载中…</span>
   </header>
+  <div id="helpSec" class="hp" style="display:none">
+    <h2>这是什么</h2>
+    <p>hookjudge 是管道背后的<b>判官</b>：收一条标准化事件，给一个裁决（重要性、分类、一句话摘要），
+    回传给管道，同时记一笔账。它不渲染卡片、不管渠道 — 那些是管道的活；也不做深度排查 —
+    那是调查员的活。判官只回答「这条告警值不值得打扰人」。</p>
+    <h2>四条路由 = 成本策略（顺序就是策略本身）</h2>
+    <table>
+      <tr><th>路由</th><th>什么时候走</th><th>花钱吗</th></tr>
+      <tr><td><b>recovery</b></td><td>恢复事件继承其告警当初的裁决 — 目的是与所属告警口径一致，而不只是省一次调用</td><td>免费</td></tr>
+      <tr><td><b>reuse</b></td><td>窗口内（默认 1h）同一状况的复述，沿用上一次 AI 裁决 — 告警风暴是同一件事的重复陈述</td><td>免费</td></tr>
+      <tr><td><b>ai</b></td><td>真正没见过的新状况，问模型</td><td>付费</td></tr>
+      <tr><td><b>rule</b></td><td>模型没配/超时/答非所问时的关键词兜底；<code>degraded_reason</code> 会写明为何降级，绝不冒充分析。对已知级别保守沿用</td><td>免费</td></tr>
+    </table>
+    <p class="muted-p">省钱的关键不是把模型调便宜，而是让大多数事件根本走不到 ai。</p>
+    <h2>读这块板子</h2>
+    <p>四张卡：24h 裁决量 / 付费比例（ai 占比）/ 24h 花费 / <b>回传失败</b>（&gt;0 说明管道收不到裁决 —
+    配了 <code>HOOKJUDGE_ALARM_URL</code> 会绕开管道直发自告警）。裁决行的徽章就是路由，旁边是延迟与单笔费用。</p>
+    <h2>API 与地址</h2>
+    <p class="muted-p">家族容器网络内 <code>http://hookjudge:8200</code>；宿主机回环映射 <code>http://127.0.0.1:8200</code>。</p>
+    <table>
+      <tr><th>端点</th><th>用途</th></tr>
+      <tr><td><code>POST /events</code></td><td>管道投来的标准化事件（可选时间戳 HMAC 签名）。答 202 立即返回 — 裁决走回传门送回，不占着连接</td></tr>
+      <tr><td><code>GET /status</code></td><td>本页数据源（X-Read-Token）</td></tr>
+      <tr><td><code>GET /healthz</code> · <code>GET /metrics</code></td><td>存活 / Prometheus 文本</td></tr>
+    </table>
+    <h2>关键旋钮</h2>
+    <table>
+      <tr><th>env</th><th>含义</th></tr>
+      <tr><td><code>HOOKJUDGE_AI_BASE_URL / _API_KEY / _MODEL</code></td><td>OpenAI 兼容端点。<b>留空 = 每条都走 rule 兜底</b>（能用但钝，且 reuse 永远不会发生）</td></tr>
+      <tr><td><code>HOOKJUDGE_REUSE_WINDOW_SECONDS</code></td><td>复述窗口（默认 3600）</td></tr>
+      <tr><td><code>HOOKJUDGE_RETURN_URL / _RETURN_SECRET</code></td><td>唯一的出口 — 管道的 judge-notify 门；退避重试，耗尽进死信并自告警</td></tr>
+      <tr><td><code>HOOKJUDGE_RETENTION_DAYS</code> · <code>HOOKJUDGE_ALARM_URL</code></td><td>账本保留（默认 30 天）/ 死信自告警直达地址</td></tr>
+    </table>
+  </div>
   <div class="cards">
     <div class="card"><div class="label">24h 裁决</div><div class="value" id="cJudged">–</div></div>
     <div class="card"><div class="label">付费比例</div><div class="value" id="cPaid">–</div></div>
@@ -65,6 +107,15 @@
 <script>
 (function () {
   "use strict";
+  if (location.hash === "#help") {
+    document.getElementById("helpSec").style.display = "";
+  }
+  document.getElementById("helpLink").addEventListener("click", function (e) {
+    e.preventDefault();
+    var sec = document.getElementById("helpSec");
+    sec.style.display = sec.style.display === "none" ? "" : "none";
+  });
+
   var KEY = "hookjudge-read-token";
   function esc(v) {
     return String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/</g,"&lt;")
