@@ -109,3 +109,44 @@ def test_skills_browser_shows_only_loaded_layers(tmp_path, monkeypatch) -> None:
         assert listed == {"distilled": "project", "host-lib": "user"}
         detail = client.get("/v1/skills/host-lib", headers=AUTH).json()
         assert detail["layer"] == "user" and "from the host" in detail["content"]
+
+
+def test_skill_editing_is_copy_on_write_over_the_user_layer(tmp_path, monkeypatch) -> None:
+    """Saving always lands in the project layer; deleting a shadow lets the
+    host copy resurface; the host copy itself is never writable."""
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from tests.helpers import FakeEngine
+
+    workdir = tmp_path / "wd"
+    home = tmp_path / "home"
+    host_skill = home / ".claude" / "skills" / "host-lib"
+    host_skill.mkdir(parents=True)
+    (host_skill / "SKILL.md").write_text("---\nname: host-lib\ndescription: from the host\n---\noriginal\n")
+    (workdir / ".claude" / "skills").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    settings = make_settings(workdir, token=TOKEN, setting_sources=("user", "project"))
+    service = RunService(settings, FakeEngine(), RunStore(workdir / "results"))
+    with TestClient(create_app(settings, service)) as client:
+        assert client.put("/v1/skills/bad name!", json={"content": "x"}, headers=AUTH).status_code == 400
+        assert client.delete("/v1/skills/host-lib", headers=AUTH).status_code == 403
+
+        saved = client.put(
+            "/v1/skills/host-lib",
+            json={"content": "---\nname: host-lib\ndescription: tuned\n---\nlocal copy\n"},
+            headers=AUTH,
+        ).json()
+        assert saved["layer"] == "project"
+        detail = client.get("/v1/skills/host-lib", headers=AUTH).json()
+        assert detail["layer"] == "project" and "local copy" in detail["content"]
+        assert "original" in (host_skill / "SKILL.md").read_text(), "the host copy was never touched"
+
+        assert client.delete("/v1/skills/host-lib", headers=AUTH).json()["deleted"] is True
+        resurfaced = client.get("/v1/skills/host-lib", headers=AUTH).json()
+        assert resurfaced["layer"] == "user" and "original" in resurfaced["content"]
+
+        assert client.delete("/v1/skills/host-lib", headers=AUTH).status_code == 403
+        assert client.delete("/v1/skills/never-was", headers=AUTH).status_code == 404
