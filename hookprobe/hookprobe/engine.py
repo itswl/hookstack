@@ -9,14 +9,17 @@ method.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from hookprobe.guard import bash_deny_reason
+from hookprobe.hygiene import post_tool_hook
 from hookprobe.settings import Settings
 
 logger = logging.getLogger("hookprobe.engine")
@@ -200,6 +203,35 @@ def _audit_hook(audit_dir: Path, session_key: str) -> Callable[..., Any]:
     return hook
 
 
+def _file_fact(path: Path) -> dict[str, Any] | None:
+    """Size and content digest of a prompt input, or None when absent."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    return {
+        "path": str(path),
+        "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest()[:12],
+    }
+
+
+def _skill_names(root: Path, limit: int = 40) -> list[str]:
+    try:
+        names = sorted(p.parent.name for p in root.glob("*/SKILL.md"))
+    except OSError:
+        return []
+    return names[:limit]
+
+
+def _agent_names(root: Path, limit: int = 40) -> list[str]:
+    try:
+        names = sorted(p.stem for p in root.glob("*.md"))
+    except OSError:
+        return []
+    return names[:limit]
+
+
 class ClaudeAgentEngine:
     """Runs one unattended analysis per call. No sessions, no resume."""
 
@@ -208,6 +240,62 @@ class ClaudeAgentEngine:
         self._workdir = settings.workdir
         self._agents_raw = _load_agents_raw(settings.agents_config)
         (self._workdir / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
+
+    def _engine_env(self) -> dict[str, str]:
+        """Per-command deadlines, armed as deployment policy.
+
+        A single hung command — a `curl` at an unreachable host, a `kubectl` at a
+        wedged API server — otherwise holds a slot until the whole run times out,
+        spending the run's remaining turns on nothing.
+        """
+        env: dict[str, str] = {}
+        if self._settings.bash_timeout_ms > 0:
+            env["BASH_DEFAULT_TIMEOUT_MS"] = str(self._settings.bash_timeout_ms)
+        if self._settings.bash_max_timeout_ms > 0:
+            env["BASH_MAX_TIMEOUT_MS"] = str(self._settings.bash_max_timeout_ms)
+        return env
+
+    def describe_inputs(self, *, resume: str | None = None) -> dict[str, Any]:
+        """What this run will actually put in front of the model.
+
+        Model-visible means recorded. The prompt is assembled from files on a
+        mutable volume — the environment memory, the skills previous runs
+        distilled, subagent roles, an appended methodology — so a report is only
+        explainable later if the run wrote down which of them were in force. A
+        stale line in the memory file once made every report come back in the
+        wrong language while the request itself looked identical; this record is
+        what would have shown it in one glance.
+
+        Digests, not contents: enough to prove which text was loaded without
+        copying investigation instructions into every result file.
+        """
+        home = Path(os.environ.get("HOME", "") or "/data/home")
+        skills: dict[str, Any] = {"filter": self._settings.skills or "(engine default)"}
+        if "project" in self._settings.setting_sources:
+            skills["project"] = _skill_names(self._workdir / ".claude" / "skills")
+        if "user" in self._settings.setting_sources:
+            skills["user"] = _skill_names(home / ".claude" / "skills")
+        return {
+            "model": self._settings.model,
+            "max_turns": self._settings.max_turns,
+            "setting_sources": list(self._settings.setting_sources),
+            "skills": skills,
+            "agents": {
+                "config": sorted(self._agents_raw),
+                "files": _agent_names(self._workdir / ".claude" / "agents"),
+            },
+            "system_prompt_append": _file_fact(
+                self._settings.system_prompt_append or (self._workdir / "system-prompt.md")
+            ),
+            "memory": _file_fact(self._workdir / "CLAUDE.md"),
+            "mcp_servers": sorted(_load_mcp_servers(self._settings.mcp_config)),
+            "resumed": bool(resume),
+            "hygiene": {
+                "repeat_reminder_at": self._settings.repeat_reminder_at,
+                "bash_timeout_ms": self._settings.bash_timeout_ms,
+                "bash_max_timeout_ms": self._settings.bash_max_timeout_ms,
+            },
+        }
 
     async def run(
         self,
@@ -265,8 +353,22 @@ class ClaudeAgentEngine:
                 "PreToolUse": [HookMatcher(matcher="Bash", hooks=[_bash_guard_hook])],
                 # The flight recorder: every tool call, every run, one JSONL
                 # line — subagents included, since hooks apply inside them.
-                "PostToolUse": [HookMatcher(matcher=None, hooks=[_audit_hook(self._workdir / "audit", session_key)])],
+                # Alongside it, loop hygiene: notice repeated identical calls.
+                "PostToolUse": [
+                    HookMatcher(matcher=None, hooks=[_audit_hook(self._workdir / "audit", session_key)]),
+                    HookMatcher(
+                        matcher=None,
+                        hooks=[
+                            post_tool_hook(
+                                session_key=session_key,
+                                repeat_reminder_at=self._settings.repeat_reminder_at,
+                            )
+                        ],
+                    ),
+                ],
             },
+            # Per-command deadlines; see _engine_env.
+            env=self._engine_env(),
             # Follow-up turns reopen the original investigation with its full
             # context (transcripts live under $HOME/.claude — keep that on the
             # persistent volume).

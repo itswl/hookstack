@@ -136,6 +136,12 @@ services:
       # MCP servers config (three dialects accepted; env values are
       # secrets — keep the file mounted ro or on the volume):
       HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-}
+      # Loop hygiene, all advisory (the boundary stays the bash guard):
+      # nudge the agent after N identical calls, and cap how long any single
+      # command may hang. 0 = off.
+      HOOKPROBE_REPEAT_REMINDER_AT: ${HOOKPROBE_REPEAT_REMINDER_AT:-}
+      HOOKPROBE_BASH_TIMEOUT_MS: ${HOOKPROBE_BASH_TIMEOUT_MS:-}
+      HOOKPROBE_BASH_MAX_TIMEOUT_MS: ${HOOKPROBE_BASH_MAX_TIMEOUT_MS:-}
       # Direct self-alarm when report returns exhaust their retries:
       HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
       HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
