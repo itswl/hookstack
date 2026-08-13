@@ -35,7 +35,7 @@ from typing import Any
 # is this the recovery OF?"
 _RECOVERY_WORDS = ("已恢复", "已解决", "恢复", "resolved", "recovered", "cleared")
 
-# [已恢复] / 【恢复】 / (RESOLVED) / [OK] — the decoration monitoring systems add
+# [RESOLVED] / [OK] / [已恢复] / 【恢复】 — the decoration monitoring systems add
 # to an otherwise unchanged title.
 _MARKER_BRACKETED = re.compile(
     r"[\[\(（【]\s*(?:" + "|".join(_RECOVERY_WORDS) + r"|ok)\s*[\]\)）】]",
@@ -85,7 +85,7 @@ IMPORTANCE = ("critical", "high", "medium", "low")
 #                        Alertmanager sends status=firing then status=resolved
 #                        for one alert; keeping status split the pair into two
 #                        identities and the recovery could not find its firing
-#                        — the same defect as leaving [已恢复] in the title,
+#                        — the same defect as leaving [RESOLVED] in the title,
 #                        arriving through a different door. A severity that
 #                        escalates is one condition getting worse, not a new one.
 _NON_IDENTITY_FIELDS = frozenset(
@@ -232,8 +232,8 @@ class Outgoing:
                 "brain": self.brain,
                 # The CONDITION's name, with any "it ended" decoration removed.
                 # State travels separately in is_recovery, and the pipe renders
-                # it ("✅ 已恢复 · <name>"). Sending the raw title made the
-                # recovery card say so twice: "✅ 已恢复 · [已恢复] 支付网关…".
+                # it ("✅ Resolved · <name>"). Sending the raw title made the
+                # recovery card say so twice: "✅ Resolved · [RESOLVED] Payment…".
                 # One fact, one field.
                 "alert_name": condition_title(self.incoming.title),
                 "source": self.incoming.source,

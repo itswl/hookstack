@@ -13,30 +13,30 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 VERDICTS = {
-    "支付": {
-        "summary": "支付网关 5 分钟内 5xx 达 8.1%，多为上游超时，下单成功率已受影响",
+    "gateway": {
+        "summary": "Payment gateway 5xx reached 8.1% over five minutes, mostly upstream timeouts; checkout success is already affected",
         "importance": "critical",
         "event_type": "business",
-        "impact_scope": "下单与充值链路，全量用户",
+        "impact_scope": "checkout and top-up paths, all users",
     },
-    "磁盘": {
-        "summary": "node-3 /var 剩余 7%，约 4 小时后写满，届时容器日志写入失败",
+    "disk": {
+        "summary": "node-3 /var has 7% free and fills in about four hours, after which container logging fails",
         "importance": "high",
         "event_type": "infrastructure",
-        "impact_scope": "node-3 上的全部工作负载",
+        "impact_scope": "every workload on node-3",
     },
-    "充值": {
-        "summary": "10 分钟内 3 笔大额充值集中在同一用户，合计 2600 元",
+    "top-up": {
+        "summary": "Three large top-ups from one account within ten minutes, 2600 in total",
         "importance": "high",
         "event_type": "business",
-        "impact_scope": "仅触发通知，未见服务影响",
+        "impact_scope": "notification only, no service impact seen",
     },
 }
 DEFAULT = {
-    "summary": "桩模型未匹配到预设判断，按中等处理",
+    "summary": "the stub matched no canned verdict; treating this as medium",
     "importance": "medium",
     "event_type": "",
-    "impact_scope": "影响范围未知",
+    "impact_scope": "unknown",
 }
 
 
@@ -52,10 +52,10 @@ def _fallback(prompt: str) -> dict:
     level = {"warning": "medium"}.get(match.group(1), match.group(1)) if match else ""
     if level in ("critical", "high", "medium", "low"):
         return {
-            "summary": f"桩模型未匹配到预设判断，保守沿用原级别 {level}",
+            "summary": f"the stub matched no canned verdict; keeping the inbound level {level}",
             "importance": level,
             "event_type": "",
-            "impact_scope": "影响范围未知",
+            "impact_scope": "unknown",
         }
     return DEFAULT
 
@@ -66,13 +66,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length") or 0)
         request = json.loads(self.rfile.read(length) or b"{}")
-        # The USER message only. The system prompt names 支付 and 充值 as
+        # The USER message only. The system prompt names payments and top-ups as
         # severity guidance, so matching against the whole conversation made
         # every alert — including a disk alert — come back as the payment
         # gateway verdict.
         prompt = " ".join(
             str(m.get("content") or "") for m in request.get("messages") or [] if m.get("role") == "user"
-        )
+        ).lower()
 
         verdict = next((v for k, v in VERDICTS.items() if k in prompt), None) or _fallback(prompt)
         print(f"[stub-ai] {verdict['importance']:<8} {verdict['summary'][:48]}", flush=True)
@@ -96,4 +96,4 @@ class Handler(BaseHTTPRequestHandler):
 
 
 print("stub-ai listening on :8300", flush=True)
-ThreadingHTTPServer(("0.0.0.0", 8300), Handler).serve_forever()
+ThreadingHTTPServer(("0.0.0.0", 8300), Handler).serve_forever()  # noqa: S104  # nosec B104

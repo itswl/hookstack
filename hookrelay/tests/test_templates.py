@@ -16,8 +16,18 @@ from hookrelay.config import Config, ConfigError
 from hookrelay.extract import extract_event
 from hookrelay.pipeline import handle_hook
 
-GRAFANA = {"title": "磁盘将满", "message": "/data 92%", "state": "alerting", "evalMatches": [{"metric": "disk"}]}
-SNS = {"TopicArn": "arn:aws:sns:x", "Subject": "AWS 健康事件", "Message": "维护窗口", "Severity": "warning"}
+GRAFANA = {
+    "title": "Disk about to fill",
+    "message": "/data 92%",
+    "state": "alerting",
+    "evalMatches": [{"metric": "disk"}],
+}
+SNS = {
+    "TopicArn": "arn:aws:sns:x",
+    "Subject": "AWS health event",
+    "Message": "maintenance window",
+    "Severity": "warning",
+}
 UNKNOWN = {"something": "entirely else"}
 
 MULTI = {
@@ -55,12 +65,12 @@ def test_each_shape_is_read_by_the_template_that_claims_it():
 
     grafana = extract_event(door, GRAFANA)
     assert grafana["_template"] == "grafana-in"
-    assert grafana["title"] == "磁盘将满" and grafana["level"] == "high"
+    assert grafana["title"] == "Disk about to fill" and grafana["level"] == "high"
     assert grafana["fields"]["metric"] == "disk"
 
     sns = extract_event(door, SNS)
     assert sns["_template"] == "sns-in"
-    assert sns["title"] == "AWS 健康事件" and sns["level"] == "warning"
+    assert sns["title"] == "AWS health event" and sns["level"] == "warning"
     assert sns["fields"] == {}, "each template brings only its own fields"
 
 
@@ -72,7 +82,7 @@ def test_unclaimed_shapes_land_on_the_fallback_not_on_the_floor():
 
 def test_selection_is_ordered_first_match_wins():
     """A payload matching two selectors takes the earlier template."""
-    both = dict(GRAFANA, TopicArn="arn:aws:sns:x", Subject="也像 SNS")
+    both = dict(GRAFANA, TopicArn="arn:aws:sns:x", Subject="looks like SNS too")
     assert extract_event(_door(), both)["_template"] == "grafana-in"
 
     swapped = dict(MULTI)
@@ -109,7 +119,7 @@ def test_the_inline_form_still_works_forever():
     ).sources["d"]
     assert [t.name for t in door.templates] == ["inline"]
     assert extract_event(door, GRAFANA)["_template"] == "inline"
-    assert extract_event(door, GRAFANA)["title"] == "磁盘将满"
+    assert extract_event(door, GRAFANA)["title"] == "Disk about to fill"
 
 
 def test_config_refuses_a_door_whose_last_template_can_decline():
@@ -167,7 +177,7 @@ async def test_the_ledger_records_which_template_read_the_event(store):
 
     recorded = (await store.recent_events(1))[0]
     assert recorded["steps"][0]["template"] == "sns-in"
-    assert recorded["title"] == "AWS 健康事件", "the ledger shows an identifiable event, not a fallback"
+    assert recorded["title"] == "AWS health event", "the ledger shows an identifiable event, not a fallback"
 
 
 async def test_routing_can_condition_on_a_templates_own_fields(store):

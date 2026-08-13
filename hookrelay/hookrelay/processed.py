@@ -15,7 +15,7 @@ and `meta.alert_name` in practice):
       "analysis": {"summary", "event_type", "impact_scope", "confidence"},
       "identity": {"project": "...", "env": "prod", ...},   # meaningful values
       "links":    [{"text": "...", "url": "..."}],
-      "actions":  [{"text": "确认接手", "value": {...}}]      # pre-signed by the brain
+      "actions":  [{"text": "Acknowledge", "value": {...}}]   # pre-signed by the brain
     }
 
 and every channel type renders it its own way. `actions` are carried but only
@@ -35,7 +35,13 @@ from typing import Any
 # Header colour by importance. Green whenever the alert has ENDED, whatever its
 # importance was: a recovery card wearing a red header contradicts its own text.
 _FEISHU_COLOR = {"critical": "red", "high": "red", "warning": "orange", "medium": "orange", "low": "wathet"}
-_LEVEL_TAG = {"critical": "🔴 紧急", "high": "🔴 高", "warning": "🟠 中", "medium": "🟠 中", "low": "🔵 低"}
+_LEVEL_TAG = {
+    "critical": "🔴 CRITICAL",
+    "high": "🔴 HIGH",
+    "warning": "🟠 MEDIUM",
+    "medium": "🟠 MEDIUM",
+    "low": "🔵 LOW",
+}
 
 
 class Processed:
@@ -59,7 +65,7 @@ class Processed:
 
     @property
     def title(self) -> str:
-        return str(self.meta.get("alert_name") or self.analysis.get("summary") or "告警通知")
+        return str(self.meta.get("alert_name") or self.analysis.get("summary") or "Alert")
 
     @property
     def summary(self) -> str:
@@ -69,9 +75,9 @@ class Processed:
     def headline(self) -> str:
         """Header text: state first, because "did it end?" outranks "how bad"."""
         if self.is_recovery:
-            return f"✅ 已恢复 · {self.title}"
+            return f"✅ Resolved · {self.title}"
         if self.meta.get("is_periodic_reminder"):
-            return f"🔁 未处理提醒 · {self.title}"
+            return f"🔁 Still open · {self.title}"
         return f"📡 {self.title}"
 
     @property
@@ -132,11 +138,11 @@ class Processed:
         # 3) impact, titled so it reads as secondary to the headline
         impact = str(self.analysis.get("impact_scope") or "")
         if impact:
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**影响**\n{impact}"}})
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**Impact**\n{impact}"}})
         # 4) runbooks at notification time, not after a dashboard visit
         if self.links:
             lines = "\n".join(f"[{link.get('text') or link.get('url')}]({link.get('url')})" for link in self.links)
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**相关文档**\n{lines}"}})
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**Runbooks**\n{lines}"}})
         # 5) interactive actions — only Feishu has callbacks; values are opaque
         #    and already signed by the brain.
         if self.actions:
@@ -146,7 +152,7 @@ class Processed:
                     "actions": [
                         {
                             "tag": "button",
-                            "text": {"tag": "plain_text", "content": str(a.get("text") or "操作")},
+                            "text": {"tag": "plain_text", "content": str(a.get("text") or "Action")},
                             "type": str(a.get("style") or "default"),
                             "value": a.get("value") or {},
                         }
@@ -179,7 +185,7 @@ class Processed:
             lines.append(crumb)
         impact = str(self.analysis.get("impact_scope") or "")
         if impact:
-            lines.append(f"**影响**: {impact}")
+            lines.append(f"**Impact**: {impact}")
         for link in self.links:
             lines.append(f"[{link.get('text') or link.get('url')}]({link.get('url')})")
         # No buttons: these bots have no callback channel, and a button that

@@ -134,10 +134,10 @@ Four pillars — the product itself:
 
 | pillar | what it owns |
 |---|---|
-| 接 receive | doors, signature dialects, extraction for routing |
-| 路由 route | source + conditions → channels, priority, stop |
-| 发 deliver | retry, backoff, rate limits, dead letters, channel wire formats |
-| 账本 account | one decision per event, one outcome per delivery — the soul |
+| receive | doors, signature dialects, extraction for routing |
+| route | source + conditions → channels, priority, stop |
+| deliver | retry, backoff, rate limits, dead letters, channel wire formats |
+| account | one decision per event, one outcome per delivery — the soul |
 
 Pipe *protections* — kept, but named for what they are:
 
@@ -156,7 +156,7 @@ Pipe *protections* — kept, but named for what they are:
 
 Judgment features (`filter`, `set`, dedup-as-noise-control) exist for
 **standalone posture** — a small team with no brain that still wants
-webhook→飞书 with taste. In **paired posture** (a comprehensive brain behind the
+webhook→Feishu with taste. In **paired posture** (a comprehensive brain behind the
 relay) they should all yield; the `http` processor is the doorway that keeps
 it honest — judgment gets *delegated*, never absorbed.
 

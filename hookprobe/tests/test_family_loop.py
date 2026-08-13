@@ -18,8 +18,8 @@ TOKEN = "secret-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 EVENT = {
-    "title": "支付网关 5xx 比例 8.1%",
-    "body": "gateway-2 近 5 分钟 5xx 8.1%",
+    "title": "Payment gateway 5xx rate 8.1%",
+    "body": "gateway-2 5xx at 8.1% over the last 5 minutes",
     "level": "high",
     "source": "inbound",
     "event_id": 5,
@@ -68,7 +68,7 @@ def test_event_door_escalates_and_skips(tmp_path) -> None:
             if detail["status"] != "running":
                 break
         assert engine.calls == 1
-        assert "支付网关" in engine.messages[0]
+        assert "Payment gateway" in engine.messages[0]
         assert detail["origin"] == "relay"
         assert detail["meta"]["title"] == EVENT["title"]
 
@@ -113,7 +113,7 @@ def test_relay_born_runs_report_back(tmp_path) -> None:
             {
                 "message": "investigate",
                 "sessionKey": "probe:inbound:9",
-                "_meta": {"title": "支付网关 5xx", "level": "high", "source": "inbound", "event_id": 9},
+                "_meta": {"title": "Payment gateway 5xx", "level": "high", "source": "inbound", "event_id": 9},
             },
             origin="relay",
         )
@@ -133,7 +133,7 @@ def test_relay_born_runs_report_back(tmp_path) -> None:
     delivery = _Capture.received[0]
     payload = json.loads(delivery["body"])
     # The processed dialect: what the pipe's renderers actually dress.
-    assert payload["meta"]["alert_name"] == "支付网关 5xx · 调查报告"
+    assert payload["meta"]["alert_name"] == "Payment gateway 5xx · investigation"
     assert payload["meta"]["importance"] == "high"
     assert payload["meta"]["status"] == "completed"
     assert payload["analysis"]["summary"] == "ok"
@@ -187,7 +187,7 @@ def test_restart_sweep_reports_orphans_through_the_loop(tmp_path) -> None:
     from hookprobe.runs import Run as _Run
 
     orphan = _Run(session_key="probe:inbound:31", run_id="r1", origin="relay", current_message="investigate")
-    orphan.meta = {"title": "支付网关 5xx", "level": "high", "source": "inbound", "event_id": 31}
+    orphan.meta = {"title": "Payment gateway 5xx", "level": "high", "source": "inbound", "event_id": 31}
     RunStore(results).checkpoint(orphan)
 
     async def next_boot() -> None:
@@ -210,7 +210,7 @@ def test_restart_sweep_reports_orphans_through_the_loop(tmp_path) -> None:
 
     payload = json.loads(_Capture.received[0]["body"])
     assert payload["meta"]["status"] == "failed"
-    assert payload["meta"]["alert_name"] == "支付网关 5xx · 调查报告"
+    assert payload["meta"]["alert_name"] == "Payment gateway 5xx · investigation"
     assert "interrupted by a restart" in payload["report"]["summary"]
 
 
@@ -274,7 +274,7 @@ def test_event_door_refuses_when_budget_exhausted(tmp_path) -> None:
 
         detail = client.get(f"/v1/runs/{refused['sessionKey']}", headers=AUTH).json()
         assert detail["status"] == "failed"
-        assert "预算熔断" in detail["text"]
+        assert "Budget breaker open" in detail["text"]
         assert detail["meta"]["title"] == EVENT["title"]
         assert detail["cost_usd"] == 0.0
 
@@ -361,9 +361,9 @@ def test_refusal_reports_back_through_the_loop(tmp_path) -> None:
     assert len(_Capture.received) == 1
     payload = json.loads(_Capture.received[0]["body"])
     assert payload["meta"]["status"] == "failed"
-    assert payload["meta"]["alert_name"] == f"{EVENT['title']} · 调查报告"
-    assert "预算熔断" in payload["analysis"]["summary"]
-    assert "预算熔断" in payload["report"]["summary"]
+    assert payload["meta"]["alert_name"] == f"{EVENT['title']} · investigation"
+    assert "Budget breaker open" in payload["analysis"]["summary"]
+    assert "Budget breaker open" in payload["report"]["summary"]
 
 
 def test_failed_return_fires_the_self_alarm(tmp_path) -> None:
@@ -405,7 +405,7 @@ def test_failed_return_fires_the_self_alarm(tmp_path) -> None:
 
     assert len(_Capture.received) == 1
     alarm = json.loads(_Capture.received[0]["body"])
-    assert "调查报告回传失败" in alarm["content"]["text"]
+    assert "report return failed" in alarm["content"]["text"]
     assert "probe:inbound:41" in alarm["content"]["text"]
 
 

@@ -55,20 +55,20 @@ fire() { curl -s -X POST "http://127.0.0.1:8100/hook/$1" \
   -H 'content-type: application/json' -d "$2"; echo; }
 
 # 1 firing — pays
-fire inbound '{"title":"支付网关 5xx 比例 8.1%","message":"gateway-2 近 5 分钟 5xx 8.1%","state":"alerting","env":"prod"}'
+fire inbound '{"title":"Payment gateway 5xx rate 8.1%","message":"gateway-2 5xx at 8.1% over 5 minutes","state":"alerting","env":"prod"}'
 
 # 2 the same condition restated — reuses, costs nothing
-fire inbound '{"title":"支付网关 5xx 比例 8.1%","message":"gateway-2 近 5 分钟 5xx 8.4%","state":"alerting","env":"prod"}'
+fire inbound '{"title":"Payment gateway 5xx rate 8.1%","message":"gateway-2 5xx at 8.4% over 5 minutes","state":"alerting","env":"prod"}'
 
 # 3 a different condition, through the Alertmanager door — pays
 fire alertmanager '{"status":"firing","commonLabels":{"alertname":"DiskWillFill","env":"prod"},
   "alerts":[{"status":"firing","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},
-  "annotations":{"summary":"k8s 节点磁盘使用率 93%","description":"node-3 /var 剩余 7%"}}]}'
+  "annotations":{"summary":"k8s node disk usage 93%","description":"node-3 /var has 7% free"}}]}'
 
 # 4 it recovers — inherits what its firing was judged to be, costs nothing
 fire alertmanager '{"status":"resolved","commonLabels":{"alertname":"DiskWillFill","env":"prod"},
   "alerts":[{"status":"resolved","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},
-  "annotations":{"summary":"k8s 节点磁盘使用率 93%","description":"已回落至 41%"}}]}'
+  "annotations":{"summary":"k8s node disk usage 93%","description":"fell back to 41%"}}]}'
 ```
 
 Every `fire` answers with its routing trace — the first one reads
@@ -81,10 +81,10 @@ investigator's door and sent to the brain, in one decision.
 judged 4   paid ratio 50.0%   cost $0.000524   returns {'sent': 4}
 routes {'ai': 2, 'reuse': 1, 'recovery': 1}
 
-#1 firing    ai        critical  $0.000262  支付网关 5xx 比例 8.1%
-#2 firing    reuse     critical  $0         支付网关 5xx 比例 8.1%   <- summary identical to #1
-#3 firing    ai        high      $0.000262  k8s 节点磁盘使用率 93%
-#4 RECOVERY  recovery  high      $0         k8s 节点磁盘使用率 93%   <- inherits #3's high
+#1 firing    ai        critical  $0.000262  Payment gateway 5xx rate 8.1%
+#2 firing    reuse     critical  $0         Payment gateway 5xx rate 8.1%  <- summary identical to #1
+#3 firing    ai        high      $0.000262  k8s node disk usage 93%
+#4 RECOVERY  recovery  high      $0         k8s node disk usage 93%        <- inherits #3's high
 ```
 
 And the pipe's own ledger closes the books: **16 delivered, 0 queued, 0 dead**
@@ -130,7 +130,7 @@ been broken:
    linked to its firing and the `recovery` route did not run — on call you
    would see an alert at `high` and its recovery at `medium`.
 2. **Step 4's text contains no recovery word** (the description reads
-   "已回落至 41%"). Alertmanager signals recovery with `status: resolved`, and
+   "fell back to 41%"). Alertmanager signals recovery with `status: resolved`, and
    `level_map` turns that into `info` — so `hookrelay/examples/stack.yaml` carries
    `status` as a field, or the brain sees no sign of recovery at all.
 3. **Two different alerts must have two different identities** (visible on
