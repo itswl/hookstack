@@ -43,6 +43,15 @@ class Settings:
     workdir: Path
     mcp_config: Path | None
 
+    # Skill layers. setting_sources picks which filesystem layers the engine
+    # loads: "project" = {workdir}/.claude (the distilled runbooks), "user" =
+    # $HOME/.claude (a host library mounted read-only at
+    # /data/home/.claude/skills). skills filters which discovered skills
+    # enter the session ("" = engine default, "all", or comma-separated
+    # names) — a mounted library of dozens would flood the context otherwise.
+    setting_sources: tuple[str, ...]
+    skills: str
+
     # The family loop. event_secret verifies what the pipe delivers to
     # /hooks/event; return_url is where finished investigations from that
     # door report back (the pipe's probe-notify front door), signed with
@@ -80,6 +89,11 @@ class Settings:
     def load(cls) -> Settings:
         mcp = os.environ.get("HOOKPROBE_MCP_CONFIG", "").strip()
         levels = os.environ.get("HOOKPROBE_ESCALATE_LEVELS", "critical,high")
+        sources = tuple(
+            part.strip()
+            for part in os.environ.get("HOOKPROBE_SETTING_SOURCES", "project").split(",")
+            if part.strip() in ("user", "project", "local")
+        )
         return cls(
             token=os.environ.get("HOOKPROBE_TOKEN", ""),
             model=os.environ.get("HOOKPROBE_MODEL", "claude-opus-5"),
@@ -89,6 +103,8 @@ class Settings:
             max_timeout_seconds=max(1, _int("HOOKPROBE_MAX_TIMEOUT_SECONDS", 1800)),
             workdir=Path(os.environ.get("HOOKPROBE_WORKDIR", "/data")),
             mcp_config=Path(mcp) if mcp else None,
+            setting_sources=sources or ("project",),
+            skills=os.environ.get("HOOKPROBE_SKILLS", "").strip(),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),

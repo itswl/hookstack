@@ -269,41 +269,53 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         tmp.replace(path)
         return {"saved": True, "bytes": len(raw)}
 
+    def _skill_layers() -> list[tuple[str, Path]]:
+        """The layers the ENGINE actually loads, in its precedence order —
+        the browser must not show skills that no run would see."""
+        layers = [("project", settings.workdir / ".claude" / "skills")]
+        if "user" in settings.setting_sources:
+            layers.append(("user", Path.home() / ".claude" / "skills"))
+        return layers
+
     @app.get("/v1/skills", dependencies=[Depends(require_token)])
     async def skills_list() -> list[dict[str, Any]]:
-        skills_dir = settings.workdir / ".claude" / "skills"
         out: list[dict[str, Any]] = []
-        if not skills_dir.is_dir():
-            return out
-        for entry in sorted(skills_dir.iterdir()):
-            manifest = entry / "SKILL.md"
-            if not (entry.is_dir() and manifest.is_file()):
+        seen: set[str] = set()
+        for layer, skills_dir in _skill_layers():
+            if not skills_dir.is_dir():
                 continue
-            try:
-                text = manifest.read_text(encoding="utf-8")
-                stat = manifest.stat()
-                files = sorted(f.name for f in entry.iterdir() if f.is_file())[:20]
-            except OSError:
-                continue
-            out.append(
-                {
-                    "name": entry.name,
-                    "description": _skill_description(text),
-                    "size": stat.st_size,
-                    "modified": stat.st_mtime,
-                    "files": files,
-                }
-            )
+            for entry in sorted(skills_dir.iterdir()):
+                manifest = entry / "SKILL.md"
+                if not (entry.is_dir() and manifest.is_file()) or entry.name in seen:
+                    continue
+                try:
+                    text = manifest.read_text(encoding="utf-8")
+                    stat = manifest.stat()
+                    files = sorted(f.name for f in entry.iterdir() if f.is_file())[:20]
+                except OSError:
+                    continue
+                seen.add(entry.name)
+                out.append(
+                    {
+                        "name": entry.name,
+                        "description": _skill_description(text),
+                        "size": stat.st_size,
+                        "modified": stat.st_mtime,
+                        "files": files,
+                        "layer": layer,
+                    }
+                )
         return out
 
     @app.get("/v1/skills/{name}", dependencies=[Depends(require_token)])
     async def skill_detail(name: str) -> dict[str, Any]:
         if not _SKILL_NAME.match(name):
             raise HTTPException(status_code=404, detail="skill not found")
-        manifest = settings.workdir / ".claude" / "skills" / name / "SKILL.md"
-        if not manifest.is_file():
-            raise HTTPException(status_code=404, detail="skill not found")
-        return {"name": name, "content": manifest.read_text(encoding="utf-8")}
+        for layer, skills_dir in _skill_layers():
+            manifest = skills_dir / name / "SKILL.md"
+            if manifest.is_file():
+                return {"name": name, "content": manifest.read_text(encoding="utf-8"), "layer": layer}
+        raise HTTPException(status_code=404, detail="skill not found")
 
     @app.get("/v1/budget", dependencies=[Depends(require_token)])
     async def budget() -> dict[str, Any]:
