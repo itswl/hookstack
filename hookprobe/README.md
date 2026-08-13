@@ -135,6 +135,26 @@ alert came in, the judge ruled it medium within a second, and 3.7 minutes
 later the investigator's report landed on the same channels calling it a
 false alarm — with the one actionable finding named.
 
+## Patrol mode — proactive investigations, zero new code
+
+The family loop is event-driven, but nothing says the event has to come
+from a monitor. A cron job that posts a "patrol due" event to the pipe's
+front door gets the whole machinery for free: escalation copies it to the
+investigator, the investigation runs with every skill/role/MCP it has, and
+the report lands on the same channels as any alert:
+
+```cron
+# host crontab: a daily 09:00 patrol through the pipe's front door
+0 9 * * * curl -sf -X POST http://127.0.0.1:8100/hook/inbound \
+  -H 'content-type: application/json' \
+  -d '{"title":"每日例行巡检","message":"对基础设施做一次只读健康巡检：主机资源、关键端口、家族服务自检；发现异常按优先级列出，无异常也要说明检查了什么","state":"alerting","env":"prod"}'
+```
+
+Each firing is a new event id, so each patrol is its own investigation with
+its own case file — and the case-file recall means patrol N cites what
+patrol N-1 found. The budget breaker applies as usual: a patrol is an
+autonomous spend like any other.
+
 ## Parallel subagents
 
 The engine's Task tool is enabled: a cascading incident can fan out into
