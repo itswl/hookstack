@@ -22,6 +22,7 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 | [`hookprobe/`](hookprobe) | the investigator. One read-only agent run per deep-analysis task, with a sessions page to keep asking. Replaces a full OpenClaw gateway. | [hookprobe/README.md](hookprobe/README.md) |
 | pipe + brain | run the demo pair locally in one command | [STACK.md](STACK.md) |
 | all three boards | one design language, one refresh clock | [docs/design-language.md](docs/design-language.md) |
+| decisions | why it is done this way, and why not the obvious way | [.agents/README.md](.agents/README.md) |
 
 The split is the point: a brain that renders Feishu cards has to know Feishu's
 card schema, then WeCom's, then DingTalk's. That work belongs to the pipe, and
@@ -92,6 +93,12 @@ Neither gate can see the stack, so there is a third check that can:
 ```bash
 bash scripts/stack-smoke.sh
 ```
+
+It also checks what no service's own gate can: that the three boards still share
+one design language, and that every decision record under
+[`.agents/notes/`](.agents/README.md) keeps its shape. The `rejected/` bucket
+there is worth reading before proposing something — several obvious ideas have
+already been tried and removed.
 
 Four workflows, and between them nothing at the root is uncovered:
 `ci` (pipe) · `ci-hookjudge` (brain) · `ci-hookprobe` (investigator) ·
