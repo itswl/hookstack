@@ -162,6 +162,23 @@ files — review it, prune bad runbooks, or `git init` it for history; anything
 written there instructs future runs, so treat it as part of your trust
 boundary.
 
+Skills load in two layers. The **project layer** (`{workdir}/.claude/skills`,
+on the volume) is always on — it is where the agent distills. The **user
+layer** is an optional host library: mount it read-only at
+`/data/home/.claude/skills` (only the skills subdir — never the whole
+`~/.claude`, credentials live there) and set
+`HOOKPROBE_SETTING_SOURCES=user,project`. A host library tends to be big, so
+`HOOKPROBE_SKILLS` pins the session's skill list to named skills (or `all`);
+it is a context filter, not a sandbox. The `/v1/skills` browser shows
+exactly the layers the engine would load, tagged `project`/`user`. Two
+honest caveats. A skill is instructions, not a runtime — host skills that
+shell out to binaries the image does not carry will load and then fail at
+the tool, so pin `HOOKPROBE_SKILLS` to the ones whose tools exist. And mount
+the RESOLVED directory: skill libraries are often symlink farms
+(`~/.claude/skills/x -> ../../.agents/skills/x`), and a bind mount carries
+the links but not their targets — `readlink` one entry first and mount what
+it points at.
+
 The format is not ours and that is the point: a skill is a directory with a
 `SKILL.md` (YAML frontmatter: `name`, `description`), the shape the whole
 OpenClaw-lineage ecosystem shares. Marketplace packages install unchanged —
