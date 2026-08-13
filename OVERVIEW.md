@@ -10,15 +10,14 @@ three live in this repository, each entirely self-contained (its own package,
 tests, gate, Dockerfile and CI), and together they form a complete alert
 handling pipeline.
 
-Every screenshot below comes from one local Docker run on 2026-08-12, started
-from nothing (`docker compose down -v`, then five containers up with
+Every screenshot below comes from one local Docker run on 2026-08-13, started
+from nothing (`docker compose down -v`, then the family up with
 `--profile probe`) — not mockups: four demo alerts came in the front door, and
-the verdicts and three deep investigations landed in the same ledger. The
-investigator ran against DeepSeek's Anthropic-dialect endpoint on that run —
-the engine is not provider-locked; one `ANTHROPIC_BASE_URL` plus a few model
-alias mappings is the whole switch. Steps are in [STACK.md](STACK.md) (that
-run book documents the self-contained pair; this run added `--profile probe`
-on top).
+four verdicts plus three deep investigations landed in the same ledger. The
+investigator ran against DeepSeek's Anthropic-dialect endpoint — the engine is
+not provider-locked; one `ANTHROPIC_BASE_URL` plus a few model alias mappings
+is the whole switch. Steps are in [STACK.md](STACK.md) (that run book
+documents the self-contained pair; this run added `--profile probe` on top).
 
 ```
 upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
@@ -65,7 +64,7 @@ any event opens into its full decision chain.
 The screenshot below is the ledger after the four demo alerts — the whole
 family loop on one page. Each front-door event is routed, in one decision, to
 both `to-judge` and `to-probe` (#1–#8: four alerts and the four verdicts that
-followed within seconds); minutes later the investigator's reports come back
+came back within seconds); minutes later the investigators' reports return
 through `probe-notify`, get dressed as cards, and are delivered to
 `ops-feishu` and `ops-dingtalk` (#9–#12) — 24 deliveries, all sent, nothing
 queued, nothing dead. The ledger also keeps **the bytes of both directions**:
@@ -88,15 +87,14 @@ same condition restated re-serves the last AI verdict, free) → **ai** (a real,
 paid model call) → **rule** (the keyword floor). The saving does not come from
 a cheaper model; it comes from most events never reaching `ai` at all.
 
-Below is the verdict ledger for those four alerts: the payment gateway 5xx
-paid for `ai` the first time and hit `reuse` for free when the same condition
-was restated; the disk alert paid for `ai`, and its recovery took `recovery`
-for free — 4 verdicts, 50% paid, $0.000524 total, zero failed returns. Those
-numbers are exactly what [STACK.md](STACK.md) promises. Point
-`HOOKJUDGE_AI_*` at any OpenAI-compatible endpoint and the stub becomes a real
-judge: verified against DeepSeek, a first sighting took `ai` ($0.0002 for the
-call) and the restatement still hit `reuse` ($0) — the cost policy holds
-unchanged on a real model. If a verdict's return dies for good, the self-alarm
+Below is the verdict ledger for those four alerts, and this run judged them
+with a real model (DeepSeek) rather than the stub: the payment gateway 5xx paid
+for `ai` the first time and hit `reuse` for free when the same condition was
+restated; the disk alert paid for `ai`, and its recovery took `recovery` for
+free, inheriting the firing's `high` — 4 verdicts, 50% paid, $0.000498 total,
+zero failed returns. The stub run in [STACK.md](STACK.md) produces the same
+shape for $0.000524, which is the point: the cost policy is structural, not a
+property of one model. If a verdict's return dies for good, the self-alarm
 carries the news.
 
 ![hookjudge status page: four verdicts with their routes, 50% paid](docs/img/hookjudge-status.png)
@@ -136,15 +134,19 @@ the same engine session resumes, with the first round's tool output, evidence
 and dead ends all still there. A running turn can be stopped at any time.
 
 Below is the session page after the disk investigation finished: the report
-rendered as Markdown with its one-sentence conclusion first, the 48-step
-process folded above it, and a bill line reading deepseek-v4-pro[1m]
-(auxiliary deepseek-v4-flash $0.005) · in 50.5k · out 13.3k · cache 1292.2k
-read · $1.24 · 206s. The conclusion is the part worth reading: the agent went
-through the pipe's own ledger, found that /var had already fallen back to 41%
-three seconds after the alert, and overturned a `high` alert as a transient
-spike rather than real exhaustion — the recovery event that the level gate had
-kept out of the investigation, the investigator found on its own, from
-evidence.
+rendered as Markdown with its conclusion first, the process folded above it,
+and a bill line reading deepseek-v4-pro[1m] (auxiliary deepseek-v4-flash
+$0.0060) · in 40.7k · out 2.8k · cache 138.2k read · $0.3471 · 45.0s. What the
+report says is the part worth reading. The agent established that node-3 is
+unreachable from the container and that this Prometheus scrapes only itself, so
+no filesystem metric exists to confirm the alert — and then refused to invent
+one: **"Undetermined — the signal cannot be verified or localized from here …
+I will not invent a cause."** It still produced ranked remediation, and the
+most useful item is the one the environment itself surfaced: the alert fires
+with no disk metrics behind it, so add node-exporter and the alert becomes
+diagnosable next time. An investigation that reports an observability gap
+instead of a fabricated root cause is the behaviour the environment memory
+asks for.
 
 ![hookprobe sessions console](docs/img/hookprobe-sessions.png)
 
@@ -153,22 +155,26 @@ step scrolls in live — blue for a tool call (with a one-line summary), italic
 for the agent's narration between tools, and the plan checklist (TodoWrite)
 rendered as a to-do list. When it finishes the whole thing folds into
 `process · N steps`, openable forever after. The shot below catches the disk
-investigation halfway: Bash events scrolling past as the agent probes what
-evidence this environment actually exposes — the pipe's status and
-decision-chain endpoints, the judge's verdict on this alert, the container's
-own disk state — with the last line, a Write, laying down the report file. The
+investigation halfway: it opens with `Grep DiskWillFill|disk usage|node-3|/var`
+across the case files — the episodic-memory instruction doing its job — then
+reads the three case files it found, resolves node-3, and queries the
+Prometheus targets and metric names to see what is actually scrapeable. The
 other two investigations on the left have already finished with their costs.
 
 ![live process feed: every tool call of an investigation, as it happens](docs/img/hookprobe-live-feed.png)
 
 Everything the agent accumulates is manageable from the page. The skills view
 lists every runbook (frontmatter description, files, modification time) and
-renders one in full when opened — `gateway-5xx-triage` in the shot below is a
-product of this very run: after the payment-gateway investigation finished, one
-follow-up ("distil the diagnostic path you verified into a skill") had the
-agent write down the ledger, verdict and event-detail lookups it had actually
-used. Later alerts of the same kind start with that experience in hand: the
-investigator gets smarter with use.
+renders one in full when opened. Both entries in the shot below are real:
+`gateway-5xx-triage` is a product of this very run — after the payment-gateway
+investigation finished, one follow-up ("distil the diagnostic path you
+verified into a skill") had the agent write down the lookups it had actually
+used, and its own description now tells the next run to open prior case files
+first and to state reachability honestly. `victoriametrics-metrics` came from
+the OpenOcta marketplace unchanged: the SKILL.md format is shared across the
+whole OpenClaw lineage, so a downloaded package is installed by unzipping it
+into `.claude/skills/`. Later alerts start with both in hand — the
+investigator gets smarter with use, and can borrow.
 
 ![skills browser: the diagnostic runbook this run distilled](docs/img/hookprobe-skills.png)
 
@@ -176,11 +182,13 @@ The memory view edits the environment memory (CLAUDE.md in the workdir):
 cluster topology, known false alarms and naming conventions written there are
 injected into every investigation. This run's memory said the objects in the
 demo alerts are fictional and unreachable from the container, that reachability
-must be stated honestly, that reasoning must rest on the ledger and on
-in-container evidence, and that data must never be invented. Look back at the
-investigation report above: that is exactly what the agent did — its
-conclusions were built on the pipe's decision chain and the judge's verdict,
-and it invented no data about a machine it could not log into.
+must be stated honestly, that reasoning must rest on the alert payload and
+in-container evidence, and that a reading must never be invented. Look back at
+the report above: "Undetermined … I will not invent a cause" is that
+instruction arriving intact at the model — the memory is not decoration, it is
+the reason the report is trustworthy. Beside it, the prompt view holds the
+methodology appended to the engine's own system prompt; both are read fresh at
+every run, so an edit applies to the next investigation with no restart.
 
 ![environment memory editor: CLAUDE.md reaches every investigation](docs/img/hookprobe-memory.png)
 
@@ -212,8 +220,9 @@ page — secrets as set/unset, never values.
 The investigator is wired into the family's own alert flow: the pipe's
 escalation routes copy every front-door event to `/hooks/event`, and whether an
 investigation is worth paying for is the probe's own call by level (critical
-and high by default, idempotent per source + event_id — an alert storm funds
-one investigation, not N). When it finishes, the report returns to the pipe's
+and high by default, idempotent per source + event_id — a redelivery of the
+same event funds one investigation, not N; a restatement carrying a new event
+id is a new investigation, which is what the budget breaker is for). When it finishes, the report returns to the pipe's
 `probe-notify` front door, signed with the family's timestamped HMAC, and the
 pipe dresses it as a card for the same channels as the verdict. The pipe stays
 content-blind, the judge was not touched at all, and a failed investigation
