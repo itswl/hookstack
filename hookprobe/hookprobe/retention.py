@@ -25,6 +25,7 @@ def prune(workdir: Path, home: Path, days: int) -> int:
     removed = 0
     targets = (
         (workdir / "results", "*.json"),
+        (workdir / "audit", "*.jsonl"),
         (home / ".claude" / "projects", "**/*.jsonl"),
     )
     for root, pattern in targets:

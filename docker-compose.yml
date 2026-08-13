@@ -128,6 +128,11 @@ services:
       # skill list (comma names or "all") so a big library cannot flood it.
       HOOKPROBE_SETTING_SOURCES: ${HOOKPROBE_SETTING_SOURCES:-}
       HOOKPROBE_SKILLS: ${HOOKPROBE_SKILLS:-}
+      # Operator methodology appended to the system prompt (a file path;
+      # default: {workdir}/system-prompt.md when present). Named subagent
+      # roles come from a JSON file (name -> {description, prompt, ...}).
+      HOOKPROBE_SYSTEM_PROMPT_APPEND: ${HOOKPROBE_SYSTEM_PROMPT_APPEND:-}
+      HOOKPROBE_AGENTS_CONFIG: ${HOOKPROBE_AGENTS_CONFIG:-}
       # Direct self-alarm when report returns exhaust their retries:
       HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
       HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
