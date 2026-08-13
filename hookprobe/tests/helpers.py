@@ -24,6 +24,9 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "skills": "",
         "system_prompt_append": None,
         "agents_config": None,
+        "repeat_reminder_at": 3,
+        "bash_timeout_ms": 120000,
+        "bash_max_timeout_ms": 600000,
         "event_secret": "",
         "return_url": "",
         "return_secret": "",
@@ -70,6 +73,11 @@ class FakeEngine:
         self.max_running = 0
         self.messages: list[str] = []
         self.resumes: list[str | None] = []
+        self.described: list[str | None] = []
+
+    def describe_inputs(self, *, resume: str | None = None) -> dict:
+        self.described.append(resume)
+        return {"model": "claude-opus-5", "resumed": bool(resume)}
 
     async def run(self, *, message: str, session_key: str, resume: str | None = None, on_event=None) -> EngineResult:
         self.calls += 1
@@ -97,6 +105,9 @@ class GatedEngine:
         self.result = result or EngineResult(text='{"summary": "done"}', message_count=2, session_id="sdk-session-g")
         self.release = threading.Event()
         self.resumes: list[str | None] = []
+
+    def describe_inputs(self, *, resume: str | None = None) -> dict:
+        return {"model": "claude-opus-5", "resumed": bool(resume)}
 
     async def run(self, *, message: str, session_key: str, resume: str | None = None, on_event=None) -> EngineResult:
         self.resumes.append(resume)

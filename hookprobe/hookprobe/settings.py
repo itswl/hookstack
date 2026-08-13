@@ -65,6 +65,20 @@ class Settings:
     # model?, skills?}), the config-file twin of .claude/agents/*.md files.
     agents_config: Path | None
 
+    # Loop hygiene (hygiene.py), all advisory — the security boundary stays the
+    # bash guard plus read-only credentials.
+    #   repeat_reminder_at: after N identical calls, remind the agent to change
+    #                       approach. 0 disables.
+    #   bash_timeout_ms / bash_max_timeout_ms: per-command deadlines handed to
+    #                       the CLI (BASH_DEFAULT_TIMEOUT_MS / BASH_MAX_TIMEOUT_MS)
+    #                       so one hung command cannot eat a whole run's wall
+    #                       clock. The defaults match the CLI's own, so this is
+    #                       a lever to tighten, not a behaviour change; 0 leaves
+    #                       the CLI's default in place.
+    repeat_reminder_at: int
+    bash_timeout_ms: int
+    bash_max_timeout_ms: int
+
     # The family loop. event_secret verifies what the pipe delivers to
     # /hooks/event; return_url is where finished investigations from that
     # door report back (the pipe's probe-notify front door), signed with
@@ -120,6 +134,9 @@ class Settings:
             skills=os.environ.get("HOOKPROBE_SKILLS", "").strip(),
             system_prompt_append=_path_env("HOOKPROBE_SYSTEM_PROMPT_APPEND"),
             agents_config=_path_env("HOOKPROBE_AGENTS_CONFIG"),
+            repeat_reminder_at=max(0, _int("HOOKPROBE_REPEAT_REMINDER_AT", 3)),
+            bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
+            bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),

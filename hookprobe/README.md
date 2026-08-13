@@ -84,6 +84,9 @@ what runs.
 | `HOOKPROBE_BUDGET_USD` | `0` *(off)* | Window spend ceiling for the event door; refusals report themselves. `GET /v1/budget` shows the arithmetic |
 | `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24` | The sliding window the budget is measured over |
 | `HOOKPROBE_RETENTION_DAYS` | `0` *(keep all)* | Case files and transcripts older than this are pruned daily; skills and memory are never touched |
+| `HOOKPROBE_REPEAT_REMINDER_AT` | `3` *(0 = off)* | After N identical tool calls, remind the agent to change approach |
+| `HOOKPROBE_BASH_TIMEOUT_MS` | `120000` *(0 = CLI default)* | Deadline for a single command (`BASH_DEFAULT_TIMEOUT_MS`) |
+| `HOOKPROBE_BASH_MAX_TIMEOUT_MS` | `600000` *(0 = CLI default)* | Ceiling the agent may request per command (`BASH_MAX_TIMEOUT_MS`) |
 | `HOOKPROBE_HOST` / `HOOKPROBE_PORT` | `0.0.0.0` / `8088` | Bind address |
 | `ANTHROPIC_API_KEY` | — | Or `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` for a relay |
 
@@ -100,6 +103,41 @@ Read-only is enforced in three layers, strongest first:
    cloud CLIs are too many to enumerate — scope their credentials instead.
 3. **Container** — non-root, disposable, nothing precious inside. The agent
    may write freely in `/data` (scratch + skills); that is by design.
+
+## Loop hygiene — the run's context and bill
+
+Two advisory guards, neither a security boundary. They exist because an
+unattended run cannot notice it is wasting itself.
+
+**Repeat reminder.** Running an identical call again returns the same answer at
+the same price. On the `HOOKPROBE_REPEAT_REMINDER_AT`-th identical call (and
+every multiple after) the result carries a note telling the agent to change
+approach or record what stays unknown and move on. The budget breaker stops
+spending after the fact; this is the nudge before it costs.
+
+**Per-command deadlines.** `HOOKPROBE_BASH_TIMEOUT_MS` and
+`HOOKPROBE_BASH_MAX_TIMEOUT_MS` become the CLI's `BASH_DEFAULT_TIMEOUT_MS` /
+`BASH_MAX_TIMEOUT_MS`, so a `curl` at an unreachable host or a `kubectl` at a
+wedged API server cannot hold a run slot until the whole run times out. The
+defaults match the CLI's own — this is a lever to tighten, not a change of
+behaviour.
+
+Every run also records **what the model was actually given**: model, skill
+layers and their names, subagent roles, MCP servers, and content digests of the
+environment memory and the appended methodology. Those files live on a mutable
+volume, so without that record a report cannot be explained after the volume
+moves on — a stale line in `CLAUDE.md` once made every report come back in the
+wrong language while the request looked identical. It sits on each run and each
+turn (`inputs`), and the console's session view shows it.
+
+Both guards and the inputs record are borrowed from
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+(`packages/guard`, and its "model-visible means logged" rule). Its third idea,
+spilling oversized tool output to a file, was built here and then removed: the
+Claude Code harness already does exactly that, and a second layer on top wrote a
+file that only held the harness's already-truncated copy while claiming to hold
+everything — see
+[the rejected note](../.agents/notes/rejected/2026-08-14-tool-output-spill-in-hookprobe.md).
 
 ## The family loop
 

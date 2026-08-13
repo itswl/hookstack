@@ -45,6 +45,10 @@ class Engine(Protocol):
         on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> EngineResult: ...
 
+    def describe_inputs(self, *, resume: str | None = None) -> dict[str, Any]:
+        """The prompt inputs this engine would resolve for the next turn."""
+        ...
+
 
 class RunBusyError(RuntimeError):
     """The session already has a turn in flight."""
@@ -315,6 +319,13 @@ class RunService:
 
     async def _execute(self, run: Run, message: str, timeout_s: int, *, resume: str | None = None) -> None:
         logger.info("run start session=%s timeout=%ss resume=%s", run.session_key, timeout_s, resume or "-")
+        # Record what the model is about to see, before it sees it: a failed run
+        # is exactly when the loaded memory and skills are worth knowing.
+        try:
+            run.inputs = self._engine.describe_inputs(resume=resume)
+        except Exception:  # noqa: BLE001 — a record of the inputs is not worth a failed run
+            logger.debug("describe_inputs failed", exc_info=True)
+            run.inputs = {}
 
         def on_event(event: dict[str, Any]) -> None:
             event["ts"] = time.time()
@@ -499,5 +510,6 @@ class RunService:
                 "model_usage": result.model_usage if result else None,
                 "duration_ms": result.duration_ms if result else None,
                 "events": list(run.events),
+                "inputs": dict(run.inputs),
             }
         )
