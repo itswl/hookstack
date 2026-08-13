@@ -535,7 +535,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
         Env VALUES are secrets (API tokens live there) and are never
         returned; the key names alone prove the wiring."""
-        servers = _load_mcp_servers(settings.mcp_config)
+        servers = _load_mcp_servers(settings.mcp_config, include_disabled=True)
         described: dict[str, Any] = {}
         for name, spec in servers.items():
             if not isinstance(spec, dict):
@@ -545,6 +545,8 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                 key: spec.get(key) for key in ("command", "args", "type", "url") if spec.get(key) is not None
             }
             described[name]["env_keys"] = sorted((spec.get("env") or {}).keys())
+            if spec.get("enabled") is False:
+                described[name]["disabled"] = True
         return {
             "config": str(settings.mcp_config) if settings.mcp_config else None,
             "servers": described,

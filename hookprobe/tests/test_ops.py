@@ -225,6 +225,10 @@ def test_mcp_loader_accepts_three_dialects(tmp_path) -> None:
     assert set(servers) == {"on"}, "enabled:false entries are skipped"
     assert "enabled" not in servers["on"], "the marketplace flag never reaches the SDK"
 
+    browsable = _load_mcp_servers(market, include_disabled=True)
+    assert set(browsable) == {"on", "off"}, "the browser sees disabled entries too"
+    assert browsable["off"]["enabled"] is False
+
     assert _load_mcp_servers(tmp_path / "missing.json") == {}
     assert _load_mcp_servers(None) == {}
 
