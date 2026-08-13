@@ -162,6 +162,17 @@ files — review it, prune bad runbooks, or `git init` it for history; anything
 written there instructs future runs, so treat it as part of your trust
 boundary.
 
+The format is not ours and that is the point: a skill is a directory with a
+`SKILL.md` (YAML frontmatter: `name`, `description`), the shape the whole
+OpenClaw-lineage ecosystem shares. Marketplace packages install unchanged —
+verified live with two from the OpenOcta market
+(`https://openocta.com/api/v1/skills`, ~750 skills, strong ops section):
+unzip into `/data/.claude/skills/<name>/` (strip `__MACOSX`), the next run
+loads them, and the engine invoked `server-patrol` by name and followed its
+runbook. The trust boundary above applies double to third-party skills:
+read them before installing — they will be instructing an agent that holds
+your read-only credentials.
+
 ## Web UI — operate sessions from a browser
 
 `http://<host>:8088/ui` is a single self-contained page (no build step, no
