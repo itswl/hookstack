@@ -91,7 +91,7 @@ Below is the verdict ledger for those four alerts, and this run judged them
 with a real model (DeepSeek) rather than the stub: the payment gateway 5xx paid
 for `ai` the first time and hit `reuse` for free when the same condition was
 restated; the disk alert paid for `ai`, and its recovery took `recovery` for
-free, inheriting the firing's `high` — 4 verdicts, 50% paid, $0.000498 total,
+free, inheriting the firing's `high` — 4 verdicts, 50% paid, $0.000414 total,
 zero failed returns. The stub run in [STACK.md](STACK.md) produces the same
 shape for $0.000524, which is the point: the cost policy is structural, not a
 property of one model. If a verdict's return dies for good, the self-alarm
@@ -135,18 +135,19 @@ and dead ends all still there. A running turn can be stopped at any time.
 
 Below is the session page after the disk investigation finished: the report
 rendered as Markdown with its conclusion first, the process folded above it,
-and a bill line reading deepseek-v4-pro[1m] (auxiliary deepseek-v4-flash
-$0.0060) · in 40.7k · out 2.8k · cache 138.2k read · $0.3471 · 45.0s. What the
-report says is the part worth reading. The agent established that node-3 is
+and a bill line reading deepseek-v4-pro[1m] (with its auxiliary
+deepseek-v4-flash) · in 39.7k · out 3.2k · $0.3291 · 49.5s. What the report
+says is the part worth reading. The agent established that node-3 is
 unreachable from the container and that this Prometheus scrapes only itself, so
 no filesystem metric exists to confirm the alert — and then refused to invent
-one: **"Undetermined — the signal cannot be verified or localized from here …
-I will not invent a cause."** It still produced ranked remediation, and the
-most useful item is the one the environment itself surfaced: the alert fires
-with no disk metrics behind it, so add node-exporter and the alert becomes
-diagnosable next time. An investigation that reports an observability gap
+one: **"Undetermined — no data source reaches node-3 … the alert is firing from
+a telemetry blind spot."** It still produced ranked remediation, and put the
+gap first: restore node metrics before treating the symptom, because the alert
+is currently un-triageable. It even caught an inconsistency in the alert itself
+— a rule named `DiskWillFill` is a forecast, yet the title asserts a
+threshold-crossing at 93%. An investigation that reports an observability gap
 instead of a fabricated root cause is the behaviour the environment memory
-asks for.
+asks for, and every inference in it is labelled as one.
 
 ![hookprobe sessions console](docs/img/hookprobe-sessions.png)
 

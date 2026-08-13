@@ -7,15 +7,24 @@
 <style>
   /* One file, no build, no CDN. Dark-first; colour is EARNED by state —
      a healthy board reads quiet. */
+  /* ── hookstack design tokens · keep this block identical in all three pages ── */
   :root {
     --bg: #0b0e14; --surface: #11151d; --border: #1f2530; --border-soft: #171c26;
     --text: #d7dde6; --muted: #8b94a3; --accent: #4c8dff;
     --ok: #3dd68c; --warn: #f5a524; --bad: #e5484d;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    /* "PingFang SC" stays in the stack: alert titles arrive in whatever language
+       the monitoring system speaks, and they are rendered here verbatim. */
+    --ui: 14px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
   }
+  .rc { display: flex; gap: 6px; align-items: center; }
+  .rc button, .rc select { background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px;
+    cursor: pointer; }
+  .rc button:hover, .rc select:hover { border-color: var(--accent); }
+  /* ── end design tokens ────────────────────────────────────────────────────── */
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: var(--ui); }
   .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 60px; }
   header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .02em; }
@@ -117,6 +126,15 @@
     <h1>hookrelay</h1>
     <span class="sub">every message accounted for, every delivery with an outcome</span>
     <span class="stamp" id="stamp">loading…</span>
+  <span class="rc">
+    <button id="rNow" title="refresh now">&#8635;</button>
+    <select id="rEvery" title="auto refresh">
+      <option value="0">manual</option>
+      <option value="15000">15s</option>
+      <option value="60000">60s</option>
+      <option value="300000">5m</option>
+    </select>
+  </span>
   </header>
 
   <div class="tokenbar" id="tokenbar">
@@ -211,6 +229,7 @@
       <tr><th>Area</th><th>How to read it</th></tr>
       <tr><td>The three cards</td><td>Queued = waiting to be delivered. Dead letters &gt; 0 deserves a human — with <code>HOOKRELAY_ALARM_URL</code> set it alarms on its own</td></tr>
       <tr><td>An event row</td><td>Open it for the full decision chain: which routes were considered, why each matched or was skipped, where it was delivered. The round-trip button pulls <code>/trace</code>: the payload as received, the exact body sent per channel, and what each brain sent back</td></tr>
+      <tr><td>The refresh control</td><td>↻ refreshes now; the interval beside it (manual / 15s / 60s / 5m, remembered per browser) is the only clock on the page. The stamp top-right says when the data is from</td></tr>
       <tr><td>The config tab</td><td>An editor for config.yaml (the file is the source of truth): it only writes when validation passes, and applies hot — no restart. Needs the admin token</td></tr>
     </table>
 
@@ -543,7 +562,35 @@
   });
 
   refresh();
-  setInterval(refresh, 5000);
+  // ── refresh control · keep this block identical in all three pages ─────────
+  // One timer per page, off or slow by choice: a board that polls every few
+  // seconds spends the operator's attention and the service's breath for
+  // nothing. The stamp says when the data is from; the button says now.
+  var REFRESH_KEY = "hookstack-refresh-ms";
+  var refreshTimer = null;
+  function refreshEveryMs() {
+    var raw = parseInt(localStorage.getItem(REFRESH_KEY) || "60000", 10);
+    return isNaN(raw) ? 60000 : raw;
+  }
+  function applyRefreshInterval(tick) {
+    clearInterval(refreshTimer);
+    var ms = refreshEveryMs();
+    document.getElementById("rEvery").value = String(ms);
+    if (ms > 0) refreshTimer = setInterval(function () { if (!document.hidden) tick(); }, ms);
+  }
+  function wireRefreshControl(tick) {
+    document.getElementById("rNow").addEventListener("click", function () { tick(); });
+    document.getElementById("rEvery").addEventListener("change", function (event) {
+      localStorage.setItem(REFRESH_KEY, event.target.value);
+      applyRefreshInterval(tick);
+    });
+    applyRefreshInterval(tick);
+  }
+  // ── end refresh control ───────────────────────────────────────────────────
+  wireRefreshControl(function () {
+    refresh();
+    if (document.querySelector('.tab[data-tab="config"]').classList.contains("active")) loadConfig();
+  });
 })();
 </script>
 </body>

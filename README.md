@@ -21,6 +21,7 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 | [`hookjudge/`](hookjudge) | the brain. Judges and nothing else — one inbound shape, one outbound address. | [hookjudge/README.md](hookjudge/README.md) |
 | [`hookprobe/`](hookprobe) | the investigator. One read-only agent run per deep-analysis task, with a sessions page to keep asking. Replaces a full OpenClaw gateway. | [hookprobe/README.md](hookprobe/README.md) |
 | pipe + brain | run the demo pair locally in one command | [STACK.md](STACK.md) |
+| all three boards | one design language, one refresh clock | [docs/design-language.md](docs/design-language.md) |
 
 The split is the point: a brain that renders Feishu cards has to know Feishu's
 card schema, then WeCom's, then DingTalk's. That work belongs to the pipe, and

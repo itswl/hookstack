@@ -8,20 +8,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hookprobe · sessions</title>
 <style>
-:root{
-  --bg:#0d1117; --panel:#161b22; --line:#21262d; --text:#e6edf3; --dim:#8b949e;
-  --accent:#58a6ff; --green:#3fb950; --amber:#d29922; --red:#f85149;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-}
+  /* ── hookstack design tokens · keep this block identical in all three pages ── */
+  :root {
+    --bg: #0b0e14; --surface: #11151d; --border: #1f2530; --border-soft: #171c26;
+    --text: #d7dde6; --muted: #8b94a3; --accent: #4c8dff;
+    --ok: #3dd68c; --warn: #f5a524; --bad: #e5484d;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    /* "PingFang SC" stays in the stack: alert titles arrive in whatever language
+       the monitoring system speaks, and they are rendered here verbatim. */
+    --ui: 14px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+  }
+  .rc { display: flex; gap: 6px; align-items: center; }
+  .rc button, .rc select { background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px;
+    cursor: pointer; }
+  .rc button:hover, .rc select:hover { border-color: var(--accent); }
+  /* ── end design tokens ────────────────────────────────────────────────────── */
+  /* This page's older token names, aliased onto the shared set above. */
+  :root {
+    --panel: var(--surface); --line: var(--border); --dim: var(--muted);
+    --green: var(--ok); --amber: var(--warn); --red: var(--bad);
+  }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;
-     font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+     font:var(--ui)}
 header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
 header h1{font-size:15px;margin:0;font-weight:600}
 header h1 span{color:var(--dim);font-weight:400}
 #token{margin-left:auto;background:var(--bg);border:1px solid var(--line);color:var(--text);
        border-radius:6px;padding:5px 8px;width:230px;font-family:var(--mono);font-size:12px}
 #token.bad{border-color:var(--red)}
+#stamp{font-size:11px;color:var(--dim);font-family:var(--mono);white-space:nowrap}
 #budget{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:10px;padding:3px 8px;white-space:nowrap}
 #budget.hot{color:var(--red);border-color:var(--red)}
 button{background:#21262d;border:1px solid #30363d;color:var(--text);border-radius:6px;padding:5px 12px;cursor:pointer;font-size:13px}
@@ -155,6 +172,16 @@ button.danger{color:var(--red);border-color:var(--red)}
   <button id="auditBtn">audit</button>
   <button id="helpBtn">help</button>
   <span id="budget" hidden></span>
+  <span class="stamp" id="stamp"></span>
+  <span class="rc">
+    <button id="rNow" title="refresh now">&#8635;</button>
+    <select id="rEvery" title="auto refresh">
+      <option value="0">manual</option>
+      <option value="15000">15s</option>
+      <option value="60000">60s</option>
+      <option value="300000">5m</option>
+    </select>
+  </span>
   <input id="token" placeholder="bearer token" autocomplete="off">
 </header>
 <main>
@@ -179,7 +206,6 @@ const $ = (s) => document.querySelector(s);
 let sel = null;
 let composeMode = false; // "+ new session" pressed: keep the pane free until they send
 let viewMode = "sessions"; // or "skills"
-let detailTimer = null;
 
 const tokenEl = $("#token");
 tokenEl.value = localStorage.getItem("hookprobe_token") || "";
@@ -419,15 +445,6 @@ async function renderDetail(startPolling) {
   $("#msg").placeholder = run.status === "running"
     ? "a turn is in flight…"
     : "follow-up in this session… (Ctrl/⌘+Enter to send)";
-  if (startPolling) {
-    clearInterval(detailTimer);
-    if (run.status === "running") {
-      detailTimer = setInterval(async () => {
-        const x = await renderDetail(false).catch(() => null);
-        if (x && x.status !== "running") { clearInterval(detailTimer); refreshList(); }
-      }, 2500);
-    }
-  }
   return run;
 }
 
@@ -435,7 +452,6 @@ $("#new").onclick = () => {
   sel = null;
   composeMode = true;
   sessionsMode();
-  clearInterval(detailTimer);
   $("#stopBtn").style.display = "none";
   refreshList();
   $("#meta").textContent = "new session";
@@ -469,7 +485,6 @@ function leaveSessions(mode) {
   viewMode = mode;
   sel = null;
   composeMode = false;
-  clearInterval(detailTimer);
   $("#composer").style.display = "none";
   $("#stopBtn").style.display = "none";
   $("#hint").textContent = "";
@@ -731,11 +746,10 @@ async function openSystem() {
 }
 
 // ── audit: the flight recorder, filterable, following while open ─────────
-let auditTimer = null;
+let auditReload = null;
 
 async function openAudit(filter) {
   leaveSessions("audit");
-  clearInterval(auditTimer);
   $("#meta").textContent = "audit · every tool call in every run, subagents included · {workdir}/audit/*.jsonl";
   $("#turns").innerHTML = `
     <div class="audit-bar">
@@ -745,7 +759,7 @@ async function openAudit(filter) {
     <div id="auditRows"></div>`;
   $("#auditQ").value = filter || "";
   const load = async () => {
-    if (viewMode !== "audit") { clearInterval(auditTimer); return; }
+    if (viewMode !== "audit") return;
     try {
       const q = encodeURIComponent($("#auditQ").value || "");
       const d = await (await api("/v1/audit?limit=300" + (q ? "&session=" + q : ""))).json();
@@ -760,8 +774,8 @@ async function openAudit(filter) {
     } catch (e) { $("#hint").textContent = e.message; }
   };
   $("#auditQ").oninput = load;
+  auditReload = load;
   await load();
-  auditTimer = setInterval(load, 8000);
 }
 
 // ── help: one page for a new operator or an AI driving the API ──────────
@@ -850,6 +864,7 @@ report).</p>
 <li><b>Wire an MCP server</b>: edit <code>/data/mcp.json</code> (the marketplace config.json dialect works, enabled:false is skipped), confirm on the system view, next run picks it up</li>
 <li><b>Control which skills a session sees</b>: the <code>HOOKPROBE_SKILLS</code> allowlist (a big library would otherwise flood the context); layers are switched with <code>HOOKPROBE_SETTING_SOURCES</code></li>
 <li><b>Ask "what did it actually do"</b>: the audit view, filtered by session; a single run's feed is under process · N steps in sessions</li>
+<li><b>Control the refresh</b>: the header carries ↻ and an interval — manual, 15s, 60s or 5m, remembered per browser. One timer serves every view, the open session's live feed included, so 15s is the setting for watching a run closely and <code>manual</code> means nothing polls at all</li>
 <li><b>Scheduled patrols</b>: a host crontab that POSTs a "patrol due" event to the pipe's front door is enough — the escalation door turns it into a proactive investigation whose report travels the usual channels. Each patrol is its own case file, and cites what the last one found.</li>
 </ul>
 <p class="dim">Fuller design and deployment notes live in hookprobe/README.md and the repository OVERVIEW.md.</p>
@@ -917,10 +932,48 @@ async function refreshBudget() {
   } catch { el.hidden = true; }
 }
 
-refreshList();
-setInterval(refreshList, 5000);
-refreshBudget();
-setInterval(refreshBudget, 15000);
+  // ── refresh control · keep this block identical in all three pages ─────────
+  // One timer per page, off or slow by choice: a board that polls every few
+  // seconds spends the operator's attention and the service's breath for
+  // nothing. The stamp says when the data is from; the button says now.
+  var REFRESH_KEY = "hookstack-refresh-ms";
+  var refreshTimer = null;
+  function refreshEveryMs() {
+    var raw = parseInt(localStorage.getItem(REFRESH_KEY) || "60000", 10);
+    return isNaN(raw) ? 60000 : raw;
+  }
+  function applyRefreshInterval(tick) {
+    clearInterval(refreshTimer);
+    var ms = refreshEveryMs();
+    document.getElementById("rEvery").value = String(ms);
+    if (ms > 0) refreshTimer = setInterval(function () { if (!document.hidden) tick(); }, ms);
+  }
+  function wireRefreshControl(tick) {
+    document.getElementById("rNow").addEventListener("click", function () { tick(); });
+    document.getElementById("rEvery").addEventListener("change", function (event) {
+      localStorage.setItem(REFRESH_KEY, event.target.value);
+      applyRefreshInterval(tick);
+    });
+    applyRefreshInterval(tick);
+  }
+  // ── end refresh control ───────────────────────────────────────────────────
+
+// One tick refreshes whatever is on screen: the session list and the open
+// session (its live feed included), or the audit tail.
+async function tick() {
+  await refreshBudget();
+  if (viewMode === "sessions") {
+    await refreshList();
+    if (sel) await renderDetail(false).catch(() => null);
+  } else if (viewMode === "audit" && auditReload) {
+    await auditReload();
+  }
+  const now = new Date().toTimeString().slice(0, 8);
+  $("#stamp").textContent = "refreshed " + now;
+}
+
+tick();
+wireRefreshControl(tick);
 </script>
 </body>
 </html>
