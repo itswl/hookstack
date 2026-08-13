@@ -40,6 +40,9 @@ echo "standalone and family composes parse"
 
 step "the three pages share one design"
 python3 scripts/assert_design.py
+
+step "agent notes keep their shape"
+python3 scripts/assert_agent_notes.py
 # The production composes read .env from the deployment root, which a fresh
 # checkout does not have. Validate them when the file is there and say so when
 # it is not — the alternative is marking it `required: false`, which would
