@@ -230,7 +230,10 @@ environment memory (CLAUDE.md); **prompt** edits the system-prompt append —
 both hot-read by the next run; **system** shows the runtime knobs (secrets
 as set/unset, never values), the MCP servers the next run would load, and
 the health counters; **audit** follows the flight recorder, filterable by
-session.
+session. A **help** view carries the whole manual — what this is,
+the three-step start, every view, the API contract with curl templates,
+the file map and the safety model — written for a new operator or an AI
+driving the API, reachable at `#help`.
 
 ## Follow-up exploration — reuse the session
 
