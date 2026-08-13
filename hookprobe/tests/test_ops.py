@@ -199,3 +199,50 @@ def test_audit_hook_writes_a_flight_record(tmp_path) -> None:
     line = json.loads(files[0].read_text().strip())
     assert line["session"] == "probe:inbound:7"
     assert line["tool"] == "Bash" and line["detail"] == "df -h" and line["error"] is False
+
+
+def test_mcp_loader_accepts_three_dialects(tmp_path) -> None:
+    from hookprobe.engine import _load_mcp_servers
+
+    bare = tmp_path / "bare.json"
+    bare.write_text(json.dumps({"prom": {"command": "npx", "args": ["prometheus-mcp"], "env": {}}}))
+    assert "prom" in _load_mcp_servers(bare)
+
+    wrapped = tmp_path / "wrapped.json"
+    wrapped.write_text(json.dumps({"mcpServers": {"grafana": {"command": "npx", "args": []}}}))
+    assert "grafana" in _load_mcp_servers(wrapped)
+
+    market = tmp_path / "market.json"
+    market.write_text(
+        json.dumps(
+            {
+                "on": {"enabled": True, "command": "npx", "args": ["x"], "env": {"TOKEN": "secret"}},
+                "off": {"enabled": False, "command": "npx", "args": ["y"], "env": {}},
+            }
+        )
+    )
+    servers = _load_mcp_servers(market)
+    assert set(servers) == {"on"}, "enabled:false entries are skipped"
+    assert "enabled" not in servers["on"], "the marketplace flag never reaches the SDK"
+
+    assert _load_mcp_servers(tmp_path / "missing.json") == {}
+    assert _load_mcp_servers(None) == {}
+
+
+def test_mcp_endpoint_redacts_env_values(tmp_path) -> None:
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from tests.helpers import FakeEngine
+
+    config = tmp_path / "mcp.json"
+    config.write_text(
+        json.dumps({"prom": {"command": "npx", "args": ["prometheus-mcp"], "env": {"PROM_TOKEN": "hunter2"}}})
+    )
+    settings = make_settings(tmp_path, token=TOKEN, mcp_config=config)
+    with TestClient(create_app(settings, RunService(settings, FakeEngine(), RunStore(tmp_path / "r")))) as client:
+        body = client.get("/v1/mcp", headers=AUTH).json()
+        assert body["servers"]["prom"]["command"] == "npx"
+        assert body["servers"]["prom"]["env_keys"] == ["PROM_TOKEN"]
+        assert "hunter2" not in json.dumps(body), "env values are secrets and never leave the file"

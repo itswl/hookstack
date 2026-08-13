@@ -142,6 +142,27 @@ parallel sub-investigations, each appearing in the process feed as a `Task`
 event. Hooks apply inside subagents too, so the bash guard binds them the
 same as the main loop.
 
+## Managing MCP servers by hand
+
+MCP is managed as one JSON file — no API writes, on purpose: server specs
+carry credentials in their `env`, and secrets belong in a file you mount,
+not in a web form. The loop is:
+
+1. Write the file. Three dialects are accepted: the bare
+   `{name: {command, args, env}}` mapping, the `.mcp.json` wrapper
+   (`{"mcpServers": {...}}`), and the marketplace `config.json` shape —
+   entries with `"enabled": false` are skipped and the flag is stripped, so
+   downloaded MCP packages work unedited.
+2. Mount it read-only and point `HOOKPROBE_MCP_CONFIG` at it (see the
+   commented lines in every compose). A path on the volume (e.g.
+   `/data/mcp.json`) also works and is editable without remounting.
+3. Verify with `GET /v1/mcp`: it reads the file fresh and shows each
+   server's command/args/type/url plus its env **key names only** — env
+   values never leave the file.
+4. Edit any time: the config is read fresh at every run (and every
+   `/v1/mcp` call), so changes apply to the next investigation without a
+   restart.
+
 ## Browser evidence (optional)
 
 Give the agent an interactive browser for dashboards that have no API: copy

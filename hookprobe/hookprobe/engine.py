@@ -101,6 +101,11 @@ def _skills_filter(raw: str) -> list[str] | str | None:
 
 
 def _load_mcp_servers(path: Path | None) -> dict[str, Any]:
+    """Read the MCP config fresh — called per run, so edits apply without a
+    restart. Three dialects are accepted: the bare {name: spec} mapping, the
+    .mcp.json wrapper ({"mcpServers": {...}}), and the marketplace config.json
+    shape whose specs carry an `enabled` flag (false = skip, and the flag
+    itself is stripped before the SDK sees it)."""
     if path is None:
         return {}
     try:
@@ -108,10 +113,18 @@ def _load_mcp_servers(path: Path | None) -> dict[str, Any]:
     except (OSError, ValueError) as exc:
         logger.warning("MCP config %s not loadable (%s); continuing without MCP servers", path, exc)
         return {}
-    # Accept both the bare mapping and the .mcp.json wrapper shape.
     if isinstance(raw, dict) and isinstance(raw.get("mcpServers"), dict):
-        return raw["mcpServers"]
-    return raw if isinstance(raw, dict) else {}
+        raw = raw["mcpServers"]
+    if not isinstance(raw, dict):
+        return {}
+    servers: dict[str, Any] = {}
+    for name, spec in raw.items():
+        if isinstance(spec, dict):
+            if spec.get("enabled") is False:
+                continue
+            spec = {key: value for key, value in spec.items() if key != "enabled"}
+        servers[str(name)] = spec
+    return servers
 
 
 def _load_agents_raw(path: Path | None) -> dict[str, dict[str, Any]]:
@@ -191,7 +204,6 @@ class ClaudeAgentEngine:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._workdir = settings.workdir
-        self._mcp_servers = _load_mcp_servers(settings.mcp_config)
         self._agents_raw = _load_agents_raw(settings.agents_config)
         (self._workdir / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
 
@@ -245,7 +257,8 @@ class ClaudeAgentEngine:
             agents=(
                 {name: AgentDefinition(**spec) for name, spec in self._agents_raw.items()} if self._agents_raw else None
             ),
-            mcp_servers=self._mcp_servers,
+            # Read fresh per run: edit the file, the next run uses it.
+            mcp_servers=_load_mcp_servers(self._settings.mcp_config),
             hooks={
                 "PreToolUse": [HookMatcher(matcher="Bash", hooks=[_bash_guard_hook])],
                 # The flight recorder: every tool call, every run, one JSONL
