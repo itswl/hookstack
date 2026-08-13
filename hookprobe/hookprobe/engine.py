@@ -100,12 +100,13 @@ def _skills_filter(raw: str) -> list[str] | str | None:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
-def _load_mcp_servers(path: Path | None) -> dict[str, Any]:
+def _load_mcp_servers(path: Path | None, include_disabled: bool = False) -> dict[str, Any]:
     """Read the MCP config fresh — called per run, so edits apply without a
     restart. Three dialects are accepted: the bare {name: spec} mapping, the
     .mcp.json wrapper ({"mcpServers": {...}}), and the marketplace config.json
     shape whose specs carry an `enabled` flag (false = skip, and the flag
-    itself is stripped before the SDK sees it)."""
+    itself is stripped before the SDK sees it). include_disabled keeps the
+    skipped entries WITH their flag — for the browser, never for the engine."""
     if path is None:
         return {}
     try:
@@ -120,9 +121,10 @@ def _load_mcp_servers(path: Path | None) -> dict[str, Any]:
     servers: dict[str, Any] = {}
     for name, spec in raw.items():
         if isinstance(spec, dict):
-            if spec.get("enabled") is False:
+            if spec.get("enabled") is False and not include_disabled:
                 continue
-            spec = {key: value for key, value in spec.items() if key != "enabled"}
+            if not include_disabled:
+                spec = {key: value for key, value in spec.items() if key != "enabled"}
         servers[str(name)] = spec
     return servers
 
