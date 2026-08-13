@@ -672,10 +672,11 @@ function kvGrid(pairs) {
 async function openSystem() {
   leaveSessions("system");
   try {
-    const [config, mcp, health] = await Promise.all([
+    const [config, mcp, health, agents] = await Promise.all([
       (await api("/v1/config")).json(),
       (await api("/v1/mcp")).json(),
       (await fetch("/healthz")).json(),
+      (await api("/v1/agents")).json(),
     ]);
     $("#meta").textContent = "system · runtime configuration (secrets shown as set/unset, never values)";
     const knobs = kvGrid([
@@ -688,7 +689,8 @@ async function openSystem() {
       ["setting_sources", (config.setting_sources || []).join(", ")],
       ["skills filter", config.skills_filter || "engine default"],
       ["system prompt", `${config.system_prompt.path}${config.system_prompt.active ? " (active)" : " (absent)"}`],
-      ["agents_config", config.agents_config],
+      ["subagent roles", `${agents.filter((a) => a.source !== "config").length} from .claude/agents files + ${agents.filter((a) => a.source === "config").length} config-pinned`],
+      ["agents_config (optional JSON)", config.agents_config],
       ["mcp_config", config.mcp_config],
       ["return_url", config.return_url],
       ["self-alarm / event secret / return secret", `${config.alarm_configured ? "set" : "—"} / ${config.event_secret_set ? "set" : "—"} / ${config.return_secret_set ? "set" : "—"}`],
