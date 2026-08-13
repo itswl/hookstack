@@ -33,6 +33,7 @@ from hookprobe import __version__
 from hookprobe.engine import _load_agents_raw, _load_mcp_servers, _system_prompt_append
 from hookprobe.retention import prune
 from hookprobe.runs import Run
+from hookprobe.seeds import seed_default_agents
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
 from hookprobe.wire import verify_timestamped
@@ -94,6 +95,9 @@ def _summary(run: Run) -> dict[str, Any]:
 def create_app(settings: Settings, service: RunService) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # First boot on a fresh volume: a few readable subagent roles, so the
+        # agents page teaches by example instead of starting empty.
+        seed_default_agents(settings.workdir)
         # A restart must not orphan the loop: runs a previous process left
         # mid-flight settle as failures that report themselves.
         service.sweep_orphans()
