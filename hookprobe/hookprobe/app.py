@@ -30,6 +30,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from hookprobe import __version__
+from hookprobe.engine import _load_mcp_servers
 from hookprobe.retention import prune
 from hookprobe.runs import Run
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
@@ -355,6 +356,27 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             raise HTTPException(status_code=404, detail="skill not found")
         shutil.rmtree(skill_dir)
         return {"deleted": True, "name": name}
+
+    @app.get("/v1/mcp", dependencies=[Depends(require_token)])
+    async def mcp_servers() -> dict[str, Any]:
+        """What the next run would load — read fresh from the config file.
+
+        Env VALUES are secrets (API tokens live there) and are never
+        returned; the key names alone prove the wiring."""
+        servers = _load_mcp_servers(settings.mcp_config)
+        described: dict[str, Any] = {}
+        for name, spec in servers.items():
+            if not isinstance(spec, dict):
+                described[name] = {"invalid": True}
+                continue
+            described[name] = {
+                key: spec.get(key) for key in ("command", "args", "type", "url") if spec.get(key) is not None
+            }
+            described[name]["env_keys"] = sorted((spec.get("env") or {}).keys())
+        return {
+            "config": str(settings.mcp_config) if settings.mcp_config else None,
+            "servers": described,
+        }
 
     @app.get("/v1/budget", dependencies=[Depends(require_token)])
     async def budget() -> dict[str, Any]:

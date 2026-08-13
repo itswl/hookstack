@@ -83,7 +83,9 @@ services:
       # impersonate the investigator's reports. One line of .env each.
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
-      # HOOKPROBE_MCP_CONFIG: /config/mcp.json
+      # MCP servers config (three dialects accepted; env values are
+      # secrets — keep the file mounted ro or on the volume):
+      HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}

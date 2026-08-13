@@ -125,7 +125,9 @@ services:
       ANTHROPIC_DEFAULT_OPUS_MODEL: ${ANTHROPIC_DEFAULT_OPUS_MODEL:-}
       CLAUDE_CODE_SUBAGENT_MODEL: ${CLAUDE_CODE_SUBAGENT_MODEL:-}
       API_TIMEOUT_MS: ${API_TIMEOUT_MS:-}
-      # HOOKPROBE_MCP_CONFIG: /config/mcp.json
+      # MCP servers config (three dialects accepted; env values are
+      # secrets — keep the file mounted ro or on the volume):
+      HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-}
     volumes:
       - probe-data:/data
       # A host skills library as the read-only user layer — mount ONLY the

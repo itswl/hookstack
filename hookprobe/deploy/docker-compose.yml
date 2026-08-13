@@ -42,7 +42,9 @@ services:
       ANTHROPIC_DEFAULT_OPUS_MODEL: ${ANTHROPIC_DEFAULT_OPUS_MODEL:-}
       CLAUDE_CODE_SUBAGENT_MODEL: ${CLAUDE_CODE_SUBAGENT_MODEL:-}
       API_TIMEOUT_MS: ${API_TIMEOUT_MS:-}
-      # HOOKPROBE_MCP_CONFIG: /config/mcp.json
+      # MCP servers config (three dialects accepted; env values are
+      # secrets — keep the file mounted ro or on the volume):
+      HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-}
       # Wire the event door / report return to your own pipe if you have one:
       HOOKPROBE_RETURN_URL: ${HOOKPROBE_RETURN_URL:-}
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
