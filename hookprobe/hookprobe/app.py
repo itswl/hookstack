@@ -30,7 +30,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from hookprobe import __version__
-from hookprobe.engine import _load_mcp_servers
+from hookprobe.engine import _load_agents_raw, _load_mcp_servers, _system_prompt_append
 from hookprobe.retention import prune
 from hookprobe.runs import Run
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
@@ -86,6 +86,8 @@ def _summary(run: Run) -> dict[str, Any]:
         "model": run.model,
         "engine_session_id": run.engine_session_id,
         "title": title[:120],
+        "origin": run.origin,
+        "return_status": run.return_status,
     }
 
 
@@ -356,6 +358,176 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             raise HTTPException(status_code=404, detail="skill not found")
         shutil.rmtree(skill_dir)
         return {"deleted": True, "name": name}
+
+    # Subagent roles: .claude/agents/*.md files in the same layers as skills,
+    # plus config-pinned roles from HOOKPROBE_AGENTS_CONFIG. Same copy-on-write
+    # editing story as skills — writes land in the project layer, the user
+    # layer and the config are never touched from the web.
+    def _agent_layers() -> list[tuple[str, Path]]:
+        layers = [("project", settings.workdir / ".claude" / "agents")]
+        if "user" in settings.setting_sources:
+            layers.append(("user", Path.home() / ".claude" / "agents"))
+        return layers
+
+    @app.get("/v1/agents", dependencies=[Depends(require_token)])
+    async def agents_list() -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for name, spec in _load_agents_raw(settings.agents_config).items():
+            seen.add(name)
+            out.append(
+                {
+                    "name": name,
+                    "description": str(spec.get("description") or "")[:200],
+                    "source": "config",
+                }
+            )
+        for layer, agents_dir in _agent_layers():
+            if not agents_dir.is_dir():
+                continue
+            for entry in sorted(agents_dir.glob("*.md")):
+                name = entry.stem
+                if name in seen:
+                    continue
+                try:
+                    text = entry.read_text(encoding="utf-8")
+                    stat = entry.stat()
+                except OSError:
+                    continue
+                seen.add(name)
+                out.append(
+                    {
+                        "name": name,
+                        "description": _skill_description(text),
+                        "modified": stat.st_mtime,
+                        "source": layer,
+                    }
+                )
+        return out
+
+    @app.get("/v1/agents/{name}", dependencies=[Depends(require_token)])
+    async def agent_detail(name: str) -> dict[str, Any]:
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="agent not found")
+        config_agents = _load_agents_raw(settings.agents_config)
+        if name in config_agents:
+            content = json.dumps(config_agents[name], ensure_ascii=False, indent=2)
+            return {"name": name, "content": content, "source": "config"}
+        for layer, agents_dir in _agent_layers():
+            path = agents_dir / f"{name}.md"
+            if path.is_file():
+                return {"name": name, "content": path.read_text(encoding="utf-8"), "source": layer}
+        raise HTTPException(status_code=404, detail="agent not found")
+
+    @app.put("/v1/agents/{name}", dependencies=[Depends(require_token)])
+    async def agent_write(name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=400, detail="invalid agent name")
+        if name in _load_agents_raw(settings.agents_config):
+            raise HTTPException(status_code=403, detail="config-pinned agents are edited in HOOKPROBE_AGENTS_CONFIG")
+        content = payload.get("content")
+        if not isinstance(content, str):
+            raise HTTPException(status_code=400, detail="content must be a string")
+        raw = content.encode("utf-8")
+        if len(raw) > _MEMORY_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"agent exceeds {_MEMORY_MAX_BYTES} bytes")
+        agents_dir = settings.workdir / ".claude" / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        path = agents_dir / f"{name}.md"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(raw)
+        tmp.replace(path)
+        return {"saved": True, "name": name, "source": "project", "bytes": len(raw)}
+
+    @app.delete("/v1/agents/{name}", dependencies=[Depends(require_token)])
+    async def agent_delete(name: str) -> dict[str, Any]:
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="agent not found")
+        path = settings.workdir / ".claude" / "agents" / f"{name}.md"
+        if not path.is_file():
+            if name in _load_agents_raw(settings.agents_config):
+                raise HTTPException(status_code=403, detail="config-pinned agents cannot be deleted here")
+            for layer, agents_dir in _agent_layers():
+                if layer != "project" and (agents_dir / f"{name}.md").is_file():
+                    raise HTTPException(status_code=403, detail="user-layer agents are read-only")
+            raise HTTPException(status_code=404, detail="agent not found")
+        path.unlink()
+        return {"deleted": True, "name": name}
+
+    # The system prompt append: the same editor story as the environment
+    # memory — a file on the volume, hot-read by every run.
+    @app.get("/v1/system-prompt", dependencies=[Depends(require_token)])
+    async def system_prompt_read() -> dict[str, Any]:
+        path = settings.system_prompt_append or (settings.workdir / "system-prompt.md")
+        content = ""
+        if path.is_file():
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"system prompt unreadable: {exc}") from exc
+        return {"content": content, "path": str(path)}
+
+    @app.put("/v1/system-prompt", dependencies=[Depends(require_token)])
+    async def system_prompt_write(payload: dict[str, Any]) -> dict[str, Any]:
+        content = payload.get("content")
+        if not isinstance(content, str):
+            raise HTTPException(status_code=400, detail="content must be a string")
+        raw = content.encode("utf-8")
+        if len(raw) > _MEMORY_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"system prompt exceeds {_MEMORY_MAX_BYTES} bytes")
+        path = settings.system_prompt_append or (settings.workdir / "system-prompt.md")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(raw)
+        tmp.replace(path)
+        return {"saved": True, "bytes": len(raw)}
+
+    @app.get("/v1/audit", dependencies=[Depends(require_token)])
+    async def audit_tail(limit: int = 200, session: str = "") -> dict[str, Any]:
+        """The flight recorder, newest last. Reads the most recent day files
+        only — the full history stays on disk for grep."""
+        limit = max(1, min(1000, limit))
+        audit_dir = settings.workdir / "audit"
+        entries: list[dict[str, Any]] = []
+        if audit_dir.is_dir():
+            for path in sorted(audit_dir.glob("*.jsonl"))[-3:]:
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue
+                    if session and session not in str(entry.get("session") or ""):
+                        continue
+                    entries.append(entry)
+        return {"entries": entries[-limit:], "count": len(entries[-limit:])}
+
+    @app.get("/v1/config", dependencies=[Depends(require_token)])
+    async def config_view() -> dict[str, Any]:
+        """The operational knobs, redacted: secret VALUES never appear —
+        booleans say whether they are set."""
+        prompt_path = settings.system_prompt_append or (settings.workdir / "system-prompt.md")
+        return {
+            "model": settings.model,
+            "max_turns": settings.max_turns,
+            "max_concurrent": settings.max_concurrent,
+            "default_timeout_seconds": settings.default_timeout_seconds,
+            "max_timeout_seconds": settings.max_timeout_seconds,
+            "workdir": str(settings.workdir),
+            "setting_sources": list(settings.setting_sources),
+            "skills_filter": settings.skills or None,
+            "escalate_levels": sorted(settings.escalate_levels),
+            "budget_usd": settings.budget_usd or None,
+            "budget_window_hours": settings.budget_window_hours,
+            "retention_days": settings.retention_days or None,
+            "system_prompt": {"path": str(prompt_path), "active": bool(_system_prompt_append(settings))},
+            "agents_config": str(settings.agents_config) if settings.agents_config else None,
+            "mcp_config": str(settings.mcp_config) if settings.mcp_config else None,
+            "return_url": settings.return_url or None,
+            "alarm_configured": bool(settings.alarm_url),
+            "event_secret_set": bool(settings.event_secret),
+            "return_secret_set": bool(settings.return_secret),
+            "token_required": bool(settings.token),
+        }
 
     @app.get("/v1/mcp", dependencies=[Depends(require_token)])
     async def mcp_servers() -> dict[str, Any]:
