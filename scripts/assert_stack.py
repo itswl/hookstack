@@ -82,9 +82,9 @@ def main() -> int:
 
     if sink:
         print("\ndownstream")
-        check("飞书卡片" in sink, "the sink received a rendered Feishu card")
+        check("feishu card" in sink, "the sink received a rendered Feishu card")
         check("[green]" in sink, "the recovery card is green")
-        check("已恢复" in sink, "the recovery card says so in its headline")
+        check("Resolved" in sink, "the recovery card says so in its headline")
         check("msgtype" in sink, "a second dialect was rendered from the same judgement")
 
         # Four judgements dressed for two channels (8), plus each front-door

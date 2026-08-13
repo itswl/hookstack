@@ -12,11 +12,11 @@ curl -s "$base/healthz"; echo; echo
 
 echo "── 1. unsigned test event (routed → sink)"
 curl -s "$base/hook/test" -H "content-type: application/json" \
-  -d '{"title":"try.sh 事件","message":"hello","level":"high"}' | python3 -m json.tool
+  -d '{"title":"try.sh event","message":"hello","level":"high"}' | python3 -m json.tool
 echo
 
 echo "── 2. signed grafana event"
-BODY='{"title":"磁盘将满","message":"/data 92%","state":"alerting"}'
+BODY='{"title":"Disk about to fill","message":"/data 92%","state":"alerting"}'
 SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$GRAFANA_HOOK_SECRET" | awk '{print $2}')
 curl -s "$base/hook/grafana" -H "content-type: application/json" -H "X-Hook-Signature: $SIG" -d "$BODY" | python3 -m json.tool
 echo
@@ -29,7 +29,7 @@ echo "── 4. silence grafana for 5 minutes, send again → silenced"
 curl -s "$base/silences" -H "X-Admin-Token: $HOOKRELAY_ADMIN_TOKEN" \
   -H "content-type: application/json" -d '{"source":"grafana","minutes":5,"note":"try.sh demo"}'
 echo
-BODY2='{"title":"另一条告警","message":"x","state":"alerting"}'
+BODY2='{"title":"Another alert","message":"x","state":"alerting"}'
 SIG2=$(printf '%s' "$BODY2" | openssl dgst -sha256 -hmac "$GRAFANA_HOOK_SECRET" | awk '{print $2}')
 curl -s "$base/hook/grafana" -H "content-type: application/json" -H "X-Hook-Signature: $SIG2" -d "$BODY2" | python3 -m json.tool
 echo

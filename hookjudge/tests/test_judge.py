@@ -41,7 +41,7 @@ def settings(**overrides: Any) -> Settings:
     )
 
 
-def event(title: str = "示例充值超限告警", body: str = "用户 42 充值 920 元", **kw: Any) -> Incoming:
+def event(title: str = "Single top-up over 500", body: str = "account 42 topped up 920", **kw: Any) -> Incoming:
     return Incoming.parse(
         {
             "meta": {"source": kw.pop("source", "grafana"), "correlation_id": kw.pop("correlation_id", "hr-86")},
@@ -109,10 +109,10 @@ async def test_ai_verdict_reads_the_model_and_prices_it():
         _completion(
             json.dumps(
                 {
-                    "summary": "9 分钟内 3 次大额充值,涉及两个用户",
+                    "summary": "three large top-ups in nine minutes across two accounts",
                     "importance": "high",
                     "event_type": "business",
-                    "impact_scope": "仅触发通知,未见服务影响",
+                    "impact_scope": "notification only, no service impact seen",
                 },
                 ensure_ascii=False,
             )
@@ -121,7 +121,7 @@ async def test_ai_verdict_reads_the_model_and_prices_it():
     verdict = await ai_verdict(client, settings(), event())
 
     assert verdict.route == ROUTE_AI
-    assert verdict.summary.startswith("9 分钟内")
+    assert verdict.summary.startswith("three large top-ups")
     assert verdict.importance == "high" and verdict.event_type == "business"
     # 900 in @ .001/1k + 120 out @ .002/1k
     assert verdict.cost == pytest.approx(0.00114)
@@ -131,22 +131,24 @@ async def test_ai_verdict_reads_the_model_and_prices_it():
     assert sent["url"] == "https://ai.example/v1/chat/completions"
     assert sent["headers"]["authorization"] == "Bearer k"
     prompt = sent["json"]["messages"][0]["content"]
-    assert "中文" in prompt, "the room speaks Chinese; the answer must too"
+    assert "strict JSON" in prompt, "the contract with the model is JSON only"
 
 
 async def test_json_wrapped_in_prose_or_fences_is_still_read():
     """Models add fences and preamble more often than anyone admits."""
-    fenced = '这是分析结果:\n```json\n{"summary":"磁盘将满","importance":"medium"}\n```\n希望有帮助'
+    fenced = (
+        'Here is the analysis:\n```json\n{"summary":"disk about to fill","importance":"medium"}\n```\nHope it helps'
+    )
     verdict = await ai_verdict(FakeAI(_completion(fenced)), settings(), event())
-    assert verdict.route == ROUTE_AI and verdict.summary == "磁盘将满"
+    assert verdict.route == ROUTE_AI and verdict.summary == "disk about to fill"
 
 
 @pytest.mark.parametrize(
     "client,reason",
     [
-        (FakeAI(raises=httpx.ConnectError("down")), "AI 调用失败"),
-        (FakeAI(_completion("完全不是 JSON 的一段话")), "AI 返回无法解析"),
-        (FakeAI(_completion(json.dumps({"importance": "high"}))), "AI 返回无法解析"),
+        (FakeAI(raises=httpx.ConnectError("down")), "AI call failed"),
+        (FakeAI(_completion("a sentence that is not JSON at all")), "AI answer unparseable"),
+        (FakeAI(_completion(json.dumps({"importance": "high"}))), "AI answer unparseable"),
     ],
 )
 async def test_every_model_failure_lands_on_the_rule_floor_and_says_so(client: FakeAI, reason: str):
@@ -159,7 +161,7 @@ async def test_every_model_failure_lands_on_the_rule_floor_and_says_so(client: F
 
 async def test_unconfigured_ai_does_not_pretend():
     verdict = await ai_verdict(FakeAI(), settings(ai_api_key=""), event())
-    assert verdict.route == ROUTE_RULE and verdict.degraded_reason == "AI 未配置"
+    assert verdict.route == ROUTE_RULE and verdict.degraded_reason == "AI not configured"
 
 
 async def test_an_unusable_importance_is_normalized_not_trusted():
@@ -175,11 +177,15 @@ async def test_an_unusable_importance_is_normalized_not_trusted():
 @pytest.mark.parametrize(
     "title,expected",
     [
-        ("示例充值超限告警", "high"),
-        ("用户提现异常", "high"),
-        ("[测试] 请忽略这条", "low"),
+        ("Single top-up over 500", "high"),
+        ("Withdrawal anomaly for one account", "high"),
+        ("[test] please ignore this one", "low"),
         ("staging deploy finished", "low"),
-        ("磁盘使用率 78%", "medium"),
+        ("Disk usage 78%", "medium"),
+        # Inbound alerts arrive in whatever language the monitoring stack
+        # speaks, so the matchers are bilingual and so is this coverage.
+        ("示例充值超限告警", "high"),
+        ("[测试] 请忽略这条", "low"),
     ],
 )
 def test_rule_floor_is_crude_but_defensible(title: str, expected: str):
@@ -187,36 +193,40 @@ def test_rule_floor_is_crude_but_defensible(title: str, expected: str):
 
 
 def test_rule_floor_infers_a_type_when_it_can():
-    # body="" on purpose: the default fixture body mentions 充值, and leaving
-    # it in makes every case look like business (it did).
-    assert rule_verdict(event(title="支付网关超时", body="")).event_type == "business"
-    assert rule_verdict(event(title="k8s 节点磁盘不足", body="")).event_type == "infrastructure"
-    assert rule_verdict(event(title="检测到越权访问", body="")).event_type == "security"
+    # body="" on purpose: the default fixture body mentions a top-up, and
+    # leaving it in makes every case look like business (it did).
+    assert rule_verdict(event(title="Payment gateway timeouts", body="")).event_type == "business"
+    assert rule_verdict(event(title="k8s node disk low", body="")).event_type == "infrastructure"
+    assert rule_verdict(event(title="privilege escalation detected", body="")).event_type == "security"
     # And the body counts too — type is about the whole alert, not its title.
-    assert rule_verdict(event(title="告警", body="证书 7 天后过期")).event_type == "infrastructure"
+    assert rule_verdict(event(title="alert", body="certificate expires in 7 days")).event_type == "infrastructure"
+    # Non-English inbound text classifies the same way.
+    assert rule_verdict(event(title="k8s 节点磁盘不足", body="")).event_type == "infrastructure"
 
 
 # ── reuse and recovery ───────────────────────────────────────────────────────
 
 
 def test_reuse_serves_the_prior_answer_without_contradicting_it():
-    prior = {"summary": "原始判断", "importance": "high", "event_type": "business", "impact_scope": "x"}
+    prior = {"summary": "the original verdict", "importance": "high", "event_type": "business", "impact_scope": "x"}
     again = reuse_verdict(prior, recovery=False)
-    assert again.route == ROUTE_REUSE and again.summary == "原始判断" and again.cost == 0
+    assert again.route == ROUTE_REUSE and again.summary == "the original verdict" and again.cost == 0
 
     ended = reuse_verdict(prior, recovery=True)
     assert ended.route == ROUTE_RECOVERY
     assert ended.importance == "high", "a recovery keeps the importance its firing had"
-    assert ended.summary == "原始判断", "a recovery that disagrees with its firing reads as a second incident"
+    assert ended.summary == "the original verdict", (
+        "a recovery that disagrees with its firing reads as a second incident"
+    )
 
 
 @pytest.mark.parametrize(
     "title,expected",
     [
-        ("[RESOLVED] 示例充值超限告警", True),
-        ("[FIRING:1] 示例充值超限告警", False),
-        ("磁盘告警已恢复", True),
-        ("okhttp 连接超时", False),
+        ("[RESOLVED] Single top-up over 500", True),
+        ("[FIRING:1] Single top-up over 500", False),
+        ("Disk alert 已恢复", True),  # a Chinese marker on an inbound title
+        ("okhttp connect timeout", False),
         ("status: OK", True),
     ],
 )
@@ -271,24 +281,24 @@ def test_the_pipes_real_normalized_wire_shape_parses():
     looks like excellent cost savings rather than a broken parser.
     """
     wire = {
-        "body": "用户 42 充值 920 元",
+        "body": "account 42 topped up 920",
         "event_id": 86,
         "fields": {"env": "prod"},
         "level": "high",
         "received_at": 1786000000.0,
         "source": "grafana",
-        "title": "示例充值超限告警",
+        "title": "Single top-up over 500",
     }
     parsed = Incoming.parse(wire, now=1.0)
     assert parsed.source == "grafana"
-    assert parsed.title == "示例充值超限告警"
-    assert parsed.body == "用户 42 充值 920 元"
+    assert parsed.title == "Single top-up over 500"
+    assert parsed.body == "account 42 topped up 920"
     assert parsed.level == "high"
     assert parsed.fields == {"env": "prod"}
     assert parsed.received_at == 1786000000.0
-    assert parsed.identity == "grafana|示例充值超限告警|env=prod"
+    assert parsed.identity == "grafana|Single top-up over 500|env=prod"
 
-    other = Incoming.parse({**wire, "event_id": 87, "title": "磁盘使用率 91%"}, now=1.0)
+    other = Incoming.parse({**wire, "event_id": 87, "title": "Disk usage 91%"}, now=1.0)
     assert other.identity != parsed.identity, "two conditions must not share one identity"
 
 
@@ -326,21 +336,23 @@ def test_the_wrapped_envelope_still_parses():
 @pytest.mark.parametrize(
     "decorated",
     [
-        "[RESOLVED] 磁盘使用率 93%",
-        "[已恢复] 磁盘使用率 93%",
-        "【恢复】磁盘使用率 93%",
-        "(recovered) 磁盘使用率 93%",
-        "[OK] 磁盘使用率 93%",
-        "已恢复: 磁盘使用率 93%",
-        "磁盘使用率 93% 已恢复",
-        "磁盘使用率 93% - resolved",
+        "[RESOLVED] Disk usage 93%",
+        "(recovered) Disk usage 93%",
+        "[OK] Disk usage 93%",
+        "resolved: Disk usage 93%",
+        "Disk usage 93% - resolved",
+        # The same decorations as monitoring stacks that speak Chinese.
+        "[已恢复] Disk usage 93%",
+        "【恢复】Disk usage 93%",
+        "已恢复: Disk usage 93%",
+        "Disk usage 93% 已恢复",
     ],
 )
 def test_a_recovery_and_its_firing_are_one_condition(decorated: str):
     """A recovery is the firing alert's title plus decoration. If the marker
     stays in the identity the pair has two identities, and the recovery can
     never find the alert it recovered from."""
-    firing = Incoming.parse({"source": "s", "title": "磁盘使用率 93%"}, now=1.0)
+    firing = Incoming.parse({"source": "s", "title": "Disk usage 93%"}, now=1.0)
     ended = Incoming.parse({"source": "s", "title": decorated}, now=1.0)
     assert ended.is_recovery, decorated
     assert ended.identity == firing.identity, f"{decorated!r} did not normalize to its firing"
@@ -349,8 +361,8 @@ def test_a_recovery_and_its_firing_are_one_condition(decorated: str):
 def test_normalizing_does_not_merge_genuinely_different_alerts():
     """The marker strip must not blur conditions together — that would be the
     identity collapse in a smaller costume."""
-    a = Incoming.parse({"source": "s", "title": "[已恢复] 磁盘使用率 93%"}, now=1.0)
-    b = Incoming.parse({"source": "s", "title": "[已恢复] 内存使用率 93%"}, now=1.0)
+    a = Incoming.parse({"source": "s", "title": "[RESOLVED] Disk usage 93%"}, now=1.0)
+    b = Incoming.parse({"source": "s", "title": "[RESOLVED] Memory usage 93%"}, now=1.0)
     assert a.identity != b.identity
 
     # Fields still separate two instances of the same alert text.
@@ -362,14 +374,14 @@ def test_normalizing_does_not_merge_genuinely_different_alerts():
 def test_a_title_that_is_only_a_marker_keeps_something_to_identify_it():
     """Stripping must never produce an empty identity — that is the collapse
     this normalization is meant to avoid, arrived at from the other side."""
-    only = Incoming.parse({"source": "s", "title": "[已恢复]"}, now=1.0)
+    only = Incoming.parse({"source": "s", "title": "[RESOLVED]"}, now=1.0)
     assert only.identity != "s|"
-    assert "已恢复" in only.identity
+    assert "RESOLVED" in only.identity
 
 
 def test_ok_inside_a_word_is_not_a_recovery_marker():
     """okhttp timeouts are not recoveries, and must not be normalized as one."""
-    event = Incoming.parse({"source": "s", "title": "okhttp 连接超时"}, now=1.0)
+    event = Incoming.parse({"source": "s", "title": "okhttp connect timeout"}, now=1.0)
     assert not event.is_recovery
     assert "okhttp" in event.identity
 
@@ -377,18 +389,18 @@ def test_ok_inside_a_word_is_not_a_recovery_marker():
 def test_the_result_names_the_condition_and_states_its_state_separately():
     """meta.alert_name is the condition; meta.is_recovery is its state.
 
-    The pipe renders the state as a prefix ("✅ 已恢复 · <name>"), so sending
+    The pipe renders the state as a prefix ("✅ Resolved · <name>"), so sending
     the raw title made a real recovery card read
-    "✅ 已恢复 · [已恢复] 支付网关 5xx 比例 8%" — the same fact twice. One fact,
+    "✅ Resolved · [RESOLVED] Payment gateway 5xx 8%" — the same fact twice. One fact,
     one field.
     """
-    ended = Incoming.parse({"source": "s", "title": "[已恢复] 支付网关 5xx 比例 8%"}, now=1.0)
+    ended = Incoming.parse({"source": "s", "title": "[RESOLVED] Payment gateway 5xx 8%"}, now=1.0)
     payload = Outgoing(incoming=ended, verdict=rule_verdict(ended)).payload()
 
-    assert payload["meta"]["alert_name"] == "支付网关 5xx 比例 8%"
+    assert payload["meta"]["alert_name"] == "Payment gateway 5xx 8%"
     assert payload["meta"]["is_recovery"] is True
 
-    firing = Incoming.parse({"source": "s", "title": "支付网关 5xx 比例 8%"}, now=1.0)
+    firing = Incoming.parse({"source": "s", "title": "Payment gateway 5xx 8%"}, now=1.0)
     firing_payload = Outgoing(incoming=firing, verdict=rule_verdict(firing)).payload()
     assert firing_payload["meta"]["alert_name"] == payload["meta"]["alert_name"], (
         "a condition and its recovery must present the same name to the pipe"
@@ -410,8 +422,8 @@ def _from_pipe(**over):
     """
     base = {
         "source": "alertmanager",
-        "title": "支付网关 5xx 比例 8.1%",
-        "body": "gateway-2 近 5 分钟 5xx 8.1%",
+        "title": "Payment gateway 5xx rate 8.1%",
+        "body": "gateway-2 5xx at 8.1% over the last 5 minutes",
         "level": "high",
         "fields": dict(_AM_FIELDS, status="firing"),
     }
@@ -420,13 +432,13 @@ def _from_pipe(**over):
 
 
 def test_alertmanager_resolved_is_a_recovery_even_with_no_marker_in_its_text():
-    """Alertmanager says `status: resolved`, not "已恢复".
+    """Alertmanager says `status: resolved` and nothing else.
 
-    Its resolved body reads "已回落至 0.2%" — no recovery word anywhere in the
+    Its resolved body reads "fell back to 0.2%" — no recovery word anywhere in the
     title, body, or level (which the pipe maps to `info`). The fact lives only
     in `status`, so the pipe must carry it as a field and this must read it.
     """
-    resolved = _from_pipe(body="已回落至 0.2%", level="info", fields=dict(_AM_FIELDS, status="resolved"))
+    resolved = _from_pipe(body="fell back to 0.2%", level="info", fields=dict(_AM_FIELDS, status="resolved"))
     assert resolved.is_recovery, "an Alertmanager resolve must not look like a new alert"
 
 
@@ -435,11 +447,11 @@ def test_a_state_field_must_not_split_one_condition_in_two():
 
     Carrying `status` so is_recovery can see it also puts it in the identity,
     which made status=firing and status=resolved two different conditions —
-    the same defect as leaving [已恢复] in the title, through another door. So
+    the same defect as leaving [RESOLVED] in the title, through another door. So
     identity excludes state the way it excludes timestamps.
     """
     firing = _from_pipe()
-    resolved = _from_pipe(body="已回落至 0.2%", level="info", fields=dict(_AM_FIELDS, status="resolved"))
+    resolved = _from_pipe(body="fell back to 0.2%", level="info", fields=dict(_AM_FIELDS, status="resolved"))
     assert firing.identity == resolved.identity
     assert "status" not in firing.identity
 

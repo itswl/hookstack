@@ -85,7 +85,7 @@ async def test_alarm_sends_once_then_throttles_and_folds_the_count() -> None:
     # throttling never hides the scale.
     await alarm.dead_letter(client, channel="feishu-ops", event_id=9, error="http 500", now=1700.0)
     assert len(client.posts) == 2
-    assert "另有 4 条" in client.posts[1]["json"]["content"]["text"]
+    assert "4 more dead letters" in client.posts[1]["json"]["content"]["text"]
 
 
 @pytest.mark.asyncio

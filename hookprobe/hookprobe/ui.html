@@ -588,9 +588,10 @@ async function renderAgents() {
       return;
     }
     $("#turns").innerHTML = `
-      <div class="mem-tip">主 agent 在调查中用 Task 工具把子任务委派给这些角色 — 每个角色是一个
-      .claude/agents/*.md 文件（frontmatter 定 name/description/tools，正文就是它的提示词）。
-      点开可读可改可删，改动下一次运行生效；默认三个角色是首启播种的示例，照着抄一个就是新角色。</div>` +
+      <div class="mem-tip">During an investigation the main agent delegates subtasks to these
+      roles through the Task tool. Each role is one .claude/agents/*.md file — frontmatter sets
+      name/description/tools, the body is its prompt. Open one to read, edit or delete it; changes
+      apply to the next run. The three defaults are seeded examples: copy one to make your own.</div>` +
       agents.map((a) => `
       <div class="skill" data-name="${esc(a.name)}">
         <div class="skill-name">${esc(a.name)}<span class="skill-layer ${esc(a.source)}">${esc(a.source)}</span></div>
@@ -766,81 +767,92 @@ async function openAudit(filter) {
 // ── help: one page for a new operator or an AI driving the API ──────────
 function openHelp() {
   leaveSessions("help");
-  $("#meta").textContent = "help · hookprobe 是什么、怎么用 · 人和 AI 都从这页开始";
+  $("#meta").textContent = "help · what hookprobe is and how to use it · start here, human or AI";
   const base = "http://hookprobe:8088";
   $("#turns").innerHTML = `<div class="help">
-<h2>这是什么</h2>
-<p>hookprobe 是一个<b>只读的告警调查员</b>：收到一条值得深挖的告警，就跑一次带工具的
-agent 调查（查日志、查指标、翻案卷、必要时开浏览器），产出一份结论先行的中文报告。
-它通常接在 hookstack 家族里 — 管道(hookrelay)把重要告警复制过来，调查完的报告经管道
-送回飞书/钉钉等渠道；也可以被任何 OpenClaw 方言的调用方直接驱动。</p>
+<h2>What this is</h2>
+<p>hookprobe is a <b>read-only alert investigator</b>: given an alert worth digging into, it runs
+one tool-using agent investigation (logs, metrics, its own case files, a browser when needed) and
+produces a short report with the conclusion first. It normally sits inside the hookstack family —
+the pipe (hookrelay) copies important alerts over, and the finished report travels back through
+the pipe to the same channels as the verdict — but any OpenClaw-dialect caller can drive it
+directly.</p>
 
-<h2>三步上手</h2>
-<p>1. 右上角粘贴 <b>bearer token</b>（存 localStorage，只需一次）。<br>
-2. 点 <b>+ new session</b>，用一句话描述要调查什么（例：「对本容器做一次健康巡检，结论先行」）。<br>
-3. 运行中可看实时过程流、随时 <b>Stop</b>；完成后底部输入框就是<b>追问</b> — 同一引擎会话续跑，第一轮的证据全都还在。</p>
+<h2>Three steps to start</h2>
+<p>1. Paste your <b>bearer token</b> top-right (kept in localStorage, once per browser).<br>
+2. Hit <b>+ new session</b> and describe the investigation in a sentence (e.g. "run a read-only
+health patrol of this container, conclusion first").<br>
+3. Watch the live process feed while it runs and <b>Stop</b> it any time; when it finishes, the box
+at the bottom is a <b>follow-up</b> — the same engine session resumes with all of the first
+round's evidence intact.</p>
 
-<h2>七个视图</h2>
+<h2>The seven views</h2>
 <table>
-<tr><th>视图</th><th>看什么 / 改什么</th></tr>
-<tr><td><b>sessions</b></td><td>所有调查：逐轮对话、账单行（模型/token/费用/耗时）、过程流回放；relay 来源的会话带回传徽章。侧栏可过滤</td></tr>
-<tr><td><b>skills</b></td><td>诊断 runbook（SKILL.md）。分层：project=卷上可编辑，user=宿主库只读；保存永远落 project 层（写时复制）。agent 沉淀的经验也在这里</td></tr>
-<tr><td><b>agents</b></td><td>子代理角色（.claude/agents/*.md）。主 agent 用 Task 工具把子任务委派给它们；默认三个播种示例照着抄就是新角色</td></tr>
-<tr><td><b>memory</b></td><td>环境记忆（CLAUDE.md）：拓扑、已知误报、命名规范 — 每次调查开工前注入</td></tr>
-<tr><td><b>prompt</b></td><td>系统提示词追加：运维方法论，保存后下一次运行即生效</td></tr>
-<tr><td><b>system</b></td><td>运行时全景：模型/预算/保留/层/各配置路径（密钥只显 set/unset）+ MCP servers + 健康计数</td></tr>
-<tr><td><b>audit</b></td><td>飞行记录仪：每次工具调用一行（含子代理），按会话过滤，8 秒自动跟随</td></tr>
+<tr><th>View</th><th>What it shows / what you can change</th></tr>
+<tr><td><b>sessions</b></td><td>Every investigation: turn by turn, the bill line (model, tokens, cost, duration), the process feed replayed. Relay-born sessions carry their return outcome. The sidebar filters.</td></tr>
+<tr><td><b>skills</b></td><td>Diagnostic runbooks (SKILL.md), layer-tagged: project = on the volume and editable, user = a host library, read-only. Saving always lands in the project layer (copy-on-write). What the agent distills lands here too.</td></tr>
+<tr><td><b>agents</b></td><td>Subagent roles (.claude/agents/*.md). The main agent delegates to them through the Task tool; copy one of the three seeded examples to make your own.</td></tr>
+<tr><td><b>memory</b></td><td>Environment memory (CLAUDE.md): topology, known false alarms, conventions — injected at the start of every investigation.</td></tr>
+<tr><td><b>prompt</b></td><td>The system-prompt append: your investigation methodology. Saved edits apply to the next run.</td></tr>
+<tr><td><b>system</b></td><td>Runtime panorama: model, budget, retention, layers, every config path (secrets as set/unset) plus MCP servers and health counters.</td></tr>
+<tr><td><b>audit</b></td><td>The flight recorder: one line per tool call (subagents included), filterable by session, following every 8s.</td></tr>
 </table>
 
-<h2>API 速查（给 AI 或脚本）</h2>
-<p class="dim">鉴权：所有请求带 <code>Authorization: Bearer &lt;token&gt;</code>。轮询语义：/final 返回 202=还在跑，200 时 <code>isFinal</code> 恒为 true — 读到即可信，不需要稳定性判断。<br>
-示例用<b>家族容器网络内</b>的地址 <code>http://hookprobe:8088</code>；在宿主机上把它换成回环映射 <code>http://127.0.0.1:8088</code>。</p>
-<pre># 发起一次调查（OpenClaw 兼容合同）
+<h2>API quick reference (for an AI or a script)</h2>
+<p class="dim">Auth: every request carries <code>Authorization: Bearer &lt;token&gt;</code>. Polling contract:
+/final answers 202 while running; on a 200 <code>isFinal</code> is always true — trust the first
+confirming read, no stability heuristics needed.<br>
+The examples use the <b>docker-network</b> address <code>http://hookprobe:8088</code>; from the host,
+use the loopback mapping <code>http://127.0.0.1:8088</code>.</p>
+<pre># start an investigation (OpenClaw-compatible contract)
 curl -X POST ${base}/hooks/agent -H "Authorization: Bearer $TOKEN" \\
   -H "Content-Type: application/json" \\
-  -d '{"message":"调查内容…","sessionKey":"my:task:1","timeoutSeconds":900}'
+  -d '{"message":"what to investigate…","sessionKey":"my:task:1","timeoutSeconds":900}'
 
-# 轮询结果（202=进行中；200 => {"isFinal":true,"text":"报告全文"}）
+# poll for the result (202 = running; 200 => {"isFinal":true,"text":"the full report"})
 curl ${base}/sessions/my:task:1/final -H "Authorization: Bearer $TOKEN"
 
-# 追问同一会话 / 停止在跑的轮次
-curl -X POST ${base}/sessions/my:task:1/continue -H ... -d '{"message":"补充问题"}'
+# follow up in the same session / stop the turn in flight
+curl -X POST ${base}/sessions/my:task:1/continue -H ... -d '{"message":"a follow-up question"}'
 curl -X POST ${base}/sessions/my:task:1/stop -H ...</pre>
 <table>
-<tr><th>管理端点</th><th>用途</th></tr>
-<tr><td><code>GET /v1/runs</code> · <code>GET /v1/runs/{key}</code></td><td>会话列表 / 完整运行记录（含事件流与账单）</td></tr>
-<tr><td><code>GET/PUT/DELETE /v1/skills[/{name}]</code></td><td>技能浏览与写时复制编辑</td></tr>
-<tr><td><code>GET/PUT/DELETE /v1/agents[/{name}]</code></td><td>子代理角色，同上语义</td></tr>
-<tr><td><code>GET/PUT /v1/memory</code> · <code>/v1/system-prompt</code></td><td>环境记忆 / 方法论，保存即热生效</td></tr>
-<tr><td><code>GET /v1/mcp</code> · <code>/v1/config</code> · <code>/v1/budget</code> · <code>/v1/audit</code></td><td>MCP 清单（env 只给键名）/ 配置快照 / 预算账 / 审计尾部</td></tr>
-<tr><td><code>GET /healthz</code>（免鉴权）</td><td>存活 + 并发/排队/回传失败计数，给外部监控轮询</td></tr>
+<tr><th>Management endpoint</th><th>Purpose</th></tr>
+<tr><td><code>GET /v1/runs</code> · <code>GET /v1/runs/{key}</code></td><td>Session list / full run record (events and bill included)</td></tr>
+<tr><td><code>GET/PUT/DELETE /v1/skills[/{name}]</code></td><td>Browse and copy-on-write edit the skills</td></tr>
+<tr><td><code>GET/PUT/DELETE /v1/agents[/{name}]</code></td><td>Subagent roles, same semantics</td></tr>
+<tr><td><code>GET/PUT /v1/memory</code> · <code>/v1/system-prompt</code></td><td>Environment memory / methodology — saved edits are hot</td></tr>
+<tr><td><code>GET /v1/mcp</code> · <code>/v1/config</code> · <code>/v1/budget</code> · <code>/v1/audit</code></td><td>MCP servers (env key names only) / config snapshot / budget arithmetic / audit tail</td></tr>
+<tr><td><code>GET /healthz</code> (no auth)</td><td>Liveness plus running/queued/return-failure counters, for an external monitor</td></tr>
 </table>
 
-<h2>文件地图（/data 卷 = 全部经验，备份它就够）</h2>
+<h2>File map (the /data volume is the whole memory — back that up)</h2>
 <table>
-<tr><th>路径</th><th>是什么</th></tr>
-<tr><td><code>results/*.json</code></td><td>案卷：每次调查全记录 — 也是情节记忆（新调查会先 grep 同类旧案）</td></tr>
-<tr><td><code>.claude/skills/</code> · <code>.claude/agents/</code></td><td>技能与角色（project 层）。宿主库以只读挂载出现在 user 层</td></tr>
-<tr><td><code>CLAUDE.md</code> · <code>system-prompt.md</code> · <code>mcp.json</code></td><td>环境记忆 / 方法论 / MCP 配置 — 三个都每次运行现读</td></tr>
-<tr><td><code>audit/*.jsonl</code></td><td>审计账本；<code>home/</code> 下是可续跑的会话 transcript</td></tr>
+<tr><th>Path</th><th>What it is</th></tr>
+<tr><td><code>results/*.json</code></td><td>Case files: the full record of every investigation — and the episodic memory a new investigation greps first</td></tr>
+<tr><td><code>.claude/skills/</code> · <code>.claude/agents/</code></td><td>Skills and roles (project layer). A host library appears as the read-only user layer.</td></tr>
+<tr><td><code>CLAUDE.md</code> · <code>system-prompt.md</code> · <code>mcp.json</code></td><td>Environment memory / methodology / MCP config — all three read fresh at every run</td></tr>
+<tr><td><code>audit/*.jsonl</code></td><td>The audit ledger; <code>home/</code> holds the resumable session transcripts</td></tr>
 </table>
 
-<h2>安全模型（为什么敢让它自主跑）</h2>
-<p>只读三层：<b>只读凭据</b>（真正的边界，挂进容器的都是查询型身份）→ <b>bash 守卫</b>
-（拦截 kubectl/systemctl/terraform 等的变更动词，子代理内同样生效）→ <b>一次性容器</b>（非 root）。
-外加：<b>预算熔断</b>（窗口花费达上限后升级门拒收新调查，拒绝也发卡片说明）、<b>幂等</b>
-（同一告警的风暴只养一次调查）、<b>失败有交代</b>（超时/崩溃/重启/熔断都会落一份报告走完闭环）。</p>
+<h2>Safety model (why it can run unattended)</h2>
+<p>Read-only in three layers: <b>read-only credentials</b> (the real boundary — only query-grade
+identities are mounted) → <b>the bash guard</b> (denies mutating verbs of kubectl/systemctl/
+terraform and friends, inside subagents too) → <b>a disposable container</b> (non-root). On top of
+that: the <b>budget breaker</b> (once the window's spend hits the ceiling the event door refuses new
+investigations — and says so on a card), <b>idempotency</b> (an alert storm funds one investigation,
+not N), and <b>failure completes the loop</b> (timeout, crash, restart or refusal all return a
+report).</p>
 
-<h2>常见任务菜谱</h2>
+<h2>Recipes</h2>
 <ul>
-<li><b>装一个市场技能</b>：下载 ZIP 解压进 <code>/data/.claude/skills/&lt;名&gt;/</code>（删掉 __MACOSX），下次运行自动加载 — 装之前先读它，技能会指挥持有你凭据的 agent</li>
-<li><b>加一个角色</b>：agents 视图打开任一默认角色 → 照抄改名 → 保存；或直接放 .md 文件</li>
-<li><b>接一个 MCP</b>：编辑 <code>/data/mcp.json</code>（支持市场 config.json 方言，enabled:false 会被跳过），system 页确认，下次运行生效</li>
-<li><b>控制会话看到哪些技能</b>：<code>HOOKPROBE_SKILLS</code> 白名单（大库防淹）；层的开关是 <code>HOOKPROBE_SETTING_SOURCES</code></li>
-<li><b>查"它到底干了什么"</b>：audit 视图按会话过滤；单次运行的过程流在 sessions 里点开 process · N steps</li>
-<li><b>定时巡检</b>：宿主 crontab 定时往管道前门 POST 一条「巡检」事件即可 — 升级门会把它变成一次主动调查，报告走同样的渠道；每次巡检都是新案卷，且会引用上一次的发现</li>
+<li><b>Install a marketplace skill</b>: unzip it into <code>/data/.claude/skills/&lt;name&gt;/</code> (drop __MACOSX); the next run loads it — read it first, a skill instructs an agent holding your credentials</li>
+<li><b>Add a role</b>: open any seeded role in the agents view → copy, rename, save; or drop a .md file in place</li>
+<li><b>Wire an MCP server</b>: edit <code>/data/mcp.json</code> (the marketplace config.json dialect works, enabled:false is skipped), confirm on the system view, next run picks it up</li>
+<li><b>Control which skills a session sees</b>: the <code>HOOKPROBE_SKILLS</code> allowlist (a big library would otherwise flood the context); layers are switched with <code>HOOKPROBE_SETTING_SOURCES</code></li>
+<li><b>Ask "what did it actually do"</b>: the audit view, filtered by session; a single run's feed is under process · N steps in sessions</li>
+<li><b>Scheduled patrols</b>: a host crontab that POSTs a "patrol due" event to the pipe's front door is enough — the escalation door turns it into a proactive investigation whose report travels the usual channels. Each patrol is its own case file, and cites what the last one found.</li>
 </ul>
-<p class="dim">更完整的设计与部署说明见仓库 hookprobe/README.md 与根目录 README.zh.md。</p>
+<p class="dim">Fuller design and deployment notes live in hookprobe/README.md and the repository OVERVIEW.md.</p>
 </div>`;
   $("#turns").scrollTop = 0;
 }
