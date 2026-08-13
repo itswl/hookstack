@@ -220,9 +220,17 @@ From there you can read any investigation turn by turn (JSON reports
 pretty-print, Markdown answers render, long alert payloads collapse), watch a
 running turn's live process feed (tool calls, narration, the plan checklist),
 **Stop** a runaway turn, send follow-ups into a finished session, or hit
-**+ new session** for a free-form investigation. **skills** browses the
-distilled runbooks; **memory** edits the environment memory (CLAUDE.md) that
-every investigation starts from.
+**+ new session** for a free-form investigation. The sidebar filters by
+key/title and flags relay-born sessions with their return outcome.
+
+Six more views cover the rest of the surface: **skills** browses and edits
+the runbooks (layer-tagged, copy-on-write); **agents** does the same for
+subagent roles (config-pinned ones shown read-only); **memory** edits the
+environment memory (CLAUDE.md); **prompt** edits the system-prompt append —
+both hot-read by the next run; **system** shows the runtime knobs (secrets
+as set/unset, never values), the MCP servers the next run would load, and
+the health counters; **audit** follows the flight recorder, filterable by
+session.
 
 ## Follow-up exploration — reuse the session
 

@@ -246,3 +246,83 @@ def test_mcp_endpoint_redacts_env_values(tmp_path) -> None:
         assert body["servers"]["prom"]["command"] == "npx"
         assert body["servers"]["prom"]["env_keys"] == ["PROM_TOKEN"]
         assert "hunter2" not in json.dumps(body), "env values are secrets and never leave the file"
+
+
+def _ops_client(tmp_path, monkeypatch, **overrides):
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from tests.helpers import FakeEngine
+
+    workdir = tmp_path / "wd"
+    workdir.mkdir(exist_ok=True)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    settings = make_settings(workdir, token=TOKEN, **overrides)
+    return TestClient(create_app(settings, RunService(settings, FakeEngine(), RunStore(workdir / "r")))), workdir, home
+
+
+def test_agents_endpoints_mirror_the_skills_story(tmp_path, monkeypatch) -> None:
+    agents_config = tmp_path / "agents.json"
+    agents_config.write_text(json.dumps({"pinned": {"description": "配置钉死的角色", "prompt": "p"}}))
+    client, workdir, home = _ops_client(
+        tmp_path, monkeypatch, setting_sources=("user", "project"), agents_config=agents_config
+    )
+    host_dir = home / ".claude" / "agents"
+    host_dir.mkdir(parents=True)
+    (host_dir / "host-role.md").write_text("---\nname: host-role\ndescription: from host\n---\nhost prompt\n")
+
+    with client:
+        listing = {a["name"]: a["source"] for a in client.get("/v1/agents", headers=AUTH).json()}
+        assert listing == {"pinned": "config", "host-role": "user"}
+
+        assert client.put("/v1/agents/pinned", json={"content": "x"}, headers=AUTH).status_code == 403
+        assert client.delete("/v1/agents/host-role", headers=AUTH).status_code == 403
+
+        saved = client.put(
+            "/v1/agents/host-role",
+            json={"content": "---\nname: host-role\ndescription: tuned\n---\nlocal prompt\n"},
+            headers=AUTH,
+        ).json()
+        assert saved["source"] == "project"
+        assert client.get("/v1/agents/host-role", headers=AUTH).json()["source"] == "project"
+        assert "from host" in (host_dir / "host-role.md").read_text()
+
+        assert client.delete("/v1/agents/host-role", headers=AUTH).json()["deleted"] is True
+        assert client.get("/v1/agents/host-role", headers=AUTH).json()["source"] == "user"
+
+
+def test_system_prompt_roundtrip_and_config_redaction(tmp_path, monkeypatch) -> None:
+    client, workdir, _ = _ops_client(
+        tmp_path, monkeypatch, alarm_url="https://open.feishu.cn/bot/hook/SECRET", event_secret="s1"
+    )
+    with client:
+        assert client.get("/v1/system-prompt", headers=AUTH).json()["content"] == ""
+        client.put("/v1/system-prompt", json={"content": "先取数再下结论。"}, headers=AUTH)
+        assert (workdir / "system-prompt.md").read_text() == "先取数再下结论。"
+
+        config = client.get("/v1/config", headers=AUTH).json()
+        assert config["system_prompt"]["active"] is True
+        assert config["alarm_configured"] is True and config["event_secret_set"] is True
+        assert "SECRET" not in json.dumps(config), "secret-bearing URLs never leave the settings"
+
+
+def test_audit_tail_filters_by_session(tmp_path, monkeypatch) -> None:
+    client, workdir, _ = _ops_client(tmp_path, monkeypatch)
+    audit = workdir / "audit"
+    audit.mkdir()
+    lines = [
+        {"ts": 1.0, "session": "probe:inbound:1", "tool": "Bash", "detail": "df", "error": False},
+        {"ts": 2.0, "session": "web:x", "tool": "Read", "detail": "/etc/hosts", "error": False},
+        {"ts": 3.0, "session": "probe:inbound:1", "tool": "Grep", "detail": "err", "error": True},
+    ]
+    (audit / "2026-08-13.jsonl").write_text("\n".join(json.dumps(x) for x in lines))
+    with client:
+        everything = client.get("/v1/audit", headers=AUTH).json()
+        assert everything["count"] == 3
+        filtered = client.get("/v1/audit?session=inbound:1", headers=AUTH).json()
+        assert [e["tool"] for e in filtered["entries"]] == ["Bash", "Grep"]
+        capped = client.get("/v1/audit?limit=1", headers=AUTH).json()
+        assert capped["count"] == 1 and capped["entries"][0]["ts"] == 3.0, "newest last, oldest dropped"
