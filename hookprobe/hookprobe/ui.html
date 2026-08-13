@@ -64,6 +64,16 @@ details.proc-past summary{cursor:pointer;color:var(--dim);font-size:12px}
 .skill-desc{font-size:13px;margin-top:3px}
 .skill-meta{color:var(--dim);font-size:11px;margin-top:5px;font-family:var(--mono)}
 .skill-back{color:var(--accent);cursor:pointer;margin-bottom:10px;font-size:13px}
+.skill-layer{font-size:10px;border:1px solid var(--line);border-radius:8px;padding:1px 6px;color:var(--dim);margin-left:8px;font-family:var(--mono)}
+.skill-layer.user{color:var(--accent);border-color:var(--accent)}
+.skill-bar{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+.skill-bar .spacer{flex:1}
+.skill-bar .skill-back{margin-bottom:0}
+.skill-note{color:var(--dim);font-size:11px}
+button.danger{color:var(--red);border-color:var(--red)}
+#skillSrc{width:100%;min-height:420px;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  color:var(--text);font-family:var(--mono);font-size:12.5px;padding:12px;line-height:1.55}
+#skillSrc:focus{outline:none;border-color:var(--accent)}
 .ev-todos{font-family:inherit;padding:4px 0}
 .ev-todos div{padding:1px 0;color:var(--text);font-size:12.5px}
 .ev-todos .todo-done{color:var(--dim);text-decoration:line-through}
@@ -442,7 +452,9 @@ async function openMemory() {
 async function renderSkills() {
   try {
     const skills = await (await api("/v1/skills")).json();
-    $("#meta").textContent = `distilled runbooks · ${skills.length} skill${skills.length === 1 ? "" : "s"} · {workdir}/.claude/skills`;
+    const proj = skills.filter((s) => s.layer === "project").length;
+    const host = skills.length - proj;
+    $("#meta").textContent = `runbooks · ${proj} project${host ? ` + ${host} host (read-only)` : ""} · {workdir}/.claude/skills`;
     if (!skills.length) {
       $("#turns").innerHTML =
         '<div class="empty">no skills yet — when an investigation verifies a reusable diagnostic path, it distills a SKILL.md runbook here, and later runs load it automatically</div>';
@@ -450,7 +462,7 @@ async function renderSkills() {
     }
     $("#turns").innerHTML = skills.map((s) => `
       <div class="skill" data-name="${esc(s.name)}">
-        <div class="skill-name">${esc(s.name)}</div>
+        <div class="skill-name">${esc(s.name)}<span class="skill-layer ${esc(s.layer || "project")}">${esc(s.layer || "project")}</span></div>
         <div class="skill-desc">${esc(s.description || "(no description)")}</div>
         <div class="skill-meta">${esc((s.files || []).join("  "))} · ${fmtTime(s.modified)}</div>
       </div>`).join("");
@@ -463,11 +475,47 @@ async function renderSkill(name) {
   const r = await api("/v1/skills/" + encodeURIComponent(name));
   if (!r.ok) { $("#hint").textContent = "skill not found"; return; }
   const s = await r.json();
-  $("#meta").textContent = `skill · ${name}/SKILL.md`;
+  const layer = s.layer || "project";
+  $("#meta").textContent = `skill · ${name}/SKILL.md · ${layer} layer`;
   const body = (s.content || "").replace(/^---[\s\S]*?\n---\n/, ""); // frontmatter is for machines
-  $("#turns").innerHTML = `<div class="skill-back">← all skills</div>` + mdToHtml(body);
+  const note = layer === "user"
+    ? '<span class="skill-note">host library, read-only — saving stores a project copy that shadows it</span>'
+    : "";
+  $("#turns").innerHTML =
+    `<div class="skill-bar"><span class="skill-back">← all skills</span><span class="spacer"></span>${note}` +
+    `<button id="skillEdit">edit</button>` +
+    (layer === "project" ? '<button id="skillDelete" class="danger">delete</button>' : "") +
+    `</div>` + mdToHtml(body);
   $("#turns").scrollTop = 0;
   $("#turns").querySelector(".skill-back").onclick = () => renderSkills();
+  $("#skillEdit").onclick = () => editSkill(name, s.content || "");
+  const del = $("#skillDelete");
+  if (del) del.onclick = async () => {
+    if (!confirm(`delete skill "${name}"? (a same-named host skill would resurface)`)) return;
+    const resp = await api("/v1/skills/" + encodeURIComponent(name), { method: "DELETE" });
+    if (resp.ok) renderSkills();
+    else $("#hint").textContent = "delete failed (" + resp.status + ")";
+  };
+}
+
+function editSkill(name, content) {
+  $("#meta").textContent = `skill · ${name}/SKILL.md · editing (saves to the project layer)`;
+  $("#turns").innerHTML = `
+    <div class="skill-bar"><span class="skill-back">← cancel</span></div>
+    <textarea id="skillSrc" spellcheck="false"></textarea>
+    <div class="mem-bar"><button id="skillSave" class="primary">Save</button><span id="skillStatus"></span></div>`;
+  $("#skillSrc").value = content;
+  $("#turns").querySelector(".skill-back").onclick = () => renderSkill(name);
+  $("#skillSave").onclick = async () => {
+    try {
+      const r = await api("/v1/skills/" + encodeURIComponent(name), {
+        method: "PUT",
+        body: JSON.stringify({ content: $("#skillSrc").value }),
+      });
+      if (r.ok) { renderSkill(name); return; }
+      $("#skillStatus").textContent = "save failed (" + r.status + ")";
+    } catch (e) { $("#skillStatus").textContent = e.message; }
+  };
 }
 
 $("#msg").addEventListener("keydown", (e) => {
@@ -502,7 +550,11 @@ $("#composer").onsubmit = async (ev) => {
   }
 };
 
-if (location.hash === "#skills") openSkills();
+if (location.hash.startsWith("#skills")) {
+  const deepLink = decodeURIComponent(location.hash.slice("#skills".length).replace(/^\//, ""));
+  if (deepLink) { leaveSessions("skills"); renderSkill(deepLink); }
+  else openSkills();
+}
 else if (location.hash === "#memory") openMemory();
 async function refreshBudget() {
   const el = $("#budget");
