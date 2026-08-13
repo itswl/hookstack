@@ -1,14 +1,19 @@
 # hookprobe: Python runtime + Node (the Claude Agent SDK drives the Claude
-# Code CLI) + nothing else. Diagnostic CLIs are deliberately NOT bundled —
-# extend this image with exactly the read-only tools your alerts need.
+# Code CLI) + a lean read-only diagnostic core. Domain CLIs (kubectl, db
+# clients) stay opt-in below — extend with exactly what your alerts need.
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
+# The diagnostic core: what any investigation reaches for first, and what
+# marketplace runbooks assume exists (a patrol skill mis-read this container
+# for lack of `ps`). All read-only by nature: process/socket/DNS/JSON.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg \
+        procps jq iproute2 dnsutils netcat-openbsd lsof \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g @anthropic-ai/claude-code \
@@ -16,10 +21,14 @@ RUN apt-get update \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-# Example: add the read-only diagnostic CLIs your prompts rely on.
+# Domain CLIs — uncomment what your alerts actually need. The bash guard
+# blocks their mutating verbs; credentials decide what they can see.
 # RUN curl -fsSLo /usr/local/bin/kubectl \
 #       "https://dl.k8s.io/release/v1.31.4/bin/linux/$(dpkg --print-architecture)/kubectl" \
 #     && chmod +x /usr/local/bin/kubectl
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#       postgresql-client default-mysql-client redis-tools \
+#     && rm -rf /var/lib/apt/lists/*
 
 # Optional: browser evidence via the Playwright MCP server (wire it with
 # deploy/mcp.example.json -> HOOKPROBE_MCP_CONFIG). Baking chromium and its

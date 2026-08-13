@@ -21,6 +21,11 @@ def _float(name: str, default: float) -> float:
         return default
 
 
+def _path_env(name: str) -> Path | None:
+    raw = os.environ.get(name, "").strip()
+    return Path(raw) if raw else None
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     # Inbound: callers authenticate with a single bearer token (an
@@ -51,6 +56,14 @@ class Settings:
     # names) — a mounted library of dozens would flood the context otherwise.
     setting_sources: tuple[str, ...]
     skills: str
+
+    # Operator methodology appended to the engine's own system prompt, read
+    # fresh at every run (hot-editable). Unset falls back to the convention
+    # path {workdir}/system-prompt.md when that file exists.
+    system_prompt_append: Path | None
+    # Named subagent roles (JSON: name -> {description, prompt, tools?,
+    # model?, skills?}), the config-file twin of .claude/agents/*.md files.
+    agents_config: Path | None
 
     # The family loop. event_secret verifies what the pipe delivers to
     # /hooks/event; return_url is where finished investigations from that
@@ -105,6 +118,8 @@ class Settings:
             mcp_config=Path(mcp) if mcp else None,
             setting_sources=sources or ("project",),
             skills=os.environ.get("HOOKPROBE_SKILLS", "").strip(),
+            system_prompt_append=_path_env("HOOKPROBE_SYSTEM_PROMPT_APPEND"),
+            agents_config=_path_env("HOOKPROBE_AGENTS_CONFIG"),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),

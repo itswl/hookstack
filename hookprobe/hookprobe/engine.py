@@ -114,6 +114,77 @@ def _load_mcp_servers(path: Path | None) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _load_agents_raw(path: Path | None) -> dict[str, dict[str, Any]]:
+    """HOOKPROBE_AGENTS_CONFIG: named subagent roles as plain JSON.
+
+    {name: {description, prompt, tools?, model?, skills?}} — the config-file
+    twin of .claude/agents/*.md files, for roles an operator wants pinned in
+    deployment config rather than on the volume. Invalid entries are dropped
+    with a warning; the investigation must not die of a bad role file.
+    """
+    if path is None:
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("agents config %s not loadable (%s); continuing without custom agents", path, exc)
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    agents: dict[str, dict[str, Any]] = {}
+    for name, spec in raw.items():
+        if not (isinstance(spec, dict) and spec.get("description") and spec.get("prompt")):
+            logger.warning("agents config: %r needs description and prompt; dropped", name)
+            continue
+        agents[str(name)] = {
+            key: spec[key] for key in ("description", "prompt", "tools", "model", "skills") if key in spec
+        }
+    return agents
+
+
+def _system_prompt_append(settings: Settings) -> str:
+    """Operator methodology, read fresh each run so edits apply immediately.
+
+    The configured path wins; otherwise the convention path
+    {workdir}/system-prompt.md applies when it exists. Empty means "engine
+    default prompt only"."""
+    path = settings.system_prompt_append or (settings.workdir / "system-prompt.md")
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _audit_hook(audit_dir: Path, session_key: str) -> Callable[..., Any]:
+    """PostToolUse flight recorder: one JSONL line per tool call, per day.
+
+    The run's own event feed is capped and lives on the run record; this is
+    the uncapped, greppable account across ALL runs — who ran what, when,
+    for which session. Append-only, never raises, pruned by retention."""
+
+    async def hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
+        try:
+            import time
+
+            response = input_data.get("tool_response")
+            line = {
+                "ts": round(time.time(), 3),
+                "session": session_key,
+                "tool": str(input_data.get("tool_name") or ""),
+                "detail": _tool_detail(input_data.get("tool_input")),
+                "error": bool(response.get("is_error")) if isinstance(response, dict) else False,
+            }
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            day_file = audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")
+            with day_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+        except Exception:  # noqa: BLE001 — the recorder must never break the run
+            logger.debug("audit write failed", exc_info=True)
+        return {}
+
+    return hook
+
+
 class ClaudeAgentEngine:
     """Runs one unattended analysis per call. No sessions, no resume."""
 
@@ -121,6 +192,7 @@ class ClaudeAgentEngine:
         self._settings = settings
         self._workdir = settings.workdir
         self._mcp_servers = _load_mcp_servers(settings.mcp_config)
+        self._agents_raw = _load_agents_raw(settings.agents_config)
         (self._workdir / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
 
     async def run(
@@ -133,6 +205,7 @@ class ClaudeAgentEngine:
     ) -> EngineResult:
         # Imported here so the HTTP service (and its tests) never needs the SDK.
         from claude_agent_sdk import (
+            AgentDefinition,
             AssistantMessage,
             ClaudeAgentOptions,
             HookMatcher,
@@ -150,6 +223,7 @@ class ClaudeAgentEngine:
             except Exception:  # noqa: BLE001 — a broken observer must not kill the run
                 logger.exception("on_event callback failed")
 
+        append = _system_prompt_append(self._settings)
         options = ClaudeAgentOptions(
             cwd=str(self._workdir),
             model=self._settings.model,
@@ -159,13 +233,25 @@ class ClaudeAgentEngine:
             permission_mode="bypassPermissions",
             allowed_tools=_ALLOWED_TOOLS,
             max_turns=self._settings.max_turns,
+            # Keep the engine's own system prompt; append the operator's
+            # methodology when a system-prompt file is present.
+            system_prompt=({"type": "preset", "preset": "claude_code", "append": append} if append else None),
             # "project" loads {workdir}/.claude/skills — the runbooks previous
             # runs distilled. Adding "user" (HOOKPROBE_SETTING_SOURCES) loads
             # $HOME/.claude too — a host skills library mounted read-only.
             setting_sources=list(self._settings.setting_sources),
             skills=_skills_filter(self._settings.skills),
+            # Named roles from config, on top of any .claude/agents/*.md files.
+            agents=(
+                {name: AgentDefinition(**spec) for name, spec in self._agents_raw.items()} if self._agents_raw else None
+            ),
             mcp_servers=self._mcp_servers,
-            hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_bash_guard_hook])]},
+            hooks={
+                "PreToolUse": [HookMatcher(matcher="Bash", hooks=[_bash_guard_hook])],
+                # The flight recorder: every tool call, every run, one JSONL
+                # line — subagents included, since hooks apply inside them.
+                "PostToolUse": [HookMatcher(matcher=None, hooks=[_audit_hook(self._workdir / "audit", session_key)])],
+            },
             # Follow-up turns reopen the original investigation with its full
             # context (transcripts live under $HOME/.claude — keep that on the
             # persistent volume).
