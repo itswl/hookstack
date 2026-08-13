@@ -86,6 +86,20 @@ def _tool_detail(tool_input: Any) -> str:
         return ""
 
 
+def _skills_filter(raw: str) -> list[str] | str | None:
+    """HOOKPROBE_SKILLS → the SDK's `skills` option.
+
+    "" keeps the engine's own default listing; "all" enables every discovered
+    skill; a comma list pins the session to exactly those names. This is a
+    context filter, not a sandbox — unlisted skills stay on disk.
+    """
+    if not raw:
+        return None
+    if raw == "all":
+        return "all"
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
 def _load_mcp_servers(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {}
@@ -145,9 +159,11 @@ class ClaudeAgentEngine:
             permission_mode="bypassPermissions",
             allowed_tools=_ALLOWED_TOOLS,
             max_turns=self._settings.max_turns,
-            # "project" makes the SDK load {workdir}/.claude/skills — the
-            # runbooks previous runs distilled.
-            setting_sources=["project"],
+            # "project" loads {workdir}/.claude/skills — the runbooks previous
+            # runs distilled. Adding "user" (HOOKPROBE_SETTING_SOURCES) loads
+            # $HOME/.claude too — a host skills library mounted read-only.
+            setting_sources=list(self._settings.setting_sources),
+            skills=_skills_filter(self._settings.skills),
             mcp_servers=self._mcp_servers,
             hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_bash_guard_hook])]},
             # Follow-up turns reopen the original investigation with its full
