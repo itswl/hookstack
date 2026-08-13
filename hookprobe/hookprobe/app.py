@@ -20,6 +20,7 @@ import asyncio
 import hmac
 import json
 import re
+import shutil
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -316,6 +317,44 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             if manifest.is_file():
                 return {"name": name, "content": manifest.read_text(encoding="utf-8"), "layer": layer}
         raise HTTPException(status_code=404, detail="skill not found")
+
+    @app.put("/v1/skills/{name}", dependencies=[Depends(require_token)])
+    async def skill_write(name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Writes always land in the project layer: editing a read-only
+        user-layer skill saves a project copy that shadows it from then on."""
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=400, detail="invalid skill name")
+        content = payload.get("content")
+        if not isinstance(content, str):
+            raise HTTPException(status_code=400, detail="content must be a string")
+        raw = content.encode("utf-8")
+        if len(raw) > _MEMORY_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"skill exceeds {_MEMORY_MAX_BYTES} bytes")
+        skill_dir = settings.workdir / ".claude" / "skills" / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        manifest = skill_dir / "SKILL.md"
+        tmp = manifest.with_suffix(".tmp")
+        tmp.write_bytes(raw)
+        tmp.replace(manifest)
+        return {"saved": True, "name": name, "layer": "project", "bytes": len(raw)}
+
+    @app.delete("/v1/skills/{name}", dependencies=[Depends(require_token)])
+    async def skill_delete(name: str) -> dict[str, Any]:
+        """Only the project layer is deletable. Removing a shadow lets the
+        user-layer skill of the same name resurface — the host copy was
+        never touched."""
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        skill_dir = settings.workdir / ".claude" / "skills" / name
+        if not (skill_dir / "SKILL.md").is_file():
+            for layer, layer_dir in _skill_layers():
+                if layer != "project" and (layer_dir / name / "SKILL.md").is_file():
+                    raise HTTPException(
+                        status_code=403, detail="user-layer skills are read-only (mounted from the host)"
+                    )
+            raise HTTPException(status_code=404, detail="skill not found")
+        shutil.rmtree(skill_dir)
+        return {"deleted": True, "name": name}
 
     @app.get("/v1/budget", dependencies=[Depends(require_token)])
     async def budget() -> dict[str, Any]:
