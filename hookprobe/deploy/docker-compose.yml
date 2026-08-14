@@ -101,13 +101,21 @@ services:
       # while the inbound side, which carries the alert payload and whatever the
       # environment memory says, stays off until someone decides otherwise.
       OTEL_LOG_ASSISTANT_RESPONSES: ${OTEL_LOG_ASSISTANT_RESPONSES:-1}
-      OTEL_LOG_USER_PROMPTS: ${OTEL_LOG_USER_PROMPTS:-}
-      # Heavier still, and off: tool arguments, whole tool outputs (the megabyte
-      # `grep` the harness already truncates), and the raw request/response
-      # bodies of every model call.
-      OTEL_LOG_TOOL_DETAILS: ${OTEL_LOG_TOOL_DETAILS:-}
-      OTEL_LOG_TOOL_CONTENT: ${OTEL_LOG_TOOL_CONTENT:-}
-      OTEL_LOG_RAW_API_BODIES: ${OTEL_LOG_RAW_API_BODIES:-}
+      OTEL_LOG_USER_PROMPTS: ${OTEL_LOG_USER_PROMPTS:-1}
+      OTEL_LOG_TOOL_DETAILS: ${OTEL_LOG_TOOL_DETAILS:-1}
+      OTEL_LOG_TOOL_CONTENT: ${OTEL_LOG_TOOL_CONTENT:-1}
+      OTEL_LOG_RAW_API_BODIES: ${OTEL_LOG_RAW_API_BODIES:-1}
+      # Raw bodies are capped at 60 KiB by the CLI, which says so in the value
+      # it sends ("[TRUNCATED - Content exceeds 60KB limit]") rather than losing
+      # it silently — body_length still reports the true size, so the loss is
+      # measurable. Every real investigation exceeds it: a single call here
+      # carries ~113 KB once the conversation and the tool schemas are in it.
+      # This lifts the cap (verified: 113426 declared, 113425 received, valid
+      # JSON to the closing brace). Left unset on purpose — with all five
+      # content switches already on, uncapping as well would push the entire
+      # conversation on every call unconditionally. Set it when you actually
+      # want byte-exact replay of what the model saw.
+      CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH: ${CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH:-}
       # Direct self-alarm when report returns exhaust their retries:
       HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
       HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
