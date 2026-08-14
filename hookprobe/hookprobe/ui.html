@@ -196,7 +196,7 @@ button.danger{color:var(--red);border-color:var(--red)}
     <div id="turns"><div class="empty">select a session on the left, or start a new one</div></div>
     <div id="hint"></div>
     <form id="composer">
-      <textarea id="msg" placeholder="new session: describe what to investigate… (Ctrl/⌘+Enter to send)"></textarea>
+      <textarea id="msg" placeholder="new session: describe what to investigate… (Enter sends, Shift+Enter for a new line)"></textarea>
       <button id="stopBtn" type="button" style="display:none">Stop</button>
       <button class="primary" id="send" type="submit">Send</button>
     </form>
@@ -534,9 +534,14 @@ async function renderDetail(startPolling) {
     return null;
   }
   const run = await r.json();
+  // What this conversation has cost so far, next to what it is: a follow-up is
+  // cheap to ask for and the running total is the only thing that says otherwise.
+  const spent = (run.turns || []).reduce((sum, turn) => sum + (Number(turn.cost_usd) || 0), 0);
+  const turnCount = (run.turns || []).length;
   $("#meta").textContent =
     `${run.session_key} · ${run.status}` +
     (run.model ? ` · ${run.model}` : "") +
+    (turnCount ? ` · ${turnCount} turn${turnCount > 1 ? "s" : ""} $${spent.toFixed(4)}` : "") +
     ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");
   const parts = (run.turns || []).map(turnHtml);
@@ -554,7 +559,7 @@ async function renderDetail(startPolling) {
   $("#stopBtn").style.display = run.status === "running" ? "" : "none";
   $("#msg").placeholder = run.status === "running"
     ? "a turn is in flight…"
-    : "follow-up in this session… (Ctrl/⌘+Enter to send)";
+    : "follow-up in this session… (Enter sends, Shift+Enter for a new line)";
   // Watch while it runs, let go the moment it settles.
   if (run.status === "running") { if (!runAbort) watchRun(run.session_key); }
   else stopWatching();
@@ -571,7 +576,7 @@ $("#new").onclick = () => {
   $("#meta").textContent = "new session";
   $("#turns").innerHTML = '<div class="empty">describe below what to investigate</div>';
   $("#send").disabled = false;
-  $("#msg").placeholder = "new session: describe what to investigate… (Ctrl/⌘+Enter to send)";
+  $("#msg").placeholder = "new session: describe what to investigate… (Enter sends, Shift+Enter for a new line)";
   $("#msg").focus();
 };
 
@@ -983,6 +988,9 @@ nudge before it costs.</td></tr>
 <tr><td><b>command deadlines</b></td><td><code>HOOKPROBE_BASH_TIMEOUT_MS</code> /
 <code>HOOKPROBE_BASH_MAX_TIMEOUT_MS</code> cap a single command, so a curl at an unreachable host
 cannot hold a slot until the whole run times out.</td></tr>
+<tr><td><b>what it cost</b></td><td>Each turn carries its own line — model, tokens in/out, cache reads and writes,
+dollars, seconds. The session's running total sits in the header line beside the session key, and the chip top-right
+is the whole window's spend (with the ceiling next to it when <code>HOOKPROBE_BUDGET_USD</code> is set).</td></tr>
 <tr><td><b>inputs record</b></td><td>Every turn records what it was given — model, skill layers and
 names, roles, MCP servers, and digests of the environment memory and appended methodology. Those
 files live on a mutable volume; a stale line in <code>CLAUDE.md</code> once made every report come
@@ -1008,7 +1016,11 @@ given</b> on any turn.</td></tr>
 }
 
 $("#msg").addEventListener("keydown", (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") $("#composer").requestSubmit();
+  // Enter sends, Shift+Enter breaks the line. This is a chat box before it is a
+  // text editor, and the common case should not need a modifier.
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  $("#composer").requestSubmit();
 });
 
 $("#composer").onsubmit = async (ev) => {
@@ -1068,9 +1080,14 @@ async function refreshBudget() {
   const el = $("#budget");
   try {
     const b = await (await api("/v1/budget")).json();
-    if (!b.enabled) { el.hidden = true; return; }
     el.hidden = false;
-    el.textContent = `budget $${Number(b.spent_usd).toFixed(2)} / $${Number(b.budget_usd).toFixed(2)}`;
+    // Spend is shown whether or not a ceiling was set: an operator who declined
+    // to cap the window still wants to know what it has cost.
+    const spent = `$${Number(b.spent_usd || 0).toFixed(2)} / ${b.window_hours || 24}h`;
+    el.textContent = b.enabled ? `${spent} of $${Number(b.budget_usd).toFixed(2)}` : spent;
+    el.title = b.enabled
+      ? "spend in the budget window, and the ceiling the event door refuses at"
+      : "spend in the window · no ceiling set (HOOKPROBE_BUDGET_USD)";
     el.classList.toggle("hot", !!b.exhausted);
   } catch { el.hidden = true; }
 }

@@ -656,15 +656,20 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
     @app.get("/v1/budget", dependencies=[Depends(require_token)])
     async def budget() -> dict[str, Any]:
+        # The spend is reported either way: "what has this cost" is a question
+        # worth answering even for an operator who declined to set a ceiling.
+        window = {
+            "window_hours": settings.budget_window_hours,
+            "spent_usd": round(service.window_spend(), 6),
+        }
         state = service.budget_state()
         if state is None:
-            return {"enabled": False}
+            return {"enabled": False, **window}
         spent, limit = state
         return {
             "enabled": True,
             "budget_usd": limit,
-            "window_hours": settings.budget_window_hours,
-            "spent_usd": round(spent, 6),
+            **window,
             "remaining_usd": round(max(0.0, limit - spent), 6),
             "exhausted": spent >= limit,
         }
