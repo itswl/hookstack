@@ -146,6 +146,44 @@ file that only held the harness's already-truncated copy while claiming to hold
 everything — see
 [the rejected note](../.agents/notes/rejected/2026-08-14-tool-output-spill-in-hookprobe.md).
 
+## What a run costs, and why reuse is the lever
+
+Each turn shows what it cost: model, tokens in and out, cache reads, dollars,
+seconds. The session's running total sits beside the session key, and the header
+chip carries the window's spend and its **cache %** — how much context was reused
+rather than paid for again.
+
+That number matters more than it looks, because the part of the bill you cannot
+negotiate is large. An investigation carries roughly 29k input tokens before its
+alert is even mentioned, and measured on a running container it does not shrink:
+
+| configuration | input tokens |
+| --- | --- |
+| preset `claude_code` + 12 tools | 26,920 |
+| no preset + 12 tools | 25,569 |
+| no preset + 4 tools | 25,569 |
+
+The preset is worth ~1,350 tokens and cutting the tool list changes nothing —
+`allowed_tools` gates execution, not what is sent. Everything of ours (memory,
+appended methodology, skills, roles) came to under 3% of the prefix on the
+deployment this was measured on.
+
+So the difference between an expensive week and a cheap one is reuse, and three
+habits decide it:
+
+- **Follow up in the session rather than opening a new investigation.** Measured
+  pair on the same context: $0.1490 fresh, $0.0156 on the follow-up.
+- **Let bursts run together.** Concurrent runs share a warm prefix, so lowering
+  `HOOKPROBE_MAX_CONCURRENT` to save money does the opposite.
+- **Batch edits to memory, prompt and skills.** Each change starts the prefix
+  over; adjusting them between alerts pays the full entry fee every time.
+
+Whether to pay that entry fee at all is decided upstream — `HOOKPROBE_ESCALATE_LEVELS`,
+the event door's idempotency, and the budget breaker. Caching only sets the
+discount. The reasoning and the rejected alternative (a timer to keep the cache
+warm — it costs about ten times what it saves at this volume) are in
+[.agents/notes](../.agents/README.md).
+
 ## Model-call telemetry (on by default, no backend assumed)
 
 Every run's totals are already on its record — cost, tokens, per-model

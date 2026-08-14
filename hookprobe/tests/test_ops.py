@@ -388,3 +388,31 @@ def test_spend_is_reported_even_with_no_ceiling_set(tmp_path) -> None:
     assert round(body["spent_usd"], 6) == 0.5, body  # the fake engine's cost
     assert body["window_hours"] == 24.0
     assert "budget_usd" not in body  # no ceiling was set, so none is claimed
+
+
+def test_the_window_reports_how_much_context_was_reused(tmp_path) -> None:
+    """Reuse is the only cost lever left, so it has to be visible.
+
+    The prefix an investigation carries is the harness's ~29k and does not
+    shrink — see .agents/notes/implemented/2026-08-14-the-prompt-prefix-is-not-
+    ours-to-shrink.md — so what remains worth watching is whether it was paid
+    for again or read from cache.
+    """
+    from hookprobe.runs import Run, RunStore
+
+    store = RunStore(tmp_path / "results")
+    run = Run(session_key="s", run_id="r")
+    now = time.time()
+    run.turns = [
+        {"finished_at": now, "usage": {"input_tokens": 29000, "cache_read_input_tokens": 0}},
+        {"finished_at": now, "usage": {"input_tokens": 200, "cache_read_input_tokens": 28800}},
+        # Older than the window: counted by neither.
+        {"finished_at": now - 90000, "usage": {"input_tokens": 5000, "cache_read_input_tokens": 5000}},
+    ]
+    store.create(run)
+    store._scanned = True  # nothing on disk to merge in
+
+    fresh, cached = store.cache_since(now - 3600)
+
+    assert (fresh, cached) == (29200, 28800)
+    assert round(cached / (cached + fresh), 3) == 0.497
