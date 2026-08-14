@@ -23,6 +23,7 @@ speaks, so they stay bilingual.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -37,6 +38,8 @@ from hookjudge.contract import (
     Incoming,
     Verdict,
 )
+
+logger = logging.getLogger("hookjudge.judge")
 
 _SYSTEM_PROMPT = """You judge operations alerts. Read one alert and answer with strict JSON only,
 no prose around it.
@@ -228,8 +231,47 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 _ALERT_OPEN, _ALERT_CLOSE = "<alert>", "</alert>"
 
+# The verdict's shape, stated once. Whether a provider can ENFORCE it is a
+# property of the provider, not of the judge, so it is negotiated below.
+_VERDICT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string", "description": "one sentence on what happened, facts only"},
+        "importance": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+        "event_type": {"type": "string", "enum": ["business", "infrastructure", "security", "deploy", "test"]},
+        "impact_scope": {"type": "string", "description": 'who or what is affected; "unknown" if unsaid'},
+    },
+    "required": ["summary", "importance", "event_type", "impact_scope"],
+}
 
-def build_ai_request(settings: Any, event: Incoming) -> dict[str, Any]:
+# Best first. Each step down is a real provider limitation, not a preference:
+#   schema — the provider validates the enums. A DeepSeek-dialect relay answered
+#            400 "This response_format type is unavailable now".
+#   tools  — a function call carries the same schema. Works there, but only with
+#            tool_choice left unset: forcing it answers 400 "Thinking mode does
+#            not support this tool_choice".
+#   object — JSON with nothing enforced; _extract_json digs it out. Always works.
+_DIALECTS = ("schema", "tools", "object")
+_FORMAT_REJECTED = re.compile(r"response_format|json_schema|tool_choice|tools|unavailable|not support", re.IGNORECASE)
+
+# Negotiated once per model per process. A step-down costs one 400, not one per
+# alert, and the alert that paid it is still judged on the next attempt.
+_dialect_for_model: dict[str, str] = {}
+
+
+def _parse_verdict(body: dict[str, Any]) -> dict[str, Any] | None:
+    """The verdict, whichever way the provider chose to return it."""
+    message = ((body.get("choices") or [{}])[0].get("message")) or {}
+    for call in message.get("tool_calls") or []:
+        arguments = (call.get("function") or {}).get("arguments")
+        if isinstance(arguments, str):
+            parsed = _extract_json(arguments)
+            if parsed:
+                return parsed
+    return _extract_json(str(message.get("content") or ""))
+
+
+def build_ai_request(settings: Any, event: Incoming, dialect: str = "object") -> dict[str, Any]:
     """The exact request the judge sends, so the trust boundary is testable.
 
     The alert is fenced rather than pasted in raw. Anyone who can raise an alert
@@ -247,15 +289,33 @@ def build_ai_request(settings: Any, event: Incoming) -> dict[str, Any]:
         "fields": event.fields,
     }
     captured = json.dumps(context, ensure_ascii=False).replace(_ALERT_CLOSE, "<\\/alert>")
-    return {
+    request: dict[str, Any] = {
         "model": settings.ai_model,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": f"{_ALERT_OPEN}\n{captured}\n{_ALERT_CLOSE}"},
         ],
         "temperature": 0,
-        "response_format": {"type": "json_object"},
     }
+    if dialect == "schema":
+        request["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "verdict", "strict": True, "schema": _VERDICT_SCHEMA},
+        }
+    elif dialect == "tools":
+        request["tools"] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "record_verdict",
+                    "description": "Record the judgement for this alert.",
+                    "parameters": _VERDICT_SCHEMA,
+                },
+            }
+        ]
+    else:
+        request["response_format"] = {"type": "json_object"}
+    return request
 
 
 async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) -> Verdict:
@@ -263,22 +323,43 @@ async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) 
     if not settings.ai_api_key or not settings.ai_base_url:
         return rule_verdict(event, degraded_reason="AI not configured")
 
-    request = build_ai_request(settings, event)
-    try:
-        response = await client.post(
-            f"{settings.ai_base_url.rstrip('/')}/chat/completions",
-            json=request,
-            headers={"authorization": f"Bearer {settings.ai_api_key}"},
-            timeout=settings.ai_timeout_seconds,
-        )
-        response.raise_for_status()
-        body = response.json()
-    except Exception as error:  # noqa: BLE001 — every failure lands on the same floor
-        return rule_verdict(event, degraded_reason=f"AI call failed: {error.__class__.__name__}")
+    # Ask for the strongest structure this provider accepts, stepping down only
+    # when it says it cannot. The alert being judged is never spent on the
+    # negotiation: a rejected format is retried immediately in the next dialect.
+    preferred = settings.ai_structured_output
+    dialect = _dialect_for_model.get(settings.ai_model) or (preferred if preferred in _DIALECTS else _DIALECTS[0])
+    pinned = preferred in _DIALECTS
+    body: dict[str, Any] = {}
+    while True:
+        try:
+            response = await client.post(
+                f"{settings.ai_base_url.rstrip('/')}/chat/completions",
+                json=build_ai_request(settings, event, dialect),
+                headers={"authorization": f"Bearer {settings.ai_api_key}"},
+                timeout=settings.ai_timeout_seconds,
+            )
+        except Exception as error:  # noqa: BLE001 — every failure lands on the same floor
+            return rule_verdict(event, degraded_reason=f"AI call failed: {error.__class__.__name__}")
+        if response.status_code == 400 and not pinned and _FORMAT_REJECTED.search(response.text or ""):
+            remaining = _DIALECTS[_DIALECTS.index(dialect) + 1 :]
+            if remaining:
+                logger.info(
+                    "structured output %r refused by %s, falling back to %r",
+                    dialect,
+                    settings.ai_model,
+                    remaining[0],
+                )
+                dialect = remaining[0]
+                continue
+        try:
+            response.raise_for_status()
+            body = response.json()
+        except Exception as error:  # noqa: BLE001
+            return rule_verdict(event, degraded_reason=f"AI call failed: {error.__class__.__name__}")
+        break
+    _dialect_for_model[settings.ai_model] = dialect
 
-    choices = body.get("choices") or []
-    content = str(((choices[0] if choices else {}).get("message") or {}).get("content") or "")
-    parsed = _extract_json(content)
+    parsed = _parse_verdict(body)
     if not parsed or not str(parsed.get("summary") or "").strip():
         return rule_verdict(event, degraded_reason="AI answer unparseable")
 

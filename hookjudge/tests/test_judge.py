@@ -620,3 +620,87 @@ def ai_ok(*, importance: str = "high", summary: str = "something happened") -> A
         route=ROUTE_AI,
         model="test-model",
     ).normalized()
+
+
+class _ScriptedAI:
+    """Answers per dialect, so a negotiation can be watched happening."""
+
+    def __init__(self, *, accepts: str, reject_status: int = 400, reject_text: str = "") -> None:
+        self.accepts = accepts
+        self.reject_status = reject_status
+        self.reject_text = reject_text or '{"error":{"message":"This response_format type is unavailable now"}}'
+        self.dialects: list[str] = []
+
+    async def post(self, url: str, **kwargs: Any) -> Any:
+        body = kwargs["json"]
+        dialect = "tools" if "tools" in body else body.get("response_format", {}).get("type", "?")
+        dialect = {"json_schema": "schema", "json_object": "object"}.get(dialect, dialect)
+        self.dialects.append(dialect)
+        if dialect != self.accepts:
+            return _Response(self.reject_status, self.reject_text)
+        if dialect == "tools":
+            arguments = (
+                '{"summary":"disk filling","importance":"high","event_type":"infrastructure","impact_scope":"node-3"}'
+            )
+            return _Response(
+                200,
+                {
+                    "model": "test-model",
+                    "choices": [
+                        {"message": {"tool_calls": [{"function": {"name": "record_verdict", "arguments": arguments}}]}}
+                    ],
+                    "usage": {"prompt_tokens": 900, "completion_tokens": 40},
+                },
+            )
+        return _Response(200, _completion('{"summary":"disk filling","importance":"high"}'))
+
+
+@pytest.mark.anyio
+async def test_structured_output_steps_down_to_what_the_provider_accepts():
+    """A provider that refuses a format must not cost an alert its verdict.
+
+    Verified against the real endpoint: json_schema answers 400 "This
+    response_format type is unavailable now", and forcing tool_choice answers
+    400 "Thinking mode does not support this tool_choice". Neither may end as a
+    rule-floor verdict.
+    """
+    from hookjudge.judge import _dialect_for_model, ai_verdict
+
+    _dialect_for_model.clear()
+    ai = _ScriptedAI(accepts="tools")
+    verdict = await ai_verdict(ai, settings(ai_model="negotiating-model"), event(title="Disk 91%"))
+
+    assert ai.dialects == ["schema", "tools"]
+    assert verdict.route == "ai"
+    assert verdict.importance == "high"
+    assert not verdict.degraded_reason
+    # Negotiated once: the next alert starts where the last one landed.
+    assert _dialect_for_model["negotiating-model"] == "tools"
+    await ai_verdict(ai, settings(ai_model="negotiating-model"), event(title="Disk 92%"))
+    assert ai.dialects == ["schema", "tools", "tools"]
+
+
+@pytest.mark.anyio
+async def test_a_pinned_dialect_is_not_negotiated_away():
+    from hookjudge.judge import _dialect_for_model, ai_verdict
+
+    _dialect_for_model.clear()
+    ai = _ScriptedAI(accepts="object")
+    verdict = await ai_verdict(
+        ai, settings(ai_model="pinned-model", ai_structured_output="object"), event(title="Disk 91%")
+    )
+    assert ai.dialects == ["object"]
+    assert verdict.route == "ai"
+
+
+@pytest.mark.anyio
+async def test_a_400_that_is_not_about_the_format_still_degrades():
+    """Rate limits and bad keys must not be mistaken for a format rejection."""
+    from hookjudge.judge import _dialect_for_model, ai_verdict
+
+    _dialect_for_model.clear()
+    ai = _ScriptedAI(accepts="never", reject_text='{"error":{"message":"insufficient balance"}}')
+    verdict = await ai_verdict(ai, settings(ai_model="broke-model"), event(title="Disk 91%"))
+    assert ai.dialects == ["schema"]
+    assert verdict.route == "rule"
+    assert "AI call failed" in verdict.degraded_reason
