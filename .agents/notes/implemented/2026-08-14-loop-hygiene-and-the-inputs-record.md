@@ -61,3 +61,11 @@ instructions out of every result file while still proving which text was loaded.
   outlive the default has to ask for a longer timeout, up to the maximum.
 - Its sibling idea, spilling oversized output ourselves, was tried and removed:
   see [the rejected note](../rejected/2026-08-14-tool-output-spill-in-hookprobe.md).
+- **Follow-up, same day: a digest on its own is noise.** Shown in the console, the
+  two digests were the same twelve characters on every run — accurate, and nothing
+  to read. A digest only answers a comparative question, and the record cannot hold
+  both sides of it. `GET /v1/runs/{key}` now also returns `inputs_now`, the same
+  files' digests as they stand today, and the console prints only the answer: the
+  recorded size, plus `edited`/`added`/`removed since this run` in amber when the
+  file has moved, with the hex left on hover. What a run records did not change —
+  the record is the durable half, and this is the half that has to be read fresh.

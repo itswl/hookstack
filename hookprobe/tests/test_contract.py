@@ -130,6 +130,29 @@ def test_continue_endpoint_roundtrip(tmp_path) -> None:
         assert detail["turns"][1]["message"] == "check node capacity"
 
 
+def test_detail_reports_the_prompt_files_as_they_stand_now(tmp_path) -> None:
+    """A recorded digest says nothing alone; the read path supplies what to compare it to."""
+    from hookprobe.engine import file_fact
+
+    (tmp_path / "CLAUDE.md").write_text("Report in English.", encoding="utf-8")
+    with make_client(tmp_path, FakeEngine()) as client:
+        key = TRIGGER_PAYLOAD["sessionKey"]
+        client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH)
+        poll_until_final(client, key)
+
+        before = client.get(f"/v1/runs/{key}", headers=AUTH).json()["inputs_now"]
+        assert before["memory"] == file_fact(tmp_path / "CLAUDE.md")["sha256"]
+        # Absent is a state of its own, not a missing key: the console says "absent".
+        assert before["system_prompt_append"] is None
+
+        client.put("/v1/memory", json={"content": "Report in Chinese."}, headers=AUTH)
+        after = client.get(f"/v1/runs/{key}", headers=AUTH).json()["inputs_now"]
+        assert after["memory"] != before["memory"]
+
+        # Both ends of the comparison have to stay wired together.
+        assert "inputs_now" in client.get("/ui").text
+
+
 def test_run_list_and_ui_page(tmp_path) -> None:
     with make_client(tmp_path, FakeEngine()) as client:
         # The list needs auth; the page markup does not (it holds no data).
