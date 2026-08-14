@@ -106,6 +106,7 @@ details.q summary{cursor:pointer;color:var(--dim);white-space:normal}
 .proc{border-left:2px solid var(--line);margin:6px 0 8px 6px;padding-left:10px}
 .ev{font-family:var(--mono);font-size:11.5px;color:var(--dim);padding:2px 0;word-break:break-all}
 .ev-tool{color:var(--accent);margin-right:8px}
+.ev-changed{color:var(--amber)}
 .ev-narr{font-family:inherit;font-style:italic;color:#9daebe;white-space:pre-wrap}
 .ev-live{font-family:inherit;white-space:pre-wrap;color:var(--text)}
 .ev-live.thinking{font-style:italic;color:var(--dim)}
@@ -238,6 +239,11 @@ function esc(s) {
   const d = document.createElement("div");
   d.textContent = s == null ? "" : String(s);
   return d.innerHTML;
+}
+// esc() escapes text nodes, which leaves the double quote alone; attribute
+// values need it too.
+function attr(s) {
+  return esc(s).replace(/"/g, "&quot;");
 }
 function pretty(t) {
   try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return t; }
@@ -417,11 +423,26 @@ function eventHtml(e) {
 // What the model was actually given. The prompt is assembled from files on a
 // mutable volume, so the record of which ones were in force is the only way to
 // explain a report later.
-function inputsHtml(inputs) {
+// A recorded digest is the same string on every run until somebody edits the
+// file, so printing it is noise dressed as evidence. The one question it can
+// answer is comparative — does this file still say what it said when the run
+// used it? — so the digest is compared here against the file as it stands now
+// (`inputs_now`, from the read path) and only its answer is shown. The hex
+// stays on hover for anyone lining up two reports by hand.
+function factHtml(f, now, unknown) {
+  const size = !f ? "absent" : f.bytes ? `${f.bytes}B` : "empty";
+  const title = f ? `${f.path} · sha256 ${f.sha256}` : "not present when this run started";
+  if (unknown) return { text: size, title };
+  const recorded = f ? f.sha256 : null;
+  if (recorded === now) return { text: size, title };
+  const verb = !recorded ? "added" : now === null ? "removed" : "edited";
+  return { text: `${size} · ${verb} since this run`, title, warn: true };
+}
+function inputsHtml(inputs, now) {
   const i = inputs || {};
   if (!i.model) return "";
-  const fact = (f) => (f ? `${f.sha256} · ${f.bytes}B` : "none");
   const layer = (names) => (names && names.length ? names.join(", ") : "none");
+  const fact = (f, key) => factHtml(f, now ? now[key] : null, !now || !(key in now));
   const rows = [
     ["model", i.model + (i.resumed ? " · resumed" : "")],
     ["skills", `filter ${i.skills?.filter ?? "—"}` +
@@ -429,21 +450,26 @@ function inputsHtml(inputs) {
       (i.skills?.user ? ` · host: ${layer(i.skills.user)}` : "")],
     ["roles", `files: ${layer(i.agents?.files)} · config: ${layer(i.agents?.config)}`],
     ["mcp", layer(i.mcp_servers)],
-    ["memory", fact(i.memory)],
-    ["prompt append", fact(i.system_prompt_append)],
+    ["memory", fact(i.memory, "memory")],
+    ["prompt append", fact(i.system_prompt_append, "system_prompt_append")],
   ];
   return `<details class="proc-past"><summary>inputs · what the model was given</summary>
     <div class="proc">${rows
-      .map(([k, v]) => `<div class="ev"><span class="ev-tool">${esc(k)}</span>${esc(String(v))}</div>`)
+      .map(([k, v]) => {
+        const cell = typeof v === "string" ? { text: v } : v;
+        return `<div class="ev"${cell.title ? ` title="${attr(cell.title)}"` : ""}>` +
+          `<span class="ev-tool">${esc(k)}</span>` +
+          `<span class="${cell.warn ? "ev-changed" : ""}">${esc(cell.text)}</span></div>`;
+      })
       .join("")}</div></details>`;
 }
-function turnHtml(t) {
+function turnHtml(t, now) {
   const evs = t.events || [];
   const proc = evs.length
     ? `<details class="proc-past"><summary>process · ${evs.length} steps</summary>
          <div class="proc">${evs.map(eventHtml).join("")}</div></details>`
     : "";
-  return `<div class="turn">${qHtml(t.message)}${inputsHtml(t.inputs)}${proc}
+  return `<div class="turn">${qHtml(t.message)}${inputsHtml(t.inputs, now)}${proc}
     <div class="a ${t.error ? "err" : ""}">${answerHtml(t.text)}</div>${statsHtml(t)}</div>`;
 }
 
@@ -555,11 +581,13 @@ async function renderDetail(startPolling) {
     (hit === null ? "" : ` · cache ${hit}%`) +
     ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");
-  const parts = (run.turns || []).map(turnHtml);
+  // Recorded prompt inputs are only legible next to the files as they are now.
+  const now = run.inputs_now;
+  const parts = (run.turns || []).map((t) => turnHtml(t, now));
   if (run.status === "running") {
     const live = (run.events || []).map(eventHtml).join("");
     parts.push(
-      `<div class="turn">${qHtml(run.current_message)}${inputsHtml(run.inputs)}` +
+      `<div class="turn">${qHtml(run.current_message)}${inputsHtml(run.inputs, now)}` +
       `<div class="proc">${live}</div>` +
       `<div class="pending">investigating</div></div>`,
     );
