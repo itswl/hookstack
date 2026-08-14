@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from hookrelay import metrics, registry
 from hookrelay.alarm import SelfAlarm
@@ -29,6 +29,7 @@ from hookrelay.breaker import CircuitBreaker
 from hookrelay.config import Config, ConfigError
 from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
+from hookrelay.live import Live
 from hookrelay.pipeline import handle_hook, record_storm_suppressed
 from hookrelay.security import token_ok
 from hookrelay.settings import Settings
@@ -47,6 +48,8 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         print(f"[hookrelay] plugins loaded: {', '.join(loaded_plugins)}")
     app_config = cfg or Config.from_file(app_settings.config_path)
     store = Store(app_settings.db_path)
+    live = Live()
+    store.on_change = live.changed
 
     async def _worker_loop(client: httpx.AsyncClient) -> None:
         next_purge = 0.0
@@ -214,6 +217,24 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             bearer = authorization[7:].strip()
         if not (token_ok(configured, token) or (bearer and token_ok(configured, bearer))):
             raise HTTPException(status_code=401, detail="read token required")
+
+    @app.get("/live")
+    async def live_stream(
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        """The ledger's wake-up line: one `changed` per write, a `ping` through the quiet.
+
+        No rows: this board carries a source filter, an outcome filter, a search
+        and a cursor, so "look again" is smaller than pushing rows the viewer
+        may not be asking for — and it cannot get their filters wrong.
+        """
+        _read_guard(x_read_token, authorization)
+        return StreamingResponse(
+            live.stream(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/status")
     async def status(

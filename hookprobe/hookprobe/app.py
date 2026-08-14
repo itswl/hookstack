@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 
 from hookprobe import __version__
 from hookprobe.engine import _load_agents_raw, _load_mcp_servers, _system_prompt_append
+from hookprobe.live import Live
 from hookprobe.retention import prune
 from hookprobe.runs import Run
 from hookprobe.seeds import seed_default_agents
@@ -102,6 +103,11 @@ def _summary(run: Run) -> dict[str, Any]:
 
 
 def create_app(settings: Settings, service: RunService) -> FastAPI:
+    # The board's change signal. The service already knows when a run's state
+    # moves; this is where that becomes something a browser can wait on.
+    live = Live()
+    service.on_board_change = live.changed
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         # First boot on a fresh volume: a few readable subagent roles, so the
@@ -168,6 +174,20 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         except (NotResumableError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"runId": run.run_id, "sessionKey": run.session_key}
+
+    @app.get("/v1/live", dependencies=[Depends(require_token)])
+    async def board_events() -> StreamingResponse:
+        """The session list's wake-up line, the same shape the other two boards use.
+
+        The per-run stream above carries a run's steps; this one carries only
+        "something moved" — a run started, finished, or returned its report —
+        so the list refetches itself without the page keeping a clock.
+        """
+        return StreamingResponse(
+            live.stream(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/v1/runs", dependencies=[Depends(require_token)])
     async def run_list(limit: int = 100) -> list[dict[str, Any]]:

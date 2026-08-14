@@ -25,11 +25,12 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from hookjudge.alarm import SelfAlarm
 from hookjudge.contract import Incoming, Outgoing
 from hookjudge.judge import ai_verdict, reuse_verdict, rule_verdict
+from hookjudge.live import Live
 from hookjudge.settings import Settings
 from hookjudge.store import Store, now_ts
 
@@ -60,6 +61,8 @@ def verify_signature(secret: str, body: bytes, provided: str | None, timestamp: 
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings.load()
     store = Store(app_settings.db_path)
+    live = Live()
+    store.on_change = live.changed
     alarm = SelfAlarm(app_settings.alarm_url, app_settings.alarm_min_interval_seconds)
 
     async def _judge_and_record(client: httpx.AsyncClient, event: Incoming) -> int:
@@ -226,6 +229,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # sender must not be held for it.
         asyncio.create_task(_judge_and_record(app.state.client, event))
         return JSONResponse({"accepted": True, "identity": event.identity}, status_code=202)
+
+    @app.get("/live")
+    async def live_stream(
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        """The board's wake-up line: one `changed` per write, a `ping` through the quiet.
+
+        It carries no rows on purpose — the viewer has a route filter, a search
+        and a window of its own, so "look again" is both smaller and more correct
+        than pushing rows it may not be asking for.
+        """
+        _read_guard(x_read_token, authorization)
+        return StreamingResponse(
+            live.stream(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/status")
     async def status(
