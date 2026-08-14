@@ -5,6 +5,8 @@ __pycache__/
 .ruff_cache/
 *.db
 .env
+# Rotation backups hold the same credentials as .env.
+.env.bak-*
 data/
 .DS_Store
 docker-compose.override.yml
