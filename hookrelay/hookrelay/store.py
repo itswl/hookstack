@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from typing import Any
 
 import aiosqlite
@@ -71,6 +72,9 @@ CREATE TABLE IF NOT EXISTS silences (
 
 class Store:
     def __init__(self, path: str) -> None:
+        # Set by the app to a Live.changed; None everywhere else, so the store
+        # works unchanged with nobody watching.
+        self.on_change: Callable[[], None] | None = None
         self._path = path
         self._db: aiosqlite.Connection | None = None
 
@@ -147,7 +151,13 @@ class Store:
             ),
         )
         await self.db.commit()
+        self._announce()
         return int(cursor.lastrowid or 0)
+
+    def _announce(self) -> None:
+        """Say that the ledger moved; the boards decide what to refetch."""
+        if self.on_change is not None:
+            self.on_change()
 
     async def recent_duplicate(self, fp: str, window_seconds: int, now: float) -> dict[str, Any] | None:
         cursor = await self.db.execute(
@@ -165,6 +175,7 @@ class Store:
             (event_id, outcome, skip_code, json.dumps(channels), json.dumps(steps, ensure_ascii=False)),
         )
         await self.db.commit()
+        self._announce()
 
     # ── deliveries ────────────────────────────────────────────────────────
 
@@ -174,6 +185,7 @@ class Store:
             (event_id, channel, now),
         )
         await self.db.commit()
+        self._announce()
 
     async def due_deliveries(self, now: float, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.db.execute(
@@ -195,6 +207,7 @@ class Store:
         """Rate-limit pushback: not an attempt, not an error — just later."""
         await self.db.execute("UPDATE deliveries SET next_attempt_at = ? WHERE id = ?", (until, delivery_id))
         await self.db.commit()
+        self._announce()
 
     async def mark_sent(self, delivery_id: int, now: float, sent_body: str | None = None) -> None:
         await self.db.execute(
@@ -202,6 +215,7 @@ class Store:
             (now, sent_body, delivery_id),
         )
         await self.db.commit()
+        self._announce()
 
     async def mark_failed(
         self, delivery_id: int, attempts: int, error: str, next_at: float | None, sent_body: str | None = None
@@ -218,6 +232,7 @@ class Store:
                 (attempts, error[:500], next_at, sent_body, delivery_id),
             )
         await self.db.commit()
+        self._announce()
 
     async def retry_delivery(self, delivery_id: int, now: float) -> bool:
         """Operator second chance: a dead delivery back to queued, due now.
@@ -245,6 +260,7 @@ class Store:
             (source, until_ts, note, now),
         )
         await self.db.commit()
+        self._announce()
         return int(cursor.lastrowid or 0)
 
     async def delete_silence(self, silence_id: int) -> bool:

@@ -23,6 +23,10 @@
     color: var(--text); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px;
     cursor: pointer; }
   .rc button:hover, .rc select:hover { border-color: var(--accent); }
+  .rc .live { font-size: 11px; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
+  .rc .live.on { color: var(--ok); border-color: var(--ok); }
+  .rc .live.off { color: var(--warn); border-color: var(--warn); }
   /* ── end design tokens ────────────────────────────────────────────────────── */
   /* This page's older token names, aliased onto the shared set above. */
   :root {
@@ -175,12 +179,7 @@ button.danger{color:var(--red);border-color:var(--red)}
   <span class="stamp" id="stamp"></span>
   <span class="rc">
     <button id="rNow" title="refresh now">&#8635;</button>
-    <select id="rEvery" title="auto refresh">
-      <option value="0">manual</option>
-      <option value="15000">15s</option>
-      <option value="60000">60s</option>
-      <option value="300000">5m</option>
-    </select>
+    <span id="rLive" class="live" title="live connection">live</span>
   </span>
   <input id="token" placeholder="bearer token" autocomplete="off">
 </header>
@@ -214,6 +213,11 @@ tokenEl.addEventListener("change", () => {
   tokenEl.classList.remove("bad");
   refreshList();
 });
+
+function readHeaders() {
+  const token = tokenEl.value.trim();
+  return token ? { Authorization: "Bearer " + token } : {};
+}
 
 async function api(path, opts = {}) {
   const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
@@ -447,11 +451,11 @@ function turnHtml(t) {
 //
 // fetch + ReadableStream, not EventSource: every call here carries the bearer
 // token as a header, and EventSource cannot send headers.
-let liveAbort = null;
+let runAbort = null;
 async function watchRun(key) {
   stopWatching();
   const controller = new AbortController();
-  liveAbort = controller;
+  runAbort = controller;
   let response;
   try {
     response = await api("/v1/runs/" + encodeURIComponent(key) + "/stream", { signal: controller.signal });
@@ -483,11 +487,11 @@ async function watchRun(key) {
     // A dropped stream is not an error worth showing: the refresh control still
     // brings the run's state in, just later.
   } finally {
-    if (liveAbort === controller) liveAbort = null;
+    if (runAbort === controller) runAbort = null;
   }
 }
 function stopWatching() {
-  if (liveAbort) { liveAbort.abort(); liveAbort = null; }
+  if (runAbort) { runAbort.abort(); runAbort = null; }
 }
 function liveFeedNode() {
   return document.querySelector("#turns .turn:last-child .proc");
@@ -534,7 +538,7 @@ async function renderDetail(startPolling) {
     ? "a turn is in flight…"
     : "follow-up in this session… (Ctrl/⌘+Enter to send)";
   // Watch while it runs, let go the moment it settles.
-  if (run.status === "running") { if (!liveAbort) watchRun(run.session_key); }
+  if (run.status === "running") { if (!runAbort) watchRun(run.session_key); }
   else stopWatching();
   return run;
 }
@@ -1053,31 +1057,70 @@ async function refreshBudget() {
   } catch { el.hidden = true; }
 }
 
-  // ── refresh control · keep this block identical in all three pages ─────────
-  // One timer per page, off or slow by choice: a board that polls every few
-  // seconds spends the operator's attention and the service's breath for
-  // nothing. The stamp says when the data is from; the button says now.
-  var REFRESH_KEY = "hookstack-refresh-ms";
-  var refreshTimer = null;
-  function refreshEveryMs() {
-    var raw = parseInt(localStorage.getItem(REFRESH_KEY) || "60000", 10);
-    return isNaN(raw) ? 60000 : raw;
+  // ── live control · keep this block identical in all three pages ────────────
+  // A board is watched while something is happening, and what it shows changes
+  // when the service writes — not when a clock in the browser says so. So there
+  // is no clock: the page holds one streaming connection and refetches what it
+  // is looking at when the service says something changed. The dropdown this
+  // replaces made the operator choose between a stale board and a busy one,
+  // which is a choice the service can simply answer.
+  //
+  // NDJSON over fetch rather than EventSource: every board authenticates its
+  // reads with a header, and EventSource cannot send one.
+  var liveAbort = null;
+  var liveRetry = 0;
+  function liveMark(state) {
+    var el = document.getElementById("rLive");
+    if (!el) return;
+    el.className = "live " + state;
+    el.textContent = state === "on" ? "live" : "offline";
   }
-  function applyRefreshInterval(tick) {
-    clearInterval(refreshTimer);
-    var ms = refreshEveryMs();
-    document.getElementById("rEvery").value = String(ms);
-    if (ms > 0) refreshTimer = setInterval(function () { if (!document.hidden) tick(); }, ms);
-  }
-  function wireRefreshControl(tick) {
-    document.getElementById("rNow").addEventListener("click", function () { tick(); });
-    document.getElementById("rEvery").addEventListener("change", function (event) {
-      localStorage.setItem(REFRESH_KEY, event.target.value);
-      applyRefreshInterval(tick);
+  function liveConnect(url, headers, onChange) {
+    if (liveAbort) liveAbort.abort();
+    var controller = new AbortController();
+    liveAbort = controller;
+    fetch(url, { headers: headers(), signal: controller.signal }).then(function (response) {
+      if (!response.ok || !response.body) throw new Error("stream " + response.status);
+      liveMark("on");
+      liveRetry = 0;
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffered = "";
+      return (function pump() {
+        return reader.read().then(function (chunk) {
+          if (chunk.done) throw new Error("stream closed");
+          buffered += decoder.decode(chunk.value, { stream: true });
+          var lines = buffered.split("\n");
+          buffered = lines.pop();
+          lines.forEach(function (line) {
+            if (!line.trim()) return;
+            var message;
+            try { message = JSON.parse(line); } catch (err) { return; }
+            if (message.type === "changed") onChange();
+          });
+          return pump();
+        });
+      })();
+    }).catch(function () {
+      if (controller !== liveAbort) return;   // superseded by a newer connection
+      liveMark("off");
+      liveRetry = Math.min(liveRetry + 1, 6);
+      // Backoff, capped: a service that is down should not be hammered, and a
+      // board left open overnight should still come back on its own.
+      setTimeout(function () {
+        if (controller === liveAbort) liveConnect(url, headers, onChange);
+      }, Math.pow(2, liveRetry) * 500);
     });
-    applyRefreshInterval(tick);
   }
-  // ── end refresh control ───────────────────────────────────────────────────
+  function wireLiveControl(url, headers, onChange) {
+    document.getElementById("rNow").addEventListener("click", function () { onChange(); });
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) onChange();
+    });
+    onChange();
+    liveConnect(url, headers, onChange);
+  }
+  // ── end live control ──────────────────────────────────────────────────────
 
 // One tick refreshes whatever is on screen: the session list and the open
 // session (its live feed included), or the audit tail.
@@ -1093,8 +1136,7 @@ async function tick() {
   $("#stamp").textContent = "refreshed " + now;
 }
 
-tick();
-wireRefreshControl(tick);
+wireLiveControl("/v1/live", readHeaders, tick);
 </script>
 </body>
 </html>

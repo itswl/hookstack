@@ -20,6 +20,10 @@
     color: var(--text); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px;
     cursor: pointer; }
   .rc button:hover, .rc select:hover { border-color: var(--accent); }
+  .rc .live { font-size: 11px; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
+  .rc .live.on { color: var(--ok); border-color: var(--ok); }
+  .rc .live.off { color: var(--warn); border-color: var(--warn); }
   /* ── end design tokens ────────────────────────────────────────────────────── */
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font: var(--ui); }
@@ -74,12 +78,7 @@
     <span class="stamp" id="stamp">loading…</span>
   <span class="rc">
     <button id="rNow" title="refresh now">&#8635;</button>
-    <select id="rEvery" title="auto refresh">
-      <option value="0">manual</option>
-      <option value="15000">15s</option>
-      <option value="60000">60s</option>
-      <option value="300000">5m</option>
-    </select>
+    <span id="rLive" class="live" title="live connection">live</span>
   </span>
   </header>
   <div id="helpSec" class="hp" style="display:none">
@@ -161,6 +160,11 @@
     var d = new Date(ts * 1000), p = function (n) { return n < 10 ? "0" + n : "" + n; };
     return p(d.getMonth()+1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
   }
+  function readHeaders() {
+    var headers = {}, token = localStorage.getItem(KEY);
+    if (token) headers["X-Read-Token"] = token;
+    return headers;
+  }
   function refresh() {
     if (document.hidden) return;
     var headers = {}, token = localStorage.getItem(KEY);
@@ -197,32 +201,71 @@
     }).catch(function () { document.getElementById("stamp").textContent = "connection failed"; });
   }
   refresh();
-  // ── refresh control · keep this block identical in all three pages ─────────
-  // One timer per page, off or slow by choice: a board that polls every few
-  // seconds spends the operator's attention and the service's breath for
-  // nothing. The stamp says when the data is from; the button says now.
-  var REFRESH_KEY = "hookstack-refresh-ms";
-  var refreshTimer = null;
-  function refreshEveryMs() {
-    var raw = parseInt(localStorage.getItem(REFRESH_KEY) || "60000", 10);
-    return isNaN(raw) ? 60000 : raw;
+  // ── live control · keep this block identical in all three pages ────────────
+  // A board is watched while something is happening, and what it shows changes
+  // when the service writes — not when a clock in the browser says so. So there
+  // is no clock: the page holds one streaming connection and refetches what it
+  // is looking at when the service says something changed. The dropdown this
+  // replaces made the operator choose between a stale board and a busy one,
+  // which is a choice the service can simply answer.
+  //
+  // NDJSON over fetch rather than EventSource: every board authenticates its
+  // reads with a header, and EventSource cannot send one.
+  var liveAbort = null;
+  var liveRetry = 0;
+  function liveMark(state) {
+    var el = document.getElementById("rLive");
+    if (!el) return;
+    el.className = "live " + state;
+    el.textContent = state === "on" ? "live" : "offline";
   }
-  function applyRefreshInterval(tick) {
-    clearInterval(refreshTimer);
-    var ms = refreshEveryMs();
-    document.getElementById("rEvery").value = String(ms);
-    if (ms > 0) refreshTimer = setInterval(function () { if (!document.hidden) tick(); }, ms);
-  }
-  function wireRefreshControl(tick) {
-    document.getElementById("rNow").addEventListener("click", function () { tick(); });
-    document.getElementById("rEvery").addEventListener("change", function (event) {
-      localStorage.setItem(REFRESH_KEY, event.target.value);
-      applyRefreshInterval(tick);
+  function liveConnect(url, headers, onChange) {
+    if (liveAbort) liveAbort.abort();
+    var controller = new AbortController();
+    liveAbort = controller;
+    fetch(url, { headers: headers(), signal: controller.signal }).then(function (response) {
+      if (!response.ok || !response.body) throw new Error("stream " + response.status);
+      liveMark("on");
+      liveRetry = 0;
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffered = "";
+      return (function pump() {
+        return reader.read().then(function (chunk) {
+          if (chunk.done) throw new Error("stream closed");
+          buffered += decoder.decode(chunk.value, { stream: true });
+          var lines = buffered.split("\n");
+          buffered = lines.pop();
+          lines.forEach(function (line) {
+            if (!line.trim()) return;
+            var message;
+            try { message = JSON.parse(line); } catch (err) { return; }
+            if (message.type === "changed") onChange();
+          });
+          return pump();
+        });
+      })();
+    }).catch(function () {
+      if (controller !== liveAbort) return;   // superseded by a newer connection
+      liveMark("off");
+      liveRetry = Math.min(liveRetry + 1, 6);
+      // Backoff, capped: a service that is down should not be hammered, and a
+      // board left open overnight should still come back on its own.
+      setTimeout(function () {
+        if (controller === liveAbort) liveConnect(url, headers, onChange);
+      }, Math.pow(2, liveRetry) * 500);
     });
-    applyRefreshInterval(tick);
   }
-  // ── end refresh control ───────────────────────────────────────────────────
-  wireRefreshControl(refresh);
+  function wireLiveControl(url, headers, onChange) {
+    document.getElementById("rNow").addEventListener("click", function () { onChange(); });
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) onChange();
+    });
+    onChange();
+    liveConnect(url, headers, onChange);
+  }
+  // ── end live control ──────────────────────────────────────────────────────
+  wireLiveControl("/live", readHeaders, refresh);
 })();
 </script>
 </body>
