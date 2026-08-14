@@ -67,10 +67,13 @@ def condition_title(title: str) -> str:
 # Judgement routes, in the order the ledger reports them. Every judged event
 # has exactly one, and it is the first question about cost: what did we
 # actually pay for?
+_FIRING_PREFIX = re.compile(r"^\[(?:FIRING|RESOLVED)(?::\d+)?\]\s*")
+
 ROUTE_AI = "ai"  # a model was called
 ROUTE_REUSE = "reuse"  # a prior verdict for the same identity was reused
 ROUTE_RECOVERY = "recovery"  # the alert ended; reuse what its firing said
 ROUTE_RULE = "rule"  # the model was unavailable or refused; rules decided
+ROUTE_RULE_REUSE = "rule-reuse"  # a prior AI verdict for the same alert RULE answered
 
 IMPORTANCE = ("critical", "high", "medium", "low")
 
@@ -156,6 +159,24 @@ class Incoming:
             ),
             received_at=float(meta.get("received_at") or event.get("received_at") or now),
         )
+
+    @property
+    def rule_key(self) -> str:
+        """Which alert rule this is, as opposed to which firing of it.
+
+        Identity separates instances on purpose — two hosts hitting the same
+        threshold are two conditions. A judgement, though, is usually about the
+        rule: measured on 795 real alerts, 28 of 29 rules had one and only one
+        AI verdict across every firing. So the rule is the key worth reusing a
+        paid answer on, and Grafana/Alertmanager both name it in a label. The
+        title is the fallback, minus the "[FIRING:2]" prefix that would
+        otherwise split one rule into firing and resolved halves.
+        """
+        for label in ("alertname", "rulename", "RuleName"):
+            named = str(self.fields.get(label) or "").strip()
+            if named:
+                return named
+        return _FIRING_PREFIX.sub("", self.title).strip()
 
     @property
     def identity(self) -> str:

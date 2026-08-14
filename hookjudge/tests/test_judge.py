@@ -520,3 +520,103 @@ def test_json_survives_prose_around_it():
     assert _extract_json('{"summary": "he said \\"full\\""}') == {"summary": 'he said "full"'}
     assert _extract_json('{"summary": "first"} {"summary": "second"}') == {"summary": "first"}
     assert _extract_json("sorry, I cannot judge this alert") is None
+
+
+async def _ledger(tmp_path: Any) -> Any:
+    from hookjudge.store import Store
+
+    store = Store(str(tmp_path / "ledger.db"))
+    await store.open()
+    return store
+
+
+@pytest.mark.anyio
+async def test_a_rule_reuses_its_own_paid_verdict(tmp_path):
+    """The second firing of a rule is a question already answered.
+
+    Measured on 795 production alerts: 28 of 29 rules had exactly one AI verdict
+    across every firing, so this is the cheapest tier that is not a guess.
+    """
+    from hookjudge.judge import rule_reuse_verdict
+
+    store = await _ledger(tmp_path)
+    first = event(title="[FIRING:1] Top-up over 500", fields={"alertname": "topup-over-500"}, level="critical")
+    await store.record(first, ai_ok(importance="high", summary="Top-up of 920 on account 42"), 12)
+
+    later = event(title="[FIRING:1] Top-up over 500", fields={"alertname": "topup-over-500"}, level="critical")
+    prior = await store.prior_rule_verdict(later.rule_key, later.level, 3600, later.received_at)
+    assert prior is not None
+
+    verdict = rule_reuse_verdict(prior, later)
+    assert verdict.importance == "high"
+    assert verdict.route == "rule-reuse"
+    # Yesterday's amount must not be re-served as today's summary.
+    assert "920" not in verdict.summary
+    assert verdict.summary == later.title
+    await store.close()
+
+
+@pytest.mark.anyio
+async def test_rule_reuse_refuses_the_cases_that_would_hide_a_problem(tmp_path):
+    store = await _ledger(tmp_path)
+    fields = {"alertname": "disk-full"}
+
+    # A degraded verdict must never spread: this is the shortcut that filed 73
+    # payment alerts as low in WebhookWise while the model called them high.
+    await store.record(
+        event(title="Disk full", fields=fields, level="warning"),
+        rule_verdict(event(title="Disk full", fields=fields, level="warning"), degraded_reason="AI call failed"),
+        3,
+    )
+    same = event(title="Disk full", fields=fields, level="warning")
+    assert await store.prior_rule_verdict(same.rule_key, same.level, 3600, same.received_at) is None
+
+    # An escalation asks a different question, so it reaches the model.
+    await store.record(event(title="Disk full", fields=fields, level="warning"), ai_ok(importance="medium"), 3)
+    worse = event(title="Disk full", fields=fields, level="critical")
+    assert await store.prior_rule_verdict(worse.rule_key, worse.level, 3600, worse.received_at) is None
+
+    # Off by default: a zero window looks nothing up.
+    calm = event(title="Disk full", fields=fields, level="warning")
+    assert await store.prior_rule_verdict(calm.rule_key, calm.level, 0, calm.received_at) is None
+    await store.close()
+
+
+@pytest.mark.anyio
+async def test_an_existing_ledger_gains_the_new_columns(tmp_path):
+    """CREATE TABLE IF NOT EXISTS does nothing to a table already there."""
+    import aiosqlite
+
+    from hookjudge.store import _SCHEMA
+
+    # The schema as it was before the columns existed, so this stays honest
+    # when the real one grows again.
+    previous = "\n".join(
+        line for line in _SCHEMA.splitlines() if "rule_key TEXT" not in line and "level TEXT" not in line
+    )
+    path = str(tmp_path / "old.db")
+    async with aiosqlite.connect(path) as db:
+        await db.executescript(previous)
+        await db.commit()
+
+    from hookjudge.store import Store
+
+    store = Store(path)
+    await store.open()
+    cursor = await store.db.execute("PRAGMA table_info(judgements)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    assert {"rule_key", "level"} <= columns
+    await store.close()
+
+
+def ai_ok(*, importance: str = "high", summary: str = "something happened") -> Any:
+    from hookjudge.contract import ROUTE_AI, Verdict
+
+    return Verdict(
+        summary=summary,
+        importance=importance,
+        event_type="business",
+        impact_scope="checkout",
+        route=ROUTE_AI,
+        model="test-model",
+    ).normalized()
