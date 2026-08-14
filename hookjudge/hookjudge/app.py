@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Str
 
 from hookjudge.alarm import SelfAlarm
 from hookjudge.contract import Incoming, Outgoing
-from hookjudge.judge import ai_verdict, reuse_verdict, rule_verdict
+from hookjudge.judge import ai_verdict, reuse_verdict, rule_reuse_verdict, rule_verdict
 from hookjudge.live import Live
 from hookjudge.settings import Settings
 from hookjudge.store import Store, now_ts
@@ -85,7 +85,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # analyse the past is the easiest cost to never incur.
             verdict = rule_verdict(event, degraded_reason="recovery alerts are not analysed on their own")
         else:
-            verdict = await ai_verdict(client, app_settings, event)
+            # Cheapest tier that is not a guess: this rule's own last AI verdict.
+            # Measured on 795 production alerts, 28 of 29 rules answered the same
+            # way every single time, so the second firing of a rule is usually a
+            # question already paid for. Off unless a window is configured.
+            by_rule = await store.prior_rule_verdict(
+                event.rule_key, event.level, app_settings.rule_reuse_window_seconds, now_ts()
+            )
+            if by_rule is not None:
+                verdict = rule_reuse_verdict(by_rule, event)
+            else:
+                verdict = await ai_verdict(client, app_settings, event)
         latency_ms = int((time.monotonic() - started) * 1000)
         return await store.record(event, verdict, latency_ms)
 

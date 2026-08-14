@@ -28,7 +28,15 @@ from typing import Any
 
 import httpx
 
-from hookjudge.contract import ROUTE_AI, ROUTE_RECOVERY, ROUTE_REUSE, ROUTE_RULE, Incoming, Verdict
+from hookjudge.contract import (
+    ROUTE_AI,
+    ROUTE_RECOVERY,
+    ROUTE_REUSE,
+    ROUTE_RULE,
+    ROUTE_RULE_REUSE,
+    Incoming,
+    Verdict,
+)
 
 _SYSTEM_PROMPT = """You judge operations alerts. Read one alert and answer with strict JSON only,
 no prose around it.
@@ -303,5 +311,23 @@ def reuse_verdict(prior: dict[str, Any], *, recovery: bool) -> Verdict:
         event_type=str(prior.get("event_type") or ""),
         impact_scope=str(prior.get("impact_scope") or ""),
         route=ROUTE_RECOVERY if recovery else ROUTE_REUSE,
+        model=str(prior.get("model") or ""),
+    ).normalized()
+
+
+def rule_reuse_verdict(prior: dict[str, Any], event: Incoming) -> Verdict:
+    """This rule's known classification, applied to today's firing.
+
+    The classification carries over; the summary does not. A prior summary names
+    the amount, host or value that fired last time, and re-serving it would put
+    yesterday's number on today's card — the one part of a verdict that is about
+    this firing rather than about the rule.
+    """
+    return Verdict(
+        summary=event.title or "(untitled alert)",
+        importance=str(prior.get("importance") or "medium"),
+        event_type=str(prior.get("event_type") or ""),
+        impact_scope=str(prior.get("impact_scope") or "unknown (reused for this rule)"),
+        route=ROUTE_RULE_REUSE,
         model=str(prior.get("model") or ""),
     ).normalized()
