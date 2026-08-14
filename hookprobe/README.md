@@ -87,6 +87,7 @@ what runs.
 | `HOOKPROBE_REPEAT_REMINDER_AT` | `3` *(0 = off)* | After N identical tool calls, remind the agent to change approach |
 | `HOOKPROBE_BASH_TIMEOUT_MS` | `120000` *(0 = CLI default)* | Deadline for a single command (`BASH_DEFAULT_TIMEOUT_MS`) |
 | `HOOKPROBE_BASH_MAX_TIMEOUT_MS` | `600000` *(0 = CLI default)* | Ceiling the agent may request per command (`BASH_MAX_TIMEOUT_MS`) |
+| `CLAUDE_CODE_ENABLE_TELEMETRY` + `OTEL_*` | *(unset = off)* | Passed to the CLI, which emits one OpenTelemetry event per model call. No default endpoint — see below |
 | `HOOKPROBE_HOST` / `HOOKPROBE_PORT` | `0.0.0.0` / `8088` | Bind address |
 | `ANTHROPIC_API_KEY` | — | Or `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` for a relay |
 
@@ -143,6 +144,55 @@ Claude Code harness already does exactly that, and a second layer on top wrote a
 file that only held the harness's already-truncated copy while claiming to hold
 everything — see
 [the rejected note](../.agents/notes/rejected/2026-08-14-tool-output-spill-in-hookprobe.md).
+
+## Model-call telemetry (optional, no backend assumed)
+
+Every run's totals are already on its record — cost, tokens, per-model
+breakdown, duration, and the tool steps. What that cannot show is the *shape* of
+a run: how many model calls it took, which one was slow, where the context went.
+The bundled CLI emits that itself over OpenTelemetry, and the SDK merges this
+container's environment into the CLI's, so switching it on is configuration:
+
+```bash
+CLAUDE_CODE_ENABLE_TELEMETRY=1
+OTEL_EXPORTER_OTLP_ENDPOINT=http://your-collector:4317
+OTEL_LOGS_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=otlp
+```
+
+Unset, nothing is emitted and nothing is dialled — there is no default endpoint
+and no vendor here. Point it at whatever you already run, or at nothing until you
+do.
+
+One event per model call, `claude_code.api_request`:
+
+```
+model: "deepseek-v4-pro"      input_tokens: 25853     output_tokens: 2
+cost_usd: 0.129315            duration_ms: 1752       cache_read_tokens: 0
+session.id: 1a09123d…         prompt.id: bcf7d8b9…    event.sequence: 1
+query_source: "sdk"           effort: "high"
+```
+
+Alongside it: `assistant_response`, `tool_decision`, and the counters
+`claude_code.token.usage` / `cost.usage` / `tool.execution` / `subagent.spawn` /
+`mcp.rpc` / `compaction` / `active_time.total`.
+
+This is where per-model detail appears that a run record cannot show: one
+investigation was observed spending on **two** models — a fast one for cheap
+turns and the main one for the reasoning — while the run's own total is a single
+number. Anyone re-pricing usage needs both names.
+
+Two things to know before you build on it, both measured rather than assumed
+(CLI 2.1.229):
+
+- **These are events, not spans.** `OTEL_TRACES_EXPORTER` is accepted but no
+  spans were emitted for a plain run, and the events carry no `traceId`. A call
+  tree is reconstructable from `session.id` + `prompt.id` + `event.sequence`; it
+  does not arrive as one.
+- **`cost_usd` prices Claude models.** On another provider reached through the
+  Anthropic dialect it is an over-estimate — the run above reports $0.129 for a
+  DeepSeek call. The event carries the real model name and the raw token counts,
+  so re-price from those and treat the field as a relative signal.
 
 ## The family loop
 
