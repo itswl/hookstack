@@ -356,3 +356,35 @@ def test_default_agents_seed_once_and_respect_choices(tmp_path) -> None:
     (agents_dir / "metrics-analyst.md").unlink()
     assert seed_default_agents(workdir) == 0
     assert not (agents_dir / "metrics-analyst.md").exists()
+
+
+def test_spend_is_reported_even_with_no_ceiling_set(tmp_path) -> None:
+    """Knowing the cost and capping it are different questions.
+
+    The console shows the window's spend in its header; hiding that from anyone
+    who declined to set HOOKPROBE_BUDGET_USD would answer the second question by
+    refusing to answer the first.
+    """
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    settings = make_settings(tmp_path, token="t", budget_usd=0.0)
+    service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+    with TestClient(create_app(settings, service)) as client:
+        auth = {"Authorization": "Bearer t"}
+        client.post("/hooks/agent", json={"message": "go", "sessionKey": "s-spend"}, headers=auth)
+        for _ in range(200):
+            if client.get("/sessions/s-spend/final", headers=auth).status_code == 200:
+                break
+            time.sleep(0.02)
+
+        body = client.get("/v1/budget", headers=auth).json()
+
+    assert body["enabled"] is False, body
+    assert round(body["spent_usd"], 6) == 0.5, body  # the fake engine's cost
+    assert body["window_hours"] == 24.0
+    assert "budget_usd" not in body  # no ceiling was set, so none is claimed
