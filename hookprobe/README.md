@@ -96,7 +96,12 @@ Read-only is enforced in three layers, strongest first:
 
 1. **Credentials** — mount query-only credentials (read-only kubeconfig,
    Prometheus/Loki endpoints, viewer tokens). This is the real boundary;
-   treat the other two as convenience.
+   treat the other two as convenience. It is also the *first* thing to get
+   right: an investigator with no credentials mounted can only reason about the
+   alert payload, and no amount of tooling in the image changes that. Domain
+   CLIs are build args, so adding one is a flag rather than an edit:
+   `--build-arg APT_EXTRAS="postgresql-client redis-tools"`,
+   `--build-arg KUBECTL_VERSION=v1.31.4`.
 2. **Bash guard** — a PreToolUse hook denies mutating verbs of kubectl, helm,
    docker/podman, systemctl, terraform, plus ssh/scp and `git push`. It errs
    toward over-blocking. HTTP verbs are not policed (query APIs POST), and
