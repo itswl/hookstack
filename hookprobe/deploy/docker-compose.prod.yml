@@ -81,23 +81,33 @@ services:
       HOOKPROBE_REPEAT_REMINDER_AT: ${HOOKPROBE_REPEAT_REMINDER_AT:-}
       HOOKPROBE_BASH_TIMEOUT_MS: ${HOOKPROBE_BASH_TIMEOUT_MS:-}
       HOOKPROBE_BASH_MAX_TIMEOUT_MS: ${HOOKPROBE_BASH_MAX_TIMEOUT_MS:-}
-      # Model-call telemetry, off unless you set an endpoint. The bundled CLI
-      # speaks OpenTelemetry itself, and the SDK merges this container's
-      # environment into it, so pointing it at any collector is configuration
-      # rather than code — no vendor assumed. What arrives per LLM call:
-      # claude_code.api_request {model, input_tokens, output_tokens,
-      # cache_read_tokens, cache_creation_tokens, cost_usd, duration_ms,
-      # session.id, prompt.id, event.sequence}, plus assistant_response,
-      # tool.execution, subagent.spawn, mcp.rpc, compaction and token/cost
-      # counters. NOTE the cost_usd it reports prices Claude models; on another
-      # provider re-price from the raw token counts and the real model name.
-      CLAUDE_CODE_ENABLE_TELEMETRY: ${CLAUDE_CODE_ENABLE_TELEMETRY:-}
+      # Model-call telemetry. On by default and harmless when nothing is
+      # listening — measured: with no endpoint a run finishes in the same time,
+      # emits no retries and logs nothing. So the switch stays on and the only
+      # decision left is where to send it: set OTEL_EXPORTER_OTLP_ENDPOINT when
+      # you have a collector, and the data starts arriving with no restart of
+      # anything else. What arrives per LLM call: claude_code.api_request
+      # {model, input_tokens, output_tokens, cache_read_tokens,
+      # cache_creation_tokens, cost_usd, duration_ms, session.id, prompt.id,
+      # event.sequence}, plus assistant_response, tool_result, tool_decision,
+      # hook_execution_*, mcp_server_connection, user_prompt, and the counters
+      # token.usage / cost.usage / session.count / active_time.total.
+      # NOTE the cost_usd it reports prices Claude models; on another provider
+      # re-price from the raw token counts and the real model name.
+      CLAUDE_CODE_ENABLE_TELEMETRY: ${CLAUDE_CODE_ENABLE_TELEMETRY:-1}
+      OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-otlp}
+      OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-otlp}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/json}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-}
       OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
-      OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-}
-      OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-}
       OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
+      OTEL_METRIC_EXPORT_INTERVAL: ${OTEL_METRIC_EXPORT_INTERVAL:-}
+      # Prompts and responses are redacted by the CLI itself (<REDACTED>);
+      # nothing here does that. Set to 1 only if you mean it: alert payloads and
+      # the environment memory then leave the container in cleartext, to
+      # wherever the endpoint points. Needed if you want the telemetry to carry
+      # material for evaluating answer quality rather than only its cost.
+      OTEL_LOG_USER_PROMPTS: ${OTEL_LOG_USER_PROMPTS:-}
       # Direct self-alarm when report returns exhaust their retries:
       HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
       HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
