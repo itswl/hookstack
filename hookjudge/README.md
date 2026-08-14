@@ -107,6 +107,7 @@ deletes a queued return.
 | ------ | ---------- | ------------------------------------------------ |
 | POST   | `/events`  | the pipe's event. Answers **202** immediately.    |
 | GET    | `/status`  | ledger JSON: routes, cost, returns, recent        |
+| GET    | `/live`    | the board's wake-up line: NDJSON, `changed` per burst of writes, `ping` through the quiet |
 | GET    | `/metrics` | Prometheus text                                   |
 | GET    | `/healthz` | liveness                                          |
 | GET    | `/`        | a dark one-page view of the ledger                |
@@ -116,7 +117,7 @@ sender's connection open for that makes it time out and retry, so the same
 alert arrives twice while the first copy is still being analysed. The
 judgement travels back the other way, to a pipe door, once it exists.
 
-`/status` and `/metrics` are behind `HOOKJUDGE_READ_TOKEN`
+`/status`, `/live` and `/metrics` are behind `HOOKJUDGE_READ_TOKEN`
 (`X-Read-Token:` or `Authorization: Bearer`) — Prometheus can scrape with
 either.
 
@@ -138,7 +139,7 @@ All environment, one flat object (`hookjudge/settings.py`), no layers.
 | -------- | ------- | ------------ |
 | `HOOKJUDGE_DB` | `hookjudge.db` | ledger path |
 | `HOOKJUDGE_INGEST_SECRET` | *(empty)* | inbound HMAC secret |
-| `HOOKJUDGE_READ_TOKEN` | *(empty)* | guards `/status` and `/metrics` |
+| `HOOKJUDGE_READ_TOKEN` | *(empty)* | guards `/status`, `/live` and `/metrics` |
 | `HOOKJUDGE_MAX_BODY_BYTES` | `262144` | inbound body cap |
 | `HOOKJUDGE_RETURN_URL` | *(empty)* | the one pipe door results go back to |
 | `HOOKJUDGE_RETURN_SECRET` | *(empty)* | outbound HMAC secret |

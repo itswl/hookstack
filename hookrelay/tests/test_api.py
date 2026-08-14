@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 
 PAYLOAD = {"title": "db down", "message": "x", "state": "alerting"}
 
@@ -95,3 +96,50 @@ async def test_status_recent_carries_parsed_steps(client):
     assert isinstance(event["steps"], list)
     assert [s["gate"] for s in event["steps"]][:2] == ["extract", "dedup"]
     assert isinstance(event["channels"], list)
+
+
+async def test_a_ledger_write_wakes_every_watching_board(store):
+    """The board has no clock any more, so the write has to be the signal.
+
+    Every mutation a board can see announces itself; the endpoint that carries
+    those announcements is exercised against a running service, because httpx's
+    ASGI transport buffers a whole response and an endless one hangs it.
+    """
+    from hookrelay.live import Live
+
+    live = Live()
+    store.on_change = live.changed
+    watcher = live.watch()
+
+    await store.insert_event(
+        source="prometheus",
+        fp="fp-live",
+        extracted={"title": "disk full", "body": "/ at 96%", "level": "high", "fields": {}},
+        payload_json="{}",
+        now=time.time(),
+    )
+
+    assert watcher.qsize() == 1
+    live.unwatch(watcher)
+    assert live.watcher_count == 0
+
+
+async def test_a_storm_of_writes_is_one_wake_up(store):
+    """N rows must not mean N refetches: the board looks once and sees them all."""
+    from hookrelay.live import Live
+
+    live = Live()
+    store.on_change = live.changed
+    watcher = live.watch()
+
+    for index in range(5):
+        await store.insert_event(
+            source="prometheus",
+            fp=f"fp-{index}",
+            extracted={"title": "disk full", "body": "/ at 96%", "level": "high", "fields": {}},
+            payload_json="{}",
+            now=time.time(),
+        )
+
+    assert watcher.qsize() == 1
+    live.unwatch(watcher)
