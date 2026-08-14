@@ -11,6 +11,9 @@ So the shared parts are copied verbatim and this script is the contract. It
 compares the delimited blocks byte for byte and fails loudly on drift, which
 is cheaper than noticing months later that one page polls every 5 seconds.
 
+Since the boards became pushed rather than polled, it also forbids setInterval
+outright: a timer is no longer the mechanism, so any timer is drift.
+
     python3 scripts/assert_design.py
 """
 
@@ -34,14 +37,14 @@ BLOCKS = (
         "/* ── end design tokens ────────────────────────────────────────────────────── */",
     ),
     (
-        "refresh control markup",
+        "live control markup",
         '<span class="rc">',
         "</span>",
     ),
     (
-        "refresh control script",
-        "// ── refresh control · keep this block identical in all three pages ─────────",
-        "// ── end refresh control ───────────────────────────────────────────────────",
+        "live control script",
+        "// ── live control · keep this block identical in all three pages ────────────",
+        "// ── end live control ──────────────────────────────────────────────────────",
     ),
 )
 
@@ -70,19 +73,21 @@ def main() -> int:
         if len(set(found.values())) > 1:
             failures.append(f"{label}: the pages disagree — " + ", ".join(str(p) for p in found))
 
-    # The whole point of the refresh control: nothing may keep its own clock.
-    # The only permitted setInterval is the one the control itself owns.
+    # The whole point of the live control: these boards do not keep a clock at
+    # all. What they show changes when the service writes, and the service says
+    # so — a page that reintroduces a poll loop is answering a question nobody
+    # is asking, at whatever interval its author guessed.
     for page in PAGES:
         for number, line in enumerate((root / page).read_text(encoding="utf-8").splitlines(), 1):
-            if "setInterval(" in line and "refreshTimer = setInterval(" not in line:
-                failures.append(f"{page}:{number}: a timer outside the refresh control — {line.strip()[:60]}")
+            if "setInterval(" in line:
+                failures.append(f"{page}:{number}: a poll loop — the boards are pushed now — {line.strip()[:60]}")
 
     for line in failures:
         print(f"  FAIL  {line}")
     if failures:
         print(f"\n{len(failures)} design assertion(s) failed")
         return 1
-    print(f"design: {len(BLOCKS)} shared blocks identical across {len(PAGES)} pages, one timer each")
+    print(f"design: {len(BLOCKS)} shared blocks identical across {len(PAGES)} pages, no timers")
     return 0
 
 

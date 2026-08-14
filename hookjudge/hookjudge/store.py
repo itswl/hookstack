@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from typing import Any
 
 import aiosqlite
@@ -54,6 +55,9 @@ class Store:
     def __init__(self, path: str) -> None:
         self._path = path
         self._db: aiosqlite.Connection | None = None
+        # Set by the app to a Live.changed; left None everywhere else, so the
+        # store keeps working with nobody listening.
+        self.on_change: Callable[[], None] | None = None
 
     async def open(self) -> None:
         self._db = await aiosqlite.connect(self._path)
@@ -132,6 +136,7 @@ class Store:
             ),
         )
         await self.db.commit()
+        self._announce()
         return int(cursor.lastrowid or 0)
 
     async def pending_returns(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -140,12 +145,22 @@ class Store:
         )
         return [dict(row) for row in await cursor.fetchall()]
 
+    def _announce(self) -> None:
+        """Tell whoever is watching the board that its contents moved.
+
+        A plain callback rather than an import: the store stays free of the
+        HTTP layer, and a test can hand it a list.
+        """
+        if self.on_change is not None:
+            self.on_change()
+
     async def mark_return(self, row_id: int, status: str, attempts: int, error: str | None) -> None:
         await self.db.execute(
             "UPDATE judgements SET return_status = ?, return_attempts = ?, return_error = ? WHERE id = ?",
             (status, attempts, (error or "")[:400] or None, row_id),
         )
         await self.db.commit()
+        self._announce()
 
     async def recent(self, limit: int = 50, *, route: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
         clauses, params = [], []

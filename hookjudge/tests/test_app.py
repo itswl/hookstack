@@ -362,3 +362,67 @@ async def test_dead_return_fires_the_self_alarm(tmp_path, monkeypatch):
         assert len(sink.alarms) == 1, "the second dead letter folds into the window, not the channel"
         assert "verdict return dead-lettered" in sink.alarms[0]
         assert "Single top-up over 500" in sink.alarms[0]
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_verdict_wakes_every_watching_board(app_client):
+    """The boards have no clock any more, so the write has to be the signal.
+
+    The stream endpoint itself is exercised against a running service — httpx's
+    ASGI transport buffers a whole response, so an endless one hangs it — and
+    what matters here is that a verdict reaching the ledger reaches the watchers.
+    """
+    import asyncio
+
+    live = app_client.app.state.store.on_change.__self__
+    watcher = live.watch()
+    try:
+        assert watcher.empty()
+        await app_client.post("/events", json=EVENT)
+        await _settle(app_client)
+        assert await asyncio.wait_for(watcher.get(), timeout=2) == "changed"
+    finally:
+        live.unwatch(watcher)
+    assert live.watcher_count == 0
+
+
+@pytest.mark.asyncio
+async def test_consecutive_writes_collapse_into_one_wake_up(app_client):
+    """A storm must not queue a wake-up per row: the board refetches once."""
+    live = app_client.app.state.store.on_change.__self__
+    watcher = live.watch()
+    try:
+        for _ in range(5):
+            live.changed()
+        assert watcher.qsize() == 1
+    finally:
+        live.unwatch(watcher)
+
+
+@pytest.mark.asyncio
+async def test_live_stream_needs_the_read_token(app_client):
+    response = await app_client.get("/live")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_burst_of_writes_becomes_one_wake_up_on_the_wire():
+    """One alert touches a ledger many times; a board must look once, not N times."""
+    import asyncio
+    import json
+
+    from hookjudge.live import Live
+
+    live = Live()
+    stream = live.stream(keepalive_seconds=5, settle_seconds=0.05).__aiter__()
+
+    assert json.loads(await stream.__anext__())["type"] == "hello"
+    for _ in range(8):  # the writes of a single alert arriving together
+        live.changed()
+
+    assert json.loads(await asyncio.wait_for(stream.__anext__(), timeout=2))["type"] == "changed"
+    # Nothing is left queued behind it: the burst was absorbed, not buffered.
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(stream.__anext__(), timeout=0.3)
+    await stream.aclose()
+    assert live.watcher_count == 0

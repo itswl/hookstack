@@ -19,8 +19,8 @@ Three delimited regions, identical in all three files:
 | Block | Delimiters | What it holds |
 | --- | --- | --- |
 | Design tokens | `── hookstack design tokens …` / `── end design tokens ──` | Colours, the mono and UI font stacks, the refresh control's own styling |
-| Refresh control markup | `<span class="rc">` … `</span>` | The ↻ button and the interval select |
-| Refresh control script | `── refresh control …` / `── end refresh control ──` | One timer, localStorage persistence, hidden-tab skip |
+| Live control markup | `<span class="rc">` … `</span>` | The ↻ button and the connection indicator |
+| Live control script | `── live control …` / `── end live control ──` | One streaming connection, capped reconnect backoff, refetch on wake |
 
 Copy a block wholesale when changing it, in all three files, in one commit.
 
@@ -47,23 +47,27 @@ hookprobe's console additionally aliases its older token names
 (`--panel`, `--line`, `--dim`, `--green`, `--amber`, `--red`) onto the shared
 set, so its existing rules keep working without a sweeping rewrite.
 
-## Refreshing
+## Staying current
 
-One timer per page, and the operator owns it. The header carries ↻ (refresh
-now) and an interval: **manual · 15s · 60s · 5m**, defaulting to 60s and
-persisted in `localStorage` under `hookstack-refresh-ms`. The timer skips
-hidden tabs, and `manual` means exactly that — nothing polls until the button
-is pressed.
+The boards do not keep a clock. What they show changes when a service writes,
+and the service says so: each page holds one streaming connection (`/live`,
+`/v1/live` on the investigator) and refetches *what it is currently looking at*
+when a `changed` arrives. The header keeps ↻ for a manual refetch and shows
+whether the connection is up.
 
-Nothing else may keep a clock. The console previously ran four timers at once
-(session list every 5s, budget every 15s, audit every 8s, the open session
-every 2.5s); now one tick refreshes whatever is on screen.
+The signal carries no rows, deliberately. Every board has filters, a window, a
+cursor of its own, so "look again" is smaller than pushing rows the viewer may
+not have asked for — and it cannot get their filters wrong. Consecutive writes
+collapse into one wake-up, so an alert storm is one refetch rather than N.
 
-A clock is the wrong tool for one job, and the investigator's console shows it:
-the seconds right after you send a message are when feedback matters most, and a
-minute-long tick makes them the emptiest. So that feed is *pushed* — the page
-opens a streaming response for the run it is watching and closes it when the run
-settles. Not a second timer, and therefore not a second thing to keep in sync:
-`manual` still means nothing polls, and an open investigation is still live.
-`assert_design.py` fails on any `setInterval` the control does not own, which is
-what keeps that distinction honest.
+This replaced an interval dropdown (manual · 15s · 60s · 5m). It was an honest
+answer to "don't poll so often", but it made the operator choose between a stale
+board and a busy one, and it was worst exactly where it mattered most: the
+seconds after you send an investigation a message, when a 60s tick shows nothing
+at all. The service knows when something happened; asking the browser to guess
+was the wrong division of labour.
+
+`assert_design.py` now forbids `setInterval` outright. A timer is no longer the
+mechanism, so any timer is drift — reconnect backoff uses `setTimeout` and is
+capped, so a service that is down is not hammered and a board left open
+overnight still comes back on its own.

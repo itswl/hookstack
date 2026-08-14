@@ -148,6 +148,10 @@ class RunService:
         # already publishes its steps through on_event; this is the seam that
         # lets a browser see them as they happen instead of on the next poll.
         self._watchers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
+        # Set by the app: "the session list moved" — a run started, settled, or
+        # returned its report. Separate from the per-run feed above, because a
+        # list and a transcript answer different questions.
+        self.on_board_change: Callable[[], None] | None = None
         # Return-retry pacing, an instance attr so tests can collapse it.
         self._return_delays: tuple[float, ...] = (0.0, 2.0, 5.0)
         # Self-alarm throttle state (see _alarm_return_failure).
@@ -175,6 +179,7 @@ class RunService:
         )
         run.meta = dict(payload.get("_meta") or {})
         self._store.create(run)
+        self._board_changed()
         self._spawn(run, message, timeout_s, resume=None)
         return run
 
@@ -314,6 +319,10 @@ class RunService:
         if not watchers:
             self._watchers.pop(session_key, None)
 
+    def _board_changed(self) -> None:
+        if self.on_board_change is not None:
+            self.on_board_change()
+
     def _settle(self, run: Run) -> None:
         """Persist the finished run and wake anyone watching it.
 
@@ -322,6 +331,7 @@ class RunService:
         be slow at."""
         self._store.finish(run)
         self._publish(run.session_key, {"type": "settled", "status": run.status, "ts": time.time()})
+        self._board_changed()
 
     def _publish(self, session_key: str, event: dict[str, Any]) -> None:
         """Fan one step out to whoever is watching. Never raises: a broken
