@@ -93,12 +93,21 @@ services:
       OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
       OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
       OTEL_METRIC_EXPORT_INTERVAL: ${OTEL_METRIC_EXPORT_INTERVAL:-}
-      # Prompts and responses are redacted by the CLI itself (<REDACTED>);
-      # nothing here does that. Set to 1 only if you mean it: alert payloads and
-      # the environment memory then leave the container in cleartext, to
-      # wherever the endpoint points. Needed if you want the telemetry to carry
-      # material for evaluating answer quality rather than only its cost.
+      # Content redaction is the CLI's own (<REDACTED>), not this repository's,
+      # and it is five independent switches. Measured on 2.1.229: responses=1
+      # exposes the answers and leaves prompts redacted, while prompts=1 exposes
+      # both. So the answers are on by default — they are what a report is judged
+      # on, and their inputs are already kept upstream in the pipe's ledger —
+      # while the inbound side, which carries the alert payload and whatever the
+      # environment memory says, stays off until someone decides otherwise.
+      OTEL_LOG_ASSISTANT_RESPONSES: ${OTEL_LOG_ASSISTANT_RESPONSES:-1}
       OTEL_LOG_USER_PROMPTS: ${OTEL_LOG_USER_PROMPTS:-}
+      # Heavier still, and off: tool arguments, whole tool outputs (the megabyte
+      # `grep` the harness already truncates), and the raw request/response
+      # bodies of every model call.
+      OTEL_LOG_TOOL_DETAILS: ${OTEL_LOG_TOOL_DETAILS:-}
+      OTEL_LOG_TOOL_CONTENT: ${OTEL_LOG_TOOL_CONTENT:-}
+      OTEL_LOG_RAW_API_BODIES: ${OTEL_LOG_RAW_API_BODIES:-}
       # Direct self-alarm when report returns exhaust their retries:
       HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
       HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
