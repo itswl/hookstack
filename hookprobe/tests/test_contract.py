@@ -254,3 +254,65 @@ def test_engine_failure_is_served_as_final_report(tmp_path) -> None:
         detail = client.get(f"/v1/runs/{body['sessionKey']}", headers=AUTH).json()
         assert detail["status"] == "failed"
         assert "engine exploded" in detail["error"]
+
+
+def test_stream_pushes_the_steps_of_a_running_turn(tmp_path) -> None:
+    """The console's live feed: steps arrive as they happen, not on the next tick."""
+    events = [
+        {"type": "tool_use", "name": "Bash", "detail": "kubectl get pods"},
+        {"type": "text", "text": "checking the gateway"},
+    ]
+    engine = FakeEngine(events=events, delay=0.15)
+    seen: list[dict] = []
+    with make_client(tmp_path, engine) as client:
+        client.post("/hooks/agent", json={"message": "investigate", "sessionKey": "s-live"}, headers=AUTH)
+        with client.stream("GET", "/v1/runs/s-live/stream", headers=AUTH) as response:
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("application/x-ndjson")
+            for line in response.iter_lines():
+                if not line.strip():
+                    continue
+                seen.append(json.loads(line))
+                if seen[-1]["type"] == "done":
+                    break
+
+    kinds = [item["type"] for item in seen]
+    assert kinds[0] == "snapshot", seen
+    assert kinds[-1] == "done"
+    # Every step reached the watcher, whether through the opening snapshot or
+    # pushed afterwards — which is the guarantee, not which of the two.
+    delivered = list(seen[0].get("events") or []) + [item for item in seen[1:] if item["type"] in {"tool_use", "text"}]
+    assert [item.get("name") or item.get("text") for item in delivered] == [
+        "Bash",
+        "checking the gateway",
+    ], delivered
+
+
+def test_stream_closes_immediately_for_a_finished_run(tmp_path) -> None:
+    with make_client(tmp_path, FakeEngine()) as client:
+        client.post("/hooks/agent", json={"message": "go", "sessionKey": "s-done"}, headers=AUTH)
+        poll_until_final(client, "s-done")
+        with client.stream("GET", "/v1/runs/s-done/stream", headers=AUTH) as response:
+            payloads = [json.loads(line) for line in response.iter_lines() if line.strip()]
+
+    assert [item["type"] for item in payloads] == ["snapshot", "done"]
+    assert payloads[-1]["status"] == "completed"
+
+
+def test_stream_needs_the_token_and_a_real_session(tmp_path) -> None:
+    with make_client(tmp_path, FakeEngine()) as client:
+        assert client.get("/v1/runs/s-missing/stream", headers=AUTH).status_code == 404
+        assert client.get("/v1/runs/s-missing/stream").status_code == 401
+
+
+def test_watchers_are_released_when_the_reader_goes_away(tmp_path) -> None:
+    """A closed browser tab must not leave a queue growing behind it."""
+    settings = make_settings(tmp_path, token=TOKEN)
+    service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+    with TestClient(create_app(settings, service)) as client:
+        client.post("/hooks/agent", json={"message": "go", "sessionKey": "s-leak"}, headers=AUTH)
+        poll_until_final(client, "s-leak")
+        with client.stream("GET", "/v1/runs/s-leak/stream", headers=AUTH) as response:
+            list(response.iter_lines())
+
+    assert service._watchers == {}
