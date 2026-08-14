@@ -264,8 +264,17 @@ class RunService:
         """(spent_in_window, budget) — None when the breaker is disabled."""
         if self._settings.budget_usd <= 0:
             return None
+        return self.window_spend(), self._settings.budget_usd
+
+    def window_spend(self) -> float:
+        """What the window has cost so far, ceiling or no ceiling.
+
+        Knowing the spend and capping it are different questions: an operator
+        wants the first answered even when they have chosen not to ask the
+        second.
+        """
         cutoff = time.time() - self._settings.budget_window_hours * 3600
-        return self._store.spend_since(cutoff), self._settings.budget_usd
+        return self._store.spend_since(cutoff)
 
     def refuse_for_budget(self, payload: dict[str, Any], *, origin: str, spent: float) -> Run:
         """Settle the session as a refused run — no engine, cost 0, loop completed.
