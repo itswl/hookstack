@@ -174,7 +174,14 @@ services:
       OTEL_LOG_USER_PROMPTS: ${OTEL_LOG_USER_PROMPTS:-1}
       OTEL_LOG_TOOL_DETAILS: ${OTEL_LOG_TOOL_DETAILS:-1}
       OTEL_LOG_TOOL_CONTENT: ${OTEL_LOG_TOOL_CONTENT:-1}
-      OTEL_LOG_RAW_API_BODIES: ${OTEL_LOG_RAW_API_BODIES:-1}
+      # Off: it costs ~82% of the telemetry volume and, capped, cannot do the
+      # one thing it is for. Every real call exceeds 60 KiB, so what arrives
+      # is half a payload plus a truncation marker — the most expensive
+      # signal here delivering the least reliable artifact. Turn it on
+      # together with CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH when byte-exact
+      # replay is actually the job, then turn it back off. ("0" disables it;
+      # verified, not assumed — a truthy-string reading would have enabled it.)
+      OTEL_LOG_RAW_API_BODIES: ${OTEL_LOG_RAW_API_BODIES:-0}
       # Raw bodies are capped at 60 KiB by the CLI, which says so in the value
       # it sends ("[TRUNCATED - Content exceeds 60KB limit]") rather than losing
       # it silently — body_length still reports the true size, so the loss is
