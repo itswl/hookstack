@@ -37,7 +37,7 @@ caller ── POST /hooks/agent ───────────────▶
 | `GET/PUT /v1/memory` | The environment memory — `{workdir}/CLAUDE.md`, loaded into every engine session. Facts every investigation should start from: topology, known false alarms, conventions. |
 | `GET /v1/runs` | Session list, newest first (summaries). |
 | `GET /v1/runs/{key}` | Full run record: status, error, cost, engine session id, all turns. |
-| `GET /v1/runs/{key}/stream` | The open run's steps as they happen — NDJSON, one object per line: an opening `snapshot`, then each step, a `ping` every 15s of silence, and `done` when it settles, at which point it closes itself. |
+| `GET /v1/runs/{key}/stream` | The open run as it happens — NDJSON, one object per line: an opening `snapshot`, the answer arriving as `delta` chunks (`kind: text` or `thinking`), each finished step, a `ping` every 15s of silence, and `done` when it settles, at which point it closes itself. Deltas are live-only and never recorded; the finished blocks are what the case file keeps. |
 | `GET /ui` | The sessions page (below). Markup is served unauthenticated; the data calls it makes are not. |
 | `GET /healthz` | Liveness, unauthenticated. |
 

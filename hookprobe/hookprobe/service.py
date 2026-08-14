@@ -385,9 +385,13 @@ class RunService:
 
         def on_event(event: dict[str, Any]) -> None:
             event["ts"] = time.time()
-            run.events.append(event)
-            if len(run.events) > 400:  # bound memory and the result file
-                del run.events[: len(run.events) - 400]
+            # Deltas are for whoever is watching right now: thousands of them per
+            # run, and the finished block that follows says the same thing once.
+            # Recording them would bury the process feed and bloat every case file.
+            if event.get("type") != "delta":
+                run.events.append(event)
+                if len(run.events) > 400:  # bound memory and the result file
+                    del run.events[: len(run.events) - 400]
             self._publish(run.session_key, event)
 
         try:
