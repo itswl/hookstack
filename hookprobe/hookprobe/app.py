@@ -31,6 +31,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from hookprobe import __version__
+from hookprobe.distill import draft_skill
 from hookprobe.engine import (
     _load_agents_raw,
     _load_mcp_servers,
@@ -412,6 +413,22 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if "user" in settings.setting_sources:
             layers.append(("user", Path.home() / ".claude" / "skills"))
         return layers
+
+    @app.post("/v1/runs/{session_key}/distill", dependencies=[Depends(require_token)])
+    async def run_distill(session_key: str) -> dict[str, str]:
+        """A skill draft for what this run learned — returned, never saved.
+
+        The write is deliberately left to the operator through PUT /v1/skills:
+        an investigator that can edit its own future instructions is one whose
+        context nobody reviewed, and a single wrong conclusion would then teach
+        itself forward into every later investigation of the same alert.
+        """
+        run = service.get(session_key)
+        if run is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not run.finished:
+            raise HTTPException(status_code=409, detail="the run is still going")
+        return draft_skill(run)
 
     @app.get("/v1/skills", dependencies=[Depends(require_token)])
     async def skills_list() -> list[dict[str, Any]]:

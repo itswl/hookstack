@@ -339,3 +339,32 @@ def test_watchers_are_released_when_the_reader_goes_away(tmp_path) -> None:
             list(response.iter_lines())
 
     assert service._watchers == {}
+
+
+def test_a_finished_run_drafts_a_skill_but_never_saves_one(tmp_path) -> None:
+    """The loop closes at review, not at write.
+
+    An investigator that can edit what it will be told next time is one whose
+    context nobody reviewed: a single wrong conclusion would teach itself
+    forward into every later investigation of the same alert.
+    """
+    with make_client(tmp_path, FakeEngine()) as client:
+        key = TRIGGER_PAYLOAD["sessionKey"]
+        assert client.post(f"/v1/runs/{key}/distill", headers=AUTH).status_code == 404
+
+        client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH)
+        poll_until_final(client, key)
+
+        draft = client.post(f"/v1/runs/{key}/distill", headers=AUTH)
+        assert draft.status_code == 200
+        body = draft.json()
+        assert body["content"].startswith("---\nname: ")
+        assert body["name"] and "/" not in body["name"]
+        # The tool the fake engine ran is in the sequence.
+        assert "## What was checked, in order" in body["content"]
+        # And the volume is untouched: the draft is not a skill until saved.
+        assert client.get(f"/v1/skills/{body['name']}", headers=AUTH).status_code == 404
+
+        # Saving is the operator's existing action, and then it exists.
+        client.put(f"/v1/skills/{body['name']}", json={"content": body["content"]}, headers=AUTH)
+        assert client.get(f"/v1/skills/{body['name']}", headers=AUTH).status_code == 200
