@@ -592,7 +592,29 @@ async function renderDetail(startPolling) {
       `<div class="pending">investigating</div></div>`,
     );
   }
+  // What this investigation learned, offered as a runbook draft. Drafted only:
+  // saving it is the operator's click, because an investigator that writes its
+  // own future instructions is one nobody reviewed.
+  if (run.status === "completed" && (run.turns || []).length) {
+    parts.push(
+      `<div class="mem-bar"><button id="distill">distill into a runbook draft</button>` +
+      `<span id="distillStatus" class="dim"></span></div>`,
+    );
+  }
   $("#turns").innerHTML = parts.join("") || '<div class="empty">no turns yet</div>';
+  const distill = $("#distill");
+  if (distill) {
+    distill.onclick = async () => {
+      $("#distillStatus").textContent = "drafting…";
+      try {
+        const r = await api("/v1/runs/" + encodeURIComponent(sel) + "/distill", { method: "POST" });
+        if (!r.ok) { $("#distillStatus").textContent = "failed (" + r.status + ")"; return; }
+        const draft = await r.json();
+        stopWatching();
+        editSkill(draft.name, draft.content);
+      } catch (e) { $("#distillStatus").textContent = e.message; }
+    };
+  }
   $("#turns").scrollTop = $("#turns").scrollHeight;
   $("#send").disabled = run.status === "running";
   $("#stopBtn").style.display = run.status === "running" ? "" : "none";
