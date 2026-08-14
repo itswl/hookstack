@@ -20,13 +20,13 @@ if [ ! -x "$PY" ]; then
 fi
 
 step "compileall (syntax, every file)"
-$PY -m compileall -q hookjudge tests
+$PY -m compileall -q hookjudge tests scripts
 
 step "ruff check"
-$PY -m ruff check hookjudge tests
+$PY -m ruff check hookjudge tests scripts
 
 step "ruff format --check"
-$PY -m ruff format --check hookjudge tests
+$PY -m ruff format --check hookjudge tests scripts
 
 step "bandit (static security scan)"
 $PY -m bandit -q -r hookjudge
