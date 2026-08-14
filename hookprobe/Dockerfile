@@ -21,14 +21,31 @@ RUN apt-get update \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-# Domain CLIs — uncomment what your alerts actually need. The bash guard
-# blocks their mutating verbs; credentials decide what they can see.
-# RUN curl -fsSLo /usr/local/bin/kubectl \
-#       "https://dl.k8s.io/release/v1.31.4/bin/linux/$(dpkg --print-architecture)/kubectl" \
-#     && chmod +x /usr/local/bin/kubectl
-# RUN apt-get update && apt-get install -y --no-install-recommends \
-#       postgresql-client default-mysql-client redis-tools \
-#     && rm -rf /var/lib/apt/lists/*
+# Domain CLIs — build args rather than edits, because a deployment that tracks
+# this repository with `git pull --ff-only` cannot carry a modified Dockerfile.
+# Install exactly what your alerts need:
+#
+#   docker compose build --build-arg APT_EXTRAS="postgresql-client redis-tools" \
+#                        --build-arg KUBECTL_VERSION=v1.31.4
+#
+# A CLI is worth adding only once the investigator has something to point it at:
+# the boundary is the credential you mount (a read-only kubeconfig, a viewer
+# token), and the bash guard blocks mutating verbs on top of that. A container
+# with no credentials mounted gains nothing from a database client but the
+# bytes.
+ARG APT_EXTRAS=""
+RUN if [ -n "$APT_EXTRAS" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends $APT_EXTRAS \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+ARG KUBECTL_VERSION=""
+RUN if [ -n "$KUBECTL_VERSION" ]; then \
+      curl -fsSLo /usr/local/bin/kubectl \
+        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(dpkg --print-architecture)/kubectl" \
+      && chmod +x /usr/local/bin/kubectl; \
+    fi
 
 # Optional: browser evidence via the Playwright MCP server (wire it with
 # deploy/mcp.example.json -> HOOKPROBE_MCP_CONFIG). Baking chromium and its
