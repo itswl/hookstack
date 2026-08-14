@@ -658,9 +658,17 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     async def budget() -> dict[str, Any]:
         # The spend is reported either way: "what has this cost" is a question
         # worth answering even for an operator who declined to set a ceiling.
+        fresh, cached = service.window_cache()
         window = {
             "window_hours": settings.budget_window_hours,
             "spent_usd": round(service.window_spend(), 6),
+            # The prefix an investigation pays for is the harness's, not ours,
+            # so the only lever left is reuse — which means this is the number
+            # to watch. Reads over reads-plus-fresh: the provider caches
+            # implicitly here, so cache writes are always zero.
+            "input_tokens": fresh,
+            "cache_read_tokens": cached,
+            "cache_hit_ratio": round(cached / (cached + fresh), 4) if (cached + fresh) else None,
         }
         state = service.budget_state()
         if state is None:
