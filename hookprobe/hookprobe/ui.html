@@ -538,10 +538,21 @@ async function renderDetail(startPolling) {
   // cheap to ask for and the running total is the only thing that says otherwise.
   const spent = (run.turns || []).reduce((sum, turn) => sum + (Number(turn.cost_usd) || 0), 0);
   const turnCount = (run.turns || []).length;
+  // How much of this session's context was reused rather than paid for again.
+  // The prefix an investigation carries is the harness's ~29k, not ours to trim,
+  // so reuse is the only lever left — which makes this worth a permanent place.
+  const tok = (run.turns || []).reduce((acc, turn) => {
+    const u = turn.usage || {};
+    acc.fresh += Number(u.input_tokens || 0);
+    acc.cached += Number(u.cache_read_input_tokens || u.cacheReadInputTokens || 0);
+    return acc;
+  }, { fresh: 0, cached: 0 });
+  const hit = tok.fresh + tok.cached ? Math.round((100 * tok.cached) / (tok.fresh + tok.cached)) : null;
   $("#meta").textContent =
     `${run.session_key} · ${run.status}` +
     (run.model ? ` · ${run.model}` : "") +
     (turnCount ? ` · ${turnCount} turn${turnCount > 1 ? "s" : ""} $${spent.toFixed(4)}` : "") +
+    (hit === null ? "" : ` · cache ${hit}%`) +
     ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");
   const parts = (run.turns || []).map(turnHtml);
@@ -991,6 +1002,11 @@ cannot hold a slot until the whole run times out.</td></tr>
 <tr><td><b>what it cost</b></td><td>Each turn carries its own line — model, tokens in/out, cache reads and writes,
 dollars, seconds. The session's running total sits in the header line beside the session key, and the chip top-right
 is the whole window's spend (with the ceiling next to it when <code>HOOKPROBE_BUDGET_USD</code> is set).</td></tr>
+<tr><td><b>cache %</b></td><td>How much of the context was reused instead of paid for again. An investigation carries
+about 29k tokens before its alert is even mentioned — the harness's own system prompt and tool schemas, which neither a
+smaller tool list nor a different prompt preset shrinks — so reuse is the only lever left. It is high inside a session
+and low across them: <b>a follow-up here is roughly ten times cheaper than opening a new investigation</b>, alerts
+investigated close together share a warm prefix, and every edit to memory, prompt or skills starts the prefix over.</td></tr>
 <tr><td><b>inputs record</b></td><td>Every turn records what it was given — model, skill layers and
 names, roles, MCP servers, and digests of the environment memory and appended methodology. Those
 files live on a mutable volume; a stale line in <code>CLAUDE.md</code> once made every report come
@@ -1084,10 +1100,13 @@ async function refreshBudget() {
     // Spend is shown whether or not a ceiling was set: an operator who declined
     // to cap the window still wants to know what it has cost.
     const spent = `$${Number(b.spent_usd || 0).toFixed(2)} / ${b.window_hours || 24}h`;
-    el.textContent = b.enabled ? `${spent} of $${Number(b.budget_usd).toFixed(2)}` : spent;
+    const cache = b.cache_hit_ratio === null || b.cache_hit_ratio === undefined
+      ? ""
+      : ` · cache ${Math.round(b.cache_hit_ratio * 100)}%`;
+    el.textContent = (b.enabled ? `${spent} of $${Number(b.budget_usd).toFixed(2)}` : spent) + cache;
     el.title = b.enabled
-      ? "spend in the budget window, and the ceiling the event door refuses at"
-      : "spend in the window · no ceiling set (HOOKPROBE_BUDGET_USD)";
+      ? "spend in the budget window, the ceiling the event door refuses at, and how much context was reused rather than re-paid"
+      : "spend in the window · no ceiling set (HOOKPROBE_BUDGET_USD) · cache = context reused rather than re-paid";
     el.classList.toggle("hot", !!b.exhausted);
   } catch { el.hidden = true; }
 }
