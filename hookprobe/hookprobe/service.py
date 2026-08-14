@@ -144,6 +144,10 @@ class RunService:
         self._running: dict[str, asyncio.Task[None]] = {}
         self._stop_requested: set[str] = set()
         self._in_slot = 0
+        # Live watchers of a session's process feed, one queue each. A run
+        # already publishes its steps through on_event; this is the seam that
+        # lets a browser see them as they happen instead of on the next poll.
+        self._watchers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
         # Return-retry pacing, an instance attr so tests can collapse it.
         self._return_delays: tuple[float, ...] = (0.0, 2.0, 5.0)
         # Self-alarm throttle state (see _alarm_return_failure).
@@ -290,6 +294,48 @@ class RunService:
         logger.warning("run refused session=%s reason=%s", run.session_key, run.error)
         return run
 
+    def watch(self, session_key: str) -> asyncio.Queue[dict[str, Any]]:
+        """Register a live watcher of one session's feed.
+
+        Bounded on purpose: a browser that stops reading must not let a running
+        investigation grow an unbounded backlog in memory. On overflow the
+        oldest step is dropped and the watcher is told, which is honest — the
+        full account is on the run record either way.
+        """
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=200)
+        self._watchers.setdefault(session_key, set()).add(queue)
+        return queue
+
+    def unwatch(self, session_key: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
+        watchers = self._watchers.get(session_key)
+        if not watchers:
+            return
+        watchers.discard(queue)
+        if not watchers:
+            self._watchers.pop(session_key, None)
+
+    def _settle(self, run: Run) -> None:
+        """Persist the finished run and wake anyone watching it.
+
+        Without this a watcher would sit on its keepalive until the next timeout
+        before noticing the run had ended — the wrong end of the interaction to
+        be slow at."""
+        self._store.finish(run)
+        self._publish(run.session_key, {"type": "settled", "status": run.status, "ts": time.time()})
+
+    def _publish(self, session_key: str, event: dict[str, Any]) -> None:
+        """Fan one step out to whoever is watching. Never raises: a broken
+        watcher is not a reason to disturb the investigation."""
+        for queue in tuple(self._watchers.get(session_key, ())):
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                    queue.put_nowait({"type": "dropped", "ts": time.time()})
+                except (asyncio.QueueEmpty, asyncio.QueueFull):  # pragma: no cover - racing reader
+                    pass
+
     def get(self, session_key: str) -> Run | None:
         return self._store.get(session_key)
 
@@ -332,6 +378,7 @@ class RunService:
             run.events.append(event)
             if len(run.events) > 400:  # bound memory and the result file
                 del run.events[: len(run.events) - 400]
+            self._publish(run.session_key, event)
 
         try:
             # The semaphore sits outside the timeout: a queued run's clock
@@ -375,7 +422,7 @@ class RunService:
         run.status = COMPLETED
         run.text = result.text
         self._record_turn(run, result)
-        self._store.finish(run)
+        self._settle(run)
         self._schedule_return(run)
         logger.info(
             "run completed session=%s turns=%s cost_usd=%s",
@@ -389,7 +436,7 @@ class RunService:
         run.error = reason
         run.text = failure_report(reason)
         self._record_turn(run, result)
-        self._store.finish(run)
+        self._settle(run)
         self._schedule_return(run)
         logger.warning("run failed session=%s reason=%s", run.session_key, reason)
 
