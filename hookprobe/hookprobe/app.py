@@ -31,7 +31,12 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from hookprobe import __version__
-from hookprobe.engine import _load_agents_raw, _load_mcp_servers, _system_prompt_append
+from hookprobe.engine import (
+    _load_agents_raw,
+    _load_mcp_servers,
+    _system_prompt_append,
+    file_fact,
+)
 from hookprobe.live import Live
 from hookprobe.retention import prune
 from hookprobe.runs import Run
@@ -81,6 +86,31 @@ def _skill_description(text: str) -> str:
 def _ndjson(payload: dict[str, Any]) -> bytes:
     """One JSON object, one line — the whole wire format."""
     return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _prompt_files(settings: Settings) -> dict[str, Path]:
+    """The two editable prompt inputs, keyed by the name a run records them under."""
+    return {
+        "memory": settings.workdir / "CLAUDE.md",
+        "system_prompt_append": settings.system_prompt_append or (settings.workdir / "system-prompt.md"),
+    }
+
+
+def _prompt_digests_now(settings: Settings) -> dict[str, str | None]:
+    """Those same files as they stand right now, for comparing against a record.
+
+    A run records the digest of the memory and methodology it was handed. That
+    digest is identical on every run until somebody edits the file, so on its own
+    it reads as a meaningless constant. What an operator wants when opening an
+    old report is the comparison — does the file still say what it said then? —
+    and only the read path can answer it. None means the file is absent now,
+    which is itself a difference worth showing.
+    """
+    digests: dict[str, str | None] = {}
+    for name, path in _prompt_files(settings).items():
+        fact = file_fact(path)
+        digests[name] = fact["sha256"] if fact else None
+    return digests
 
 
 def _summary(run: Run) -> dict[str, Any]:
@@ -198,7 +228,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         run = service.get(session_key)
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
-        return asdict(run)
+        return {**asdict(run), "inputs_now": _prompt_digests_now(settings)}
 
     @app.get("/v1/runs/{session_key}/stream", dependencies=[Depends(require_token)])
     async def run_stream(session_key: str) -> StreamingResponse:

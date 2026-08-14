@@ -203,8 +203,13 @@ def _audit_hook(audit_dir: Path, session_key: str) -> Callable[..., Any]:
     return hook
 
 
-def _file_fact(path: Path) -> dict[str, Any] | None:
-    """Size and content digest of a prompt input, or None when absent."""
+def file_fact(path: Path) -> dict[str, Any] | None:
+    """Size and content digest of a prompt input, or None when absent.
+
+    Used twice over: once by a run to record what it was given, and once by the
+    read path to describe the same file as it stands now. Both sides must hash
+    identically for the comparison to mean anything, so they share this.
+    """
     try:
         raw = path.read_bytes()
     except OSError:
@@ -284,10 +289,10 @@ class ClaudeAgentEngine:
                 "config": sorted(self._agents_raw),
                 "files": _agent_names(self._workdir / ".claude" / "agents"),
             },
-            "system_prompt_append": _file_fact(
+            "system_prompt_append": file_fact(
                 self._settings.system_prompt_append or (self._workdir / "system-prompt.md")
             ),
-            "memory": _file_fact(self._workdir / "CLAUDE.md"),
+            "memory": file_fact(self._workdir / "CLAUDE.md"),
             "mcp_servers": sorted(_load_mcp_servers(self._settings.mcp_config)),
             "resumed": bool(resume),
             "hygiene": {
