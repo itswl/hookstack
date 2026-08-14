@@ -52,6 +52,9 @@ class Settings:
     ai_body_limit: int
     ai_price_in_per_1k: float
     ai_price_out_per_1k: float
+    # schema | tools | object to pin one, anything else (default "auto") to
+    # negotiate downwards from the strongest the provider will accept.
+    ai_structured_output: str = "auto"
 
     # Widen reuse from one identity to a whole alert rule. 0 = off, because it
     # changes what a verdict is based on: measure on the eval set before
@@ -81,4 +84,5 @@ class Settings:
             ai_body_limit=_int("HOOKJUDGE_AI_BODY_LIMIT", 4000),
             ai_price_in_per_1k=_float("HOOKJUDGE_AI_PRICE_IN_PER_1K", 0.0),
             ai_price_out_per_1k=_float("HOOKJUDGE_AI_PRICE_OUT_PER_1K", 0.0),
+            ai_structured_output=os.environ.get("HOOKJUDGE_AI_STRUCTURED_OUTPUT", "auto"),
         )
