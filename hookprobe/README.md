@@ -194,13 +194,14 @@ repository does that — under five independent switches. Measured on 2.1.229:
 | `OTEL_LOG_USER_PROMPTS` | the prompt — *and* the answers with it | **on** |
 | `OTEL_LOG_TOOL_DETAILS` | tool arguments | **on** |
 | `OTEL_LOG_TOOL_CONTENT` | whole tool outputs | **on** |
-| `OTEL_LOG_RAW_API_BODIES` | raw request/response bodies per call | **on** |
+| `OTEL_LOG_RAW_API_BODIES` | raw request/response bodies per call | off |
 | `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` | lifts the 60 KiB cap on those raw bodies | off |
 
-All content is exported, which is a deliberate posture and not a default to drift
+Four of the five are on, which is a deliberate posture and not a default to drift
 into: everything the agent was given and everything it produced leaves the
 container in cleartext once an endpoint is set — including whatever a tool
-happened to print, credentials included. It buys the material that cost and token
+happened to print, credentials included. The fifth is off because it is the one
+that pays most and delivers least (below). It buys the material that cost and token
 counts cannot give you: what the model was actually asked, and what it actually
 answered. Note the asymmetry between the first two: enabling prompts also enables
 answers, but not the reverse.
