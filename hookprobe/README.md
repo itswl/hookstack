@@ -183,6 +183,25 @@ investigation was observed spending on **two** models — a fast one for cheap
 turns and the main one for the reasoning — while the run's own total is a single
 number. Anyone re-pricing usage needs both names.
 
+### What is redacted, and by whom
+
+The CLI substitutes `<REDACTED>` for content in these events — nothing in this
+repository does that — under five independent switches. Measured on 2.1.229:
+
+| switch | exposes | default here |
+| --- | --- | --- |
+| `OTEL_LOG_ASSISTANT_RESPONSES` | the model's answers (`assistant_response.response`) | **on** |
+| `OTEL_LOG_USER_PROMPTS` | the prompt — *and* the answers with it | off |
+| `OTEL_LOG_TOOL_DETAILS` | tool arguments | off |
+| `OTEL_LOG_TOOL_CONTENT` | whole tool outputs | off |
+| `OTEL_LOG_RAW_API_BODIES` | raw request/response bodies per call | off |
+
+Answers are on because they are what a report is judged on, and because their
+inputs are already kept upstream — the pipe's ledger holds the inbound body that
+started the investigation. Prompts stay off because turning them on sends the
+alert payload and whatever the environment memory says out in cleartext. Note the
+asymmetry: enabling prompts also enables answers, but not the reverse.
+
 Two things to know before you build on it, both measured rather than assumed
 (CLI 2.1.229):
 
