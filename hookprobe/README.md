@@ -145,24 +145,25 @@ file that only held the harness's already-truncated copy while claiming to hold
 everything — see
 [the rejected note](../.agents/notes/rejected/2026-08-14-tool-output-spill-in-hookprobe.md).
 
-## Model-call telemetry (optional, no backend assumed)
+## Model-call telemetry (on by default, no backend assumed)
 
 Every run's totals are already on its record — cost, tokens, per-model
 breakdown, duration, and the tool steps. What that cannot show is the *shape* of
-a run: how many model calls it took, which one was slow, where the context went.
-The bundled CLI emits that itself over OpenTelemetry, and the SDK merges this
-container's environment into the CLI's, so switching it on is configuration:
+a run: how many model calls it took, which one was slow, where the context went,
+that one investigation spent on two different models.
+
+The bundled CLI emits all of that itself over OpenTelemetry, and the SDK merges
+this container's environment into the CLI's, so it is configuration rather than
+code. It is **on by default** because it costs nothing when nobody is listening —
+measured, not assumed: with no endpoint set, a run finishes in the same time,
+retries nothing and logs nothing. The only decision left is where to send it:
 
 ```bash
-CLAUDE_CODE_ENABLE_TELEMETRY=1
-OTEL_EXPORTER_OTLP_ENDPOINT=http://your-collector:4317
-OTEL_LOGS_EXPORTER=otlp
-OTEL_METRICS_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=http://your-collector:4317   # that is the whole setup
 ```
 
-Unset, nothing is emitted and nothing is dialled — there is no default endpoint
-and no vendor here. Point it at whatever you already run, or at nothing until you
-do.
+No default endpoint, no vendor. Point it at whatever you already run, whenever
+you get to it.
 
 One event per model call, `claude_code.api_request`:
 
