@@ -191,16 +191,31 @@ repository does that — under five independent switches. Measured on 2.1.229:
 | switch | exposes | default here |
 | --- | --- | --- |
 | `OTEL_LOG_ASSISTANT_RESPONSES` | the model's answers (`assistant_response.response`) | **on** |
-| `OTEL_LOG_USER_PROMPTS` | the prompt — *and* the answers with it | off |
-| `OTEL_LOG_TOOL_DETAILS` | tool arguments | off |
-| `OTEL_LOG_TOOL_CONTENT` | whole tool outputs | off |
-| `OTEL_LOG_RAW_API_BODIES` | raw request/response bodies per call | off |
+| `OTEL_LOG_USER_PROMPTS` | the prompt — *and* the answers with it | **on** |
+| `OTEL_LOG_TOOL_DETAILS` | tool arguments | **on** |
+| `OTEL_LOG_TOOL_CONTENT` | whole tool outputs | **on** |
+| `OTEL_LOG_RAW_API_BODIES` | raw request/response bodies per call | **on** |
+| `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` | lifts the 60 KiB cap on those raw bodies | off |
 
-Answers are on because they are what a report is judged on, and because their
-inputs are already kept upstream — the pipe's ledger holds the inbound body that
-started the investigation. Prompts stay off because turning them on sends the
-alert payload and whatever the environment memory says out in cleartext. Note the
-asymmetry: enabling prompts also enables answers, but not the reverse.
+All content is exported, which is a deliberate posture and not a default to drift
+into: everything the agent was given and everything it produced leaves the
+container in cleartext once an endpoint is set — including whatever a tool
+happened to print, credentials included. It buys the material that cost and token
+counts cannot give you: what the model was actually asked, and what it actually
+answered. Note the asymmetry between the first two: enabling prompts also enables
+answers, but not the reverse.
+
+**The raw bodies are capped at 60 KiB.** The CLI truncates the attribute and says
+so in the value (`[TRUNCATED - Content exceeds 60KB limit]`) while `body_length`
+keeps reporting the true size, so the loss is visible rather than silent. Every
+real investigation exceeds it — one call here carried 113 KB. Because a request
+body is `{model, messages, system, tools}`, what falls off the end is the tool
+schemas first and the conversation only after that.
+`CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` lifts the cap (measured: 113426 declared,
+113425 received, valid JSON through the closing brace) and is left unset here —
+uncapping on top of five open switches would push the whole conversation on every
+call unconditionally. Set it when you want byte-exact replay. Note the unprefixed
+`OTEL_CONTENT_MAX_LENGTH` also exists and does *not* affect these bodies.
 
 Two things to know before you build on it, both measured rather than assumed
 (CLI 2.1.229):
