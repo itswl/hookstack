@@ -338,6 +338,7 @@ async function refreshList() {
 }
 
 async function select(key) {
+  stopWatching();          // the previous session's feed is no longer on screen
   sel = key;
   composeMode = false;
   sessionsMode();
@@ -439,6 +440,70 @@ function turnHtml(t) {
     <div class="a ${t.error ? "err" : ""}">${answerHtml(t.text)}</div>${statsHtml(t)}</div>`;
 }
 
+// The open run's steps, pushed rather than polled. The shared refresh control
+// owns the only clock on this page and defaults to a minute, which is right for
+// a board and wrong for the seconds after you press send — so a run in flight
+// is watched over a streaming response instead of by a second timer.
+//
+// fetch + ReadableStream, not EventSource: every call here carries the bearer
+// token as a header, and EventSource cannot send headers.
+let liveAbort = null;
+async function watchRun(key) {
+  stopWatching();
+  const controller = new AbortController();
+  liveAbort = controller;
+  let response;
+  try {
+    response = await api("/v1/runs/" + encodeURIComponent(key) + "/stream", { signal: controller.signal });
+    if (!response.ok || !response.body) return;
+  } catch { return; }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffered += decoder.decode(value, { stream: true });
+      const lines = buffered.split("\n");
+      buffered = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch { continue; }
+        if (key !== sel) return;                      // the operator moved on
+        if (msg.type === "ping") continue;
+        if (msg.type === "snapshot") { liveReplace(msg.events || []); continue; }
+        if (msg.type === "done") { await renderDetail(false); return; }
+        liveAppend(msg);
+      }
+    }
+  } catch {
+    // A dropped stream is not an error worth showing: the refresh control still
+    // brings the run's state in, just later.
+  } finally {
+    if (liveAbort === controller) liveAbort = null;
+  }
+}
+function stopWatching() {
+  if (liveAbort) { liveAbort.abort(); liveAbort = null; }
+}
+function liveFeedNode() {
+  return document.querySelector("#turns .turn:last-child .proc");
+}
+function liveReplace(events) {
+  const node = liveFeedNode();
+  if (node) node.innerHTML = events.map(eventHtml).join("");
+  $("#turns").scrollTop = $("#turns").scrollHeight;
+}
+function liveAppend(event) {
+  const node = liveFeedNode();
+  if (!node) return;
+  node.insertAdjacentHTML("beforeend", eventHtml(event));
+  $("#turns").scrollTop = $("#turns").scrollHeight;
+}
+
 async function renderDetail(startPolling) {
   if (!sel) return null;
   const r = await api("/v1/runs/" + encodeURIComponent(sel));
@@ -457,7 +522,7 @@ async function renderDetail(startPolling) {
     const live = (run.events || []).map(eventHtml).join("");
     parts.push(
       `<div class="turn">${qHtml(run.current_message)}${inputsHtml(run.inputs)}` +
-      (live ? `<div class="proc">${live}</div>` : "") +
+      `<div class="proc">${live}</div>` +
       `<div class="pending">investigating</div></div>`,
     );
   }
@@ -468,10 +533,14 @@ async function renderDetail(startPolling) {
   $("#msg").placeholder = run.status === "running"
     ? "a turn is in flight…"
     : "follow-up in this session… (Ctrl/⌘+Enter to send)";
+  // Watch while it runs, let go the moment it settles.
+  if (run.status === "running") { if (!liveAbort) watchRun(run.session_key); }
+  else stopWatching();
   return run;
 }
 
 $("#new").onclick = () => {
+  stopWatching();
   sel = null;
   composeMode = true;
   sessionsMode();
@@ -505,6 +574,7 @@ $("#stopBtn").onclick = async () => {
 };
 
 function leaveSessions(mode) {
+  stopWatching();
   viewMode = mode;
   sel = null;
   composeMode = false;
@@ -907,7 +977,7 @@ given</b> on any turn.</td></tr>
 <li><b>Wire an MCP server</b>: edit <code>/data/mcp.json</code> (the marketplace config.json dialect works, enabled:false is skipped), confirm on the system view, next run picks it up</li>
 <li><b>Control which skills a session sees</b>: the <code>HOOKPROBE_SKILLS</code> allowlist (a big library would otherwise flood the context); layers are switched with <code>HOOKPROBE_SETTING_SOURCES</code></li>
 <li><b>Ask "what did it actually do"</b>: the audit view, filtered by session; a single run's feed is under process · N steps in sessions</li>
-<li><b>Control the refresh</b>: the header carries ↻ and an interval — manual, 15s, 60s or 5m, remembered per browser. One timer serves every view, the open session's live feed included, so 15s is the setting for watching a run closely and <code>manual</code> means nothing polls at all</li>
+<li><b>Control the refresh</b>: the header carries ↻ and an interval — manual, 15s, 60s or 5m, remembered per browser. One timer serves every view, and <code>manual</code> means nothing polls at all. A run you are watching does not depend on it: its steps are pushed over a streaming response and stop when it settles, so even on <code>manual</code> the open investigation stays live</li>
 <li><b>Scheduled patrols</b>: a host crontab that POSTs a "patrol due" event to the pipe's front door is enough — the escalation door turns it into a proactive investigation whose report travels the usual channels. Each patrol is its own case file, and cites what the last one found.</li>
 </ul>
 <p class="dim">Fuller design and deployment notes live in hookprobe/README.md and the repository OVERVIEW.md.</p>
@@ -938,9 +1008,17 @@ $("#composer").onsubmit = async (ev) => {
       sel = key;
       composeMode = false;
     }
+    // Echo it before the round trip: the first thing a sender wants to see is
+    // their own message, and the run is already spawned by the time we return.
+    $("#turns").insertAdjacentHTML(
+      "beforeend",
+      `<div class="turn">${qHtml(msg)}<div class="proc"></div>` +
+      `<div class="pending">investigating</div></div>`,
+    );
+    $("#turns").scrollTop = $("#turns").scrollHeight;
     $("#msg").value = "";
+    watchRun(sel);
     await refreshList();
-    await renderDetail(true);
   } catch (e) {
     $("#hint").textContent = e.message;
     $("#send").disabled = false;

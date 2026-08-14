@@ -57,6 +57,13 @@ is pressed.
 
 Nothing else may keep a clock. The console previously ran four timers at once
 (session list every 5s, budget every 15s, audit every 8s, the open session
-every 2.5s); now one tick refreshes whatever is on screen, including a running
-investigation's live feed. Watching a run closely is what the 15s setting is
-for. `assert_design.py` fails on any `setInterval` the control does not own.
+every 2.5s); now one tick refreshes whatever is on screen.
+
+A clock is the wrong tool for one job, and the investigator's console shows it:
+the seconds right after you send a message are when feedback matters most, and a
+minute-long tick makes them the emptiest. So that feed is *pushed* — the page
+opens a streaming response for the run it is watching and closes it when the run
+settles. Not a second timer, and therefore not a second thing to keep in sync:
+`manual` still means nothing polls, and an open investigation is still live.
+`assert_design.py` fails on any `setInterval` the control does not own, which is
+what keeps that distinction honest.
