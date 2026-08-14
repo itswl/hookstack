@@ -53,6 +53,11 @@ class Settings:
     ai_price_in_per_1k: float
     ai_price_out_per_1k: float
 
+    # Widen reuse from one identity to a whole alert rule. 0 = off, because it
+    # changes what a verdict is based on: measure on the eval set before
+    # turning it on. Last in the field list so it stays optional.
+    rule_reuse_window_seconds: int = 0
+
     @classmethod
     def load(cls) -> Settings:
         return cls(
@@ -67,6 +72,7 @@ class Settings:
             alarm_url=os.environ.get("HOOKJUDGE_ALARM_URL", ""),
             alarm_min_interval_seconds=_int("HOOKJUDGE_ALARM_MIN_INTERVAL_SECONDS", 600),
             reuse_window_seconds=_int("HOOKJUDGE_REUSE_WINDOW_SECONDS", 3600),
+            rule_reuse_window_seconds=_int("HOOKJUDGE_RULE_REUSE_WINDOW_SECONDS", 0),
             retention_days=_int("HOOKJUDGE_RETENTION_DAYS", 30),
             ai_base_url=os.environ.get("HOOKJUDGE_AI_BASE_URL", ""),
             ai_api_key=os.environ.get("HOOKJUDGE_AI_API_KEY", ""),
