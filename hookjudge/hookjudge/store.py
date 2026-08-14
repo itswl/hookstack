@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS judgements (
     received_at REAL NOT NULL,
     source TEXT NOT NULL,
     identity TEXT NOT NULL,
+    -- The alert rule behind this firing. Identity keeps instances apart;
+    -- this is what a paid verdict can be reused across.
+    rule_key TEXT NOT NULL DEFAULT '',
+    level TEXT NOT NULL DEFAULT '',
     correlation_id TEXT,
     title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '',
@@ -64,6 +68,7 @@ class Store:
         try:
             self._db.row_factory = aiosqlite.Row
             await self._db.executescript(_SCHEMA)
+            await self._migrate()
             await self._db.commit()
         except Exception:
             # A connection runs a thread; leaving it open on a failed start
@@ -71,6 +76,21 @@ class Store:
             await self._db.close()
             self._db = None
             raise
+
+    async def _migrate(self) -> None:
+        """Columns added after a ledger already exists.
+
+        CREATE TABLE IF NOT EXISTS does nothing to a table that is already
+        there, so a running deployment would keep the old shape and every
+        INSERT naming a new column would fail.
+        """
+        cursor = await self._db.execute("PRAGMA table_info(judgements)")  # type: ignore[union-attr]
+        have = {row[1] for row in await cursor.fetchall()}
+        for column in ("rule_key", "level"):
+            if column not in have:
+                await self._db.execute(  # type: ignore[union-attr]
+                    f"ALTER TABLE judgements ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"  # nosec B608
+                )
 
     async def close(self) -> None:
         if self._db is not None:
@@ -108,15 +128,43 @@ class Store:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def prior_rule_verdict(
+        self, rule_key: str, level: str, window_seconds: int, now: float
+    ) -> dict[str, Any] | None:
+        """The last AI verdict for this alert rule at this level, inside the window.
+
+        Only route='ai': reusing a rule-floor verdict would spread one degraded
+        answer across a whole rule, which is not hypothetical — the same
+        shortcut in WebhookWise filed 73 payment alerts as low while the model
+        called every one of them high.
+
+        Level has to match. Identity deliberately ignores severity so that an
+        escalation stays one condition, which is right for a storm and wrong
+        here: a rule that fired warning yesterday and critical today is asking
+        a different question and must reach the model.
+        """
+        if not rule_key or window_seconds <= 0:
+            return None
+        cursor = await self.db.execute(
+            "SELECT summary, importance, event_type, impact_scope, model FROM judgements"
+            " WHERE rule_key = ? AND level = ? AND route = 'ai' AND is_recovery = 0 AND received_at >= ?"
+            " ORDER BY id DESC LIMIT 1",
+            (rule_key, level, now - max(1, window_seconds)),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
     async def record(self, event: Any, verdict: Any, latency_ms: int) -> int:
         cursor = await self.db.execute(
-            "INSERT INTO judgements (received_at, source, identity, correlation_id, title, body, fields_json,"
-            " is_recovery, summary, importance, event_type, impact_scope, route, degraded_reason, model, tokens_in,"
-            " tokens_out, cost, latency_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO judgements (received_at, source, identity, rule_key, level, correlation_id, title, body,"
+            " fields_json, is_recovery, summary, importance, event_type, impact_scope, route, degraded_reason, model,"
+            " tokens_in, tokens_out, cost, latency_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 event.received_at,
                 event.source,
                 event.identity,
+                event.rule_key,
+                event.level,
                 event.correlation_id or None,
                 event.title,
                 event.body[:4000],
