@@ -21,13 +21,14 @@ import hmac
 import json
 import re
 import shutil
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from hookprobe import __version__
 from hookprobe.engine import _load_agents_raw, _load_mcp_servers, _system_prompt_append
@@ -74,6 +75,11 @@ def _skill_description(text: str) -> str:
         if line.startswith("description:"):
             return line.split(":", 1)[1].strip().strip("\"'")[:200]
     return ""
+
+
+def _ndjson(payload: dict[str, Any]) -> bytes:
+    """One JSON object, one line — the whole wire format."""
+    return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def _summary(run: Run) -> dict[str, Any]:
@@ -173,6 +179,74 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
         return asdict(run)
+
+    @app.get("/v1/runs/{session_key}/stream", dependencies=[Depends(require_token)])
+    async def run_stream(session_key: str) -> StreamingResponse:
+        """The open session's steps, pushed as they happen (NDJSON, one per line).
+
+        The console used to learn a run had progressed only on the next refresh
+        tick, which defaults to a minute — so the moment right after sending a
+        message, the one moment that wants immediate feedback, was the emptiest.
+        This is a push instead of a faster clock: no second timer to keep in
+        sync with the shared refresh control, and nothing polls when nobody is
+        watching.
+
+        NDJSON over `fetch`, not `text/event-stream` over `EventSource`: this
+        page authenticates every call with a bearer token, and EventSource
+        cannot set headers, which would have meant the token in a query string.
+        """
+        run = service.get(session_key)
+        if run is None:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        queue = service.watch(session_key)
+
+        async def lines() -> AsyncIterator[bytes]:
+            try:
+                # Open with what already happened, so a watcher that arrives
+                # mid-run is not blind to the steps it missed.
+                snapshot = service.get(session_key)
+                yield _ndjson(
+                    {
+                        "type": "snapshot",
+                        "status": snapshot.status if snapshot else "unknown",
+                        "events": list(snapshot.events) if snapshot else [],
+                    }
+                )
+                while True:
+                    current = service.get(session_key)
+                    finished = current is None or current.finished
+                    # Drain before deciding: a run that just settled may still
+                    # have its last steps queued, and closing on them would lose
+                    # exactly the part the watcher was waiting for.
+                    while True:
+                        try:
+                            queued = queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        if queued.get("type") != "settled":
+                            yield _ndjson(queued)
+                    if finished:
+                        yield _ndjson({"type": "done", "status": current.status if current else "unknown"})
+                        return
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15)
+                    except TimeoutError:
+                        # Idle keepalive: proxies drop silent connections, and a
+                        # thinking model is silent for a long time.
+                        yield _ndjson({"type": "ping"})
+                        continue
+                    if event.get("type") == "settled":
+                        continue  # loop re-reads the run, drains, and closes
+                    yield _ndjson(event)
+            finally:
+                service.unwatch(session_key, queue)
+
+        return StreamingResponse(
+            lines(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
 
     # The family's event door: hookrelay's to-probe channel (generic,
     # payload: normalized) delivers judged-worthy alerts here. The pipe stays
