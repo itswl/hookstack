@@ -312,6 +312,7 @@ class ClaudeAgentEngine:
             ClaudeAgentOptions,
             HookMatcher,
             ResultMessage,
+            StreamEvent,
             TextBlock,
             ToolUseBlock,
             query,
@@ -333,6 +334,11 @@ class ClaudeAgentEngine:
             # boundary is the bash guard plus read-only credentials, not a
             # human in the loop.
             permission_mode="bypassPermissions",
+            # Partial messages turn the answer into a stream of deltas instead of
+            # one block at the end. Watching an investigation is most of what the
+            # console is for, and an agent that says nothing for two minutes and
+            # then everything at once is indistinguishable from a hung one.
+            include_partial_messages=True,
             allowed_tools=_ALLOWED_TOOLS,
             max_turns=self._settings.max_turns,
             # Keep the engine's own system prompt; append the operator's
@@ -381,6 +387,21 @@ class ClaudeAgentEngine:
         result: Any = None
         async for msg in query(prompt=message, options=options):
             message_count += 1
+            if isinstance(msg, StreamEvent):
+                # Transient by design: deltas are for a human watching right now.
+                # The finished blocks below are what gets recorded.
+                if msg.event.get("type") == "content_block_delta":
+                    delta = msg.event.get("delta") or {}
+                    chunk = delta.get("text") or delta.get("thinking") or ""
+                    if chunk:
+                        emit(
+                            {
+                                "type": "delta",
+                                "kind": "thinking" if delta.get("type") == "thinking_delta" else "text",
+                                "text": chunk,
+                            }
+                        )
+                continue
             if isinstance(msg, AssistantMessage):
                 text_parts: list[str] = []
                 for block in msg.content:
