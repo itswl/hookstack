@@ -10,3 +10,10 @@ __pycache__/
 data/
 .DS_Store
 docker-compose.override.yml
+
+# Eval data is captured production alerts — service names, hosts, thresholds.
+# This repository is public: the labelled set stays local, only eval/sample.jsonl
+# (synthetic) and the scripts are shared.
+hookjudge/eval/dataset.jsonl
+hookjudge/eval/*.local.jsonl
+hookjudge/eval/results/
