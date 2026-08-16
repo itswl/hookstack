@@ -368,3 +368,39 @@ def test_a_finished_run_drafts_a_skill_but_never_saves_one(tmp_path) -> None:
         # Saving is the operator's existing action, and then it exists.
         client.put(f"/v1/skills/{body['name']}", json={"content": body["content"]}, headers=AUTH)
         assert client.get(f"/v1/skills/{body['name']}", headers=AUTH).status_code == 200
+
+
+def test_a_draft_is_named_after_the_alert_not_the_instructions(tmp_path) -> None:
+    """The family loop's first message is the caller's whole prompt.
+
+    Its first line is a role description, so naming the runbook after it
+    produced `webhookwise-sre-agent-webhook-webhook` — measured on a real
+    production run, not imagined. The alert is on the Title: line the loop
+    writes, and the report that comes back is JSON, so quoting its opening
+    paragraph put a whole document under "what it turned out to be".
+    """
+    from hookprobe.distill import draft_skill
+
+    class _Run:
+        session_key = "hook:deep-analysis:grafana:abc"
+        engine_session_id = "sdk-1"
+        current_message = ""
+        turns = [
+            {
+                "message": (
+                    "You are the unattended SRE deep-analysis agent. Nobody will follow up.\n"
+                    "Source: grafana\nLevel: critical\nTitle: [MQ] Ready backlog growing\nBody: ...\n"
+                ),
+                "text": '{"summary": "Consumers stopped draining the queue", "root_cause": "consumer crash"}',
+                "events": [{"type": "tool_use", "name": "Bash", "detail": "command -v rabbitmqctl"}],
+            }
+        ]
+
+    draft = draft_skill(_Run())
+
+    assert draft["name"] == "mq-ready-backlog-growing"
+    assert "[MQ] Ready backlog growing" in draft["content"]
+    assert "unattended SRE" not in draft["content"]
+    # The human-readable field, not the whole object.
+    assert "Consumers stopped draining the queue" in draft["content"]
+    assert '"root_cause"' not in draft["content"]
