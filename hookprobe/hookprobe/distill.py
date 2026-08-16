@@ -59,23 +59,56 @@ def _conclusion(turns: list[dict[str, Any]]) -> str:
         # A caller that asked for structured output gets an object back, and
         # dumping it verbatim put a whole JSON document under "what it turned
         # out to be". Prefer the fields written for a human to read.
-        report = _as_object(text)
-        if report is not None:
-            for key in ("summary", "root_cause", "conclusion", "primary_text", "impact"):
-                value = str(report.get(key) or "").strip()
-                if value:
-                    return value[:600]
+        for key in ("summary", "root_cause", "conclusion", "primary_text", "impact"):
+            value = _field(text, key)
+            if value:
+                return value[:600]
         # The report's opening paragraph is written to be quotable on its own.
         return text.split("\n\n")[0][:600]
     return ""
 
 
-def _as_object(text: str) -> dict[str, Any] | None:
+# A quoted string value for a named key, wherever it sits in the document.
+_FIELD = '"{key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"'
+
+
+def _field(text: str, key: str) -> str:
+    """One field out of a report, parsed or not.
+
+    Strict parsing is tried first and usually works. It must not be the only
+    way in: a real production report came back 4,671 characters long, correctly
+    terminated, and invalid at line 20 — the model had emitted one malformed
+    entry. Everything else in it was still readable, and a runbook draft that
+    degrades to quoting a brace because of one bad line is worse than one that
+    reads the field it wanted.
+    """
     try:
         parsed = json.loads(text)
     except ValueError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+        parsed = None
+    if isinstance(parsed, dict):
+        found = _walk(parsed, key)
+        if found:
+            return found
+    match = re.search(_FIELD.format(key=re.escape(key)), text)
+    if not match:
+        return ""
+    try:
+        return str(json.loads(f'"{match.group(1)}"')).strip()
+    except ValueError:
+        return match.group(1).strip()
+
+
+def _walk(obj: dict[str, Any], key: str) -> str:
+    value = obj.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    for nested in obj.values():
+        if isinstance(nested, dict):
+            found = _walk(nested, key)
+            if found:
+                return found
+    return ""
 
 
 def _headline(turns: list[dict[str, Any]], current_message: str) -> str:
@@ -96,13 +129,11 @@ def _headline(turns: list[dict[str, Any]], current_message: str) -> str:
                 if titled:
                     return titled
     for turn in turns:
-        report = _as_object(str(turn.get("text") or "").strip())
-        if report:
-            identity = report.get("alert_identity")
-            if isinstance(identity, dict):
-                named = str(identity.get("rule_name") or identity.get("service") or "").strip()
-                if named:
-                    return named
+        text = str(turn.get("text") or "").strip()
+        for key in ("rule_name", "alert_name", "service"):
+            named = _field(text, key)
+            if named:
+                return named
     first = next((line.strip() for line in message.splitlines() if line.strip()), "")
     return first
 
