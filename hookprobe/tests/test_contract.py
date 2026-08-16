@@ -404,3 +404,36 @@ def test_a_draft_is_named_after_the_alert_not_the_instructions(tmp_path) -> None
     # The human-readable field, not the whole object.
     assert "Consumers stopped draining the queue" in draft["content"]
     assert '"root_cause"' not in draft["content"]
+
+
+def test_a_draft_survives_a_report_that_does_not_quite_parse(tmp_path) -> None:
+    """One malformed line must not cost the whole draft.
+
+    A real production report was 4,671 characters, correctly terminated, and
+    invalid at line 20 — the model emitted one bad entry. Strict parsing failed,
+    so the draft fell back to quoting the opening brace and naming itself after
+    the caller's role description.
+    """
+    from hookprobe.distill import draft_skill
+
+    class _Run:
+        session_key = "hook:deep-analysis:grafana:xyz"
+        engine_session_id = "sdk-2"
+        current_message = ""
+        turns = [
+            {
+                "message": "你是无人值守 SRE Agent。\n## 输入数据\n...",
+                "text": (
+                    '{\n  "alert_identity": {\n    "rule_name": "[MQ] Ready backlog growing"\n  },\n'
+                    "  oops-not-json,\n"
+                    '  "summary": "Consumers stopped draining the queue"\n}'
+                ),
+                "events": [],
+            }
+        ]
+
+    draft = draft_skill(_Run())
+
+    assert draft["name"] == "mq-ready-backlog-growing"
+    assert "Consumers stopped draining the queue" in draft["content"]
+    assert "无人值守" not in draft["content"]
