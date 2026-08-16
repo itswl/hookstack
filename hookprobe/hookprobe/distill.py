@@ -18,6 +18,7 @@ model call would cost money to restate that, and would be free to invent.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -53,17 +54,63 @@ def _conclusion(turns: list[dict[str, Any]]) -> str:
     """
     for turn in turns:
         text = str(turn.get("text") or "").strip()
-        if text:
-            # The report's opening paragraph is written to be quotable on its own.
-            return text.split("\n\n")[0][:600]
+        if not text:
+            continue
+        # A caller that asked for structured output gets an object back, and
+        # dumping it verbatim put a whole JSON document under "what it turned
+        # out to be". Prefer the fields written for a human to read.
+        report = _as_object(text)
+        if report is not None:
+            for key in ("summary", "root_cause", "conclusion", "primary_text", "impact"):
+                value = str(report.get(key) or "").strip()
+                if value:
+                    return value[:600]
+        # The report's opening paragraph is written to be quotable on its own.
+        return text.split("\n\n")[0][:600]
     return ""
+
+
+def _as_object(text: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _headline(turns: list[dict[str, Any]], current_message: str) -> str:
+    """What this investigation was about, not how it was instructed.
+
+    An event-door run's first message is the caller's whole analysis prompt,
+    whose first line is a role description ("you are the unattended SRE agent
+    …"). Naming a runbook after that produces one called
+    webhookwise-sre-agent-webhook-webhook. The alert is further down, on the
+    Title: line the family loop writes, or named in the structured report.
+    """
+    message = str((turns[0] if turns else {}).get("message") or current_message or "")
+    for line in message.splitlines():
+        stripped = line.strip()
+        for prefix in ("Title:", "标题:", "Rule:", "告警:"):
+            if stripped.startswith(prefix):
+                titled = stripped[len(prefix) :].strip()
+                if titled:
+                    return titled
+    for turn in turns:
+        report = _as_object(str(turn.get("text") or "").strip())
+        if report:
+            identity = report.get("alert_identity")
+            if isinstance(identity, dict):
+                named = str(identity.get("rule_name") or identity.get("service") or "").strip()
+                if named:
+                    return named
+    first = next((line.strip() for line in message.splitlines() if line.strip()), "")
+    return first
 
 
 def draft_skill(run: Any, *, title: str = "") -> dict[str, str]:
     """A SKILL.md draft for the condition this run investigated."""
     turns = list(getattr(run, "turns", []) or [])
-    first_message = str((turns[0] if turns else {}).get("message") or getattr(run, "current_message", "") or "")
-    headline = (title or first_message.strip().splitlines()[0] if first_message.strip() else "") or run.session_key
+    headline = title or _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
     name = slug(headline)
     steps = _steps(turns)
     conclusion = _conclusion(turns)
