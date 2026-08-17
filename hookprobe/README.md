@@ -37,7 +37,9 @@ caller ── POST /hooks/agent ───────────────▶
 | `GET/PUT /v1/memory` | The environment memory — `{workdir}/CLAUDE.md`, loaded into every engine session. Facts every investigation should start from: topology, known false alarms, conventions. |
 | `GET /v1/runs` | Session list, newest first (summaries). |
 | `GET /v1/runs/{key}` | Full run record: status, error, cost, engine session id, all turns. `inputs_now` carries the digests of the memory and methodology files *as they stand today*, so a recorded digest can be read as "still current" or "edited since". |
-| `POST /v1/runs/{key}/distill` | A SKILL.md draft for what a finished run learned — the question, the tool sequence, the conclusion. Returns it; never writes it. Saving is still `PUT /v1/skills/{name}`, because an investigator that edits its own future instructions is one nobody reviewed. |
+| `POST /v1/runs/{key}/distill` | A SKILL.md draft for what a finished run learned — the question, the tool sequence, the conclusion. Returns it; never writes it. Saving is still `PUT /v1/skills/{name}`; the automatic path is `HOOKPROBE_AUTO_DISTILL_MAX` (see *The learning loop*). |
+| `POST /v1/skills/{name}/review` | Mark a runbook read without changing a byte — the other outcome of a review, which used to be unrecordable. Saving an edit already counts. |
+| `GET /v1/skills/{name}/history[/{stamp}]` · `GET /v1/skills/{name}/origin` | Every version a write displaced, and the full revision log. The skills page renders these as a diff + restore; restore is just the PUT, so it snapshots what it replaces. |
 | `GET /v1/runs/{key}/stream` | The open run as it happens — NDJSON, one object per line: an opening `snapshot`, the answer arriving as `delta` chunks (`kind: text` or `thinking`), each finished step, a `ping` every 15s of silence, and `done` when it settles, at which point it closes itself. Deltas are live-only and never recorded; the finished blocks are what the case file keeps. |
 | `GET /ui` | The sessions page (below). Markup is served unauthenticated; the data calls it makes are not. |
 | `GET /healthz` | Liveness, unauthenticated. |
