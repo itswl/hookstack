@@ -114,8 +114,12 @@ itself, which turns out to be the one target it can always reach.
    cloud CLIs are too many to enumerate — scope their credentials instead.
 3. **Container** — non-root, disposable, nothing precious inside, no container
    runtime and no socket (a run cannot start a container, and cannot build a
-   namespace of its own either). The agent may write freely in `/data`, minus
-   the carve-out below.
+   namespace of its own either). The shipped compose files bound the blast
+   radius: 2g memory, 512 pids, every capability dropped,
+   `no-new-privileges` — a runaway analysis cannot take the host with it, and
+   a compromised run finds no privilege ladder. (`ping` is the one casualty of
+   `cap_drop: ALL`; curl and nc cover reachability.) The agent may write
+   freely in `/data`, minus the carve-out below.
 4. **Input guard** — the agent may not write what steers the *next* run:
    `.claude/` (skills, roles, settings), `CLAUDE.md`, `system-prompt.md`, and
    the `audit/` flight recorder. Without this, one injected line reaching
