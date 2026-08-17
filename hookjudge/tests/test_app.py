@@ -426,3 +426,31 @@ async def test_a_burst_of_writes_becomes_one_wake_up_on_the_wire():
         await asyncio.wait_for(stream.__anext__(), timeout=0.3)
     await stream.aclose()
     assert live.watcher_count == 0
+
+
+async def test_return_url_none_is_ledger_only_not_a_dead_letter(tmp_path):
+    """The shadow deployment: the verdict's journey ends in the ledger by
+    declaration. An EMPTY url stays a misconfiguration (dead + alarm) — the
+    difference between "chose not to" and "forgot to" must stay visible."""
+    settings = _settings(tmp_path)
+    settings = replace(settings, return_url="none")
+    app = create_app(settings=settings)
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        client.app = app  # type: ignore[attr-defined]
+        await client.post("/events", json=EVENT)
+        await _settle(client)
+
+        # _settle waits for the judgement; the return pass is the worker's
+        # NEXT tick, so poll for the status flip rather than one sleep.
+        row = {}
+        for _ in range(100):
+            row = (await app.state.store.recent(1))[0]
+            if row["return_status"] != "queued":
+                break
+            await asyncio.sleep(0.01)
+        assert row["return_status"] == "skipped"
+        assert "ledger-only" in (row["return_error"] or "")
