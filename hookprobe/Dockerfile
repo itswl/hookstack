@@ -7,6 +7,12 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
+# The CLI is the agent runtime itself. Unpinned, every image rebuild
+# silently adopts whatever shipped upstream that day — the one dependency
+# where drift changes behaviour most, pinned last. Bump deliberately:
+#   docker compose build --build-arg CLAUDE_CODE_VERSION=x.y.z
+ARG CLAUDE_CODE_VERSION=2.1.232
+
 # The diagnostic core: what any investigation reaches for first, and what
 # marketplace runbooks assume exists (a patrol skill mis-read this container
 # for lack of `ps`). All read-only by nature: process/socket/DNS/JSON.
@@ -16,7 +22,7 @@ RUN apt-get update \
         procps jq iproute2 dnsutils netcat-openbsd lsof \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
@@ -55,9 +61,11 @@ RUN if [ -n "$KUBECTL_VERSION" ]; then \
 #     && npm cache clean --force
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.lock ./
 COPY hookprobe ./hookprobe
-RUN pip install .
+# The lock is a ceiling, not a wish list: pyproject declares intent with
+# floors, the lock pins the resolution the gate actually ran against.
+RUN pip install -c requirements.lock .
 
 # The layout is seeded in the image so a FRESH named volume inherits it with the
 # right ownership. This is not cosmetic: mounting a host skills library at

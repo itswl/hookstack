@@ -1,8 +1,15 @@
 FROM python:3.14-slim
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Runtime dependencies only, pinned by the lock — pytest, ruff and mypy
+# belong in the gate, not in the image that runs in production.
+COPY requirements.txt requirements.lock ./
+RUN pip install --no-cache-dir -c requirements.lock \
+      "$(grep -E '^fastapi' requirements.txt)" \
+      "$(grep -E '^uvicorn' requirements.txt)" \
+      "$(grep -E '^aiosqlite' requirements.txt)" \
+      "$(grep -E '^httpx' requirements.txt)" \
+      "$(grep -E '^pyyaml' requirements.txt)"
 
 COPY hookrelay/ hookrelay/
 COPY config.example.yaml .
