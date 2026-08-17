@@ -6,7 +6,24 @@
 
 Two services that split one job in half, and an investigator for the alerts
 where a verdict is not enough. Narrative overview with screenshots of all three:
-[OVERVIEW.md](OVERVIEW.md).
+[OVERVIEW.md](OVERVIEW.md). MIT licensed.
+
+## Ten minutes, no keys, no bill
+
+```bash
+git clone https://github.com/itswl/hookstack && cd hookstack
+docker compose up -d --build   # pipe + judge + a stub model + a readable sink
+bash scripts/demo.sh           # four alerts; every judgement route fires once
+```
+
+The demo posts a fresh alert (judged by the stub model), the same alert again
+(reused, no call), its recovery (reuses the firing's verdict), and a different
+one — then prints the judge's ledger with routes and costs. Boards:
+`http://127.0.0.1:8100` (pipe) and `:8200` (judge); what an operator would
+have received: `docker compose logs -f sink`. Real credentials in `.env` make
+the stub step aside; `--profile probe` adds the investigator (needs a model
+key). Tagged releases publish images for both amd64 and arm64:
+`ghcr.io/itswl/{hookrelay,hookjudge,hookprobe}`.
 
 ```
 upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► lark / dingtalk / wecom / webhook
