@@ -4,8 +4,8 @@ WORKDIR /app
 
 # Runtime dependencies only — pytest and ruff belong in the gate, not in the
 # image that runs in production.
-COPY requirements.txt .
-RUN pip install --no-cache-dir \
+COPY requirements.txt requirements.lock ./
+RUN pip install --no-cache-dir -c requirements.lock \
       "$(grep -E '^fastapi' requirements.txt)" \
       "$(grep -E '^uvicorn' requirements.txt)" \
       "$(grep -E '^aiosqlite' requirements.txt)" \
