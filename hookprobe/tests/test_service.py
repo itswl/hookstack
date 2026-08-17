@@ -261,3 +261,32 @@ def test_timeout_clamped_to_max(tmp_path) -> None:
         assert tight._clamp_timeout(None) == 2
 
     asyncio.run(scenario())
+
+
+def test_a_tool_done_becomes_a_duration_not_a_second_step(tmp_path) -> None:
+    """The timing hook reports under the step's tool_use_id. Matched, it is the
+    step's duration; unmatched, it is a subagent's call — the message stream
+    only carries the parent's, so this is how subagent work reaches the feed."""
+
+    async def scenario() -> None:
+        engine = FakeEngine(
+            events=[
+                {"type": "tool_use", "id": "tu_1", "name": "Bash", "detail": "df -h"},
+                {"type": "tool_done", "id": "tu_1", "name": "Bash", "detail": "df -h", "ms": 340},
+                {"type": "tool_done", "id": "tu_sub", "name": "Grep", "detail": "error", "ms": 12},
+                {"type": "tool_done", "id": "tu_gone", "name": "Bash", "detail": "curl x", "ms": 900, "error": True},
+            ]
+        )
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.start({"message": "analyze", "sessionKey": "hook:durations"})
+        done = await _wait_finished(service, "hook:durations")
+
+        events = done.turns[0]["events"]
+        steps = [e for e in events if e.get("type") == "tool_use"]
+        assert len(steps) == 3, "two subagent calls appended, no duplicate for the matched one"
+        assert steps[0]["ms"] == 340 and "sub" not in steps[0]
+        assert steps[1]["sub"] is True
+        assert steps[1]["name"] == "Grep" and steps[1]["ms"] == 12
+        assert steps[2]["sub"] is True and steps[2]["error"] is True
+
+    asyncio.run(scenario())
