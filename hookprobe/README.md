@@ -459,10 +459,12 @@ boundary.
 
 Skills load in two layers. The **project layer** (`{workdir}/.claude/skills`,
 on the volume) is always on — it is where the agent distills. The **user
-layer** is an optional host library: mount it read-only at
-`/data/home/.claude/skills` (only the skills subdir — never the whole
-`~/.claude`, credentials live there) and set
-`HOOKPROBE_SETTING_SOURCES=user,project`. A host library tends to be big, so
+layer** is an optional host library: point `HOOKPROBE_USER_SKILLS` at it in
+`.env` (the prod compose mounts it read-only at `/data/home/.claude/skills`;
+only a skills subdir — never a whole `~/.claude`, credentials live there) and
+set `HOOKPROBE_SETTING_SOURCES=user,project`. A library that lives in the
+repo of the service it drives (e.g. WebhookWise's `.claude/skills`) versions
+with that service for free. A host library tends to be big, so
 `HOOKPROBE_SKILLS` pins the session's skill list to named skills (or `all`);
 it is a context filter, not a sandbox. The `/v1/skills` browser shows
 exactly the layers the engine would load, tagged `project`/`user`. Two
