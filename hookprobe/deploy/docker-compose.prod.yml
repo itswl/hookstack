@@ -187,5 +187,10 @@ services:
 
 networks:
   default:
-    name: webhookwise_webhook_net
+    # The family's own wire, owned by the platform's app compose (WW creates
+    # it on `up`; the exact services that talk to the gateway join it). The
+    # investigator used to sit on the platform's main network, where it
+    # could open sockets to postgres and redis — the agent runs arbitrary
+    # bash, and the only boundary was the absence of a password.
+    name: hookstack_net
     external: true
