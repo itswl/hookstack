@@ -454,3 +454,33 @@ async def test_return_url_none_is_ledger_only_not_a_dead_letter(tmp_path):
             await asyncio.sleep(0.01)
         assert row["return_status"] == "skipped"
         assert "ledger-only" in (row["return_error"] or "")
+
+
+async def test_a_storm_burst_pays_for_exactly_one_judgement(app_client, monkeypatch):
+    """The reuse route exists FOR storms, so it must work DURING one: identical
+    events inside one model-latency window used to each miss the verdict the
+    others had not written yet, and every restatement billed its own ai call.
+    Serialized per identity, the first pays and the rest reuse."""
+    calls = 0
+
+    async def slow_ai(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)  # wide enough that the burst overlaps it
+        from hookjudge.contract import Verdict
+
+        return Verdict(summary="s", importance="high", event_type="business", route="ai", model="m")
+
+    monkeypatch.setattr("hookjudge.app.ai_verdict", slow_ai)
+
+    await asyncio.gather(*(app_client.post("/events", json=EVENT) for _ in range(4)))
+    store = app_client.app.state.store
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+        if len(await store.recent(10)) >= 4:
+            break
+
+    rows = await store.recent(10)
+    routes = sorted(str(r["route"]) for r in rows)
+    assert calls == 1, "one model call for the whole burst"
+    assert routes.count("ai") == 1 and routes.count("reuse") == 3
