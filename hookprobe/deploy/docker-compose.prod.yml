@@ -81,6 +81,12 @@ services:
       HOOKPROBE_REPEAT_REMINDER_AT: ${HOOKPROBE_REPEAT_REMINDER_AT:-}
       HOOKPROBE_BASH_TIMEOUT_MS: ${HOOKPROBE_BASH_TIMEOUT_MS:-}
       HOOKPROBE_BASH_MAX_TIMEOUT_MS: ${HOOKPROBE_BASH_MAX_TIMEOUT_MS:-}
+      # The learning loop: how many runbooks finished runs may leave behind for
+      # later ones. 0 keeps it manual (draft, then an operator saves). Above 0
+      # the service writes them itself — the agent's own tools still cannot
+      # touch .claude/, which is what makes the automatic write a different act
+      # from a run editing its own instructions.
+      HOOKPROBE_AUTO_DISTILL_MAX: ${HOOKPROBE_AUTO_DISTILL_MAX:-}
       # Model-call telemetry. On by default and harmless when nothing is
       # listening — measured: with no endpoint a run finishes in the same time,
       # emits no retries and logs nothing. So the switch stays on and the only
