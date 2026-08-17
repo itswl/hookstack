@@ -34,7 +34,7 @@ services:
       - ./shadow.yaml:/etc/hookrelay/config.yaml:ro
       # Bind mounts at the deployment root, like the investigator's: state in
       # plain sight for the backup script, not inside a named volume.
-      - ../../shadow-data/hookrelay:/data
+      - ../shadow-data/hookrelay:/data
     ports:
       - "127.0.0.1:8100:8100"
 
@@ -65,7 +65,7 @@ services:
       HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:-0.00042}
       HOOKJUDGE_READ_TOKEN: ${HOOKJUDGE_READ_TOKEN:-}
     volumes:
-      - ../../shadow-data/hookjudge:/data
+      - ../shadow-data/hookjudge:/data
     ports:
       - "127.0.0.1:8200:8200"
 
