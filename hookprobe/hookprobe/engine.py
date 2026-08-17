@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from hookprobe import inputs
 from hookprobe.guard import bash_deny_reason
@@ -115,6 +115,14 @@ def _input_guard_hook(workdir: Path, home: Path | None) -> Callable[..., Any]:
     return hook
 
 
+def _hook_list(*fns: Callable[..., Any]) -> list[Any]:
+    """The SDK types hook inputs as a TypedDict union; ours are plain dicts on
+    purpose — the tests never import the SDK, so its types cannot appear in
+    signatures. One list[Any] at the exact boundary, instead of ignores at
+    every registration site."""
+    return list(fns)
+
+
 def _tool_detail(tool_input: Any) -> str:
     """One line saying what a tool call is about, for the live process feed."""
     data = tool_input if isinstance(tool_input, dict) else {}
@@ -128,7 +136,7 @@ def _tool_detail(tool_input: Any) -> str:
         return ""
 
 
-def _skills_filter(raw: str) -> list[str] | str | None:
+def _skills_filter(raw: str) -> list[str] | Literal["all"] | None:
     """HOOKPROBE_SKILLS → the SDK's `skills` option.
 
     "" keeps the engine's own default listing; "all" enables every discovered
@@ -420,7 +428,7 @@ class ClaudeAgentEngine:
             # "project" loads {workdir}/.claude/skills — the runbooks previous
             # runs distilled. Adding "user" (HOOKPROBE_SETTING_SOURCES) loads
             # $HOME/.claude too — a host skills library mounted read-only.
-            setting_sources=list(self._settings.setting_sources),
+            setting_sources=cast(Any, list(self._settings.setting_sources)),
             skills=_skills_filter(self._settings.skills),
             # Named roles from config, on top of any .claude/agents/*.md files.
             agents=(
@@ -430,27 +438,27 @@ class ClaudeAgentEngine:
             mcp_servers=_load_mcp_servers(self._settings.mcp_config),
             hooks={
                 "PreToolUse": [
-                    HookMatcher(matcher="Bash", hooks=[_bash_guard_hook]),
+                    HookMatcher(matcher="Bash", hooks=_hook_list(_bash_guard_hook)),
                     # Matched on every tool, filtered by name inside: the guard
                     # must not depend on how the SDK interprets a matcher
                     # pattern for the one thing it exists to stop.
-                    HookMatcher(matcher=None, hooks=[_input_guard_hook(self._workdir, self._home)]),
-                    HookMatcher(matcher=None, hooks=[_step_begin]),
+                    HookMatcher(matcher=None, hooks=_hook_list(_input_guard_hook(self._workdir, self._home))),
+                    HookMatcher(matcher=None, hooks=_hook_list(_step_begin)),
                 ],
                 # The flight recorder: every tool call, every run, one JSONL
                 # line — subagents included, since hooks apply inside them.
                 # Alongside it, loop hygiene: notice repeated identical calls.
                 "PostToolUse": [
-                    HookMatcher(matcher=None, hooks=[_step_done]),
-                    HookMatcher(matcher=None, hooks=[_audit_hook(self._workdir / "audit", session_key)]),
+                    HookMatcher(matcher=None, hooks=_hook_list(_step_done)),
+                    HookMatcher(matcher=None, hooks=_hook_list(_audit_hook(self._workdir / "audit", session_key))),
                     HookMatcher(
                         matcher=None,
-                        hooks=[
+                        hooks=_hook_list(
                             post_tool_hook(
                                 session_key=session_key,
                                 repeat_reminder_at=self._settings.repeat_reminder_at,
                             )
-                        ],
+                        ),
                     ),
                 ],
             },
