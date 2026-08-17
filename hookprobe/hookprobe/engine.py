@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -369,6 +370,35 @@ class ClaudeAgentEngine:
             except Exception:  # noqa: BLE001 — a broken observer must not kill the run
                 logger.exception("on_event callback failed")
 
+        # Step timing, from the hooks rather than the message stream: hooks fire
+        # inside subagents too, so this is also the only place a subagent's tool
+        # calls surface at all — the message stream carries just the parent's.
+        # The pair reports under the tool_use_id; the service matches it to the
+        # streamed step, and an id it has never seen is, by elimination, a
+        # subagent's.
+        step_starts: dict[str, float] = {}
+
+        async def _step_begin(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
+            if tool_use_id:
+                step_starts[tool_use_id] = time.monotonic()
+            return {}
+
+        async def _step_done(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
+            began = step_starts.pop(tool_use_id, None) if tool_use_id else None
+            done: dict[str, Any] = {
+                "type": "tool_done",
+                "id": tool_use_id,
+                "name": str(input_data.get("tool_name") or ""),
+                "detail": _tool_detail(input_data.get("tool_input")),
+            }
+            if began is not None:
+                done["ms"] = int((time.monotonic() - began) * 1000)
+            response = input_data.get("tool_response")
+            if isinstance(response, dict) and response.get("is_error"):
+                done["error"] = True
+            emit(done)
+            return {}
+
         append = _system_prompt_append(self._settings)
         options = ClaudeAgentOptions(
             cwd=str(self._workdir),
@@ -405,11 +435,13 @@ class ClaudeAgentEngine:
                     # must not depend on how the SDK interprets a matcher
                     # pattern for the one thing it exists to stop.
                     HookMatcher(matcher=None, hooks=[_input_guard_hook(self._workdir, self._home)]),
+                    HookMatcher(matcher=None, hooks=[_step_begin]),
                 ],
                 # The flight recorder: every tool call, every run, one JSONL
                 # line — subagents included, since hooks apply inside them.
                 # Alongside it, loop hygiene: notice repeated identical calls.
                 "PostToolUse": [
+                    HookMatcher(matcher=None, hooks=[_step_done]),
                     HookMatcher(matcher=None, hooks=[_audit_hook(self._workdir / "audit", session_key)]),
                     HookMatcher(
                         matcher=None,
@@ -463,6 +495,9 @@ class ClaudeAgentEngine:
                         elif isinstance(block, ToolUseBlock):
                             event: dict[str, Any] = {
                                 "type": "tool_use",
+                                # The handle the PostToolUse timer reports back
+                                # under, so a duration can find its step.
+                                "id": block.id,
                                 "name": block.name,
                                 "detail": _tool_detail(block.input),
                             }
