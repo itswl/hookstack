@@ -95,7 +95,9 @@ what runs.
 
 ## Security model
 
-Read-only is enforced in three layers, strongest first:
+Read-only is enforced in four layers, strongest first. The first three are
+about the systems under investigation; the fourth is about the investigator
+itself, which turns out to be the one target it can always reach.
 
 1. **Credentials** — mount query-only credentials (read-only kubeconfig,
    Prometheus/Loki endpoints, viewer tokens). This is the real boundary;
@@ -109,8 +111,25 @@ Read-only is enforced in three layers, strongest first:
    docker/podman, systemctl, terraform, plus ssh/scp and `git push`. It errs
    toward over-blocking. HTTP verbs are not policed (query APIs POST), and
    cloud CLIs are too many to enumerate — scope their credentials instead.
-3. **Container** — non-root, disposable, nothing precious inside. The agent
-   may write freely in `/data` (scratch + skills); that is by design.
+3. **Container** — non-root, disposable, nothing precious inside, no container
+   runtime and no socket (a run cannot start a container, and cannot build a
+   namespace of its own either). The agent may write freely in `/data`, minus
+   the carve-out below.
+4. **Input guard** — the agent may not write what steers the *next* run:
+   `.claude/` (skills, roles, settings), `CLAUDE.md`, `system-prompt.md`, and
+   the `audit/` flight recorder. Without this, one injected line reaching
+   `.claude/skills/` outlives the run that read it and comes back as the
+   operator's own runbook — a single injection made durable. Two mechanisms,
+   because they fail differently: a PreToolUse hook refuses the write and says
+   why, and a digest of every input file is compared before and after each run,
+   which catches a change however it arrived. A run that changed its own inputs
+   says so at the top of its record, unfolded.
+
+   This is code rather than a read-only mount because the agent and the service
+   share a UID and a process tree: a mount cannot tell `PUT /v1/skills/{name}`
+   (an operator installing a reviewed runbook) from a run editing itself, and
+   mounting these paths read-only would take the operator's write endpoints
+   down along with the attack.
 
 ## Loop hygiene — the run's context and bill
 

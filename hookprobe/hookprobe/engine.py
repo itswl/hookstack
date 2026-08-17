@@ -18,17 +18,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hookprobe import inputs
 from hookprobe.guard import bash_deny_reason
 from hookprobe.hygiene import post_tool_hook
 from hookprobe.settings import Settings
 
 logger = logging.getLogger("hookprobe.engine")
 
-# The agent may write freely inside its own disposable workspace (scratch
-# scripts, distilled SKILL.md runbooks). "Read-only" applies to the systems
-# it investigates, enforced by the bash guard plus the credentials mounted
-# into the container. Task enables parallel sub-investigations for cascading
-# incidents; hooks (and so the bash guard) apply inside subagents too.
+# The agent may write freely inside its workspace — scratch scripts, working
+# notes — with one carve-out: not the files that steer the next run. See
+# hookprobe.inputs for why a run installing its own runbook is a persistence
+# vector rather than a feature. "Read-only" applies to the systems it
+# investigates, enforced by the bash guard plus the credentials mounted into
+# the container. Task enables parallel sub-investigations for cascading
+# incidents; hooks (and so both guards) apply inside subagents too.
 _ALLOWED_TOOLS = [
     "Bash",
     "Read",
@@ -59,6 +62,10 @@ class EngineResult:
     usage: dict[str, Any] | None = None
     model_usage: dict[str, Any] | None = None
     duration_ms: int | None = None
+    # Files on the run's own input surface that changed while it ran. Empty on
+    # a healthy run; anything here means the run rewrote what steers the next
+    # one, whichever tool it went through. See hookprobe.inputs.
+    input_changes: tuple[str, ...] = ()
 
 
 async def _bash_guard_hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
@@ -74,6 +81,37 @@ async def _bash_guard_hook(input_data: dict[str, Any], tool_use_id: str | None, 
             "permissionDecisionReason": reason,
         }
     }
+
+
+# Tools that put bytes on disk. NotebookEdit and MultiEdit are not in
+# _ALLOWED_TOOLS today; naming them costs nothing and means enabling one later
+# cannot quietly reopen the hole.
+_WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+_WRITE_PATH_KEYS = ("file_path", "notebook_path", "path")
+
+
+def _input_guard_hook(workdir: Path, home: Path | None) -> Callable[..., Any]:
+    """PreToolUse: refuse a write aimed at the files that steer the next run."""
+
+    async def hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
+        if str(input_data.get("tool_name") or "") not in _WRITE_TOOLS:
+            return {}
+        tool_input = input_data.get("tool_input")
+        data = tool_input if isinstance(tool_input, dict) else {}
+        for key in _WRITE_PATH_KEYS:
+            reason = inputs.write_deny_reason(str(data.get(key) or ""), workdir=workdir, home=home)
+            if reason is not None:
+                logger.warning("input guard denied write: %s", data.get(key))
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": reason,
+                    }
+                }
+        return {}
+
+    return hook
 
 
 def _tool_detail(tool_input: Any) -> str:
@@ -243,6 +281,7 @@ class ClaudeAgentEngine:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._workdir = settings.workdir
+        self._home = Path(os.environ.get("HOME", "") or "/data/home")
         self._agents_raw = _load_agents_raw(settings.agents_config)
         (self._workdir / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
 
@@ -274,12 +313,11 @@ class ClaudeAgentEngine:
         Digests, not contents: enough to prove which text was loaded without
         copying investigation instructions into every result file.
         """
-        home = Path(os.environ.get("HOME", "") or "/data/home")
         skills: dict[str, Any] = {"filter": self._settings.skills or "(engine default)"}
         if "project" in self._settings.setting_sources:
             skills["project"] = _skill_names(self._workdir / ".claude" / "skills")
         if "user" in self._settings.setting_sources:
-            skills["user"] = _skill_names(home / ".claude" / "skills")
+            skills["user"] = _skill_names(self._home / ".claude" / "skills")
         return {
             "model": self._settings.model,
             "max_turns": self._settings.max_turns,
@@ -361,7 +399,13 @@ class ClaudeAgentEngine:
             # Read fresh per run: edit the file, the next run uses it.
             mcp_servers=_load_mcp_servers(self._settings.mcp_config),
             hooks={
-                "PreToolUse": [HookMatcher(matcher="Bash", hooks=[_bash_guard_hook])],
+                "PreToolUse": [
+                    HookMatcher(matcher="Bash", hooks=[_bash_guard_hook]),
+                    # Matched on every tool, filtered by name inside: the guard
+                    # must not depend on how the SDK interprets a matcher
+                    # pattern for the one thing it exists to stop.
+                    HookMatcher(matcher=None, hooks=[_input_guard_hook(self._workdir, self._home)]),
+                ],
                 # The flight recorder: every tool call, every run, one JSONL
                 # line — subagents included, since hooks apply inside them.
                 # Alongside it, loop hygiene: notice repeated identical calls.
@@ -387,52 +431,66 @@ class ClaudeAgentEngine:
         )
 
         logger.info("engine start session=%s model=%s resume=%s", session_key, self._settings.model, resume or "-")
+        inputs_before = inputs.fingerprint(self._workdir, self._home)
+        input_changes: tuple[str, ...] = ()
         last_text = ""
         message_count = 0
         result: Any = None
-        async for msg in query(prompt=message, options=options):
-            message_count += 1
-            if isinstance(msg, StreamEvent):
-                # Transient by design: deltas are for a human watching right now.
-                # The finished blocks below are what gets recorded.
-                if msg.event.get("type") == "content_block_delta":
-                    delta = msg.event.get("delta") or {}
-                    chunk = delta.get("text") or delta.get("thinking") or ""
-                    if chunk:
-                        emit(
-                            {
-                                "type": "delta",
-                                "kind": "thinking" if delta.get("type") == "thinking_delta" else "text",
-                                "text": chunk,
+        try:
+            async for msg in query(prompt=message, options=options):
+                message_count += 1
+                if isinstance(msg, StreamEvent):
+                    # Transient by design: deltas are for a human watching right now.
+                    # The finished blocks below are what gets recorded.
+                    if msg.event.get("type") == "content_block_delta":
+                        delta = msg.event.get("delta") or {}
+                        chunk = delta.get("text") or delta.get("thinking") or ""
+                        if chunk:
+                            emit(
+                                {
+                                    "type": "delta",
+                                    "kind": "thinking" if delta.get("type") == "thinking_delta" else "text",
+                                    "text": chunk,
+                                }
+                            )
+                    continue
+                if isinstance(msg, AssistantMessage):
+                    text_parts: list[str] = []
+                    for block in msg.content:
+                        if isinstance(block, TextBlock) and block.text:
+                            text_parts.append(block.text)
+                            emit({"type": "text", "text": block.text[:500]})
+                        elif isinstance(block, ToolUseBlock):
+                            event: dict[str, Any] = {
+                                "type": "tool_use",
+                                "name": block.name,
+                                "detail": _tool_detail(block.input),
                             }
-                        )
-                continue
-            if isinstance(msg, AssistantMessage):
-                text_parts: list[str] = []
-                for block in msg.content:
-                    if isinstance(block, TextBlock) and block.text:
-                        text_parts.append(block.text)
-                        emit({"type": "text", "text": block.text[:500]})
-                    elif isinstance(block, ToolUseBlock):
-                        event: dict[str, Any] = {
-                            "type": "tool_use",
-                            "name": block.name,
-                            "detail": _tool_detail(block.input),
-                        }
-                        # The plan checklist is worth keeping structured — the
-                        # UI renders it as a live todo list.
-                        if block.name == "TodoWrite" and isinstance(block.input, dict):
-                            todos = block.input.get("todos")
-                            if isinstance(todos, list):
-                                event["todos"] = todos[:20]
-                        emit(event)
-                if text_parts:
-                    last_text = "\n".join(text_parts)
-            elif isinstance(msg, ResultMessage):
-                result = msg
+                            # The plan checklist is worth keeping structured — the
+                            # UI renders it as a live todo list.
+                            if block.name == "TodoWrite" and isinstance(block.input, dict):
+                                todos = block.input.get("todos")
+                                if isinstance(todos, list):
+                                    event["todos"] = todos[:20]
+                            emit(event)
+                    if text_parts:
+                        last_text = "\n".join(text_parts)
+                elif isinstance(msg, ResultMessage):
+                    result = msg
+        finally:
+            # In a finally because a run that rewrites its own inputs and
+            # then fails is exactly the case a return-path check misses,
+            # and the next run cannot see it: its own "before" snapshot
+            # already contains the change.
+            input_changes = self._input_changes(inputs_before)
 
         if result is None:
-            return EngineResult(text=last_text, message_count=message_count, error="engine produced no result message")
+            return EngineResult(
+                text=last_text,
+                message_count=message_count,
+                error="engine produced no result message",
+                input_changes=input_changes,
+            )
 
         text = str(getattr(result, "result", None) or last_text or "").strip()
         error: str | None = None
@@ -451,4 +509,12 @@ class ClaudeAgentEngine:
             usage=dict(usage) if isinstance(usage, dict) else None,
             model_usage=dict(model_usage) if isinstance(model_usage, dict) else None,
             duration_ms=getattr(result, "duration_ms", None),
+            input_changes=input_changes,
         )
+
+    def _input_changes(self, before: dict[str, str]) -> tuple[str, ...]:
+        """What this run did to its own input surface — empty when it behaved."""
+        found = tuple(inputs.changes(before, inputs.fingerprint(self._workdir, self._home)))
+        if found:
+            logger.warning("run rewrote its own inputs: %s", "; ".join(found))
+        return found
