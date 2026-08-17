@@ -586,5 +586,9 @@ class RunService:
                 "duration_ms": result.duration_ms if result else None,
                 "events": list(run.events),
                 "inputs": dict(run.inputs),
+                # Empty on every healthy run. Stored next to the inputs it is
+                # about, so a report and the evidence that the run edited what
+                # produced it are never more than one record apart.
+                "input_changes": list(result.input_changes) if result else [],
             }
         )
