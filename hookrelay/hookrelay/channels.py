@@ -122,7 +122,7 @@ def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> Built
             "elements": [{"tag": "plain_text", "content": f"hookrelay · {message['source']} · #{message['event_id']}"}],
         },
     ]
-    payload: dict[str, Any] = {
+    payload = {
         "msg_type": "interactive",
         "card": {
             "header": {"title": {"tag": "plain_text", "content": message["title"]}, "template": color},
@@ -223,7 +223,7 @@ def build_generic(channel: Channel, message: dict[str, Any], now: float) -> Buil
         else {key: value for key, value in message.items() if key != "payload" and not key.startswith("_")}
     )
     body = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-    headers: dict[str, str] = {"content-type": "application/json"}
+    headers = {"content-type": "application/json"}
     if channel.secret:
         # Timestamped by default when the receiver speaks our own dialect, so
         # relay→relay hops are replay-protected; a foreign receiver (custom
