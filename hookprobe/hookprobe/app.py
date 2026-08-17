@@ -21,6 +21,7 @@ import hmac
 import json
 import re
 import shutil
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -31,7 +32,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from hookprobe import __version__
-from hookprobe.distill import draft_skill
+from hookprobe.distill import draft_skill, record_revision, snapshot
 from hookprobe.engine import (
     _load_agents_raw,
     _load_mcp_servers,
@@ -512,9 +513,17 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         skill_dir = settings.workdir / ".claude" / "skills" / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         manifest = skill_dir / "SKILL.md"
+        if manifest.is_file():
+            # Same undo an automatic write gets. A correction typed into the
+            # wrong runbook is the same accident as a run overwriting a good
+            # one, and neither is worth a permission check when the previous
+            # version is still on the volume.
+            snapshot(skill_dir, manifest)
         tmp = manifest.with_suffix(".tmp")
         tmp.write_bytes(raw)
         tmp.replace(manifest)
+        # Someone has now read it, which is the only thing "reviewed" means.
+        record_revision(skill_dir, by="operator", reviewed=True, at=time.time())
         return {"saved": True, "name": name, "layer": "project", "bytes": len(raw)}
 
     @app.delete("/v1/skills/{name}", dependencies=[Depends(require_token)])
