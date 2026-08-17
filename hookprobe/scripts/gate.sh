@@ -28,6 +28,9 @@ $PY -m ruff check hookprobe tests
 step "ruff format --check"
 $PY -m ruff format --check hookprobe tests
 
+step "mypy (types)"
+$PY -m mypy hookprobe
+
 step "bandit (static security scan)"
 $PY -m bandit -q -r hookprobe
 

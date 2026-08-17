@@ -40,6 +40,7 @@ jobs:
       - run: python -m compileall -q hookrelay tests
       - run: ruff check hookrelay tests
       - run: ruff format --check hookrelay tests
+      - run: python -m mypy hookrelay
       - run: python -m bandit -q -r hookrelay
       # Node ships pre-installed on GitHub-hosted ubuntu runners.
       - name: inline page JS parses

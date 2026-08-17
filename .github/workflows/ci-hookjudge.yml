@@ -31,6 +31,7 @@ jobs:
       - run: python -m compileall -q hookjudge tests scripts
       - run: ruff check hookjudge tests scripts
       - run: ruff format --check hookjudge tests scripts
+      - run: python -m mypy hookjudge
       - run: python -m bandit -q -r hookjudge
       - name: inline page JS parses
         run: |
