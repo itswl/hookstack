@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# Daily tarball of the investigator's state, keep the last 7.
+# Daily tarball of the family's state, keep the last 7.
 #
-# probe-data is the only state in the family worth a backup: the runbooks the
-# learning loop accumulated, the environment memory, case files, transcripts,
-# the audit log. Everything else (images, config) is a `git pull` away. The
-# volume is a plain bind mount precisely so this can be one tar with no docker
-# involvement — a backup that needs the thing it protects to be healthy is not
-# a backup.
+# probe-data holds the investigator's accumulated runbooks, memory, case files
+# and audit log; shadow-data (when the shadow run exists) holds the ledgers the
+# whole comparison exercise is for. Everything else (images, config) is a
+# `git pull` away. Both are plain bind mounts precisely so this can be one tar
+# with no docker involvement — a backup that needs the thing it protects to be
+# healthy is not a backup.
 #
 # Install (host crontab):
 #   15 4 * * * /srv/hookstack/scripts/backup_probe_data.sh
 set -euo pipefail
 
-SOURCE="${PROBE_DATA_DIR:-/srv/hookstack/probe-data}"
+ROOT="${HOOKSTACK_ROOT:-/srv/hookstack}"
 TARGET="${BACKUP_DIR:-/opt/backups/hookstack}"
 KEEP="${KEEP:-7}"
 
-[ -d "$SOURCE" ] || { echo "nothing to back up: $SOURCE missing" >&2; exit 1; }
+members=()
+for dir in probe-data shadow-data; do
+  [ -d "$ROOT/$dir" ] && members+=("$dir")
+done
+[ ${#members[@]} -gt 0 ] || { echo "nothing to back up under $ROOT" >&2; exit 1; }
 mkdir -p "$TARGET"
 
 stamp="$(date +%F)"
@@ -24,7 +28,7 @@ tmp="$TARGET/.probe-data-$stamp.tgz.partial"
 # One tar, atomically renamed: a backup killed mid-write must not look like a
 # backup. --warning=no-file-changed because runs write while we read; a file
 # torn mid-append (audit JSONL) is still a better copy than no copy.
-tar -czf "$tmp" --warning=no-file-changed -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")" || [ $? -eq 1 ]
+tar -czf "$tmp" --warning=no-file-changed -C "$ROOT" "${members[@]}" || [ $? -eq 1 ]
 mv "$tmp" "$TARGET/probe-data-$stamp.tgz"
 
 # Keep the newest KEEP, delete the rest — by name, which is by date.

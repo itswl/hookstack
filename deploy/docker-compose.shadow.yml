@@ -1,0 +1,76 @@
+# Shadow deployment: the pipe and the judge on real production traffic,
+# with zero production responsibility. See deploy/shadow.yaml for what that
+# means and what is deliberately absent.
+#
+#   cd /srv/hookstack
+#   docker compose --env-file .env -f deploy/docker-compose.shadow.yml up -d --build
+#
+# .env needs:
+#   WW_RELAY_SECRET        — mirror of the platform's FORWARD_RELAY_SECRET
+#   SHADOW_INGEST_SECRET   — pipe→judge hop signing (openssl rand -hex 24)
+#   ANTHROPIC_AUTH_TOKEN   — already present for the investigator; the judge
+#                            reuses the same DeepSeek key on the OpenAI dialect
+#
+# Ports bind to loopback only: the boards are for an ssh tunnel, the doors are
+# for the docker network.
+
+name: hookstack-shadow
+
+services:
+  hookrelay:
+    build: ../hookrelay
+    image: hookrelay:shadow
+    container_name: hookrelay
+    restart: unless-stopped
+    environment:
+      HOOKRELAY_HOST: 0.0.0.0
+      HOOKRELAY_PORT: 8100
+      HOOKRELAY_DB: /data/hookrelay.db
+      HOOKRELAY_CONFIG: /etc/hookrelay/config.yaml
+      HOOKRELAY_WORKER_INTERVAL: "0.5"
+      WW_RELAY_SECRET: ${WW_RELAY_SECRET:?mirror FORWARD_RELAY_SECRET into .env}
+      SHADOW_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
+    volumes:
+      - ./shadow.yaml:/etc/hookrelay/config.yaml:ro
+      # Bind mounts at the deployment root, like the investigator's: state in
+      # plain sight for the backup script, not inside a named volume.
+      - ../../shadow-data/hookrelay:/data
+    ports:
+      - "127.0.0.1:8100:8100"
+
+  hookjudge:
+    build: ../hookjudge
+    image: hookjudge:shadow
+    container_name: hookjudge
+    restart: unless-stopped
+    environment:
+      HOOKJUDGE_HOST: 0.0.0.0
+      HOOKJUDGE_PORT: 8200
+      HOOKJUDGE_DB: /data/hookjudge.db
+      HOOKJUDGE_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
+      # Empty on purpose: the verdict's whole journey ends in the ledger.
+      HOOKJUDGE_RETURN_URL: ""
+      HOOKJUDGE_WORKER_INTERVAL: "0.5"
+      HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
+      # The investigator's DeepSeek key, on the OpenAI dialect this time. The
+      # judge negotiates structured output per model at first use (json_schema
+      # is 400 on this endpoint; tools-with-auto works — measured 2026-08-15).
+      HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:-https://api.deepseek.com/v1}
+      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}
+      HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_AI_MODEL:-deepseek-chat}
+      # deepseek-chat list price as of the v3.2 cut (USD per 1k tokens); the
+      # ledger prices verdicts with these, so re-check on a model change.
+      HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:-0.00028}
+      HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:-0.00042}
+      HOOKJUDGE_READ_TOKEN: ${HOOKJUDGE_READ_TOKEN:-}
+    volumes:
+      - ../../shadow-data/hookjudge:/data
+    ports:
+      - "127.0.0.1:8200:8200"
+
+networks:
+  default:
+    # Owned by the platform's app compose; the same wire the investigator and
+    # the platform's forwarder already share.
+    name: hookstack_net
+    external: true
