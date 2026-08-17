@@ -107,6 +107,10 @@ services:
       # touch .claude/, which is what makes the automatic write a different act
       # from a run editing its own instructions.
       HOOKPROBE_AUTO_DISTILL_MAX: ${HOOKPROBE_AUTO_DISTILL_MAX:-}
+      # Storm coalescing: a re-fire of the same alert joins the session that
+      # already investigated it (follow-up turn) instead of funding a cold
+      # start. Default 1800s; 0 = every fire is its own run.
+      HOOKPROBE_COALESCE_WINDOW_SECONDS: ${HOOKPROBE_COALESCE_WINDOW_SECONDS:-}
       # Model-call telemetry. On by default and harmless when nothing is
       # listening — measured: with no endpoint a run finishes in the same time,
       # emits no retries and logs nothing. So the switch stays on and the only

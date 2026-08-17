@@ -364,6 +364,32 @@ class RunService:
     def get(self, session_key: str) -> Run | None:
         return self._store.get(session_key)
 
+    def same_alert(self, source: str, title: str, window_seconds: int) -> Run | None:
+        """The session already investigating this condition, if one is claimable.
+
+        A running session claims its alert regardless of age — it is live, and
+        a re-fire is information for it, not a reason to race it. A finished
+        one claims re-fires for `window_seconds` after it finished, so a storm
+        extends one investigation instead of funding N cold starts. Identity is
+        (source, title): the same pair the case-file recall greps for.
+        """
+        if window_seconds <= 0 or not title:
+            return None
+        cutoff = time.time() - window_seconds
+        best: Run | None = None
+        for run in self._store.list_runs(limit=200):
+            meta = run.meta or {}
+            if str(meta.get("source") or "") != source or str(meta.get("title") or "") != title:
+                continue
+            if not run.finished:
+                return run
+            # Only a session that can actually be reopened is worth claiming
+            # with; without an engine session there is nothing to continue.
+            claimable = (run.finished_at or 0) >= cutoff and not run.error and run.engine_session_id
+            if claimable and (best is None or (run.finished_at or 0) > (best.finished_at or 0)):
+                best = run
+        return best
+
     def list_runs(self, limit: int = 100) -> list[Run]:
         return self._store.list_runs(limit=limit)
 
