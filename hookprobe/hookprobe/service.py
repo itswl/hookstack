@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from hookprobe import distill
 from hookprobe.engine import EngineResult
 from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
@@ -450,6 +451,8 @@ class RunService:
         run.status = COMPLETED
         run.text = result.text
         self._record_turn(run, result)
+        # After the turn is recorded, because the runbook is assembled from it.
+        self._auto_distill(run, result)
         self._settle(run)
         self._schedule_return(run)
         logger.info(
@@ -458,6 +461,32 @@ class RunService:
             result.message_count,
             result.cost_usd,
         )
+
+    def _auto_distill(self, run: Run, result: EngineResult) -> None:
+        """Leave the next investigation a runbook, if the operator asked for it.
+
+        The write happens here, in the service, and never through the agent's
+        tools — that separation is the whole reason the input guard can stay on
+        while the loop closes. Failure is never the run's problem: the report is
+        already written and somebody is waiting for it.
+        """
+        if self._settings.auto_distill_max <= 0:
+            return
+        try:
+            outcome = distill.auto_install(
+                run,
+                skills_dir=self._settings.workdir / ".claude" / "skills",
+                limit=self._settings.auto_distill_max,
+                input_changes=result.input_changes,
+            )
+        except Exception:  # noqa: BLE001 — distilling must never cost a finished report
+            logger.exception("auto-distill failed session=%s", run.session_key)
+            return
+        run.distilled = outcome
+        if "installed" in outcome:
+            logger.info("auto-distilled session=%s runbook=%s", run.session_key, outcome["installed"])
+        else:
+            logger.info("auto-distill skipped session=%s reason=%s", run.session_key, outcome.get("skipped"))
 
     def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:
         run.status = FAILED

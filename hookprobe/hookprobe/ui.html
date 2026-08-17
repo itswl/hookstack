@@ -124,6 +124,7 @@ details.proc-past summary{cursor:pointer;color:var(--dim);font-size:12px}
 .skill-back{color:var(--accent);cursor:pointer;margin-bottom:10px;font-size:13px}
 .skill-layer{font-size:10px;border:1px solid var(--line);border-radius:8px;padding:1px 6px;color:var(--dim);margin-left:8px;font-family:var(--mono)}
 .skill-layer.user{color:var(--accent);border-color:var(--accent)}
+.skill-layer.unreviewed{color:var(--amber);border-color:var(--amber)}
 .skill-bar{display:flex;gap:12px;align-items:center;margin-bottom:10px}
 .skill-bar .spacer{flex:1}
 .skill-bar .skill-back{margin-bottom:0}
@@ -726,7 +727,13 @@ async function renderSkills() {
     }
     $("#turns").innerHTML = skills.map((s) => `
       <div class="skill" data-name="${esc(s.name)}">
-        <div class="skill-name">${esc(s.name)}<span class="skill-layer ${esc(s.layer || "project")}">${esc(s.layer || "project")}</span></div>
+        <div class="skill-name">${esc(s.name)}<span class="skill-layer ${esc(s.layer || "project")}">${esc(s.layer || "project")}</span>${
+          // A runbook a run wrote is loaded by every later run exactly like one
+          // a person wrote. The only place that difference can still be seen is
+          // here, so it is said on the row rather than a click away.
+          s.written_by === "auto-distill" && !s.reviewed
+            ? `<span class="skill-layer unreviewed" title="written automatically from ${attr(s.from_session || "a run")}; nobody has reviewed it">unreviewed</span>`
+            : ""}</div>
         <div class="skill-desc">${esc(s.description || "(no description)")}</div>
         <div class="skill-meta">${esc((s.files || []).join("  "))} · ${fmtTime(s.modified)}</div>
       </div>`).join("");
