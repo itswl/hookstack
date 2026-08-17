@@ -102,6 +102,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _return_once(client: httpx.AsyncClient, row: dict[str, Any], now: float) -> None:
         """Hand one judgement back to the pipe. The only delivery this service
         does, and only to one address — fan-out is the pipe's job."""
+        if app_settings.return_url.strip().lower() in ("none", "off"):
+            # A ledger-only deployment (the shadow run): the verdict's whole
+            # journey ends in the ledger, by declaration rather than by
+            # accident — which is what separates it from the case below.
+            await store.mark_return(
+                int(row["id"]), "skipped", int(row["return_attempts"]), "returns disabled (ledger-only deployment)"
+            )
+            return
         if not app_settings.return_url:
             await store.mark_return(
                 int(row["id"]), "dead", int(row["return_attempts"]), "HOOKJUDGE_RETURN_URL is not configured"

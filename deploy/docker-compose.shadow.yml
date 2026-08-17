@@ -48,8 +48,9 @@ services:
       HOOKJUDGE_PORT: 8200
       HOOKJUDGE_DB: /data/hookjudge.db
       HOOKJUDGE_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
-      # Empty on purpose: the verdict's whole journey ends in the ledger.
-      HOOKJUDGE_RETURN_URL: ""
+      # Ledger-only, by declaration: "none" marks returns skipped instead of
+      # dead — an empty URL is treated as a misconfiguration and alarms.
+      HOOKJUDGE_RETURN_URL: "none"
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
       HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
       # The investigator's DeepSeek key, on the OpenAI dialect this time. The
