@@ -48,6 +48,11 @@ _MARKER_EDGE = re.compile(
 )
 
 
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    """The wire is untyped; a dict where one was hoped for, else nothing."""
+    return value if isinstance(value, dict) else {}
+
+
 def condition_title(title: str) -> str:
     """The title with any "it ended" decoration removed.
 
@@ -136,17 +141,17 @@ class Incoming:
         the first one's judgement forever. It even looks healthy from the
         outside, because a paid ratio near zero reads as excellent savings.
         """
-        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-        wrapped = payload.get("event") if isinstance(payload.get("event"), dict) else None
-        event = wrapped if wrapped is not None else payload
-        fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+        meta = _dict_or_empty(payload.get("meta"))
+        wrapped = payload.get("event")
+        event = wrapped if isinstance(wrapped, dict) else payload
+        fields = _dict_or_empty(event.get("fields"))
         return cls(
             source=str(meta.get("source") or event.get("source") or "unknown"),
             title=str(event.get("title") or ""),
             body=str(event.get("body") or ""),
             level=str(event.get("level") or "").lower(),
             fields={str(k): str(v) for k, v in fields.items() if str(v).strip()},
-            raw=payload.get("raw") if isinstance(payload.get("raw"), dict) else {},
+            raw=_dict_or_empty(payload.get("raw")),
             # Precedence: the body says it, else the transport header did, else
             # the pipe's own hr-<event_id> convention. The header matters
             # because the flat shape carries no correlation id at all, and
