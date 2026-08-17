@@ -64,6 +64,22 @@ Fields:
 {fields}
 ```"""
 
+_REFIRE_MESSAGE = """The same alert fired again — this is a follow-up in the investigation you \
+already ran, not a new incident.
+
+Level now: {level}
+Title: {title}
+Body: {body}
+Fields:
+```json
+{fields}
+```
+
+Compare against your previous conclusion: has anything changed (worse, better, different \
+symptom)? If your conclusion stands, restate it in one sentence and say it stands. If it \
+does not, say what changed and revise the remediation order. Keep it short; the channels \
+already carry your full report."""
+
 _MEMORY_MAX_BYTES = 256 * 1024
 
 _UI_PAGE = Path(__file__).with_name("ui.html")
@@ -365,6 +381,55 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             "sessionKey": session_key,
             "_meta": {"title": title, "level": level, "source": source, "event_id": event_id},
         }
+
+        # Storm coalescing: a re-fire of the same condition (same source+title,
+        # NEW event id — redelivery of the same id stays idempotent below)
+        # joins the session that already investigated it instead of funding a
+        # cold start. The judge's reuse route stops verdict storms; this stops
+        # investigation storms, and does it with a follow-up turn, which keeps
+        # everything the first pass gathered in context.
+        if service.get(session_key) is None:
+            prior = service.same_alert(source, title, settings.coalesce_window_seconds)
+            if prior is not None and not prior.finished:
+                # Already being investigated right now; the re-fire adds no
+                # question the running session is not about to answer.
+                return {
+                    "status": "coalesced",
+                    "state": "investigating",
+                    "sessionKey": prior.session_key,
+                    "runId": prior.run_id,
+                }
+            if prior is not None:
+                budget = service.budget_state()
+                if budget is not None and budget[0] >= budget[1]:
+                    # A follow-up spends money too. The original report has
+                    # already been delivered; standing on it is not a drop.
+                    return {
+                        "status": "skipped",
+                        "reason": "budget exhausted; the previous report stands",
+                        "sessionKey": prior.session_key,
+                    }
+                refire = _REFIRE_MESSAGE.format(
+                    level=level,
+                    title=title,
+                    body=str(event.get("body") or "")[:4000],
+                    fields=json.dumps(event.get("fields") or {}, ensure_ascii=False, indent=1),
+                )
+                try:
+                    run = service.continue_run(prior.session_key, {"message": refire})
+                except RunBusyError:
+                    return {
+                        "status": "coalesced",
+                        "state": "investigating",
+                        "sessionKey": prior.session_key,
+                        "runId": prior.run_id,
+                    }
+                except NotResumableError:
+                    pass  # engine session gone; fall through to a fresh start
+                else:
+                    run.meta["refires"] = int(run.meta.get("refires") or 0) + 1
+                    run.meta["level"] = level
+                    return {"status": "coalesced", "sessionKey": run.session_key, "runId": run.run_id}
 
         # The budget breaker guards this door only — the one path that spends
         # money without a human asking. A refusal is not a silent drop: it
