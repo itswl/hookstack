@@ -28,6 +28,9 @@ $PY -m ruff check hookjudge tests scripts
 step "ruff format --check"
 $PY -m ruff format --check hookjudge tests scripts
 
+step "mypy (types)"
+$PY -m mypy hookjudge
+
 step "bandit (static security scan)"
 $PY -m bandit -q -r hookjudge
 

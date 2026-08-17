@@ -34,6 +34,9 @@ $PY -m ruff check hookrelay tests
 step "ruff format --check"
 $PY -m ruff format --check hookrelay tests
 
+step "mypy (types)"
+$PY -m mypy hookrelay
+
 step "bandit (static security scan)"
 $PY -m bandit -q -r hookrelay
 

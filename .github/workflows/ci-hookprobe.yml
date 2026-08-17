@@ -32,6 +32,7 @@ jobs:
       - run: python -m compileall -q hookprobe tests
       - run: ruff check hookprobe tests
       - run: ruff format --check hookprobe tests
+      - run: python -m mypy hookprobe
       - run: python -m bandit -q -r hookprobe
       - name: sessions page inline JS parses
         run: |

@@ -101,16 +101,19 @@ class Store:
         touching the new column would fail — the production ledger has 173
         events in it and must survive the upgrade.
         """
-        cursor = await self._db.execute("PRAGMA table_info(events)")
+        db = self._db
+        if db is None:  # open() migrates right after connecting; anything else is a bug
+            raise RuntimeError("store is not open")
+        cursor = await db.execute("PRAGMA table_info(events)")
         columns = {str(row["name"]) for row in await cursor.fetchall()}
         if "correlation_id" not in columns:
-            await self._db.execute("ALTER TABLE events ADD COLUMN correlation_id TEXT")
+            await db.execute("ALTER TABLE events ADD COLUMN correlation_id TEXT")
         # Always, and only after the column is certain to exist.
-        await self._db.execute("CREATE INDEX IF NOT EXISTS ix_events_correlation ON events (correlation_id)")
-        cursor = await self._db.execute("PRAGMA table_info(deliveries)")
+        await db.execute("CREATE INDEX IF NOT EXISTS ix_events_correlation ON events (correlation_id)")
+        cursor = await db.execute("PRAGMA table_info(deliveries)")
         delivery_columns = {str(row["name"]) for row in await cursor.fetchall()}
         if "sent_body" not in delivery_columns:
-            await self._db.execute("ALTER TABLE deliveries ADD COLUMN sent_body TEXT")
+            await db.execute("ALTER TABLE deliveries ADD COLUMN sent_body TEXT")
 
     async def close(self) -> None:
         if self._db is not None:

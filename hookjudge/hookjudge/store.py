@@ -211,7 +211,8 @@ class Store:
         self._announce()
 
     async def recent(self, limit: int = 50, *, route: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
-        clauses, params = [], []
+        clauses: list[str] = []
+        params: list[Any] = []
         if route:
             clauses.append("route = ?")
             params.append(route)
