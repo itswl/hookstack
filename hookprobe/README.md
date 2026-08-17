@@ -87,6 +87,7 @@ what runs.
 | `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24` | The sliding window the budget is measured over |
 | `HOOKPROBE_RETENTION_DAYS` | `0` *(keep all)* | Case files and transcripts older than this are pruned daily; skills and memory are never touched |
 | `HOOKPROBE_AUTO_DISTILL_MAX` | `0` *(manual)* | How many runbooks finished runs may leave behind. Above 0, each completed run writes its own `.claude/skills/<name>/SKILL.md` — from the service, create-only, marked unreviewed. See *The learning loop* |
+| `HOOKPROBE_COALESCE_WINDOW_SECONDS` | `1800` | A re-fire of the same alert (same source+title, new event id) inside this window becomes a follow-up turn in the existing session instead of a new cold-start investigation. Redelivery of the same event id stays idempotent. `0` disables |
 | `HOOKPROBE_REPEAT_REMINDER_AT` | `3` *(0 = off)* | After N identical tool calls, remind the agent to change approach |
 | `HOOKPROBE_BASH_TIMEOUT_MS` | `120000` *(0 = CLI default)* | Deadline for a single command (`BASH_DEFAULT_TIMEOUT_MS`) |
 | `HOOKPROBE_BASH_MAX_TIMEOUT_MS` | `600000` *(0 = CLI default)* | Ceiling the agent may request per command (`BASH_MAX_TIMEOUT_MS`) |
