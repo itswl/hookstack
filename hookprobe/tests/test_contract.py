@@ -440,3 +440,23 @@ def test_a_draft_survives_a_report_that_does_not_quite_parse(tmp_path) -> None:
     assert draft["name"] == "mq-ready-backlog-growing"
     assert "Consumers stopped draining the queue" in draft["content"]
     assert "无人值守" not in draft["content"]
+
+
+def test_metrics_speak_prometheus_and_need_no_token(tmp_path) -> None:
+    """The platform's alerting is the consumer; a scraper cannot type a token
+    prompt, and nothing here is more sensitive than counts and a dollar figure."""
+    with make_client(tmp_path, FakeEngine()) as client:
+        client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH)
+        poll_until_final(client, TRIGGER_PAYLOAD["sessionKey"])
+
+        response = client.get("/metrics")
+
+        assert response.status_code == 200
+        assert "text/plain" in response.headers["content-type"]
+        body = response.text
+        assert "hookprobe_up 1" in body
+        assert "hookprobe_active_runs 0" in body
+        # The fake engine's run cost 0.5 inside the (disabled) window.
+        assert "hookprobe_window_spend_usd 0.5" in body
+        assert "hookprobe_budget_usd" not in body, "no budget configured, no budget series"
+        assert "hookprobe_runbooks 0" in body
