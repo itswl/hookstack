@@ -106,6 +106,13 @@ details.q summary{cursor:pointer;color:var(--dim);white-space:normal}
 .proc{border-left:2px solid var(--line);margin:6px 0 8px 6px;padding-left:10px}
 .ev{font-family:var(--mono);font-size:11.5px;color:var(--dim);padding:2px 0;word-break:break-all}
 .ev-tool{color:var(--accent);margin-right:8px}
+.ev-ms{color:var(--dim);font-size:10px}
+#spend{display:flex;align-items:flex-end;gap:2px;padding:4px 2px 2px;min-height:0}
+.spend-bar{width:9px;display:inline-flex;align-items:flex-end;height:24px;cursor:default}
+.spend-bar i{display:block;width:100%;background:var(--accent);opacity:.55;border-radius:1px}
+.spend-total{color:var(--dim);font-size:10px;font-family:var(--mono);margin-left:6px;align-self:center}
+.ev-sub{padding-left:16px;opacity:.85}
+.ev-err .ev-tool{color:var(--bad)}
 .ev-changed{color:var(--amber)}
 .tamper{border:1px solid var(--red);border-radius:6px;padding:8px 10px;margin:6px 0}
 .tamper-head{color:var(--red);font-size:12px;font-weight:600}
@@ -203,6 +210,7 @@ button.danger{color:var(--red);border-color:var(--red)}
 <main>
   <aside>
     <input id="q" placeholder="filter sessions…" autocomplete="off">
+    <div id="spend" title=""></div>
     <div id="list"><div class="empty">loading…</div></div>
   </aside>
   <section>
@@ -336,9 +344,39 @@ function returnFlag(x) {
   return '<span class="flag">relay</span>';
 }
 
+// Fourteen days of spend as one quiet row of bars — the answer to "what is
+// this costing lately" without a metrics stack. Computed from the same list
+// the board already fetched; unfiltered on purpose, so searching for a
+// session does not appear to change what the month cost.
+function renderSpend(runs) {
+  const el = $("#spend");
+  if (!el) return;
+  const day = 86400, now = Date.now() / 1000;
+  const days = Array.from({ length: 14 }, (_, i) => {
+    const start = (Math.floor(now / day) - (13 - i)) * day;
+    return { start, cost: 0, count: 0 };
+  });
+  for (const x of runs) {
+    const idx = Math.floor((x.created_at - days[0].start) / day);
+    if (idx >= 0 && idx < 14) { days[idx].cost += Number(x.cost_usd) || 0; days[idx].count += 1; }
+  }
+  const total = days.reduce((s, d) => s + d.cost, 0);
+  if (!days.some((d) => d.count)) { el.innerHTML = ""; return; }
+  const peak = Math.max(...days.map((d) => d.cost), 0.0001);
+  el.innerHTML =
+    days.map((d) => {
+      const h = d.cost > 0 ? Math.max(2, Math.round((d.cost / peak) * 22)) : (d.count ? 2 : 0);
+      const label = new Date(d.start * 1000).toISOString().slice(5, 10);
+      return `<span class="spend-bar" title="${label} · $${d.cost.toFixed(3)} · ${d.count} run${d.count === 1 ? "" : "s"}">` +
+        `<i style="height:${h}px"></i></span>`;
+    }).join("") +
+    `<span class="spend-total">14d $${total.toFixed(2)}</span>`;
+}
+
 async function refreshList() {
   try {
     let runs = await (await api("/v1/runs")).json();
+    renderSpend(runs);
     const q = ($("#q").value || "").toLowerCase();
     if (q) runs = runs.filter((x) => (x.session_key + " " + (x.title || "")).toLowerCase().includes(q));
     const el = $("#list");
@@ -419,6 +457,10 @@ function statsHtml(t) {
   if (t.duration_ms != null) bits.push(`${(t.duration_ms / 1000).toFixed(1)}s`);
   return bits.length ? `<div class="stats">${esc(bits.join("  ·  "))}</div>` : "";
 }
+function fmtMs(ms) {
+  if (ms == null) return "";
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
 function eventHtml(e) {
   if (e.type === "tool_use") {
     if (e.name === "TodoWrite" && Array.isArray(e.todos)) {
@@ -428,7 +470,12 @@ function eventHtml(e) {
         .map((t) => `<div class="${cls[t.status] || ""}">${mark[t.status] || "☐"} ${esc(t.content)}</div>`)
         .join("")}</div>`;
     }
-    return `<div class="ev"><span class="ev-tool">${esc(e.name)}</span>${esc(e.detail || "")}</div>`;
+    // sub: a tool call the message stream never carried — a subagent's, known
+    // only from the hooks. Indented under whichever Task spawned it, without
+    // pretending to know which one that was.
+    const dur = e.ms != null ? ` <span class="ev-ms">${fmtMs(e.ms)}</span>` : "";
+    return `<div class="ev${e.sub ? " ev-sub" : ""}${e.error ? " ev-err" : ""}"${e.id ? ` data-tid="${attr(e.id)}"` : ""}>` +
+      `<span class="ev-tool">${e.sub ? "↳ " : ""}${esc(e.name)}</span>${esc(e.detail || "")}${dur}</div>`;
   }
   if (e.type === "text") return `<div class="ev ev-narr">${esc(e.text)}</div>`;
   return "";
@@ -568,6 +615,16 @@ function liveAppend(event) {
       live = node.querySelector(".ev-live:last-child");
     }
     live.textContent += event.text;
+  } else if (event.type === "tool_done") {
+    // A duration report for a step already on screen; a step nobody streamed
+    // (a subagent's) appears now, indented.
+    const step = event.id ? node.querySelector(`[data-tid="${CSS.escape(event.id)}"]`) : null;
+    if (step) {
+      if (event.ms != null) step.insertAdjacentHTML("beforeend", ` <span class="ev-ms">${fmtMs(event.ms)}</span>`);
+      if (event.error) step.classList.add("ev-err");
+    } else {
+      node.insertAdjacentHTML("beforeend", eventHtml({ ...event, type: "tool_use", sub: true }));
+    }
   } else {
     // A finished block supersedes whatever was streaming into it.
     node.querySelectorAll(".ev-live").forEach((n) => n.remove());

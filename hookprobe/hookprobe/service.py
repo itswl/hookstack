@@ -426,6 +426,30 @@ class RunService:
 
         def on_event(event: dict[str, Any]) -> None:
             event["ts"] = time.time()
+            # A tool_done is a timing report, not a new step. Matched to its
+            # streamed step by tool_use_id it becomes that step's duration; an
+            # id the stream never produced is a subagent's call — the message
+            # stream only carries the parent's, so this is where subagent work
+            # gets into the feed at all.
+            if event.get("type") == "tool_done":
+                for prior in reversed(run.events):
+                    if prior.get("type") == "tool_use" and prior.get("id") == event.get("id"):
+                        if "ms" in event:
+                            prior["ms"] = event["ms"]
+                        if event.get("error"):
+                            prior["error"] = True
+                        self._publish(run.session_key, event)
+                        return
+                event = {
+                    "type": "tool_use",
+                    "sub": True,
+                    "id": event.get("id"),
+                    "name": event.get("name"),
+                    "detail": event.get("detail"),
+                    "ts": event["ts"],
+                    **({"ms": event["ms"]} if "ms" in event else {}),
+                    **({"error": True} if event.get("error") else {}),
+                }
             # Deltas are for whoever is watching right now: thousands of them per
             # run, and the finished block that follows says the same thing once.
             # Recording them would bury the process feed and bloat every case file.
