@@ -473,7 +473,7 @@ class RunService:
         if self._settings.auto_distill_max <= 0:
             return
         try:
-            outcome = distill.auto_install(
+            outcome = distill.auto_write(
                 run,
                 skills_dir=self._settings.workdir / ".claude" / "skills",
                 limit=self._settings.auto_distill_max,
@@ -483,10 +483,11 @@ class RunService:
             logger.exception("auto-distill failed session=%s", run.session_key)
             return
         run.distilled = outcome
-        if "installed" in outcome:
-            logger.info("auto-distilled session=%s runbook=%s", run.session_key, outcome["installed"])
+        if "skipped" in outcome:
+            logger.info("auto-distill skipped session=%s reason=%s", run.session_key, outcome["skipped"])
         else:
-            logger.info("auto-distill skipped session=%s reason=%s", run.session_key, outcome.get("skipped"))
+            verb, name = next(iter(outcome.items()))
+            logger.info("auto-distill %s session=%s runbook=%s", verb, run.session_key, name)
 
     def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:
         run.status = FAILED
