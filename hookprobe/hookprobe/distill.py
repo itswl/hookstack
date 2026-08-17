@@ -364,7 +364,13 @@ def snapshot(target: Path, manifest: Path) -> None:
     """
     history = target / "history"
     history.mkdir(exist_ok=True)
-    (history / f"{int(time.time())}-SKILL.md").write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
+    # Two writes in the same second must not share a filename — the second
+    # snapshot would silently overwrite the first, losing exactly the version
+    # a quick save-then-restore was relying on. Borrow the next free second.
+    stamp = int(time.time())
+    while (history / f"{stamp}-SKILL.md").exists():
+        stamp += 1
+    (history / f"{stamp}-SKILL.md").write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
     stale = sorted(history.glob("*-SKILL.md"))[:-_HISTORY_KEEP]
     for path in stale:
         path.unlink(missing_ok=True)

@@ -313,3 +313,61 @@ def test_an_operator_save_counts_as_the_review(tmp_path: Path) -> None:
     # And the version they replaced is still there.
     history = sorted((tmp_path / ".claude" / "skills" / "db-latency" / "history").glob("*-SKILL.md"))
     assert [path.read_text() for path in history] == ["# first\n"]
+
+
+# --- the review workflow: history, provenance, mark-reviewed -----------------
+
+
+def review_client(tmp_path: Path):
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    settings = make_settings(tmp_path, auto_distill_max=5)
+    client = TestClient(create_app(settings, RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))))
+    return client, {"Authorization": f"Bearer {settings.token}"}
+
+
+def test_mark_reviewed_flips_the_badge_without_touching_the_text(tmp_path: Path) -> None:
+    """The other outcome of a review — the text was fine as written — used to be
+    unrecordable, so an approved runbook kept its unreviewed badge forever."""
+    skills = tmp_path / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    distill.auto_write(run_record(), skills_dir=skills, limit=5)
+    name = "investigate-disk-pressure-on-db-1"
+    client, auth = review_client(tmp_path)
+    before = (skills / name / "SKILL.md").read_text()
+
+    assert client.post(f"/v1/skills/{name}/review", headers=auth).json() == {"reviewed": True, "name": name}
+
+    listed = {row["name"]: row for row in client.get("/v1/skills", headers=auth).json()}
+    assert listed[name]["reviewed"] is True
+    assert (skills / name / "SKILL.md").read_text() == before
+    origin = client.get(f"/v1/skills/{name}/origin", headers=auth).json()
+    assert [r["by"] for r in origin["revisions"]] == ["auto-distill", "operator"]
+
+
+def test_history_lists_versions_and_serves_each_one(tmp_path: Path) -> None:
+    client, auth = review_client(tmp_path)
+    client.put("/v1/skills/db-latency", json={"content": "# v1\n"}, headers=auth)
+    client.put("/v1/skills/db-latency", json={"content": "# v2\n"}, headers=auth)
+
+    versions = client.get("/v1/skills/db-latency/history", headers=auth).json()
+    assert len(versions) == 1
+    stamp = versions[0]["stamp"]
+    assert client.get(f"/v1/skills/db-latency/history/{stamp}", headers=auth).json()["content"] == "# v1\n"
+
+    # Restore is just the existing PUT — and it snapshots v2 first.
+    client.put("/v1/skills/db-latency", json={"content": "# v1\n"}, headers=auth)
+    assert len(client.get("/v1/skills/db-latency/history", headers=auth).json()) == 2
+
+
+def test_review_endpoints_guard_their_edges(tmp_path: Path) -> None:
+    client, auth = review_client(tmp_path)
+    assert client.post("/v1/skills/nope/review", headers=auth).status_code == 404
+    assert client.get("/v1/skills/nope/history", headers=auth).json() == []
+    assert client.get("/v1/skills/nope/history/123", headers=auth).status_code == 404
+    assert client.post("/v1/skills/x/review").status_code == 401
