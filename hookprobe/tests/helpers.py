@@ -27,6 +27,9 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "repeat_reminder_at": 3,
         "bash_timeout_ms": 120000,
         "bash_max_timeout_ms": 600000,
+        # Off by default here too: a test that wants the loop must say so, so
+        # that no other test quietly starts writing runbooks into its tmp dir.
+        "auto_distill_max": 0,
         "event_secret": "",
         "return_url": "",
         "return_secret": "",

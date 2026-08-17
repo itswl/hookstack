@@ -1,15 +1,36 @@
-"""Turn a finished investigation into a skill draft a human can approve.
+"""Turn a finished investigation into a runbook the next one can use.
 
 The investigator is already told to read prior case files, and the skills
 directory is described as what previous runs distilled — but nothing ever wrote
 one, so the loop was open at exactly the step that would make the next
 investigation cheaper.
 
-It closes here as a **draft**, never a write. An agent that can silently edit
-what it will be told next time is an agent whose future context nobody reviewed;
-one bad conclusion would then teach itself forward. So this assembles the draft
-and returns it, and the existing `PUT /v1/skills/{name}` — an operator action —
-is still the only way anything lands on the volume.
+Two ways to close it, and the difference is *who writes*, not whether it is
+automatic:
+
+* `draft_skill` assembles a draft and returns it. `POST /v1/runs/{key}/distill`
+  hands it to an operator, who saves it with `PUT /v1/skills/{name}`.
+* `auto_install` does the same assembly and writes it, at the end of a run,
+  **from the service** — which is the point. The agent's own Write and Edit
+  cannot reach `.claude/` (see hookprobe.inputs): an agent that can edit its
+  future instructions mid-run is one injected line away from teaching itself
+  forward, and nothing in the record would say so. The service writing a
+  runbook assembled from the run's own structure is a different act with a
+  different failure mode, and it is the one that can be made safe.
+
+What makes it safe is not review, since there is none — it is the shape of the
+write:
+
+* assembled from the record, never from free text the run chose: the question,
+  the tool sequence, the conclusion;
+* **create-only**. Replacing an existing runbook stays an operator action, so a
+  bad run cannot overwrite a good one, and an injection cannot quietly rewrite
+  what an operator approved;
+* never from a run that failed, and never from a run that changed its own
+  inputs — one that already misbehaved does not get to leave instructions;
+* capped, because every runbook is prefix cost on every later run;
+* stamped with where it came from, and marked unreviewed in its own text, so
+  neither the next run nor the next operator mistakes it for doctrine.
 
 Assembled from the record rather than by asking a model: the run already knows
 what was asked, which tools ran in what order, and what it concluded. A second
@@ -20,6 +41,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from pathlib import Path
 from typing import Any
 
 _SLUG = re.compile(r"[^a-z0-9]+")
@@ -138,8 +161,13 @@ def _headline(turns: list[dict[str, Any]], current_message: str) -> str:
     return first
 
 
-def draft_skill(run: Any, *, title: str = "") -> dict[str, str]:
-    """A SKILL.md draft for the condition this run investigated."""
+def draft_skill(run: Any, *, title: str = "", unreviewed: bool = False) -> dict[str, str]:
+    """A SKILL.md draft for the condition this run investigated.
+
+    `unreviewed` switches the closing caveat: a draft on its way to an operator
+    tells them what to prune before saving, which is nonsense once the same text
+    has been saved automatically and is being read by the next investigation.
+    """
     turns = list(getattr(run, "turns", []) or [])
     headline = title or _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
     name = slug(headline)
@@ -165,14 +193,97 @@ def draft_skill(run: Any, *, title: str = "") -> dict[str, str]:
     else:
         lines.append("_No tools ran — the answer came from the alert alone._")
     lines += ["", "## What it turned out to be", "", conclusion or "_(the run left no conclusion)_", ""]
-    lines += [
-        "## Before trusting this next time",
-        "",
-        "- Dead ends are **not** recorded: the run keeps which tools ran, not what",
-        "  they returned, so a step listed above may have been a wasted one. Delete",
-        "  the steps that did not help before saving.",
-        "- Anything specific to that day — hostnames, amounts, a one-off outage —",
-        "  belongs in the description or nowhere.",
-        "",
-    ]
+    if unreviewed:
+        lines += [
+            "## How much to trust this",
+            "",
+            "- Written automatically when that investigation ended, and **reviewed by",
+            "  nobody**. It is a lead, not a procedure.",
+            "- Dead ends are **not** recorded: the run keeps which tools ran, not what",
+            "  they returned, so a step listed above may have been a wasted one.",
+            "- Anything specific to that day — hostnames, amounts, a one-off outage —",
+            "  is noise here. Do not repeat it because it appears above.",
+            "- If it is wrong, delete it: `DELETE /v1/skills/" + name + "`.",
+            "",
+        ]
+    else:
+        lines += [
+            "## Before trusting this next time",
+            "",
+            "- Dead ends are **not** recorded: the run keeps which tools ran, not what",
+            "  they returned, so a step listed above may have been a wasted one. Delete",
+            "  the steps that did not help before saving.",
+            "- Anything specific to that day — hostnames, amounts, a one-off outage —",
+            "  belongs in the description or nowhere.",
+            "",
+        ]
     return {"name": name, "content": "\n".join(lines)}
+
+
+def auto_install(
+    run: Any,
+    *,
+    skills_dir: Path,
+    limit: int,
+    input_changes: tuple[str, ...] | list[str] = (),
+) -> dict[str, Any]:
+    """Write this run's runbook, or say why it was not written.
+
+    Returns `{"installed": name}` or `{"skipped": reason}` — recorded on the run
+    either way, because "the loop did nothing again" is the failure this whole
+    feature exists to end, and it must not be invisible.
+    """
+    if input_changes:
+        return {"skipped": "run changed its own inputs"}
+    if getattr(run, "error", None):
+        return {"skipped": "run failed"}
+    if not str(getattr(run, "text", "") or "").strip():
+        return {"skipped": "run produced no report"}
+
+    draft = draft_skill(run, unreviewed=True)
+    name = draft["name"]
+    target = skills_dir / name
+
+    if (target / "SKILL.md").is_file():
+        # Deliberately not an update. See the module docstring: replacing a
+        # runbook is an operator action, so that a later run — or a later
+        # injection — cannot quietly rewrite one that was approved.
+        return {"skipped": f"runbook '{name}' already exists"}
+    try:
+        existing = sorted(path.parent.name for path in skills_dir.glob("*/SKILL.md"))
+    except OSError:
+        existing = []
+    if limit > 0 and len(existing) >= limit:
+        # Not an eviction: something here may have been reviewed, and this is
+        # not the code that gets to decide it is worth less than a new lead.
+        return {"skipped": f"at the {limit}-runbook cap"}
+
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        manifest = target / "SKILL.md"
+        tmp = manifest.with_suffix(".tmp")
+        tmp.write_text(draft["content"], encoding="utf-8")
+        tmp.replace(manifest)
+        # Provenance as data, not prose to be re-parsed: what wrote this, from
+        # which investigation, when, and whether anyone has looked at it.
+        (target / "origin.json").write_text(
+            json.dumps(
+                {
+                    "written_by": "auto-distill",
+                    "reviewed": False,
+                    "session_key": str(getattr(run, "session_key", "")),
+                    "run_id": str(getattr(run, "run_id", "")),
+                    "engine_session_id": str(getattr(run, "engine_session_id", "") or ""),
+                    "model": str(getattr(run, "model", "")),
+                    "origin": str(getattr(run, "origin", "")) or "api",
+                    "written_at": round(time.time(), 3),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        return {"skipped": f"write failed: {exc}"}
+    return {"installed": name}
