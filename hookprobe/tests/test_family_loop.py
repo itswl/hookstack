@@ -12,7 +12,7 @@ from hookprobe.app import create_app
 from hookprobe.runs import COMPLETED, Run, RunStore
 from hookprobe.service import RunService
 from hookprobe.wire import sign_timestamped, verify_timestamped
-from tests.helpers import FakeEngine, make_settings
+from tests.helpers import FakeEngine, GatedEngine, make_settings
 
 TOKEN = "secret-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -431,3 +431,133 @@ def test_api_born_runs_do_not_report_back(tmp_path) -> None:
     finally:
         server.shutdown()
     assert _Capture.received == []
+
+
+# --- storm coalescing: one condition, one session -----------------------------
+
+
+def _drain(client: TestClient, key: str) -> dict:
+    for _ in range(300):
+        detail = client.get(f"/v1/runs/{key}", headers=AUTH).json()
+        if detail["status"] != "running":
+            return detail
+        time.sleep(0.01)
+    raise AssertionError("run never finished")
+
+
+def test_a_refire_joins_the_finished_investigation(tmp_path) -> None:
+    """Same source+title, new event id, inside the window: a follow-up turn in
+    the session that already mapped the condition — not a second cold start."""
+    engine = FakeEngine()
+    with make_client(tmp_path, engine) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+        _drain(client, first["sessionKey"])
+
+        refire = client.post("/hooks/event", json=dict(EVENT, event_id=6, level="critical")).json()
+
+        assert refire["status"] == "coalesced"
+        assert refire["sessionKey"] == first["sessionKey"]
+        detail = _drain(client, first["sessionKey"])
+        assert engine.calls == 2
+        # The point of continuing rather than restarting: the engine session.
+        assert engine.resumes[1] == "sdk-session-1"
+        assert "fired again" in engine.messages[1]
+        assert "critical" in engine.messages[1], "the refire carries the NEW severity"
+        assert len(detail["turns"]) == 2
+        assert detail["meta"]["refires"] == 1
+        assert detail["meta"]["level"] == "critical"
+
+
+def test_a_refire_while_running_spends_nothing(tmp_path) -> None:
+    """A live session already claims its alert; a re-fire adds no question."""
+    engine = GatedEngine()
+    with make_client(tmp_path, engine) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+
+        refire = client.post("/hooks/event", json=dict(EVENT, event_id=6)).json()
+
+        assert refire == {
+            "status": "coalesced",
+            "state": "investigating",
+            "sessionKey": first["sessionKey"],
+            "runId": first["runId"],
+        }
+        assert len(engine.resumes) == 1
+        engine.release.set()
+        _drain(client, first["sessionKey"])
+
+
+def test_redelivery_of_the_same_event_id_is_still_idempotent(tmp_path) -> None:
+    """A retry of the SAME event is delivery plumbing, not a re-fire; it must
+    not buy a follow-up turn."""
+    engine = FakeEngine()
+    with make_client(tmp_path, engine) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+        _drain(client, first["sessionKey"])
+
+        again = client.post("/hooks/event", json=EVENT).json()
+
+        assert again["status"] == "accepted"
+        assert again["sessionKey"] == first["sessionKey"]
+        assert engine.calls == 1
+
+
+def test_a_different_alert_is_never_coalesced(tmp_path) -> None:
+    engine = FakeEngine()
+    with make_client(tmp_path, engine) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+        _drain(client, first["sessionKey"])
+
+        other = client.post("/hooks/event", json=dict(EVENT, event_id=7, title="Disk full on db-1")).json()
+
+        assert other["status"] == "accepted"
+        assert other["sessionKey"] != first["sessionKey"]
+        _drain(client, other["sessionKey"])
+        assert engine.calls == 2
+        assert engine.resumes[1] is None
+
+
+def test_coalescing_off_means_every_fire_is_its_own_run(tmp_path) -> None:
+    engine = FakeEngine()
+    with make_client(tmp_path, engine, coalesce_window_seconds=0) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+        _drain(client, first["sessionKey"])
+
+        refire = client.post("/hooks/event", json=dict(EVENT, event_id=6)).json()
+
+        assert refire["status"] == "accepted"
+        assert refire["sessionKey"] != first["sessionKey"]
+        _drain(client, refire["sessionKey"])
+        assert engine.resumes == [None, None]
+
+
+def test_a_refire_outside_the_window_starts_fresh(tmp_path) -> None:
+    engine = FakeEngine()
+    with make_client(tmp_path, engine, coalesce_window_seconds=1) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+        _drain(client, first["sessionKey"])
+
+        time.sleep(1.1)
+        refire = client.post("/hooks/event", json=dict(EVENT, event_id=6)).json()
+
+        assert refire["status"] == "accepted"
+        assert refire["sessionKey"] != first["sessionKey"]
+        _drain(client, refire["sessionKey"])
+
+
+def test_a_refire_with_the_budget_gone_stands_on_the_delivered_report(tmp_path) -> None:
+    """A follow-up spends money too — but unlike a refused cold start, the
+    original report already reached the channels, so standing is not a drop."""
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    with _budget_client(tmp_path, engine, store, budget_usd=10.0) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+        _drain(client, first["sessionKey"])
+
+        _seed_spend(store, 100.0, time.time(), "old:funded")
+        refire = client.post("/hooks/event", json=dict(EVENT, event_id=6)).json()
+
+        assert refire["status"] == "skipped"
+        assert "previous report stands" in refire["reason"]
+        assert refire["sessionKey"] == first["sessionKey"]
+        assert engine.calls == 1

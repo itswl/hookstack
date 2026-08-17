@@ -87,6 +87,14 @@ class Settings:
     # which is the right default for a deployment nobody is watching.
     auto_distill_max: int
 
+    # Storm coalescing at the event door: a re-fire of the same alert (same
+    # source + title, new event id) within this many seconds continues the
+    # existing investigation instead of funding a new one. The judge's reuse
+    # route already stops verdict storms; without this, every re-fire that
+    # cleared the escalation bar still bought a full cold-start investigation
+    # of a condition the previous session had already mapped. 0 disables.
+    coalesce_window_seconds: int
+
     # The family loop. event_secret verifies what the pipe delivers to
     # /hooks/event; return_url is where finished investigations from that
     # door report back (the pipe's probe-notify front door), signed with
@@ -146,6 +154,7 @@ class Settings:
             bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
             bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),
             auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),
+            coalesce_window_seconds=max(0, _int("HOOKPROBE_COALESCE_WINDOW_SECONDS", 1800)),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),
