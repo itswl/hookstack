@@ -29,6 +29,13 @@ services:
     image: hookprobe:latest
     container_name: hookprobe
     restart: unless-stopped
+    # Same bounds as prod (see docker-compose.prod.yml for the reasoning):
+    # the demo runs the same arbitrary-bash engine as production does.
+    mem_limit: ${HOOKPROBE_MEM_LIMIT:-2g}
+    pids_limit: 512
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     environment:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
