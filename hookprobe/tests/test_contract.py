@@ -10,6 +10,7 @@ import time
 
 from fastapi.testclient import TestClient
 
+from hookprobe import distill
 from hookprobe.app import create_app
 from hookprobe.runs import RunStore
 from hookprobe.service import RunService
@@ -342,11 +343,12 @@ def test_watchers_are_released_when_the_reader_goes_away(tmp_path) -> None:
 
 
 def test_a_finished_run_drafts_a_skill_but_never_saves_one(tmp_path) -> None:
-    """The loop closes at review, not at write.
+    """This endpoint drafts and never saves, whatever else is switched on.
 
-    An investigator that can edit what it will be told next time is one whose
-    context nobody reviewed: a single wrong conclusion would teach itself
-    forward into every later investigation of the same alert.
+    It is the operator's path: read it, prune the dead ends the record cannot
+    tell from the useful steps, then save. The automatic loop
+    (HOOKPROBE_AUTO_DISTILL_MAX, off here) is a separate door, and turning it on
+    must not turn this one into a write.
     """
     with make_client(tmp_path, FakeEngine()) as client:
         key = TRIGGER_PAYLOAD["sessionKey"]
@@ -360,8 +362,9 @@ def test_a_finished_run_drafts_a_skill_but_never_saves_one(tmp_path) -> None:
         body = draft.json()
         assert body["content"].startswith("---\nname: ")
         assert body["name"] and "/" not in body["name"]
-        # The tool the fake engine ran is in the sequence.
-        assert "## What was checked, in order" in body["content"]
+        # One delimited case, in the region later investigations append to.
+        assert distill.CASES_MARKER in body["content"]
+        assert body["content"].count("<!-- case:start") == 1
         # And the volume is untouched: the draft is not a skill until saved.
         assert client.get(f"/v1/skills/{body['name']}", headers=AUTH).status_code == 404
 
