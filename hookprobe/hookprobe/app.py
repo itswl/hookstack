@@ -563,6 +563,62 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                 return {"name": name, "content": manifest.read_text(encoding="utf-8"), "layer": layer}
         raise HTTPException(status_code=404, detail="skill not found")
 
+    @app.get("/v1/skills/{name}/origin", dependencies=[Depends(require_token)])
+    async def skill_origin_detail(name: str) -> dict[str, Any]:
+        """The full provenance record — every revision, not just the last one."""
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        path = settings.workdir / ".claude" / "skills" / name / "origin.json"
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"name": name, "revisions": []}
+        if not isinstance(record, dict):
+            return {"name": name, "revisions": []}
+        record["name"] = name
+        return record
+
+    @app.get("/v1/skills/{name}/history", dependencies=[Depends(require_token)])
+    async def skill_history(name: str) -> list[dict[str, Any]]:
+        """Every version a write displaced, newest first — the undo the review
+        page stands on. Project layer only: nothing else is ever written to."""
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        history = settings.workdir / ".claude" / "skills" / name / "history"
+        out: list[dict[str, Any]] = []
+        if history.is_dir():
+            for path in sorted(history.glob("*-SKILL.md"), reverse=True):
+                stamp = path.name.split("-", 1)[0]
+                if stamp.isdigit():
+                    out.append({"stamp": int(stamp), "bytes": path.stat().st_size})
+        return out
+
+    @app.get("/v1/skills/{name}/history/{stamp}", dependencies=[Depends(require_token)])
+    async def skill_history_version(name: str, stamp: int) -> dict[str, Any]:
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        path = settings.workdir / ".claude" / "skills" / name / "history" / f"{stamp}-SKILL.md"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="no such version")
+        return {"name": name, "stamp": stamp, "content": path.read_text(encoding="utf-8")}
+
+    @app.post("/v1/skills/{name}/review", dependencies=[Depends(require_token)])
+    async def skill_review(name: str) -> dict[str, Any]:
+        """Mark a runbook read without changing a character of it.
+
+        "Reviewed" has only ever meant that somebody looked. Saving an edit
+        already flips it; this is for the other outcome of a review — the text
+        was fine as the run wrote it — which previously could not be recorded
+        at all, so an approved runbook kept its unreviewed badge forever.
+        """
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        skill_dir = settings.workdir / ".claude" / "skills" / name
+        if not (skill_dir / "SKILL.md").is_file():
+            raise HTTPException(status_code=404, detail="skill not found")
+        record_revision(skill_dir, by="operator", reviewed=True, at=time.time(), detail={"action": "review"})
+        return {"reviewed": True, "name": name}
+
     @app.put("/v1/skills/{name}", dependencies=[Depends(require_token)])
     async def skill_write(name: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Writes always land in the project layer: editing a read-only
