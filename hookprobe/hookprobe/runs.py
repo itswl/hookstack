@@ -50,6 +50,11 @@ class Run:
     meta: dict = field(default_factory=dict)
     # Set once the engine reports back; the handle for follow-up turns.
     engine_session_id: str | None = None
+    # What auto-distill did at the end of this run: {"installed": name} or
+    # {"skipped": reason}, empty when the loop is off. Recorded rather than
+    # only logged — "it silently did nothing again" is the failure the feature
+    # exists to end, and a log line nobody greps is how that hides.
+    distilled: dict = field(default_factory=dict)
     # The message of the turn currently in flight (or the last one asked).
     current_message: str = ""
     # Finished turns, oldest first: {"message", "text", "error", "run_id",
