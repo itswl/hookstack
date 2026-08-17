@@ -35,6 +35,26 @@ services:
       context: ..
     image: hookprobe:latest
     container_name: hookprobe
+    # The agent executes arbitrary bash in here, so the container is treated
+    # as hostile-by-default even though nothing hostile is expected: a runaway
+    # analysis must not be able to take the host with it, and a compromised
+    # run must find no privilege ladder. Measured before this existed: no
+    # memory cap, no pid cap, full default capabilities.
+    #   - mem_limit: the SDK CLI is a node process; 2g is roomy for one run
+    #     plus subagents (a real investigation peaks well under 1g).
+    #   - pids_limit: a fork bomb hits a wall at 512 instead of the host limit.
+    #   - cap_drop ALL: an investigator only opens sockets and reads files;
+    #     it never chowns, mounts, raw-sockets or ptraces. Costs `ping`
+    #     (NET_RAW) — curl/nc cover reachability checks.
+    #   - no-new-privileges: setuid binaries stop being an escalator.
+    # The root filesystem stays writable: the CLI writes $HOME state and
+    # /tmp caches, and /app is already read-only from the image. Credentials
+    # remain the real boundary; this bounds the blast radius, not the intent.
+    mem_limit: ${HOOKPROBE_MEM_LIMIT:-2g}
+    pids_limit: 512
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:8088:8088"
     volumes:
