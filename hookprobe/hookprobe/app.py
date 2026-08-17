@@ -896,6 +896,48 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     async def ui() -> HTMLResponse:
         return HTMLResponse(_UI_PAGE.read_text(encoding="utf-8"))
 
+    @app.get("/metrics")
+    async def metrics() -> Any:
+        """Prometheus text format, rendered by hand — three gauges are not a
+        client-library dependency.
+
+        Unauthenticated like /healthz, and for the same reason: the scraper is
+        a machine on the private network, and nothing here is more sensitive
+        than counts and a dollar figure. This is how the platform's existing
+        alerting finally sees the investigator — the platform's own deliveries
+        once failed silently for 8 days, and this service had the same blind
+        spot until now.
+        """
+        from fastapi.responses import PlainTextResponse
+
+        running, queued = service.turn_counts()
+        lines = [
+            "# TYPE hookprobe_up gauge",
+            "hookprobe_up 1",
+            "# TYPE hookprobe_active_runs gauge",
+            f"hookprobe_active_runs {service.active_count()}",
+            "# TYPE hookprobe_running_turns gauge",
+            f"hookprobe_running_turns {running}",
+            "# TYPE hookprobe_queued_turns gauge",
+            f"hookprobe_queued_turns {queued}",
+            "# TYPE hookprobe_window_spend_usd gauge",
+            f"hookprobe_window_spend_usd {service.window_spend():.6f}",
+        ]
+        budget = service.budget_state()
+        if budget is not None:
+            lines += [
+                "# TYPE hookprobe_budget_usd gauge",
+                f"hookprobe_budget_usd {budget[1]:.6f}",
+                "# TYPE hookprobe_budget_exhausted gauge",
+                f"hookprobe_budget_exhausted {1 if budget[0] >= budget[1] else 0}",
+            ]
+        try:
+            runbooks = len(list((settings.workdir / ".claude" / "skills").glob("*/SKILL.md")))
+        except OSError:
+            runbooks = 0
+        lines += ["# TYPE hookprobe_runbooks gauge", f"hookprobe_runbooks {runbooks}"]
+        return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
         running, queued = service.turn_counts()
