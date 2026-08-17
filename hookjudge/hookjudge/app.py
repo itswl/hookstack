@@ -202,10 +202,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await client.aclose()
             await store.close()
 
+    # One judgement in flight per identity. A storm is N restatements of one
+    # condition arriving inside one model-latency window; unserialized, every
+    # one of them misses the verdict the others have not written yet, and the
+    # reuse route — the whole point of which is storms — only starts working
+    # after the storm is over. Watched live in the demo: an identical repeat,
+    # one second apart, billed a second ai judgement. The lock queues the
+    # restatements behind the first call; each then re-reads the ledger and
+    # reuses. Locks are refcounted away so the map cannot grow with alert
+    # cardinality.
+    identity_locks: dict[str, tuple[asyncio.Lock, int]] = {}
+
+    async def _judge_serialized(client: httpx.AsyncClient, event: Incoming) -> None:
+        lock, holders = identity_locks.get(event.identity, (asyncio.Lock(), 0))
+        identity_locks[event.identity] = (lock, holders + 1)
+        try:
+            async with lock:
+                await _judge_and_record(client, event)
+        finally:
+            lock_again, holders_now = identity_locks[event.identity]
+            if holders_now <= 1:
+                del identity_locks[event.identity]
+            else:
+                identity_locks[event.identity] = (lock_again, holders_now - 1)
+
     app = FastAPI(title="hookjudge", lifespan=lifespan)
     app.state.settings = app_settings
     app.state.store = store
     app.state.judge_and_record = _judge_and_record
+    app.state.judge_tasks = set()
 
     def _read_guard(token: str | None, authorization: str | None) -> None:
         configured = app_settings.read_token
@@ -245,7 +270,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         # Judged in the background: the answer takes tens of seconds and the
         # sender must not be held for it.
-        asyncio.create_task(_judge_and_record(app.state.client, event))
+        task = asyncio.create_task(_judge_serialized(app.state.client, event))
+        # Held, or the garbage collector may cancel a fire-and-forget task
+        # mid-judgement — the documented asyncio footgun.
+        app.state.judge_tasks.add(task)
+        task.add_done_callback(app.state.judge_tasks.discard)
         return JSONResponse({"accepted": True, "identity": event.identity}, status_code=202)
 
     @app.get("/live")
