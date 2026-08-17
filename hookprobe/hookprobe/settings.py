@@ -79,6 +79,14 @@ class Settings:
     bash_timeout_ms: int
     bash_max_timeout_ms: int
 
+    # Auto-distill: how many runbooks a finished run may leave behind for the
+    # next one, written by the service (never by the agent — see
+    # hookprobe.inputs). A cap rather than a flag, because the cap is the
+    # setting that matters: every runbook is prefix cost on every later run,
+    # and there is no reviewer deciding when to stop. 0 keeps the loop manual,
+    # which is the right default for a deployment nobody is watching.
+    auto_distill_max: int
+
     # The family loop. event_secret verifies what the pipe delivers to
     # /hooks/event; return_url is where finished investigations from that
     # door report back (the pipe's probe-notify front door), signed with
@@ -137,6 +145,7 @@ class Settings:
             repeat_reminder_at=max(0, _int("HOOKPROBE_REPEAT_REMINDER_AT", 3)),
             bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
             bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),
+            auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),

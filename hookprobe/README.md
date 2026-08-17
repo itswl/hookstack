@@ -86,6 +86,7 @@ what runs.
 | `HOOKPROBE_BUDGET_USD` | `0` *(off)* | Window spend ceiling for the event door; refusals report themselves. `GET /v1/budget` shows the arithmetic |
 | `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24` | The sliding window the budget is measured over |
 | `HOOKPROBE_RETENTION_DAYS` | `0` *(keep all)* | Case files and transcripts older than this are pruned daily; skills and memory are never touched |
+| `HOOKPROBE_AUTO_DISTILL_MAX` | `0` *(manual)* | How many runbooks finished runs may leave behind. Above 0, each completed run writes its own `.claude/skills/<name>/SKILL.md` — from the service, create-only, marked unreviewed. See *The learning loop* |
 | `HOOKPROBE_REPEAT_REMINDER_AT` | `3` *(0 = off)* | After N identical tool calls, remind the agent to change approach |
 | `HOOKPROBE_BASH_TIMEOUT_MS` | `120000` *(0 = CLI default)* | Deadline for a single command (`BASH_DEFAULT_TIMEOUT_MS`) |
 | `HOOKPROBE_BASH_MAX_TIMEOUT_MS` | `600000` *(0 = CLI default)* | Ceiling the agent may request per command (`BASH_MAX_TIMEOUT_MS`) |
@@ -130,6 +131,38 @@ itself, which turns out to be the one target it can always reach.
    (an operator installing a reviewed runbook) from a run editing itself, and
    mounting these paths read-only would take the operator's write endpoints
    down along with the attack.
+
+## The learning loop
+
+The investigator is told to read prior case files, and the skills directory is
+described as what earlier runs distilled — so the loop is only worth anything
+if something writes one. `HOOKPROBE_AUTO_DISTILL_MAX` closes it: above 0, each
+completed run assembles a runbook from its own record (the question, the tool
+sequence in order, the conclusion) and installs it.
+
+The write happens **in the service**, never through the agent's tools, and that
+distinction is the whole design. Layer 4 above blocks the agent from writing
+`.claude/` because a run that edits its own future instructions turns one
+injected line into a permanent one. Automatic distillation is a different act
+with a different failure mode, and the terms are what make it safe:
+
+- **Create-only.** Replacing a runbook stays an operator action, so a bad run
+  cannot overwrite a good one and an injection cannot rewrite what was
+  approved. A recurring alert reuses its runbook rather than stacking copies.
+- **Never from a run that failed, produced nothing, or changed its own
+  inputs.** A run that already misbehaved does not get to leave instructions.
+- **Capped**, because each runbook is prefix cost on every later run and no
+  reviewer is deciding when to stop. At the cap the loop stops writing; it
+  never evicts, because something there may have been reviewed and this is not
+  the code that gets to price that.
+- **Stamped.** `origin.json` beside the manifest records which run wrote it,
+  when, on which model, and `reviewed: false`. The skills page shows those as
+  `unreviewed`; the runbook's own text says so too, because the next
+  investigation reads the text and cannot ask where it came from.
+
+Every run records what the loop did — `{"installed": name}` or
+`{"skipped": reason}` — so "it quietly did nothing again" is not a state this
+can be in.
 
 ## Loop hygiene — the run's context and bill
 

@@ -84,6 +84,22 @@ def _skill_description(text: str) -> str:
     return ""
 
 
+def _skill_origin(entry: Path) -> dict[str, Any]:
+    """Provenance for a runbook auto-distill wrote, or nothing for a hand-made one."""
+    try:
+        raw = json.loads((entry / "origin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        "written_by": str(raw.get("written_by") or ""),
+        "reviewed": bool(raw.get("reviewed")),
+        "from_session": str(raw.get("session_key") or ""),
+        "written_at": raw.get("written_at"),
+    }
+
+
 def _ndjson(payload: dict[str, Any]) -> bytes:
     """One JSON object, one line — the whole wire format."""
     return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
@@ -130,6 +146,9 @@ def _summary(run: Run) -> dict[str, Any]:
         "title": title[:120],
         "origin": run.origin,
         "return_status": run.return_status,
+        # What the run left for the next one: {"installed": name} or
+        # {"skipped": reason}, empty when the loop is off.
+        "distilled": dict(run.distilled),
     }
 
 
@@ -418,10 +437,12 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     async def run_distill(session_key: str) -> dict[str, str]:
         """A skill draft for what this run learned — returned, never saved.
 
-        The write is deliberately left to the operator through PUT /v1/skills:
-        an investigator that can edit its own future instructions is one whose
-        context nobody reviewed, and a single wrong conclusion would then teach
-        itself forward into every later investigation of the same alert.
+        The operator's path: read the draft, prune the dead ends the record
+        cannot tell from the useful steps, save it with PUT /v1/skills/{name}.
+        The automatic path is HOOKPROBE_AUTO_DISTILL_MAX, which writes the same
+        assembly from the service at the end of a run — never through the
+        agent's own tools, which cannot reach .claude/ at all. See
+        hookprobe.distill for why those two are different acts.
         """
         run = service.get(session_key)
         if run is None:
@@ -456,6 +477,12 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                         "modified": stat.st_mtime,
                         "files": files,
                         "layer": layer,
+                        # Written by a run rather than installed by a person.
+                        # Read from the sidecar, never guessed from the prose:
+                        # the page must be able to say which runbooks nobody
+                        # has looked at, and that is exactly the claim a
+                        # heuristic would get wrong.
+                        **_skill_origin(entry),
                     }
                 )
         return out
