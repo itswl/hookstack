@@ -1,0 +1,63 @@
+# The pipe's config for the SHADOW deployment (deploy/docker-compose.shadow.yml).
+#
+# Shadow means: real production traffic, zero production responsibility. The
+# platform (WebhookWise) forwards every alert it has already analyzed through
+# its feishu_relay channel — the PROCESSED-EVENT dialect, HMAC-timestamped —
+# and this pipe hands it to the judge, whose verdict lands in the ledger and
+# goes NOWHERE else.
+#
+# What that buys, before anyone trusts the family with a real delivery:
+#   - the adapters and the door run against real traffic shapes, not fixtures;
+#   - every event arrives with the platform's own verdict in it
+#     (meta.importance), so the ledger accumulates judge-vs-platform
+#     disagreements — labelled comparison data, at production rates, for free;
+#   - reuse/recovery routes are exercised by real storms, not synthetic ones.
+#
+# What is deliberately ABSENT:
+#   - notification channels: a shadow that can page somebody is not a shadow;
+#   - probe escalation: the investigator already serves the platform's own
+#     deep-analysis leg, and a second door onto the same runs would double the
+#     model bill for no new information;
+#   - a judge return door: HOOKJUDGE_RETURN_URL is empty, so the verdict stops
+#     in the judge's ledger instead of coming back as an event this config
+#     would then have to route into silence.
+#
+# Caveat, stated where the data will be read: the judge sees the platform's
+# {alert title + AI summary}, not the raw webhook — the platform's feishu_relay
+# envelope carries the RESULT by design. Agreements are cheap confirmation;
+# disagreements are the interesting rows and need the case pulled up before
+# anyone calls either side wrong.
+
+sources:
+  # WebhookWise's feishu_relay channel, mode `processed`. The signature is the
+  # timestamped form ("{ts}.{body}", X-Hook-Timestamp beside it) with the
+  # platform's FORWARD_RELAY_SECRET — mirrored into .env as WW_RELAY_SECRET.
+  - name: ww
+    secret: ${WW_RELAY_SECRET}
+    title: "{meta.alert_name}"
+    body: "{analysis.summary}"
+    level: "{meta.importance}"
+    fields:
+      source: "{meta.source}"
+      event_type: "{analysis.event_type}"
+      recovery: "{meta.is_recovery}"
+      reminder: "{meta.is_periodic_reminder}"
+      rule: "{meta.rule_name}"
+
+channels:
+  - name: to-judge
+    type: generic
+    url: http://hookjudge:8200/events
+    secret: ${SHADOW_INGEST_SECRET}
+    options: {payload: normalized}
+
+routes:
+  - name: shadow-to-judge
+    source: ww
+    send_to: [to-judge]
+    priority: 0
+
+# The judge does the noise accounting (reuse/recovery are the point of the
+# shadow), so the pipe's own dedup stays off — same posture as the family
+# stack, for the same reason: two counters and neither ledger true.
+pipeline: [silence, routes]
