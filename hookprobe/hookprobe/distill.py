@@ -10,7 +10,7 @@ automatic:
 
 * `draft_skill` assembles a draft and returns it. `POST /v1/runs/{key}/distill`
   hands it to an operator, who saves it with `PUT /v1/skills/{name}`.
-* `auto_install` does the same assembly and writes it, at the end of a run,
+* `auto_write` does the same assembly and writes it, at the end of a run,
   **from the service** — which is the point. The agent's own Write and Edit
   cannot reach `.claude/` (see hookprobe.inputs): an agent that can edit its
   future instructions mid-run is one injected line away from teaching itself
@@ -18,19 +18,34 @@ automatic:
   runbook assembled from the run's own structure is a different act with a
   different failure mode, and it is the one that can be made safe.
 
-What makes it safe is not review, since there is none — it is the shape of the
-write:
+A runbook **updates itself**: the second investigation of the same condition
+adds to the first rather than replacing it. Replacing would be regression
+dressed as learning — a shallow run would flatten a runbook that had already
+seen five incidents, because a run only knows its own steps. So each
+investigation appends a case, newest first, and everything already in the file
+survives it.
+
+That is also what keeps an operator's corrections. Neither side is restricted:
+a run may write a runbook a person edited, and a person may edit a runbook a
+run wrote. The invariant is not *who may write* but that **no write destroys
+what was there** — automatic writes only insert into the case region, anything
+outside it is carried through untouched, and every write snapshots the previous
+manifest into `history/` first, so a bad one (from either side) is one file copy
+away from being undone.
+
+The rest of the shape:
 
 * assembled from the record, never from free text the run chose: the question,
   the tool sequence, the conclusion;
-* **create-only**. Replacing an existing runbook stays an operator action, so a
-  bad run cannot overwrite a good one, and an injection cannot quietly rewrite
-  what an operator approved;
-* never from a run that failed, and never from a run that changed its own
-  inputs — one that already misbehaved does not get to leave instructions;
-* capped, because every runbook is prefix cost on every later run;
-* stamped with where it came from, and marked unreviewed in its own text, so
-  neither the next run nor the next operator mistakes it for doctrine.
+* never from a run that failed or produced nothing — there is no lesson in a
+  run that did not finish;
+* never from a run that changed its own inputs: that one already misbehaved,
+  and what it wants to teach forward is the thing being defended against;
+* the case region is trimmed to the most recent cases, because a runbook that
+  grows without bound is prefix cost on every later run;
+* stamped with where each revision came from, and marked unreviewed in its own
+  text after a machine write, so neither the next run nor the next operator
+  mistakes it for doctrine.
 
 Assembled from the record rather than by asking a model: the run already knows
 what was asked, which tools ran in what order, and what it concluded. A second
@@ -177,22 +192,20 @@ def draft_skill(run: Any, *, title: str = "", unreviewed: bool = False) -> dict[
     lines = [
         "---",
         f"name: {name}",
-        f'description: What a previous investigation of "{headline[:90]}" checked, and what it found.',
+        f'description: What previous investigations of "{headline[:90]}" checked, and what they found.',
         "---",
         "",
         f"# {headline[:120]}",
         "",
-        f"Distilled from session `{run.session_key}`"
-        + (f" (engine session `{run.engine_session_id}`)." if getattr(run, "engine_session_id", "") else "."),
+        # The seam. Later investigations of the same condition insert here,
+        # newest first; everything around it survives them, which is where an
+        # operator's own corrections are safe to live.
+        "## Investigations",
         "",
-        "## What was checked, in order",
+        CASES_MARKER,
         "",
+        case_block(run, steps=steps, conclusion=conclusion, at=time.time()),
     ]
-    if steps:
-        lines += [f"{index}. `{step}`" for index, step in enumerate(steps[:30], 1)]
-    else:
-        lines.append("_No tools ran — the answer came from the alert alone._")
-    lines += ["", "## What it turned out to be", "", conclusion or "_(the run left no conclusion)_", ""]
     if unreviewed:
         lines += [
             "## How much to trust this",
@@ -203,7 +216,11 @@ def draft_skill(run: Any, *, title: str = "", unreviewed: bool = False) -> dict[
             "  they returned, so a step listed above may have been a wasted one.",
             "- Anything specific to that day — hostnames, amounts, a one-off outage —",
             "  is noise here. Do not repeat it because it appears above.",
-            "- If it is wrong, delete it: `DELETE /v1/skills/" + name + "`.",
+            "- Later investigations of the same thing add a case above, newest",
+            "  first. Anything you write outside that list — here, or in a section",
+            "  of your own — survives every one of them.",
+            "- If it is wrong, delete it: `DELETE /v1/skills/" + name + "`. Earlier",
+            "  versions are in `history/`.",
             "",
         ]
     else:
@@ -220,18 +237,65 @@ def draft_skill(run: Any, *, title: str = "", unreviewed: bool = False) -> dict[
     return {"name": name, "content": "\n".join(lines)}
 
 
-def auto_install(
+# The seam an automatic write is allowed to touch. Everything outside it —
+# frontmatter, title, the trust caveat, and whatever an operator has added —
+# is carried through every update unread.
+CASES_MARKER = "<!-- hookprobe:cases -->"
+_CASE_RE = re.compile(r"<!-- case:start [^\n>]*-->.*?<!-- case:end -->\n*", re.DOTALL)
+_HISTORY_KEEP = 8
+
+
+def case_block(run: Any, *, steps: list[str], conclusion: str, at: float) -> str:
+    """One investigation, delimited so a later trim can find its edges."""
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(at))
+    session = str(getattr(run, "session_key", "") or "?")
+    lines = [
+        f"<!-- case:start {int(at)} -->",
+        f"### {stamp} · session `{session}`",
+        "",
+    ]
+    if steps:
+        lines += [f"{index}. `{step}`" for index, step in enumerate(steps[:30], 1)]
+    else:
+        lines.append("_No tools ran — the answer came from the alert alone._")
+    lines += ["", conclusion or "_(the run left no conclusion)_", "", "<!-- case:end -->", ""]
+    return "\n".join(lines)
+
+
+def merge_case(existing: str, block: str, *, max_cases: int) -> str:
+    """Insert one case at the top of the case region. Destroys nothing else.
+
+    A missing marker means the file was written before this existed, or an
+    operator restructured it. Either way the answer is to append rather than to
+    guess at its shape.
+    """
+    if CASES_MARKER in existing:
+        head, _, tail = existing.partition(CASES_MARKER)
+        merged = f"{head}{CASES_MARKER}\n\n{block}{tail.lstrip(chr(10))}"
+    else:
+        merged = f"{existing.rstrip()}\n\n## Later investigations\n\n{CASES_MARKER}\n\n{block}"
+
+    if max_cases > 0:
+        found = list(_CASE_RE.finditer(merged))
+        # Newest first, so the tail is what falls off.
+        for match in reversed(found[max_cases:]):
+            merged = merged[: match.start()] + merged[match.end() :]
+    return merged
+
+
+def auto_write(
     run: Any,
     *,
     skills_dir: Path,
     limit: int,
+    max_cases: int = 5,
     input_changes: tuple[str, ...] | list[str] = (),
 ) -> dict[str, Any]:
-    """Write this run's runbook, or say why it was not written.
+    """Leave this run's findings in a runbook — new, or added to an existing one.
 
-    Returns `{"installed": name}` or `{"skipped": reason}` — recorded on the run
-    either way, because "the loop did nothing again" is the failure this whole
-    feature exists to end, and it must not be invisible.
+    Returns `{"installed": name}`, `{"updated": name}` or `{"skipped": reason}`
+    — recorded on the run either way, because "the loop did nothing again" is
+    the failure this whole feature exists to end, and it must not be invisible.
     """
     if input_changes:
         return {"skipped": "run changed its own inputs"}
@@ -240,50 +304,96 @@ def auto_install(
     if not str(getattr(run, "text", "") or "").strip():
         return {"skipped": "run produced no report"}
 
-    draft = draft_skill(run, unreviewed=True)
-    name = draft["name"]
+    turns = list(getattr(run, "turns", []) or [])
+    headline = _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
+    name = slug(headline)
     target = skills_dir / name
+    manifest = target / "SKILL.md"
+    existed = manifest.is_file()
 
-    if (target / "SKILL.md").is_file():
-        # Deliberately not an update. See the module docstring: replacing a
-        # runbook is an operator action, so that a later run — or a later
-        # injection — cannot quietly rewrite one that was approved.
-        return {"skipped": f"runbook '{name}' already exists"}
-    try:
-        existing = sorted(path.parent.name for path in skills_dir.glob("*/SKILL.md"))
-    except OSError:
-        existing = []
-    if limit > 0 and len(existing) >= limit:
-        # Not an eviction: something here may have been reviewed, and this is
-        # not the code that gets to decide it is worth less than a new lead.
-        return {"skipped": f"at the {limit}-runbook cap"}
+    if not existed:
+        try:
+            present = sorted(path.parent.name for path in skills_dir.glob("*/SKILL.md"))
+        except OSError:
+            present = []
+        if limit > 0 and len(present) >= limit:
+            # Only new runbooks are capped. An existing one going on learning
+            # costs a case, not a whole new prefix entry — and refusing that
+            # would be exactly the restriction this loop is meant not to have.
+            return {"skipped": f"at the {limit}-runbook cap"}
 
+    now = time.time()
     try:
         target.mkdir(parents=True, exist_ok=True)
-        manifest = target / "SKILL.md"
-        tmp = manifest.with_suffix(".tmp")
-        tmp.write_text(draft["content"], encoding="utf-8")
-        tmp.replace(manifest)
-        # Provenance as data, not prose to be re-parsed: what wrote this, from
-        # which investigation, when, and whether anyone has looked at it.
-        (target / "origin.json").write_text(
-            json.dumps(
-                {
-                    "written_by": "auto-distill",
-                    "reviewed": False,
-                    "session_key": str(getattr(run, "session_key", "")),
-                    "run_id": str(getattr(run, "run_id", "")),
-                    "engine_session_id": str(getattr(run, "engine_session_id", "") or ""),
-                    "model": str(getattr(run, "model", "")),
-                    "origin": str(getattr(run, "origin", "")) or "api",
-                    "written_at": round(time.time(), 3),
-                },
-                ensure_ascii=False,
-                indent=2,
+        if existed:
+            snapshot(target, manifest)
+            content = merge_case(
+                manifest.read_text(encoding="utf-8"),
+                case_block(run, steps=_steps(turns), conclusion=_conclusion(turns), at=now),
+                max_cases=max_cases,
             )
-            + "\n",
-            encoding="utf-8",
+        else:
+            content = draft_skill(run, unreviewed=True)["content"]
+        tmp = manifest.with_suffix(".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(manifest)
+        record_revision(
+            target,
+            by="auto-distill",
+            reviewed=False,
+            at=now,
+            detail={
+                "session_key": str(getattr(run, "session_key", "")),
+                "run_id": str(getattr(run, "run_id", "")),
+                "engine_session_id": str(getattr(run, "engine_session_id", "") or ""),
+                "model": str(getattr(run, "model", "")),
+                "origin": str(getattr(run, "origin", "")) or "api",
+            },
         )
     except OSError as exc:
         return {"skipped": f"write failed: {exc}"}
-    return {"installed": name}
+    return {"updated" if existed else "installed": name}
+
+
+def snapshot(target: Path, manifest: Path) -> None:
+    """Keep the manifest as it stood, so any write can be undone.
+
+    The reason updates need no permission check: nothing is lost when the last
+    good version is still on the volume. Applies to operator writes too — a
+    correction typed into the wrong runbook is the same accident.
+    """
+    history = target / "history"
+    history.mkdir(exist_ok=True)
+    (history / f"{int(time.time())}-SKILL.md").write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
+    stale = sorted(history.glob("*-SKILL.md"))[:-_HISTORY_KEEP]
+    for path in stale:
+        path.unlink(missing_ok=True)
+
+
+def record_revision(target: Path, *, by: str, reviewed: bool, at: float, detail: dict[str, Any] | None = None) -> None:
+    """Append to the runbook's provenance — who wrote it, when, reviewed or not.
+
+    Provenance as data, not prose to be re-parsed: the skills page has to be
+    able to say which runbooks nobody has looked at, and that is exactly the
+    claim a heuristic over the text would get wrong.
+    """
+    path = target / "origin.json"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            record = {}
+    except (OSError, ValueError):
+        record = {}
+    revisions = record.get("revisions")
+    revisions = revisions if isinstance(revisions, list) else []
+    revisions.append({"by": by, "at": round(at, 3), **(detail or {})})
+    record.update(
+        {
+            "written_by": by,
+            "reviewed": reviewed,
+            "written_at": round(at, 3),
+            "revisions": revisions[-20:],
+            **(detail or {}),
+        }
+    )
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

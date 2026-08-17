@@ -144,25 +144,51 @@ The write happens **in the service**, never through the agent's tools, and that
 distinction is the whole design. Layer 4 above blocks the agent from writing
 `.claude/` because a run that edits its own future instructions turns one
 injected line into a permanent one. Automatic distillation is a different act
-with a different failure mode, and the terms are what make it safe:
+with a different failure mode.
 
-- **Create-only.** Replacing a runbook stays an operator action, so a bad run
-  cannot overwrite a good one and an injection cannot rewrite what was
-  approved. A recurring alert reuses its runbook rather than stacking copies.
+**Runbooks update themselves.** The second investigation of the same condition
+adds a case rather than replacing what was there — replacing would be
+regression dressed as learning, since a run only knows its own steps and would
+flatten a runbook that had already seen five incidents. Cases go newest first,
+inside a marked region:
+
+```markdown
+## Investigations
+<!-- hookprobe:cases -->
+<!-- case:start … -->   ← a new investigation inserts here
+```
+
+Neither side is restricted. A run may update a runbook a person edited; a
+person may edit one a run wrote. The invariant is not *who may write* but that
+**no write destroys what was there**:
+
+- automatic writes only insert into the case region, so anything outside it —
+  your corrections, your own sections, the title, the caveat — is carried
+  through untouched;
+- **every** write, by run or by operator, snapshots the previous manifest into
+  the runbook's `history/` first, so a bad one from either side is one file
+  copy away from being undone;
+- a runbook with no marker (hand-written, or older than this) is appended to,
+  never reshaped to fit.
+
+The rest of the terms:
+
 - **Never from a run that failed, produced nothing, or changed its own
   inputs.** A run that already misbehaved does not get to leave instructions.
-- **Capped**, because each runbook is prefix cost on every later run and no
-  reviewer is deciding when to stop. At the cap the loop stops writing; it
-  never evicts, because something there may have been reviewed and this is not
-  the code that gets to price that.
-- **Stamped.** `origin.json` beside the manifest records which run wrote it,
-  when, on which model, and `reviewed: false`. The skills page shows those as
-  `unreviewed`; the runbook's own text says so too, because the next
-  investigation reads the text and cannot ask where it came from.
+- **New runbooks are capped**, because each is prefix cost on every later run.
+  The cap never stops an existing runbook from going on learning — that costs a
+  case, not a new prefix entry. At the cap the loop stops creating; it never
+  evicts, because something there may have been reviewed and this is not the
+  code that gets to price that. The case list itself keeps the most recent five.
+- **Stamped.** `origin.json` records every revision — who wrote it, when, from
+  which session, on which model — and whether anyone has read it. An operator
+  saving a runbook *is* the review, and flips it to `reviewed: true`; a later
+  machine write flips it back, because the text changed and nobody looked.
+  The skills page badges the unreviewed ones.
 
-Every run records what the loop did — `{"installed": name}` or
-`{"skipped": reason}` — so "it quietly did nothing again" is not a state this
-can be in.
+Every run records what the loop did — `{"installed": name}`,
+`{"updated": name}` or `{"skipped": reason}` — so "it quietly did nothing
+again" is not a state this can be in.
 
 ## Loop hygiene — the run's context and bill
 
