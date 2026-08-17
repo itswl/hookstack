@@ -38,7 +38,7 @@ sources:
     body: "{analysis.summary}"
     level: "{meta.importance}"
     fields:
-      source: "{meta.source}"
+      origin: "{meta.source}"
       event_type: "{analysis.event_type}"
       recovery: "{meta.is_recovery}"
       reminder: "{meta.is_periodic_reminder}"
