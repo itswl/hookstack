@@ -44,7 +44,10 @@ from pathlib import Path
 # writing the queue directly would let it forge attribution or flush other
 # runs' suggestions. (A bash write around this guard can at worst stuff
 # the queue with rows an operator dismisses — never write memory itself.)
-_PROTECTED = (".claude", "CLAUDE.md", "system-prompt.md", "audit", "memory-suggestions.jsonl")
+# remediation/: the agent proposes through its report; a direct write could
+# only forge a proposal's provenance. (Even forged, a proposal is inert —
+# approval and the allowlist stand between any proposal and execution.)
+_PROTECTED = (".claude", "CLAUDE.md", "system-prompt.md", "audit", "memory-suggestions.jsonl", "remediation")
 
 # Hashed before and after a run. `audit/` is deliberately absent: the flight
 # recorder appends a line per tool call, so it changes during every healthy run

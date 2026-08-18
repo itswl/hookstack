@@ -33,6 +33,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         # Off in the fixture for the same reason auto-distill is: a test that
         # wants the pass says so, and nobody else pays a surprise model run.
         "consolidate_at": 0,
+        "remediation_allowlist": None,
         "coalesce_window_seconds": 1800,
         "event_secret": "",
         "return_url": "",

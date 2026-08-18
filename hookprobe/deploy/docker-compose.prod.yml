@@ -117,6 +117,10 @@ services:
       # Consolidation: at N cases a runbook buys one distillation run whose
       # draft waits for review as proposal.md. 0 = off.
       HOOKPROBE_CONSOLIDATE_AT: ${HOOKPROBE_CONSOLIDATE_AT:-}
+      # Remediation executor gate: a file of full-match regexes, one per
+      # line, deny-by-default. Unset = proposals collect, nothing runs.
+      # Mount it read-only beside the other operator config.
+      HOOKPROBE_REMEDIATION_ALLOWLIST: ${HOOKPROBE_REMEDIATION_ALLOWLIST:-}
       # Model-call telemetry. On by default and harmless when nothing is
       # listening — measured: with no endpoint a run finishes in the same time,
       # emits no retries and logs nothing. So the switch stays on and the only
