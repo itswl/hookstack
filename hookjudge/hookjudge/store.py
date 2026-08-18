@@ -86,10 +86,24 @@ class Store:
         """
         cursor = await self._db.execute("PRAGMA table_info(judgements)")  # type: ignore[union-attr]
         have = {row[1] for row in await cursor.fetchall()}
-        for column in ("rule_key", "level"):
+        typed = {
+            "rule_key": "TEXT NOT NULL DEFAULT ''",
+            "level": "TEXT NOT NULL DEFAULT ''",
+            # The operator's ruling on a platform-vs-judge disagreement. The
+            # importance is the label; the source says whose answer it agreed
+            # with (platform / judge / operator), which the export keeps as
+            # provenance in the note.
+            "label_importance": "TEXT NOT NULL DEFAULT ''",
+            "label_source": "TEXT NOT NULL DEFAULT ''",
+            "labeled_at": "REAL",
+            # Cross-alert correlation, v1: same upstream origin, multiple
+            # rules, one window -> one burst id.
+            "burst_id": "TEXT NOT NULL DEFAULT ''",
+        }
+        for column, ddl in typed.items():
             if column not in have:
                 await self._db.execute(  # type: ignore[union-attr]
-                    f"ALTER TABLE judgements ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"  # nosec B608
+                    f"ALTER TABLE judgements ADD COLUMN {column} {ddl}"  # nosec B608
                 )
 
     async def close(self) -> None:
@@ -155,10 +169,12 @@ class Store:
         return dict(row) if row else None
 
     async def record(self, event: Any, verdict: Any, latency_ms: int) -> int:
+        burst = await self._burst_id_for(event)
         cursor = await self.db.execute(
             "INSERT INTO judgements (received_at, source, identity, rule_key, level, correlation_id, title, body,"
             " fields_json, is_recovery, summary, importance, event_type, impact_scope, route, degraded_reason, model,"
-            " tokens_in, tokens_out, cost, latency_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " tokens_in, tokens_out, cost, latency_ms, burst_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 event.received_at,
                 event.source,
@@ -181,11 +197,83 @@ class Store:
                 verdict.tokens_out,
                 verdict.cost,
                 latency_ms,
+                burst,
             ),
         )
         await self.db.commit()
         self._announce()
         return int(cursor.lastrowid or 0)
+
+    # A burst is DIFFERENT rules from one upstream origin inside one window —
+    # the shape of a cascading incident. Same-rule repeats are already the
+    # reuse route's business; a burst is the cross-alert layer above it.
+    BURST_WINDOW_SECONDS = 600
+
+    @staticmethod
+    def _origin_of(fields: dict[str, Any], source: str) -> str:
+        return str(fields.get("origin") or source or "")
+
+    async def _burst_id_for(self, event: Any) -> str:
+        origin = self._origin_of(event.fields, event.source)
+        if not origin or event.is_recovery:
+            return ""
+        cutoff = float(event.received_at) - self.BURST_WINDOW_SECONDS
+        cursor = await self.db.execute(
+            "SELECT id, rule_key, burst_id, fields_json, source FROM judgements"
+            " WHERE received_at >= ? AND is_recovery = 0 ORDER BY id DESC LIMIT 50",
+            (cutoff,),
+        )
+        peers = []
+        for row in await cursor.fetchall():
+            try:
+                fields = json.loads(row["fields_json"] or "{}")
+            except ValueError:
+                fields = {}
+            if self._origin_of(fields, str(row["source"])) == origin and str(row["rule_key"]) != event.rule_key:
+                peers.append(row)
+        if not peers:
+            return ""
+        existing = next((str(row["burst_id"]) for row in peers if row["burst_id"]), "")
+        burst = existing or f"burst-{int(event.received_at)}"
+        # The FIRST member of a burst was recorded before anyone knew it was
+        # one; joining it retroactively is what makes the group queryable.
+        stragglers = [int(row["id"]) for row in peers if not row["burst_id"]]
+        if stragglers:
+            await self.db.execute(
+                f"UPDATE judgements SET burst_id = ? WHERE id IN ({','.join('?' * len(stragglers))})",  # nosec B608
+                (burst, *stragglers),
+            )
+        return burst
+
+    # ── the operator's rulings on disagreements ──────────────────────────────
+
+    async def disagreements(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Unlabeled rows where the platform and the judge picked different
+        importances — the queue the review page drains, newest first."""
+        vocab = ("critical", "high", "medium", "low")
+        cursor = await self.db.execute(
+            "SELECT * FROM judgements WHERE label_importance = ''"
+            " AND level != '' AND importance != '' AND level != importance"
+            f" AND level IN ({','.join('?' * len(vocab))}) ORDER BY id DESC LIMIT ?",  # nosec B608
+            (*vocab, max(1, min(200, limit))),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def set_label(self, judgement_id: int, importance: str, source: str, now: float) -> bool:
+        cursor = await self.db.execute(
+            "UPDATE judgements SET label_importance = ?, label_source = ?, labeled_at = ? WHERE id = ?",
+            (importance, source, now, judgement_id),
+        )
+        await self.db.commit()
+        self._announce()
+        return cursor.rowcount > 0
+
+    async def labeled(self, limit: int = 1000) -> list[dict[str, Any]]:
+        cursor = await self.db.execute(
+            "SELECT * FROM judgements WHERE label_importance != '' ORDER BY id ASC LIMIT ?",
+            (max(1, min(5000, limit)),),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
 
     async def pending_returns(self, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.db.execute(

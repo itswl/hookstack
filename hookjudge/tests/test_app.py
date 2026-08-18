@@ -484,3 +484,76 @@ async def test_a_storm_burst_pays_for_exactly_one_judgement(app_client, monkeypa
     routes = sorted(str(r["route"]) for r in rows)
     assert calls == 1, "one model call for the whole burst"
     assert routes.count("ai") == 1 and routes.count("reuse") == 3
+
+
+async def test_a_disagreement_is_labeled_in_one_click_and_exports_as_an_eval_row(app_client):
+    """The shadow's whole payoff: platform verdict rides in as `level`, the
+    judge rules its own way, and the operator's click turns the disagreement
+    into an eval row — production traffic labelling the eval set."""
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    event = Incoming.parse(
+        {"event": {"title": "gateway 5xx", "body": "x", "level": "high", "fields": {"origin": "grafana"}}},
+        now=time.time(),
+    )
+    await store.record(event, Verdict(summary="s", importance="medium", route="ai", model="m").normalized(), 10)
+
+    queue = (await app_client.get("/disagreements", headers={"X-Read-Token": "read-t"})).json()["queue"]
+    assert len(queue) == 1 and queue[0]["level"] == "high" and queue[0]["importance"] == "medium"
+    row_id = queue[0]["id"]
+
+    labeled = await app_client.post(
+        f"/judgements/{row_id}/label",
+        json={"importance": "high", "source": "platform"},
+        headers={"X-Read-Token": "read-t"},
+    )
+    assert labeled.status_code == 200
+
+    # Labeled rows leave the queue and enter the export, harness-shaped.
+    assert (await app_client.get("/disagreements", headers={"X-Read-Token": "read-t"})).json()["queue"] == []
+    export = (await app_client.get("/labels/export", headers={"X-Read-Token": "read-t"})).text
+    row = json.loads(export.strip())
+    assert row["expect"]["importance"] == "high"
+    assert row["alert"]["title"] == "gateway 5xx"
+    assert row["reviewed"] is True and "platform" in row["note"]
+
+    # Guards: vocabulary and auth.
+    bad = await app_client.post(
+        f"/judgements/{row_id}/label", json={"importance": "urgent"}, headers={"X-Read-Token": "read-t"}
+    )
+    assert bad.status_code == 400
+    assert (await app_client.post(f"/judgements/{row_id}/label", json={"importance": "low"})).status_code == 401
+
+
+async def test_an_agreement_is_not_a_review_item(app_client):
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    event = Incoming.parse({"event": {"title": "ok alert", "body": "x", "level": "low"}}, now=time.time())
+    await store.record(event, Verdict(summary="s", importance="low", route="ai", model="m").normalized(), 10)
+
+    assert (await app_client.get("/disagreements", headers={"X-Read-Token": "read-t"})).json()["queue"] == []
+
+
+async def test_different_rules_from_one_origin_in_one_window_share_a_burst(app_client):
+    """Cross-alert correlation v1: the cascading-incident shape. Same-rule
+    repeats stay the reuse route's business; recoveries never join."""
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    def make(title, origin="prom"):
+        return Incoming.parse(
+            {"event": {"title": title, "body": "x", "level": "high", "fields": {"origin": origin}}},
+            now=time.time(),
+        )
+
+    verdict = Verdict(summary="s", importance="high", route="ai", model="m").normalized()
+    await store.record(make("disk full on db-1"), verdict, 10)
+    await store.record(make("api latency p99 over 2s"), verdict, 10)
+    await store.record(make("unrelated", origin="other-system"), verdict, 10)
+
+    rows = {r["title"]: r for r in await store.recent(10)}
+    assert rows["disk full on db-1"]["burst_id"], "the first member joins retroactively"
+    assert rows["disk full on db-1"]["burst_id"] == rows["api latency p99 over 2s"]["burst_id"]
+    assert rows["unrelated"]["burst_id"] == "", "a different origin is not this incident"
