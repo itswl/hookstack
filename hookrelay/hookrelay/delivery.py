@@ -115,6 +115,9 @@ async def _drain_channel(
             "level": row["level"],
             "fields": json.loads(row["fields_json"] or "{}"),
             "received_at": row["received_at"],
+            # Only when the source template stated it (tri-state column);
+            # absent means the receiver falls back to its own detection.
+            **({"is_recovery": bool(row["is_recovery"])} if row["is_recovery"] is not None else {}),
             # The original inbound payload, for raw-mode channels. Normalized
             # channels never serialize it (generic strips it before signing).
             "payload": json.loads(row["payload_json"] or "null"),
