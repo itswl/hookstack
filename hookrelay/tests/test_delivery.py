@@ -182,13 +182,19 @@ async def test_recovery_flag_survives_the_ledger_round_trip(store):
 
     now = _time.time()
     stated = await store.insert_event(
-        source="ww", fp="fp-r1",
+        source="ww",
+        fp="fp-r1",
         extracted={"title": "t", "body": "b", "level": "low", "fields": {}, "is_recovery": True},
-        payload_json="{}", now=now)
+        payload_json="{}",
+        now=now,
+    )
     silent = await store.insert_event(
-        source="ww", fp="fp-r2",
+        source="ww",
+        fp="fp-r2",
         extracted={"title": "t2", "body": "b", "level": "high", "fields": {}},
-        payload_json="{}", now=now)
+        payload_json="{}",
+        now=now,
+    )
     await store.enqueue_delivery(stated, "to-judge", now)
     await store.enqueue_delivery(silent, "to-judge", now)
     rows = {row["event_id"]: row for row in await store.due_deliveries(now + 1)}

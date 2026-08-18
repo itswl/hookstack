@@ -710,8 +710,14 @@ def test_explicit_recovery_flag_beats_keyword_sniffing():
     """A pipe that carries the platform's stated fact wins: a recovery whose
     body is a reused firing summary contains no recovery word (WebhookWise's
     relay envelope does exactly this), and sniffing called it a firing."""
-    flat = {"source": "ww", "title": "Single top-up over 500", "body": "amount exceeded 500",
-            "level": "low", "fields": {"origin": "grafana"}, "event_id": 1}
+    flat = {
+        "source": "ww",
+        "title": "Single top-up over 500",
+        "body": "amount exceeded 500",
+        "level": "low",
+        "fields": {"origin": "grafana"},
+        "event_id": 1,
+    }
     assert Incoming.parse({**flat, "is_recovery": True}, now=1.0).is_recovery is True
     # Explicit False also beats a title that LOOKS like a recovery.
     assert Incoming.parse({**flat, "title": "status: OK", "is_recovery": False}, now=1.0).is_recovery is False
@@ -731,14 +737,26 @@ async def test_agreement_compares_platform_level_with_judge_importance(tmp_path)
     await store.record(event(title="b", level="high"), ai_ok(importance="medium"), 1)
     await store.record(event(title="c", level="low"), ai_ok(importance="low"), 1)
     await store.record(
-        Incoming.parse({"source": "ww", "title": "a", "body": "", "level": "low",
-                        "fields": {}, "event_id": 9, "is_recovery": True}, now=1.0),
-        ai_ok(importance="high"), 0)
+        Incoming.parse(
+            {
+                "source": "ww",
+                "title": "a",
+                "body": "",
+                "level": "low",
+                "fields": {},
+                "event_id": 9,
+                "is_recovery": True,
+            },
+            now=1.0,
+        ),
+        ai_ok(importance="high"),
+        0,
+    )
 
     summary = await store.summary(0.0)
     agreement = summary["agreement"]
-    assert agreement["compared"] == 3          # the recovery row is excluded
-    assert agreement["agree_pct"] == 66.7      # a + c agree, b does not
+    assert agreement["compared"] == 3  # the recovery row is excluded
+    assert agreement["agree_pct"] == 66.7  # a + c agree, b does not
     assert agreement["matrix"]["high"] == {"high": 1, "medium": 1}
     rows = agreement["recent_disagreements"]
     assert len(rows) == 1 and rows[0]["title"] == "b"
