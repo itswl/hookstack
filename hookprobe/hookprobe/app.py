@@ -543,6 +543,8 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                         "modified": stat.st_mtime,
                         "files": files,
                         "layer": layer,
+                        # A consolidation draft is waiting for review.
+                        "proposal": (entry / "proposal.md").is_file(),
                         # Written by a run rather than installed by a person.
                         # Read from the sidecar, never guessed from the prose:
                         # the page must be able to say which runbooks nobody
@@ -618,6 +620,54 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             raise HTTPException(status_code=404, detail="skill not found")
         record_revision(skill_dir, by="operator", reviewed=True, at=time.time(), detail={"action": "review"})
         return {"reviewed": True, "name": name}
+
+    @app.get("/v1/skills/{name}/proposal", dependencies=[Depends(require_token)])
+    async def skill_proposal(name: str) -> dict[str, Any]:
+        """The consolidation draft awaiting review, beside the manifest it
+        would replace. Produced by a consolidation run, written by the service
+        — the same one-proposal-at-a-time slot approving or rejecting re-arms."""
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        path = settings.workdir / ".claude" / "skills" / name / "proposal.md"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="no proposal")
+        return {"name": name, "content": path.read_text(encoding="utf-8")}
+
+    @app.post("/v1/skills/{name}/proposal/approve", dependencies=[Depends(require_token)])
+    async def skill_proposal_approve(name: str) -> dict[str, Any]:
+        """The consolidation becomes the manifest — through the same door every
+        write uses: the displaced version is snapshotted first, and approving
+        IS the review, so the runbook flips to reviewed."""
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        skill_dir = settings.workdir / ".claude" / "skills" / name
+        proposal = skill_dir / "proposal.md"
+        manifest = skill_dir / "SKILL.md"
+        if not proposal.is_file() or not manifest.is_file():
+            raise HTTPException(status_code=404, detail="no proposal")
+        snapshot(skill_dir, manifest)
+        tmp = manifest.with_suffix(".tmp")
+        tmp.write_text(proposal.read_text(encoding="utf-8"), encoding="utf-8")
+        tmp.replace(manifest)
+        proposal.unlink(missing_ok=True)
+        record_revision(skill_dir, by="operator", reviewed=True, at=time.time(), detail={"action": "consolidated"})
+        return {"approved": True, "name": name}
+
+    @app.post("/v1/skills/{name}/proposal/reject", dependencies=[Depends(require_token)])
+    async def skill_proposal_reject(name: str) -> dict[str, Any]:
+        """Drop the draft, note that somebody did — the manifest is untouched
+        and the threshold will re-arm as cases keep arriving."""
+        if not _SKILL_NAME.match(name):
+            raise HTTPException(status_code=404, detail="skill not found")
+        skill_dir = settings.workdir / ".claude" / "skills" / name
+        proposal = skill_dir / "proposal.md"
+        if not proposal.is_file():
+            raise HTTPException(status_code=404, detail="no proposal")
+        proposal.unlink(missing_ok=True)
+        record_revision(
+            skill_dir, by="operator", reviewed=False, at=time.time(), detail={"action": "consolidation-rejected"}
+        )
+        return {"rejected": True, "name": name}
 
     @app.put("/v1/skills/{name}", dependencies=[Depends(require_token)])
     async def skill_write(name: str, payload: dict[str, Any]) -> dict[str, Any]:

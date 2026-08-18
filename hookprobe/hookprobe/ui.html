@@ -132,6 +132,7 @@ details.proc-past summary{cursor:pointer;color:var(--dim);font-size:12px}
 .skill-layer{font-size:10px;border:1px solid var(--line);border-radius:8px;padding:1px 6px;color:var(--dim);margin-left:8px;font-family:var(--mono)}
 .skill-layer.user{color:var(--accent);border-color:var(--accent)}
 .skill-layer.unreviewed{color:var(--amber);border-color:var(--amber)}
+.skill-layer.proposal{color:var(--accent);border-color:var(--accent)}
 .review-head{font-size:11px;color:var(--amber);margin:10px 2px 4px;text-transform:uppercase;letter-spacing:.4px}
 .review-head.quiet{color:var(--dim)}
 .hist-diff{color:var(--accent);cursor:pointer;margin-left:8px;text-decoration:underline}
@@ -799,6 +800,9 @@ async function renderSkills() {
           // here, so it is said on the row rather than a click away.
           s.written_by === "auto-distill" && !s.reviewed
             ? `<span class="skill-layer unreviewed" title="written automatically from ${attr(s.from_session || "a run")}; nobody has reviewed it">unreviewed</span>`
+            : ""}${
+          s.proposal
+            ? '<span class="skill-layer proposal" title="a consolidation draft is waiting for review">consolidation</span>'
             : ""}</div>
         <div class="skill-desc">${esc(s.description || "(no description)")}</div>
         <div class="skill-meta">${esc((s.files || []).join("  "))} · ${fmtTime(s.modified)}</div>
@@ -826,10 +830,14 @@ async function renderSkill(name) {
   const layer = s.layer || "project";
   // Provenance and history ride along; a failure of either must not take the
   // runbook text with it.
-  let origin = {}, history = [];
+  let origin = {}, history = [], proposal = null;
   if (layer === "project") {
     try { origin = await (await api(`/v1/skills/${encodeURIComponent(name)}/origin`)).json(); } catch (e) {}
     try { history = await (await api(`/v1/skills/${encodeURIComponent(name)}/history`)).json(); } catch (e) {}
+    try {
+      const pr = await api(`/v1/skills/${encodeURIComponent(name)}/proposal`);
+      if (pr.ok) proposal = await pr.json();
+    } catch (e) {}
   }
   $("#meta").textContent = `skill · ${name}/SKILL.md · ${layer} layer`;
   const body = (s.content || "").replace(/^---[\s\S]*?\n---\n/, ""); // frontmatter is for machines
@@ -852,7 +860,17 @@ async function renderSkill(name) {
           `<a class="hist-diff" data-stamp="${attr(String(h.stamp))}">diff</a></div>`
         ).join("")}</div></details>`
     : "";
-  $("#turns").innerHTML =
+  // A consolidation draft outranks everything else on the page: it is a
+  // machine asking permission to rewrite this runbook, and the whole design
+  // is that nothing rewrites without a person looking.
+  const proposalBar = proposal
+    ? `<div class="tamper" style="border-color:var(--amber)"><div class="tamper-head" style="color:var(--amber)">consolidation draft awaiting review</div>
+        <div class="proc"><div class="ev">a consolidation run distilled the case pile into one procedure — review the diff, then approve or reject</div></div>
+        <div class="skill-bar"><button id="propDiff">diff</button>
+        <button id="propApprove" class="primary">approve</button>
+        <button id="propReject" class="danger">reject</button></div></div>`
+    : "";
+  $("#turns").innerHTML = proposalBar +
     `<div class="skill-bar"><span class="skill-back">← all skills</span><span class="spacer"></span>${note}` +
     (unreviewed ? '<button id="skillReview" class="primary">mark reviewed</button>' : "") +
     `<button id="skillEdit">edit</button>` +
@@ -868,6 +886,18 @@ async function renderSkill(name) {
     else $("#hint").textContent = "review failed (" + resp.status + ")";
   };
   $("#turns").querySelectorAll(".hist-diff").forEach((n) => (n.onclick = () => renderSkillDiff(name, n.dataset.stamp, s.content || "")));
+  if (proposal) {
+    $("#propDiff").onclick = () => renderProposalDiff(name, s.content || "", proposal.content || "");
+    $("#propApprove").onclick = async () => {
+      if (!confirm(`replace "${name}" with the consolidation draft? (the current version goes into history)`)) return;
+      const r2 = await api(`/v1/skills/${encodeURIComponent(name)}/proposal/approve`, { method: "POST" });
+      if (r2.ok) renderSkill(name); else $("#hint").textContent = "approve failed (" + r2.status + ")";
+    };
+    $("#propReject").onclick = async () => {
+      const r2 = await api(`/v1/skills/${encodeURIComponent(name)}/proposal/reject`, { method: "POST" });
+      if (r2.ok) renderSkill(name); else $("#hint").textContent = "reject failed (" + r2.status + ")";
+    };
+  }
   const del = $("#skillDelete");
   if (del) del.onclick = async () => {
     if (!confirm(`delete skill "${name}"? (a same-named host skill would resurface)`)) return;
@@ -896,6 +926,23 @@ function lineDiff(oldText, newText) {
   while (i < n) out.push(["del", a[i++]]);
   while (j < m) out.push(["add", b[j++]]);
   return out;
+}
+
+function renderProposalDiff(name, currentContent, draftContent) {
+  $("#meta").textContent = `skill · ${name} · current → consolidation draft`;
+  const rows = lineDiff(currentContent, draftContent);
+  let html = "", quiet = 0;
+  const flushQuiet = () => { if (quiet > 2) html += `<div class="diff-row ctx quiet">… ${quiet - 2} unchanged lines …</div>`; quiet = 0; };
+  for (const [kind, line] of rows) {
+    if (kind === "ctx") { quiet++; if (quiet <= 2) html += `<div class="diff-row ctx">${esc(line) || "&nbsp;"}</div>`; continue; }
+    flushQuiet();
+    html += `<div class="diff-row ${kind}">${kind === "add" ? "+" : "−"} ${esc(line)}</div>`;
+  }
+  flushQuiet();
+  $("#turns").innerHTML =
+    `<div class="skill-bar"><span class="skill-back">← ${esc(name)}</span></div>` +
+    `<div class="diff">${html || '<div class="diff-row ctx">identical</div>'}</div>`;
+  $("#turns").querySelector(".skill-back").onclick = () => renderSkill(name);
 }
 
 async function renderSkillDiff(name, stamp, currentContent) {

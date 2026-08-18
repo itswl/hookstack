@@ -30,6 +30,9 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         # Off by default here too: a test that wants the loop must say so, so
         # that no other test quietly starts writing runbooks into its tmp dir.
         "auto_distill_max": 0,
+        # Off in the fixture for the same reason auto-distill is: a test that
+        # wants the pass says so, and nobody else pays a surprise model run.
+        "consolidate_at": 0,
         "coalesce_window_seconds": 1800,
         "event_secret": "",
         "return_url": "",

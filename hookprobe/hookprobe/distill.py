@@ -403,3 +403,57 @@ def record_revision(target: Path, *, by: str, reviewed: bool, at: float, detail:
         }
     )
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+# ── consolidation: from a case pile to a curated procedure ────────────────────
+
+CONSOLIDATION_MESSAGE = """You are consolidating an investigation runbook, not investigating.
+
+Read the runbook at {path} (and, if useful, the case files it cites under
+/data/results/). It has accumulated {count} cases — repeated investigations of
+the same condition. Rewrite it as ONE curated procedure:
+
+- keep the YAML frontmatter, keeping `name: {name}` exactly;
+- keep the `<!-- hookprobe:cases -->` marker line, and below it keep ONLY the
+  newest case block (`<!-- case:start -->` … `<!-- case:end -->`) as the most
+  recent worked example — future investigations append there;
+- above the marker, distill what the cases agree on: the checks that decided
+  it, in order, with the commands; the usual conclusion; what varied between
+  cases and what that variation meant;
+- keep any operator-written sections (they are the reviewed truth) verbatim;
+- drop day-specific noise: hostnames-of-the-day, amounts, timestamps.
+
+Output ONLY the complete new file content, starting with the `---` frontmatter
+line. No commentary, no code fences."""
+
+
+def case_count(manifest_text: str) -> int:
+    return manifest_text.count("<!-- case:start")
+
+
+def valid_consolidation(text: str, name: str) -> str:
+    """The draft, normalized — or empty when it cannot be trusted as a manifest.
+
+    The model was told to output only the file; this checks it listened.
+    Anything that fails here is dropped with a logged reason rather than
+    parked as a proposal an operator would have to read to reject.
+    """
+    cleaned = text.strip()
+    # A fenced block despite the instruction is common enough to unwrap.
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z]*\n", "", cleaned)
+        cleaned = re.sub(r"\n```\s*$", "", cleaned)
+        cleaned = cleaned.strip()
+    if not cleaned.startswith("---"):
+        return ""
+    if f"name: {name}" not in cleaned[:300]:
+        return ""
+    if CASES_MARKER not in cleaned:
+        return ""
+    return cleaned + ("\n" if not cleaned.endswith("\n") else "")
+
+
+def write_proposal(skill_dir: Path, content: str) -> None:
+    tmp = (skill_dir / "proposal.md").with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(skill_dir / "proposal.md")
