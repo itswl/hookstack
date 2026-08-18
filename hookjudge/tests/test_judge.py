@@ -704,3 +704,17 @@ async def test_a_400_that_is_not_about_the_format_still_degrades():
     assert ai.dialects == ["schema"]
     assert verdict.route == "rule"
     assert "AI call failed" in verdict.degraded_reason
+
+
+def test_explicit_recovery_flag_beats_keyword_sniffing():
+    """A pipe that carries the platform's stated fact wins: a recovery whose
+    body is a reused firing summary contains no recovery word (WebhookWise's
+    relay envelope does exactly this), and sniffing called it a firing."""
+    flat = {"source": "ww", "title": "Single top-up over 500", "body": "amount exceeded 500",
+            "level": "low", "fields": {"origin": "grafana"}, "event_id": 1}
+    assert Incoming.parse({**flat, "is_recovery": True}, now=1.0).is_recovery is True
+    # Explicit False also beats a title that LOOKS like a recovery.
+    assert Incoming.parse({**flat, "title": "status: OK", "is_recovery": False}, now=1.0).is_recovery is False
+    # Nothing stated: keyword fallback still works both ways.
+    assert Incoming.parse(flat, now=1.0).is_recovery is False
+    assert Incoming.parse({**flat, "title": "[RESOLVED] top-up"}, now=1.0).is_recovery is True

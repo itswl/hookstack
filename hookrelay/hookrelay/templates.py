@@ -66,18 +66,29 @@ class ExtractTemplate:
     level: str = ""
     level_map: dict[str, str] = field(default_factory=dict)
     fields: dict[str, str] = field(default_factory=dict)
+    # Optional recovery-flag template. Rendered and truth-tested into a
+    # top-level `is_recovery` on the event — NOT a field, because anything
+    # that differs between a firing and its recovery would split their
+    # identity and the recovery could never find its firing. A platform that
+    # states the fact (e.g. WebhookWise's meta.is_recovery) beats keyword
+    # sniffing downstream.
+    recovery: str = ""
     selector: TemplateSelector = TemplateSelector()
 
     def extract(self, payload: Any, *, door: str) -> dict[str, Any]:
         level_raw = render(self.level, payload).lower() if self.level else ""
         level = self.level_map.get(level_raw, level_raw) or "info"
-        return {
+        event = {
             "title": render(self.title, payload) or f"webhook from {door}",
             "body": render(self.body, payload),
             "level": level,
             "fields": {name: render(tpl, payload) for name, tpl in self.fields.items()},
             "_template": self.name,
         }
+        if self.recovery:
+            flag = render(self.recovery, payload).strip().lower()
+            event["is_recovery"] = flag in ("true", "1", "yes", "resolved", "recovery", "recovered")
+        return event
 
 
 def select(templates: tuple[ExtractTemplate, ...], payload: Any) -> ExtractTemplate:
