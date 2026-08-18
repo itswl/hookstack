@@ -169,3 +169,28 @@ async def test_unconfigured_channel_dead_letters_with_reason(store, cfg, setting
     cursor = await store.db.execute("SELECT status, last_error FROM deliveries WHERE channel = 'mirror'")
     row = await cursor.fetchone()
     assert row["status"] == "dead" and "no longer configured" in row["last_error"]
+
+
+async def test_recovery_flag_survives_the_ledger_round_trip(store):
+    """extract -> insert -> due_deliveries must carry the stated flag: the
+    delivery loop rebuilds the message from ledger COLUMNS, so a flag that
+    only lived in the extracted dict evaporated between the door and the
+    channel (found live: the judge saw is_recovery on zero shadow events).
+    Tri-state: an event whose template stated nothing must arrive WITHOUT
+    the key, so receivers keep their own detection."""
+    import time as _time
+
+    now = _time.time()
+    stated = await store.insert_event(
+        source="ww", fp="fp-r1",
+        extracted={"title": "t", "body": "b", "level": "low", "fields": {}, "is_recovery": True},
+        payload_json="{}", now=now)
+    silent = await store.insert_event(
+        source="ww", fp="fp-r2",
+        extracted={"title": "t2", "body": "b", "level": "high", "fields": {}},
+        payload_json="{}", now=now)
+    await store.enqueue_delivery(stated, "to-judge", now)
+    await store.enqueue_delivery(silent, "to-judge", now)
+    rows = {row["event_id"]: row for row in await store.due_deliveries(now + 1)}
+    assert rows[stated]["is_recovery"] == 1
+    assert rows[silent]["is_recovery"] is None

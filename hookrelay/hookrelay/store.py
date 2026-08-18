@@ -28,7 +28,13 @@ CREATE TABLE IF NOT EXISTS events (
     -- The id this event QUOTED back, when a brain echoed ours. First-class and
     -- indexed rather than buried in the trace, because gathering N brains'
     -- work under one original alert is a query, not a scan.
-    correlation_id TEXT
+    correlation_id TEXT,
+    -- Tri-state recovery flag: NULL = the source template stated nothing
+    -- (receivers fall back to their own detection), 0/1 = the upstream
+    -- platform stated the fact. Deliberately NOT a field: fields build
+    -- identity, and a flag that flips between firing and recovery would
+    -- split the pair.
+    is_recovery INTEGER
 );
 CREATE INDEX IF NOT EXISTS ix_events_fp_time ON events (fingerprint, received_at);
 -- ix_events_correlation is created in _migrate(), NOT here: this script runs
@@ -108,6 +114,8 @@ class Store:
         columns = {str(row["name"]) for row in await cursor.fetchall()}
         if "correlation_id" not in columns:
             await db.execute("ALTER TABLE events ADD COLUMN correlation_id TEXT")
+        if "is_recovery" not in columns:
+            await db.execute("ALTER TABLE events ADD COLUMN is_recovery INTEGER")
         # Always, and only after the column is certain to exist.
         await db.execute("CREATE INDEX IF NOT EXISTS ix_events_correlation ON events (correlation_id)")
         cursor = await db.execute("PRAGMA table_info(deliveries)")
@@ -139,8 +147,8 @@ class Store:
     ) -> int:
         cursor = await self.db.execute(
             "INSERT INTO events (source, received_at, fingerprint, title, body, level, fields_json, payload_json,"
-            "                   correlation_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "                   correlation_id, is_recovery)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 source,
                 now,
@@ -151,6 +159,8 @@ class Store:
                 json.dumps(extracted["fields"], ensure_ascii=False),
                 payload_json,
                 correlation_id or None,
+                # Tri-state: absent key -> NULL (nothing stated), bool -> 0/1.
+                (int(bool(extracted["is_recovery"])) if "is_recovery" in extracted else None),
             ),
         )
         await self.db.commit()
@@ -192,7 +202,8 @@ class Store:
 
     async def due_deliveries(self, now: float, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.db.execute(
-            "SELECT d.*, e.source, e.title, e.body, e.level, e.fields_json, e.payload_json, e.received_at"
+            "SELECT d.*, e.source, e.title, e.body, e.level, e.fields_json, e.payload_json, e.received_at,"
+            " e.is_recovery"
             " FROM deliveries d JOIN events e ON e.id = d.event_id"
             " WHERE d.status = 'queued' AND d.next_attempt_at <= ? ORDER BY d.id LIMIT ?",
             (now, limit),
