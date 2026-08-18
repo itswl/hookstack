@@ -69,6 +69,35 @@ services:
     ports:
       - "127.0.0.1:8200:8200"
 
+  # The second brain. Same traffic, a different model, its own ledger — the
+  # pipe's fan-out exists exactly so two judges can be compared on the same
+  # events. Rows where judge-a, judge-b and the platform disagree three ways
+  # are the most label-worthy alerts in the building.
+  hookjudge-b:
+    build: ../hookjudge
+    image: hookjudge:shadow
+    container_name: hookjudge-b
+    restart: unless-stopped
+    environment:
+      HOOKJUDGE_HOST: 0.0.0.0
+      HOOKJUDGE_PORT: 8200
+      HOOKJUDGE_DB: /data/hookjudge.db
+      HOOKJUDGE_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
+      HOOKJUDGE_RETURN_URL: "none"
+      HOOKJUDGE_WORKER_INTERVAL: "0.5"
+      HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
+      HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_B_AI_BASE_URL:-https://api.deepseek.com/v1}
+      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}
+      HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_B_AI_MODEL:-deepseek-reasoner}
+      # Reasoner list price (USD per 1k) as of the v3.2 cut; re-check on change.
+      HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_B_AI_PRICE_IN_PER_1K:-0.00028}
+      HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_B_AI_PRICE_OUT_PER_1K:-0.00042}
+      HOOKJUDGE_READ_TOKEN: ${HOOKJUDGE_READ_TOKEN:-}
+    volumes:
+      - ../shadow-data/hookjudge-b:/data
+    ports:
+      - "127.0.0.1:8201:8200"
+
 networks:
   default:
     # Owned by the platform's app compose; the same wire the investigator and

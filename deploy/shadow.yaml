@@ -53,10 +53,18 @@ channels:
     secret: ${SHADOW_INGEST_SECRET}
     options: {payload: normalized}
 
+  - name: to-judge-b
+    type: generic
+    url: http://hookjudge-b:8200/events
+    secret: ${SHADOW_INGEST_SECRET}
+    options: {payload: normalized}
+
 routes:
-  - name: shadow-to-judge
+  # Both brains, every event: the fan-out IS the experiment. Their ledgers
+  # disagree with each other and with the platform independently.
+  - name: shadow-to-judges
     source: ww
-    send_to: [to-judge]
+    send_to: [to-judge, to-judge-b]
     priority: 0
 
 # The judge does the noise accounting (reuse/recovery are the point of the
