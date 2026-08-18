@@ -28,7 +28,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from hookjudge.alarm import SelfAlarm
-from hookjudge.contract import Incoming, Outgoing
+from hookjudge.contract import IMPORTANCE, Incoming, Outgoing
 from hookjudge.judge import ai_verdict, reuse_verdict, rule_reuse_verdict, rule_verdict
 from hookjudge.live import Live
 from hookjudge.settings import Settings
@@ -309,6 +309,82 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "summary": await store.summary(now_ts() - max(1, window_hours) * 3600),
             "recent": await store.recent(limit, route=route, q=q),
         }
+
+    @app.get("/disagreements")
+    async def disagreements(
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """The review queue: rows where the platform and the judge disagreed.
+
+        In the shadow deployment `level` carries the platform's own verdict, so
+        every row here is a labelled-comparison candidate — the operator's
+        ruling turns it into an eval row, which is the cheapest labelling the
+        eval set will ever get.
+        """
+        _read_guard(x_read_token, authorization)
+        return {"queue": await store.disagreements(limit)}
+
+    @app.post("/judgements/{judgement_id}/label")
+    async def label_judgement(
+        judgement_id: int,
+        payload: dict[str, Any],
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Record the operator's ruling. Guarded by the read token on purpose:
+        this service has exactly one operator surface and one token; a label is
+        an annotation on history, not a mutation of behaviour."""
+        _read_guard(x_read_token, authorization)
+        importance = str(payload.get("importance") or "").strip().lower()
+        if importance not in IMPORTANCE:
+            raise HTTPException(status_code=400, detail=f"importance must be one of {', '.join(IMPORTANCE)}")
+        source = str(payload.get("source") or "operator").strip().lower()
+        if source not in ("platform", "judge", "operator"):
+            raise HTTPException(status_code=400, detail="source must be platform, judge or operator")
+        if not await store.set_label(judgement_id, importance, source, now_ts()):
+            raise HTTPException(status_code=404, detail="judgement not found")
+        return {"labeled": True, "id": judgement_id, "importance": importance, "source": source}
+
+    @app.get("/labels/export")
+    async def export_labels(
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> PlainTextResponse:
+        """Every ruling as eval-harness JSONL (see eval/README.md) — pipe it
+        straight into eval/data. The note keeps the provenance: what the
+        platform said, what the judge said, whose answer the operator took."""
+        _read_guard(x_read_token, authorization)
+        lines = []
+        for row in await store.labeled():
+            try:
+                fields = json.loads(row["fields_json"] or "{}")
+            except ValueError:
+                fields = {}
+            lines.append(
+                json.dumps(
+                    {
+                        "id": f"ledger-{row['id']}",
+                        "seen": 1,
+                        "alert": {
+                            "source": str(fields.get("origin") or row["source"]),
+                            "title": row["title"],
+                            "body": row["body"],
+                            "level": row["level"],
+                            "fields": fields,
+                        },
+                        "expect": {"importance": row["label_importance"], "event_type": row["event_type"]},
+                        "reviewed": True,
+                        "note": (
+                            f"ledger ruling ({row['label_source']}): platform said {row['level']}, "
+                            f"judge said {row['importance']}"
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""), media_type="application/x-ndjson")
 
     @app.get("/metrics", response_class=PlainTextResponse)
     async def metrics(

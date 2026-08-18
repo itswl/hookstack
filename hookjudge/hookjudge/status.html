@@ -67,6 +67,15 @@
   .summary { color:var(--text); margin-top:6px; }
   .meta { color:var(--muted); font-size:12px; font-family:var(--mono); margin-top:6px; }
   .empty { color:var(--muted); text-align:center; padding:30px 0; }
+
+.review{border:1px solid var(--warn);border-radius:8px;margin:10px 0;padding:8px 10px}
+.review h3{margin:0 0 6px;font-size:12px;color:var(--warn);text-transform:uppercase;letter-spacing:.4px}
+.rv{display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap;font-size:12.5px}
+.rv .t{flex:1 1 240px}
+.rv button{font:inherit;font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer}
+.rv button:hover{border-color:var(--accent)}
+.rv select{font:inherit;font-size:11px;background:transparent;color:var(--text);border:1px solid var(--line);border-radius:6px}
+.badge.burst{color:var(--warn);border-color:var(--warn)}
 </style>
 </head>
 <body>
@@ -133,6 +142,11 @@
     <div class="card"><div class="label">platform agreement</div><div class="value" id="cAgree">–</div></div>
   </div>
   <h2>Recent verdicts</h2>
+  <div id="reviewSec" class="review" style="display:none">
+    <h3>review · <span id="rvCount">0</span> disagreements <button id="rvExport" style="float:right">export labels</button></h3>
+    <div id="rvRows"></div>
+  </div>
+
   <div id="rows"><div class="empty">…</div></div>
 </div>
 <script>
@@ -192,13 +206,17 @@
       document.getElementById("cAgree").textContent =
         ag.agree_pct == null ? "–" : ag.agree_pct + "% of " + ag.compared;
       var rows = d.recent || [];
+      fetch("/disagreements?limit=20", { headers: readHeaders() })
+        .then(function (r) { return r.ok ? r.json() : { queue: [] }; })
+        .then(renderReview).catch(function () {});
       document.getElementById("rows").innerHTML = rows.length ? rows.map(function (r) {
         var ret = r.return_status === "sent" ? "" :
           '<span class="badge ' + esc(r.return_status) + '">return ' + esc(r.return_status) + "</span>";
+        var burst = r.burst_id ? '<span class="badge burst" title="' + esc(r.burst_id) + '">burst</span>' : "";
         return '<div class="row"><div class="head">' +
           '<span class="dot ' + (r.is_recovery ? "ended" : esc(r.importance)) + '"></span>' +
           '<span class="title">' + esc(r.title) + "</span>" +
-          '<span class="badge ' + esc(r.route) + '">' + esc(r.route) + "</span>" + ret +
+          '<span class="badge ' + esc(r.route) + '">' + esc(r.route) + "</span>" + burst + ret +
           '<span class="when">' + esc(when(r.received_at)) + "</span></div>" +
           '<div class="summary">' + esc(r.summary) + "</div>" +
           '<div class="meta">' + esc(r.importance) + " · " + esc(r.event_type || "-") +
@@ -208,6 +226,53 @@
       document.getElementById("stamp").textContent = "refreshed " + new Date().toTimeString().slice(0,8);
     }).catch(function () { document.getElementById("stamp").textContent = "connection failed"; });
   }
+  // The review queue: every row is a platform-vs-judge disagreement, and one
+  // click is one eval label — the cheapest labelling this dataset will get.
+  // Two named buttons take a side; the picker records a third answer.
+  function renderReview(d) {
+    var queue = (d && d.queue) || [];
+    var sec = document.getElementById("reviewSec");
+    document.getElementById("rvCount").textContent = queue.length;
+    if (!queue.length) { sec.style.display = "none"; return; }
+    sec.style.display = "";
+    document.getElementById("rvRows").innerHTML = queue.map(function (r) {
+      var others = ["critical","high","medium","low"].filter(function (x) {
+        return x !== r.level && x !== r.importance;
+      }).map(function (x) { return '<option value="' + x + '">' + x + "</option>"; }).join("");
+      return '<div class="rv" data-id="' + esc(r.id) + '">' +
+        '<span class="t" title="' + esc(r.summary) + '">' + esc(r.title) + "</span>" +
+        '<button data-imp="' + esc(r.level) + '" data-src="platform">platform: ' + esc(r.level) + "</button>" +
+        '<button data-imp="' + esc(r.importance) + '" data-src="judge">judge: ' + esc(r.importance) + "</button>" +
+        '<select data-src="operator"><option value="">neither…</option>' + others + "</select>" +
+        "</div>";
+    }).join("");
+    Array.prototype.forEach.call(document.getElementById("rvRows").querySelectorAll(".rv"), function (row) {
+      var id = row.getAttribute("data-id");
+      function send(importance, src) {
+        fetch("/judgements/" + id + "/label", {
+          method: "POST",
+          headers: Object.assign({ "content-type": "application/json" }, readHeaders()),
+          body: JSON.stringify({ importance: importance, source: src }),
+        }).then(function (r) { if (r.ok) refresh(); });
+      }
+      Array.prototype.forEach.call(row.querySelectorAll("button"), function (b) {
+        b.addEventListener("click", function () { send(b.getAttribute("data-imp"), b.getAttribute("data-src")); });
+      });
+      row.querySelector("select").addEventListener("change", function (e) {
+        if (e.target.value) send(e.target.value, "operator");
+      });
+    });
+  }
+  document.getElementById("rvExport").addEventListener("click", function () {
+    fetch("/labels/export", { headers: readHeaders() }).then(function (r) { return r.text(); }).then(function (text) {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: "application/x-ndjson" }));
+      a.download = "ledger-labels.jsonl";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  });
+
   refresh();
   // ── live control · keep this block identical in all three pages ────────────
   // A board is watched while something is happening, and what it shows changes
