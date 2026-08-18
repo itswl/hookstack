@@ -40,7 +40,11 @@ from pathlib import Path
 # Everything the model is handed as standing instruction — plus the audit log,
 # which is here for a different reason: a record its own subject can rewrite is
 # not a record.
-_PROTECTED = (".claude", "CLAUDE.md", "system-prompt.md", "audit")
+# memory-suggestions.jsonl: the agent PROPOSES memory through its report;
+# writing the queue directly would let it forge attribution or flush other
+# runs' suggestions. (A bash write around this guard can at worst stuff
+# the queue with rows an operator dismisses — never write memory itself.)
+_PROTECTED = (".claude", "CLAUDE.md", "system-prompt.md", "audit", "memory-suggestions.jsonl")
 
 # Hashed before and after a run. `audit/` is deliberately absent: the flight
 # recorder appends a line per tool call, so it changes during every healthy run

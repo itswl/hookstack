@@ -31,7 +31,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from hookprobe import __version__
+from hookprobe import __version__, suggestions
 from hookprobe.distill import draft_skill, record_revision, snapshot
 from hookprobe.engine import (
     _load_agents_raw,
@@ -54,6 +54,9 @@ alert, and if you find one, cite it and compare — what was the previous verdic
 one agree.
 Answer with a short Markdown report, conclusion first: the opening paragraph is a \
 one-sentence conclusion a notification card can quote verbatim.
+If this investigation taught you a durable fact about the ENVIRONMENT itself — topology, \
+a known false alarm, a naming convention; never about this one incident — end the report \
+with a line `MEMORY-SUGGESTION: <the fact, one line>`. At most one; omit it when unsure.
 
 Source: {source}
 Level: {level}
@@ -466,6 +469,27 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     # session (setting_sources includes "project"), so facts written here —
     # topology, known false alarms, naming conventions — reach every
     # investigation from its first turn.
+    @app.get("/v1/memory/suggestions", dependencies=[Depends(require_token)])
+    async def memory_suggestions() -> dict[str, Any]:
+        """Facts investigations proposed for the environment memory. Open rows
+        wait for a person; the memory itself is never machine-written."""
+        rows = suggestions.load(settings.workdir)
+        return {"open": [row for row in rows if row.get("status") == "open"]}
+
+    @app.post("/v1/memory/suggestions/{suggestion_id}/accept", dependencies=[Depends(require_token)])
+    async def memory_suggestion_accept(suggestion_id: str) -> dict[str, Any]:
+        row = suggestions.resolve(settings.workdir, suggestion_id, accept=True)
+        if row is None:
+            raise HTTPException(status_code=404, detail="no such open suggestion")
+        return {"accepted": True, "line": row["line"]}
+
+    @app.post("/v1/memory/suggestions/{suggestion_id}/dismiss", dependencies=[Depends(require_token)])
+    async def memory_suggestion_dismiss(suggestion_id: str) -> dict[str, Any]:
+        row = suggestions.resolve(settings.workdir, suggestion_id, accept=False)
+        if row is None:
+            raise HTTPException(status_code=404, detail="no such open suggestion")
+        return {"dismissed": True}
+
     @app.get("/v1/memory", dependencies=[Depends(require_token)])
     async def memory_read() -> dict[str, Any]:
         path = settings.workdir / "CLAUDE.md"
