@@ -56,7 +56,9 @@ changing a URL. In this stack it is opt-in (see STACK.md): it needs a real
 model key to be worth starting.
 
 Each service has its own gate, its own Dockerfile and its own CI workflow, so a
-change to one does not queue the other's jobs.
+change to one does not queue the other's jobs. For a change that touches more
+than one, `bash scripts/gate.sh` runs every component's gate plus the stack
+checks in one command.
 
 ---
 
