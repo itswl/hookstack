@@ -16,7 +16,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from hookprobe import distill
+from hookprobe import distill, suggestions
 from hookprobe.engine import EngineResult
 from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
@@ -499,7 +499,17 @@ class RunService:
             return
 
         run.status = COMPLETED
-        run.text = result.text
+        # Suggestions ride the report as marker lines; lift them into the queue
+        # before anything records or delivers the text.
+        stripped, facts = suggestions.extract(result.text)
+        run.text = stripped
+        if facts:
+            try:
+                queued = suggestions.append(self._settings.workdir, run.session_key, facts)
+                if queued:
+                    run.meta["memory_suggestions"] = queued
+            except OSError:
+                logger.warning("could not queue memory suggestions", exc_info=True)
         self._record_turn(run, result)
         if run.meta.get("consolidates"):
             # A consolidation run's product is a PROPOSAL beside the manifest,
