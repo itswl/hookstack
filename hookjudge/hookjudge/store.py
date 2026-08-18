@@ -249,6 +249,35 @@ class Store:
         returns = {str(row["return_status"]): int(row["n"]) for row in await cursor.fetchall()}
         judged = sum(r["count"] for r in routes.values())
         paid = routes.get("ai", {}).get("count", 0)
+        # The shadow run's actual product: judge-vs-platform disagreement,
+        # from two columns every row already carries (level = the upstream
+        # platform's verdict as the pipe delivered it, importance = ours).
+        # Recoveries are excluded: their importance is REUSED from the firing
+        # by design, so counting them would manufacture agreement the judge
+        # never expressed.
+        cursor = await self.db.execute(
+            "SELECT level, importance, count(*) AS n FROM judgements"
+            " WHERE received_at >= ? AND level != '' AND importance != ''"
+            "   AND coalesce(is_recovery, 0) = 0"
+            " GROUP BY level, importance",
+            (since,),
+        )
+        matrix: dict[str, dict[str, int]] = {}
+        compared = agree = 0
+        for row in await cursor.fetchall():
+            lvl, imp, n = str(row["level"]), str(row["importance"]), int(row["n"])
+            matrix.setdefault(lvl, {})[imp] = n
+            compared += n
+            if lvl == imp:
+                agree += n
+        cursor = await self.db.execute(
+            "SELECT id, title, level, importance, route FROM judgements"
+            " WHERE received_at >= ? AND level != '' AND importance != ''"
+            "   AND coalesce(is_recovery, 0) = 0 AND level != importance"
+            " ORDER BY id DESC LIMIT 5",
+            (since,),
+        )
+        disagreements = [dict(row) for row in await cursor.fetchall()]
         return {
             "judged": judged,
             "routes": routes,
@@ -257,6 +286,13 @@ class Store:
             # The number the cost conversation actually turns on: how many of
             # the judgements we served did we have to pay a model for?
             "paid_ratio_pct": round(100.0 * paid / judged, 1) if judged else 0.0,
+            "agreement": {
+                "compared": compared,
+                "agree_pct": round(100.0 * agree / compared, 1) if compared else None,
+                # {platform_level: {judge_importance: count}}
+                "matrix": matrix,
+                "recent_disagreements": disagreements,
+            },
         }
 
     async def purge_older_than(self, cutoff: float) -> int:

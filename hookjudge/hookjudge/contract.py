@@ -110,6 +110,12 @@ _NON_IDENTITY_FIELDS = frozenset(
         "level",
         "importance",
         "priority",
+        # The platform's triage verdict rides along for three-way comparison
+        # (platform importance / platform triage / judge importance). It can
+        # flip between a firing and its recovery, so it must never split
+        # identity.
+        "triage_verdict",
+        "triage_confidence",
     }
 )
 

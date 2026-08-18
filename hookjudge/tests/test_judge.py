@@ -718,3 +718,28 @@ def test_explicit_recovery_flag_beats_keyword_sniffing():
     # Nothing stated: keyword fallback still works both ways.
     assert Incoming.parse(flat, now=1.0).is_recovery is False
     assert Incoming.parse({**flat, "title": "[RESOLVED] top-up"}, now=1.0).is_recovery is True
+
+
+@pytest.mark.anyio
+async def test_agreement_compares_platform_level_with_judge_importance(tmp_path):
+    """The shadow run's product: how often the judge and the upstream platform
+    agree, from the two columns every row carries. Recoveries are excluded —
+    their importance is inherited from the firing by design, so counting them
+    would manufacture agreement the judge never expressed."""
+    store = await _ledger(tmp_path)
+    await store.record(event(title="a", level="high"), ai_ok(importance="high"), 1)
+    await store.record(event(title="b", level="high"), ai_ok(importance="medium"), 1)
+    await store.record(event(title="c", level="low"), ai_ok(importance="low"), 1)
+    await store.record(
+        Incoming.parse({"source": "ww", "title": "a", "body": "", "level": "low",
+                        "fields": {}, "event_id": 9, "is_recovery": True}, now=1.0),
+        ai_ok(importance="high"), 0)
+
+    summary = await store.summary(0.0)
+    agreement = summary["agreement"]
+    assert agreement["compared"] == 3          # the recovery row is excluded
+    assert agreement["agree_pct"] == 66.7      # a + c agree, b does not
+    assert agreement["matrix"]["high"] == {"high": 1, "medium": 1}
+    rows = agreement["recent_disagreements"]
+    assert len(rows) == 1 and rows[0]["title"] == "b"
+    await store.close()

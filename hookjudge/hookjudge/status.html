@@ -98,10 +98,14 @@
     </table>
     <p class="muted-p">The saving does not come from a cheaper model. It comes from most events never reaching ai at all.</p>
     <h2>Reading this board</h2>
-    <p>Four cards: verdicts in 24h / paid share (the ai fraction) / spend in 24h / <b>failed returns</b>
+    <p>Five cards: verdicts in 24h / paid share (the ai fraction) / spend in 24h / <b>failed returns</b>
     (&gt;0 means the pipe is not receiving verdicts — with <code>HOOKJUDGE_ALARM_URL</code> set, the news
-    travels around the pipe as a direct self-alarm). Each verdict row is badged with its route, next to
-    the latency and what that one verdict cost.</p>
+    travels around the pipe as a direct self-alarm) / <b>platform agreement</b> — on shadow deployments
+    the pipe delivers each event with the upstream platform's own verdict as <code>level</code>, so the
+    ledger can say how often the judge and the platform agree. Recoveries are excluded (their importance
+    is inherited from the firing by design), and the <code>/status</code> JSON carries the full
+    level×importance matrix plus the latest disagreements — the rows worth reading. Each verdict row is
+    badged with its route, next to the latency and what that one verdict cost.</p>
     <p class="muted-p">The header's ↻ refreshes now, and the interval beside it (manual / 15s / 60s / 5m,
     remembered per browser) is the only clock on this page — the stamp says when the data is from.</p>
     <h2>API and addresses</h2>
@@ -126,6 +130,7 @@
     <div class="card"><div class="label">paid share</div><div class="value" id="cPaid">–</div></div>
     <div class="card"><div class="label">spend 24h</div><div class="value" id="cCost">–</div></div>
     <div class="card"><div class="label">failed returns</div><div class="value" id="cDead">–</div></div>
+    <div class="card"><div class="label">platform agreement</div><div class="value" id="cAgree">–</div></div>
   </div>
   <h2>Recent verdicts</h2>
   <div id="rows"><div class="empty">…</div></div>
@@ -183,6 +188,9 @@
       document.getElementById("cPaid").textContent = s.paid_ratio_pct + "%";
       document.getElementById("cCost").textContent = "$" + s.cost;
       document.getElementById("cDead").textContent = s.returns.dead || 0;
+      var ag = s.agreement || {};
+      document.getElementById("cAgree").textContent =
+        ag.agree_pct == null ? "–" : ag.agree_pct + "% of " + ag.compared;
       var rows = d.recent || [];
       document.getElementById("rows").innerHTML = rows.length ? rows.map(function (r) {
         var ret = r.return_status === "sent" ? "" :
