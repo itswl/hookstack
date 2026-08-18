@@ -78,7 +78,7 @@ class ExtractTemplate:
     def extract(self, payload: Any, *, door: str) -> dict[str, Any]:
         level_raw = render(self.level, payload).lower() if self.level else ""
         level = self.level_map.get(level_raw, level_raw) or "info"
-        event = {
+        event: dict[str, Any] = {
             "title": render(self.title, payload) or f"webhook from {door}",
             "body": render(self.body, payload),
             "level": level,
