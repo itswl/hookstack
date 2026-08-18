@@ -126,6 +126,9 @@ class Incoming:
     raw: dict[str, Any]
     correlation_id: str
     received_at: float
+    # The pipe's explicit recovery flag, when the upstream platform stated the
+    # fact (None = nothing stated; fall back to keyword detection).
+    recovery_flag: bool | None = None
 
     @classmethod
     def parse(cls, payload: dict[str, Any], *, now: float, correlation_id: str = "") -> Incoming:
@@ -145,6 +148,14 @@ class Incoming:
         wrapped = payload.get("event")
         event = wrapped if isinstance(wrapped, dict) else payload
         fields = _dict_or_empty(event.get("fields"))
+        recovery_raw = event.get("is_recovery", meta.get("is_recovery"))
+        recovery_flag: bool | None
+        if isinstance(recovery_raw, bool):
+            recovery_flag = recovery_raw
+        elif isinstance(recovery_raw, str) and recovery_raw.strip():
+            recovery_flag = recovery_raw.strip().lower() in ("true", "1", "yes", "resolved", "recovery", "recovered")
+        else:
+            recovery_flag = None
         return cls(
             source=str(meta.get("source") or event.get("source") or "unknown"),
             title=str(event.get("title") or ""),
@@ -163,6 +174,7 @@ class Incoming:
                 or (f"hr-{event['event_id']}" if str(event.get("event_id") or "").strip() else "")
             ),
             received_at=float(meta.get("received_at") or event.get("received_at") or now),
+            recovery_flag=recovery_flag,
         )
 
     @property
@@ -205,7 +217,14 @@ class Incoming:
     @property
     def is_recovery(self) -> bool:
         """Did the condition END? Recovery is a fact about the alert, not an
-        opinion, so it is read here and never asked of the model."""
+        opinion, so it is read here and never asked of the model.
+
+        A pipe that carries the upstream platform's explicit flag wins over
+        keyword sniffing: a recovery whose body is a reused firing summary
+        (WebhookWise's relay envelope does exactly this) contains no recovery
+        word at all, and sniffing called it a fresh firing."""
+        if self.recovery_flag is not None:
+            return self.recovery_flag
         haystack = f"{self.title} {self.body} {' '.join(self.fields.values())}".lower()
         # "ok" only counts as a standalone word: "okhttp timeout" is not a recovery.
         words = set(haystack.replace("[", " ").replace("]", " ").replace(":", " ").split())

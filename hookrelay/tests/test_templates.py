@@ -332,3 +332,24 @@ def json_roundtrip(value):
     import json
 
     return json.loads(json.dumps(value))
+
+
+def test_recovery_template_sets_a_top_level_flag_not_a_field():
+    """The recovery flag must ride OUTSIDE fields: identity is built from
+    fields, and a flag that flips between firing and recovery would split the
+    pair into two identities — the recovery could never find its firing."""
+    from hookrelay.templates import ExtractTemplate
+
+    template = ExtractTemplate(name="t", title="{meta.alert_name}", body="{analysis.summary}",
+                               recovery="{meta.is_recovery}")
+    firing = template.extract({"meta": {"alert_name": "cpu", "is_recovery": False},
+                               "analysis": {"summary": "cpu high"}}, door="ww")
+    recovery = template.extract({"meta": {"alert_name": "cpu", "is_recovery": True},
+                                 "analysis": {"summary": "cpu high"}}, door="ww")
+    assert firing["is_recovery"] is False
+    assert recovery["is_recovery"] is True
+    assert "is_recovery" not in firing["fields"] and "is_recovery" not in recovery["fields"]
+    # Unconfigured template: no key at all — downstream falls back to sniffing.
+    bare = ExtractTemplate(name="t", title="{meta.alert_name}").extract(
+        {"meta": {"alert_name": "cpu"}}, door="ww")
+    assert "is_recovery" not in bare

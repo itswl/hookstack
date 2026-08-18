@@ -14,6 +14,10 @@ sources:
     level_map:
       alerting: high
       ok: info
+    # Optional: a template whose truthy rendering marks the event a RECOVERY
+    # (top-level is_recovery, never a field — fields build identity, and a
+    # flag that flips between firing and recovery would split the pair).
+    # recovery: "{meta.is_recovery}"
     fields:
       state: "{state}"
     fingerprint_fields: [title]     # repeats of the same alert dedup on title

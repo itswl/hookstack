@@ -60,6 +60,8 @@ class Source:
     title: str
     body: str
     level: str
+    # Optional recovery-flag template (see ExtractTemplate.recovery).
+    recovery: str = ""
     # Ordered extraction templates; one door, many payload shapes. Always at
     # least one entry (the inline title/body/level form becomes template
     # "inline"), so selection can never come up empty.
@@ -173,6 +175,7 @@ class Config:
                 level=str(item.get("level", "")),
                 level_map={str(k).lower(): str(v) for k, v in (item.get("level_map") or {}).items()},
                 fields={str(k): str(v) for k, v in (item.get("fields") or {}).items()},
+                recovery=str(item.get("recovery", "")),
                 selector=selector,
             )
             for reserved in RESERVED_FIELD_NAMES:
@@ -193,6 +196,7 @@ class Config:
                 title=str(item.get("title", "{title}")),
                 body=str(item.get("body", "{body}")),
                 level=str(item.get("level", "")),
+                recovery=str(item.get("recovery", "")),
                 adapter=str(item.get("adapter", "default")),
                 level_map={str(k).lower(): str(v) for k, v in (item.get("level_map") or {}).items()},
                 fields={str(k): str(v) for k, v in (item.get("fields") or {}).items()},
@@ -235,6 +239,7 @@ class Config:
                         level=src.level,
                         level_map=src.level_map,
                         fields=src.fields,
+                        recovery=src.recovery,
                     ),
                 )
             src = replace(src, templates=chosen)
