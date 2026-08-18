@@ -114,6 +114,9 @@ services:
       # already investigated it (follow-up turn) instead of funding a cold
       # start. Default 1800s; 0 = every fire is its own run.
       HOOKPROBE_COALESCE_WINDOW_SECONDS: ${HOOKPROBE_COALESCE_WINDOW_SECONDS:-}
+      # Consolidation: at N cases a runbook buys one distillation run whose
+      # draft waits for review as proposal.md. 0 = off.
+      HOOKPROBE_CONSOLIDATE_AT: ${HOOKPROBE_CONSOLIDATE_AT:-}
       # Model-call telemetry. On by default and harmless when nothing is
       # listening — measured: with no endpoint a run finishes in the same time,
       # emits no retries and logs nothing. So the switch stays on and the only

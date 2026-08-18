@@ -371,3 +371,135 @@ def test_review_endpoints_guard_their_edges(tmp_path: Path) -> None:
     assert client.get("/v1/skills/nope/history", headers=auth).json() == []
     assert client.get("/v1/skills/nope/history/123", headers=auth).status_code == 404
     assert client.post("/v1/skills/x/review").status_code == 401
+
+
+# --- the consolidation pass ---------------------------------------------------
+
+
+def test_the_case_threshold_spawns_one_consolidation_run(tmp_path: Path) -> None:
+    """Five investigations of one condition buy one distillation run — spawned
+    off the completion path so the fifth report is never delayed, and only one
+    at a time: the open proposal is the re-arm latch."""
+    from hookprobe.engine import EngineResult
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    async def scenario():
+        engine = FakeEngine(result=EngineResult(text="Disk on db-1 filled up.", message_count=2))
+        service = RunService(
+            make_settings(tmp_path, auto_distill_max=10, consolidate_at=3),
+            engine,
+            RunStore(tmp_path / "results"),
+        )
+        for index in range(3):
+            service.start({"message": "Title: disk pressure on db-1\ncheck it", "sessionKey": f"k{index}"})
+            await wait_finished(service, f"k{index}")
+        # The third update crossed the threshold; the spawned consolidation run
+        # is on the board like any other run.
+        for _ in range(200):
+            runs = [r for r in service.list_runs(limit=20) if r.meta.get("consolidates")]
+            if runs and runs[0].finished:
+                return service, engine, runs
+            await asyncio.sleep(0.01)
+        raise AssertionError("no consolidation run appeared")
+
+    service, engine, cruns = asyncio.run(scenario())
+    assert len(cruns) == 1, "one open proposal at a time"
+    assert cruns[0].origin == "system"
+    assert "consolidating" in engine.messages[-1] and "disk-pressure-on-db-1" in engine.messages[-1]
+    # The FakeEngine's prose is not a valid manifest, so the outcome says so.
+    assert cruns[0].distilled == {"skipped": "draft did not validate as a manifest"}
+
+
+def test_a_valid_draft_lands_as_a_proposal_and_approval_replaces_the_manifest(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.engine import EngineResult
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    name = "disk-pressure-on-db-1"
+    draft = (
+        f"---\nname: {name}\ndescription: consolidated.\n---\n\n# disk pressure on db-1\n\n"
+        "## Procedure\n\n1. `df -h`\n\n## Investigations\n\n"
+        f"{distill.CASES_MARKER}\n\n<!-- case:start 9 -->\nnewest case kept\n<!-- case:end -->\n"
+    )
+    settings = make_settings(tmp_path, auto_distill_max=10, consolidate_at=2)
+
+    class RoutingEngine(FakeEngine):
+        # The consolidation run is spawned inside the second run's completion
+        # path — before any test code gets a turn — so the engine must decide
+        # by message, not by when the test swaps a field.
+        async def run(self, *, message, session_key, resume=None, on_event=None):
+            self.result = (
+                EngineResult(text=draft, message_count=1)
+                if "consolidating" in message
+                else EngineResult(text="Disk on db-1 filled up.", message_count=2)
+            )
+            return await super().run(message=message, session_key=session_key, resume=resume, on_event=on_event)
+
+    engine = RoutingEngine()
+    service = RunService(settings, engine, RunStore(tmp_path / "results"))
+    client = TestClient(create_app(settings, service))
+    headers = {"Authorization": f"Bearer {settings.token}"}
+
+    async def scenario():
+        for index in range(2):
+            service.start({"message": "Title: disk pressure on db-1\ncheck", "sessionKey": f"k{index}"})
+            await wait_finished(service, f"k{index}")
+        for _ in range(300):
+            runs = [r for r in service.list_runs(limit=20) if r.meta.get("consolidates")]
+            if runs and runs[0].finished:
+                return runs[0]
+            await asyncio.sleep(0.01)
+        raise AssertionError("no consolidation run")
+
+    crun = asyncio.run(scenario())
+    assert crun.distilled == {"proposed": name}
+
+    listed = {row["name"]: row for row in client.get("/v1/skills", headers=headers).json()}
+    assert listed[name]["proposal"] is True
+
+    before = (tmp_path / ".claude" / "skills" / name / "SKILL.md").read_text()
+    assert client.post(f"/v1/skills/{name}/proposal/approve", headers=headers).json()["approved"] is True
+    manifest = (tmp_path / ".claude" / "skills" / name / "SKILL.md").read_text()
+    assert "## Procedure" in manifest and "newest case kept" in manifest
+    # The displaced pile is one file copy away, and approving was the review.
+    kept = sorted((tmp_path / ".claude" / "skills" / name / "history").glob("*-SKILL.md"))
+    assert kept and kept[-1].read_text() == before
+    origin = client.get(f"/v1/skills/{name}/origin", headers=headers).json()
+    assert origin["reviewed"] is True
+    assert client.get(f"/v1/skills/{name}/proposal", headers=headers).status_code == 404
+
+
+def test_a_rejected_proposal_leaves_the_manifest_alone(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    name = "hand-made"
+    settings = make_settings(tmp_path)
+    skills = tmp_path / ".claude" / "skills" / name
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("---\nname: hand-made\n---\nkeep me\n")
+    (skills / "proposal.md").write_text("a draft\n")
+    client = TestClient(create_app(settings, RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))))
+    headers = {"Authorization": f"Bearer {settings.token}"}
+
+    assert client.post(f"/v1/skills/{name}/proposal/reject", headers=headers).json()["rejected"] is True
+    assert (skills / "SKILL.md").read_text() == "---\nname: hand-made\n---\nkeep me\n"
+    assert not (skills / "proposal.md").exists()
+
+
+def test_a_fenced_or_mislabeled_draft_is_normalized_or_dropped() -> None:
+    good = "---\nname: x\n---\n\n" + distill.CASES_MARKER + "\n"
+    assert distill.valid_consolidation("```markdown\n" + good + "```", "x").startswith("---")
+    assert distill.valid_consolidation("Sure! Here is the file:\n" + good, "x") == ""
+    assert distill.valid_consolidation(good.replace("name: x", "name: y"), "x") == ""
+    assert distill.valid_consolidation("---\nname: x\n---\nno marker\n", "x") == ""

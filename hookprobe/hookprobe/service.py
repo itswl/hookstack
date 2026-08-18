@@ -501,8 +501,15 @@ class RunService:
         run.status = COMPLETED
         run.text = result.text
         self._record_turn(run, result)
-        # After the turn is recorded, because the runbook is assembled from it.
-        self._auto_distill(run, result)
+        if run.meta.get("consolidates"):
+            # A consolidation run's product is a PROPOSAL beside the manifest,
+            # waiting for review — and it must never itself be distilled, or
+            # the loop would write runbooks about rewriting runbooks.
+            self._accept_consolidation(run, result)
+        else:
+            # After the turn is recorded, because the runbook is assembled from it.
+            self._auto_distill(run, result)
+            self._maybe_consolidate(run)
         self._settle(run)
         self._schedule_return(run)
         logger.info(
@@ -538,6 +545,66 @@ class RunService:
         else:
             verb, name = next(iter(outcome.items()))
             logger.info("auto-distill %s session=%s runbook=%s", verb, run.session_key, name)
+
+    def _maybe_consolidate(self, run: Run) -> None:
+        """At the case threshold, spend one run turning the pile into a draft.
+
+        Spawned from the completion path, so it never delays the report; the
+        draft lands as proposal.md and waits for review. Deliberately outside
+        the event-door budget breaker (an operator set the threshold, so this
+        spend was asked for), but every run is recorded, so the window spend
+        and the board both show it.
+        """
+        threshold = self._settings.consolidate_at
+        if threshold <= 0:
+            return
+        name = (run.distilled or {}).get("updated") or (run.distilled or {}).get("installed")
+        if not name:
+            return
+        skill_dir = self._settings.workdir / ".claude" / "skills" / str(name)
+        manifest = skill_dir / "SKILL.md"
+        if (skill_dir / "proposal.md").exists():
+            return  # one open proposal at a time; approving or rejecting re-arms
+        try:
+            count = distill.case_count(manifest.read_text(encoding="utf-8"))
+        except OSError:
+            return
+        if count < threshold:
+            return
+        for other in self._store.list_runs(limit=50):
+            if not other.finished and other.meta.get("consolidates") == name:
+                return  # already being consolidated
+        message = distill.CONSOLIDATION_MESSAGE.format(path=str(manifest), count=count, name=name)
+        payload = {
+            "message": message,
+            "sessionKey": f"consolidate:{name}:{uuid.uuid4().hex[:6]}",
+            "_meta": {"consolidates": str(name), "title": f"consolidate: {name}"},
+        }
+        consolidation = self.start(payload, origin="system")
+        logger.info("consolidation spawned session=%s runbook=%s cases=%s", consolidation.session_key, name, count)
+
+    def _accept_consolidation(self, run: Run, result: EngineResult) -> None:
+        """Park the draft as a proposal — or say exactly why not."""
+        name = str(run.meta.get("consolidates") or "")
+        skill_dir = self._settings.workdir / ".claude" / "skills" / name
+        if not (skill_dir / "SKILL.md").is_file():
+            run.distilled = {"skipped": f"runbook '{name}' vanished mid-consolidation"}
+            return
+        if result.input_changes:
+            run.distilled = {"skipped": "run changed its own inputs"}
+            return
+        draft = distill.valid_consolidation(result.text or "", name)
+        if not draft:
+            run.distilled = {"skipped": "draft did not validate as a manifest"}
+            logger.warning("consolidation draft rejected session=%s runbook=%s", run.session_key, name)
+            return
+        try:
+            distill.write_proposal(skill_dir, draft)
+        except OSError as exc:
+            run.distilled = {"skipped": f"write failed: {exc}"}
+            return
+        run.distilled = {"proposed": name}
+        logger.info("consolidation proposed session=%s runbook=%s", run.session_key, name)
 
     def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:
         run.status = FAILED
