@@ -89,6 +89,7 @@ what runs.
 | `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24` | The sliding window the budget is measured over |
 | `HOOKPROBE_RETENTION_DAYS` | `0` *(keep all)* | Case files and transcripts older than this are pruned daily; skills and memory are never touched |
 | `HOOKPROBE_AUTO_DISTILL_MAX` | `0` *(manual)* | How many runbooks finished runs may leave behind. Above 0, each completed run writes its own `.claude/skills/<name>/SKILL.md` — from the service, create-only, marked unreviewed. See *The learning loop* |
+| — | — | Memory suggestions have no switch: the family-door prompt invites at most one `MEMORY-SUGGESTION:` line per report; the service lifts it into a queue the memory page reviews. Accepting appends to CLAUDE.md; the agent's own tools cannot touch the queue or the memory |
 | `HOOKPROBE_CONSOLIDATE_AT` | `5` *(0 = off)* | At this many accumulated cases, a runbook triggers ONE agent run that distills the pile into a curated procedure. The draft lands as `proposal.md` beside the manifest and waits for review — approve replaces (snapshotting what it displaced), reject re-arms |
 | `HOOKPROBE_COALESCE_WINDOW_SECONDS` | `1800` | A re-fire of the same alert (same source+title, new event id) inside this window becomes a follow-up turn in the existing session instead of a new cold-start investigation. Redelivery of the same event id stays idempotent. `0` disables |
 | `HOOKPROBE_REPEAT_REMINDER_AT` | `3` *(0 = off)* | After N identical tool calls, remind the agent to change approach |

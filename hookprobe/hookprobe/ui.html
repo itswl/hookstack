@@ -763,14 +763,30 @@ async function openMemory() {
   leaveSessions("memory");
   try {
     const m = await (await api("/v1/memory")).json();
+    let pending = [];
+    try { pending = (await (await api("/v1/memory/suggestions")).json()).open || []; } catch (e) {}
     $("#meta").textContent = "environment memory · CLAUDE.md · loaded into every investigation";
-    $("#turns").innerHTML = `
+    // Investigations propose; only a person writes. Suggestions sit above the
+    // editor because each one is a pending question, not archive material.
+    const sugHtml = pending.length
+      ? `<div class="review-head" style="color:var(--amber)">suggested by investigations · ${pending.length}</div>` +
+        pending.map((row) =>
+          `<div class="ev sug-row" data-id="${attr(row.id)}"><span class="ev-tool">${esc(row.session_key)}</span>` +
+          `${esc(row.line)} <a class="hist-diff" data-act="accept">accept</a>` +
+          `<a class="hist-diff" data-act="dismiss">dismiss</a></div>`).join("")
+      : "";
+    $("#turns").innerHTML = sugHtml + `
       <div class="mem-tip">Facts every investigation should start from: cluster topology, known false alarms,
       naming conventions, where the dashboards live. The engine loads this file automatically at each turn.</div>
       <textarea id="memEdit" spellcheck="false"></textarea>
       <div class="mem-bar"><button id="memSave" class="primary">Save</button><span id="memStatus"></span></div>`;
     $("#memEdit").value = m.content || "";
     $("#turns").scrollTop = 0;
+    $("#turns").querySelectorAll(".sug-row a").forEach((a) => (a.onclick = async () => {
+      const id = a.closest(".sug-row").dataset.id;
+      const r = await api(`/v1/memory/suggestions/${encodeURIComponent(id)}/${a.dataset.act}`, { method: "POST" });
+      if (r.ok) openMemory(); else $("#hint").textContent = "failed (" + r.status + ")";
+    }));
     $("#memSave").onclick = async () => {
       try {
         const r = await api("/v1/memory", { method: "PUT", body: JSON.stringify({ content: $("#memEdit").value }) });
