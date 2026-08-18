@@ -37,6 +37,8 @@ sources:
     title: "{meta.alert_name}"
     body: "{analysis.summary}"
     level: "{meta.importance}"
+    # The platform states the fact; top-level flag, never a field (identity).
+    recovery: "{meta.is_recovery}"
     # Fields feed the judge's IDENTITY. Anything that differs between a
     # firing and its recovery (a recovery flag, an event_type that flips to
     # 恢复, the reminder bit) would split the pair into two identities and the
@@ -45,6 +47,10 @@ sources:
     # constant and says nothing. One stable attribute stays.
     fields:
       origin: "{meta.source}"
+      # Non-identity by the judge contract: three-way comparison data
+      # (platform importance / platform triage / judge importance).
+      triage_verdict: "{analysis.triage_verdict}"
+      triage_confidence: "{analysis.triage_confidence}"
 
 channels:
   - name: to-judge
