@@ -16,7 +16,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from hookprobe import distill, suggestions
+from hookprobe import distill, remediation, suggestions
 from hookprobe.engine import EngineResult
 from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
@@ -510,6 +510,14 @@ class RunService:
                     run.meta["memory_suggestions"] = queued
             except OSError:
                 logger.warning("could not queue memory suggestions", exc_info=True)
+        steps = remediation.extract(run.text)
+        if steps:
+            try:
+                proposal_id = remediation.propose(self._settings.workdir, run.session_key, steps)
+                run.meta["remediation_proposal"] = proposal_id
+                logger.info("remediation proposed session=%s id=%s steps=%s", run.session_key, proposal_id, len(steps))
+            except OSError:
+                logger.warning("could not park the remediation proposal", exc_info=True)
         self._record_turn(run, result)
         if run.meta.get("consolidates"):
             # A consolidation run's product is a PROPOSAL beside the manifest,
@@ -615,6 +623,104 @@ class RunService:
             return
         run.distilled = {"proposed": name}
         logger.info("consolidation proposed session=%s runbook=%s", run.session_key, name)
+
+    def approve_remediation(self, proposal_id: str, note: str = "") -> dict[str, Any]:
+        """The operator's click. Gate-checks EVERY step against the allowlist
+        before anything runs — a proposal that is half executable is refused
+        whole, because "steps 1 and 3 ran" is the worst possible outcome of a
+        procedure written as 1-2-3."""
+        row = remediation.load(self._settings.workdir, proposal_id)
+        if row is None:
+            raise LookupError("no such proposal")
+        if row.get("status") != "proposed":
+            raise ValueError(f"proposal is {row.get('status')}, not proposed")
+        patterns = remediation.allowlist_patterns(self._settings.remediation_allowlist)
+        for step in row.get("steps", []):
+            reason = remediation.deny_reason(str(step.get("command") or ""), patterns)
+            if reason is not None:
+                raise PermissionError(f"step '{step.get('action')}': {reason}")
+        row["status"] = "running"
+        row["approved_at"] = round(time.time(), 3)
+        row["approved_note"] = note[:300]
+        remediation.save(self._settings.workdir, row)
+        task = asyncio.create_task(self._execute_remediation(row))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        self._board_changed()
+        return row
+
+    def reject_remediation(self, proposal_id: str) -> dict[str, Any]:
+        row = remediation.load(self._settings.workdir, proposal_id)
+        if row is None:
+            raise LookupError("no such proposal")
+        if row.get("status") != "proposed":
+            raise ValueError(f"proposal is {row.get('status')}, not proposed")
+        row["status"] = "rejected"
+        row["resolved_at"] = round(time.time(), 3)
+        remediation.save(self._settings.workdir, row)
+        self._board_changed()
+        return row
+
+    async def _execute_remediation(self, row: dict[str, Any]) -> None:
+        """Approved commands run EXACTLY as written: sequentially, stop on the
+        first failure, output captured, every command on the audit log. No
+        agent in this loop — an agent that adapts an approved command is
+        executing something nobody approved."""
+        timeout = max(30.0, (self._settings.bash_timeout_ms or 120000) / 1000.0)
+        failed = False
+        for step in row.get("steps", []):
+            command = str(step.get("command") or "")
+            started = time.monotonic()
+            try:
+                process = await asyncio.create_subprocess_shell(  # noqa: S604 — operator-approved, allowlist-gated
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    cwd=str(self._settings.workdir),
+                )
+                try:
+                    output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                except TimeoutError:
+                    process.kill()
+                    await process.wait()
+                    output, returncode = b"(timed out)", -1
+                else:
+                    returncode = int(process.returncode or 0)
+            except OSError as exc:
+                output, returncode = str(exc).encode(), -1
+            result = {
+                "command": command,
+                "exit": returncode,
+                "ms": int((time.monotonic() - started) * 1000),
+                "output": output.decode("utf-8", "replace")[-10000:],
+            }
+            row.setdefault("results", []).append(result)
+            self._audit_remediation(row["id"], command, returncode != 0)
+            if returncode != 0:
+                failed = True
+                break
+        row["status"] = "failed" if failed else "executed"
+        row["executed_at"] = round(time.time(), 3)
+        remediation.save(self._settings.workdir, row)
+        self._board_changed()
+        logger.info("remediation %s id=%s", row["status"], row["id"])
+
+    def _audit_remediation(self, proposal_id: str, command: str, error: bool) -> None:
+        """Same flight recorder the agent's tools write to — one account."""
+        try:
+            audit_dir = self._settings.workdir / "audit"
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            line = {
+                "ts": round(time.time(), 3),
+                "session": f"remediation:{proposal_id}",
+                "tool": "Exec",
+                "detail": command[:300],
+                "error": error,
+            }
+            with (audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")).open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+        except OSError:
+            logger.debug("remediation audit write failed", exc_info=True)
 
     def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:
         run.status = FAILED

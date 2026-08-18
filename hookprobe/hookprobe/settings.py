@@ -94,6 +94,11 @@ class Settings:
     # trigger costs one model run, so the threshold is the budget lever.
     consolidate_at: int
 
+    # Remediation executor gate: a file of full-match regexes, one per line,
+    # hot-read at execution time. Deny by default — unset or empty means
+    # proposals collect and nothing executes, which is the shipping posture.
+    remediation_allowlist: Path | None
+
     # Storm coalescing at the event door: a re-fire of the same alert (same
     # source + title, new event id) within this many seconds continues the
     # existing investigation instead of funding a new one. The judge's reuse
@@ -163,6 +168,7 @@ class Settings:
             auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),
             coalesce_window_seconds=max(0, _int("HOOKPROBE_COALESCE_WINDOW_SECONDS", 1800)),
             consolidate_at=max(0, _int("HOOKPROBE_CONSOLIDATE_AT", 5)),
+            remediation_allowlist=_path_env("HOOKPROBE_REMEDIATION_ALLOWLIST"),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),

@@ -31,7 +31,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from hookprobe import __version__, suggestions
+from hookprobe import __version__, remediation, suggestions
 from hookprobe.distill import draft_skill, record_revision, snapshot
 from hookprobe.engine import (
     _load_agents_raw,
@@ -57,6 +57,13 @@ one-sentence conclusion a notification card can quote verbatim.
 If this investigation taught you a durable fact about the ENVIRONMENT itself — topology, \
 a known false alarm, a naming convention; never about this one incident — end the report \
 with a line `MEMORY-SUGGESTION: <the fact, one line>`. At most one; omit it when unsure.
+If concrete commands would remediate the root cause, ALSO append a fenced block:
+```remediation
+[{{"action": "what this does", "command": "the exact command", "target": "what it touches", \
+"risk": "low|medium|high", "rollback": "how to undo it"}}]
+```
+Propose only commands you are confident in; an operator approves each proposal before \
+anything runs, and nothing you write here executes by itself.
 
 Source: {source}
 Level: {level}
@@ -469,6 +476,35 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     # session (setting_sources includes "project"), so facts written here —
     # topology, known false alarms, naming conventions — reach every
     # investigation from its first turn.
+    @app.get("/v1/remediations", dependencies=[Depends(require_token)])
+    async def remediations_list() -> dict[str, Any]:
+        return {"proposals": remediation.list_all(settings.workdir)}
+
+    @app.post("/v1/remediations/{proposal_id}/approve", dependencies=[Depends(require_token)])
+    async def remediation_approve(proposal_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The one click that makes anything run. Refused whole unless EVERY
+        step passes the allowlist — a procedure that half-executes is worse
+        than one that never starts."""
+        try:
+            row = service.approve_remediation(proposal_id, note=str((payload or {}).get("note") or ""))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return {"approved": True, "id": row["id"], "status": row["status"]}
+
+    @app.post("/v1/remediations/{proposal_id}/reject", dependencies=[Depends(require_token)])
+    async def remediation_reject(proposal_id: str) -> dict[str, Any]:
+        try:
+            row = service.reject_remediation(proposal_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"rejected": True, "id": row["id"]}
+
     @app.get("/v1/memory/suggestions", dependencies=[Depends(require_token)])
     async def memory_suggestions() -> dict[str, Any]:
         """Facts investigations proposed for the environment memory. Open rows
