@@ -27,6 +27,11 @@ sources:
     body: "{message}"
     level: "{state}"                   # rendered, lowercased, then mapped:
     level_map: {alerting: high, ok: info}   # unmapped values pass through; empty → "info"
+    # Optional: truthy rendering marks the event a recovery (top-level
+    # is_recovery on the outbound event, tri-state: omit = receivers use
+    # their own detection). Never a field — fields build identity, and a
+    # flag that flips between firing and recovery would split the pair.
+    recovery: "{meta.is_recovery}"
     fields:                            # extra extracted keys — visible on the page,
       rule: "{ruleId}"                 # usable in route/filter conditions
     fingerprint_fields: [title]        # duplicate identity; empty = title+body
