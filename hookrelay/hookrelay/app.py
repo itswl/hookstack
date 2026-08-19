@@ -102,6 +102,12 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                     alarm=app.state.alarm,
                     breaker=app.state.breaker,
                 )
+                # Nobody was awake. The family judges an alert well, dresses it
+                # well and delivers it well, and then has no answer for the case
+                # where it lands in a channel at 3am and no human touches it.
+                # This is that answer, and it deliberately needs no identity
+                # model: the card_actions ledger says whether ANY person acted.
+                await _escalate_cold(now)
                 # Retention rides the same loop, hourly: once ALL traffic
                 # passes through this ledger it must not grow forever.
                 if app_settings.retention_days > 0 and now >= next_purge:
@@ -112,6 +118,36 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             except Exception:  # noqa: BLE001 — the loop must survive anything
                 logger.exception("worker error")
             await asyncio.sleep(app_settings.worker_interval_seconds)
+
+    async def _escalate_cold(now: float) -> None:
+        """Re-deliver alerts that went cold with nobody touching them.
+
+        Enqueued as ordinary deliveries against the SAME event, so the second
+        attempt inherits the retry, the rate limit, the dead letter and the
+        ledger row — and reads on the board as what it is: this alert, sent
+        somewhere else, later. No new event, because a second event about the
+        first one is how a ledger starts lying about how many alerts arrived.
+
+        The stamp is taken BEFORE the deliveries are enqueued and only one
+        caller can win it, so a crash between the two costs one escalation
+        rather than an escalation every tick forever.
+        """
+        rule = app.state.config.escalation
+        if rule is None:
+            return
+        cold = await app.state.store.cold_events(before=now - rule.after_minutes * 60, levels=rule.levels, limit=50)
+        for event in cold:
+            if not await app.state.store.mark_escalated(int(event["id"]), now):
+                continue  # another tick got there first
+            for channel in rule.send_to:
+                await app.state.store.enqueue_delivery(int(event["id"]), channel, now)
+            logger.info(
+                "escalated event #%s (%s) to %s — untouched for %d minutes",
+                event["id"],
+                event["level"],
+                ", ".join(rule.send_to),
+                rule.after_minutes,
+            )
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

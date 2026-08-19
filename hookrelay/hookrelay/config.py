@@ -146,12 +146,40 @@ class CardAction:
 
 
 @dataclass(frozen=True, slots=True)
+class Escalation:
+    """Deliver somewhere else when a card nobody touched goes cold.
+
+    This is the smallest honest answer to the failure the family never had one
+    for: an alert is judged well, dressed well, delivered well — and then nobody
+    is awake. There is no on-call rotation here and deliberately so (see
+    .agents/notes/proposed/2026-08-19-nobody-owns-an-alert-and-no-component-picked-it-up),
+    which is exactly why this asks a question that needs no identity model:
+    after `after_minutes`, has ANY human touched this alert?
+
+    "Touched" means a card action was pressed — the `card_actions` ledger is the
+    only evidence this service has that a person was there, and it is why this
+    could not be built before the buttons existed. A silence counts, a follow-up
+    counts, a "not worth it" counts: all of them are somebody awake.
+
+    OFF unless configured. An escalation that fires without being asked for is a
+    second alert about the first alert, in the middle of the night.
+    """
+
+    after_minutes: int
+    send_to: tuple[str, ...]
+    # Only alerts this important are worth a second delivery. Everything is
+    # eligible when empty, which is almost never what anyone wants.
+    levels: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     sources: dict[str, Source]
     channels: dict[str, Channel]
     routes: tuple[Route, ...]  # kept sorted by priority, highest first
     pipeline: tuple[PipelineStage, ...] = DEFAULT_PIPELINE
     card_actions: dict[str, CardAction] = field(default_factory=dict)
+    escalation: Escalation | None = None
 
     @classmethod
     def from_file(cls, path: str) -> Config:
@@ -366,12 +394,31 @@ class Config:
                 )
             card_actions[name] = CardAction(kind=name, forward_to=forward_to, params=dict(spec.get("params") or {}))
 
+        escalation: Escalation | None = None
+        raw_escalation = raw.get("escalation") or {}
+        if raw_escalation:
+            after = int(raw_escalation.get("after_minutes") or 0)
+            if after < 1:
+                raise ConfigError("escalation: after_minutes must be at least 1")
+            targets = tuple(str(name) for name in (raw_escalation.get("send_to") or []))
+            if not targets:
+                raise ConfigError("escalation: send_to names no channel, so nothing would be escalated to")
+            unknown = [name for name in targets if name not in channels]
+            if unknown:
+                raise ConfigError(f"escalation: send_to has unconfigured channel(s) {', '.join(unknown)}")
+            escalation = Escalation(
+                after_minutes=after,
+                send_to=targets,
+                levels=tuple(str(level).lower() for level in (raw_escalation.get("levels") or [])),
+            )
+
         return cls(
             sources=sources,
             channels=channels,
             routes=routes and tuple(routes) or (),
             pipeline=pipeline,
             card_actions=card_actions,
+            escalation=escalation,
         )
 
 

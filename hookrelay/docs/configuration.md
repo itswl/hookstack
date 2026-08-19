@@ -390,6 +390,48 @@ Every honoured press is a ledger row, and `GET /trace/{event_id}` returns them
 under `human_actions` — so the timeline answers "and what did a person do about
 it", not only what the machine did.
 
+## 5. Nobody was awake — `escalation`
+
+An alert can be judged well, dressed well and delivered well, and still be
+ignored because it arrived at 3am. This is the answer to that, and it is
+deliberately the smallest one: there is no on-call rotation in this family (see
+[the decision record](../../.agents/notes/proposed/2026-08-19-nobody-owns-an-alert-and-no-component-picked-it-up.md)),
+so instead of asking *who* should have acted it asks whether **anybody** did.
+
+```yaml
+escalation:
+  after_minutes: 15
+  send_to: [pager]                  # channels; must exist
+  levels: [critical, high]          # empty = every level, rarely what you want
+```
+
+**Off unless configured.** An escalation nobody asked for is a second alert
+about the first alert, in the middle of the night.
+
+"Touched" means a card action was pressed — the `card_actions` ledger is the
+only evidence the pipe has that a person was there, which is why this could not
+exist before the buttons did. A silence counts, a follow-up counts, a "not worth
+it" counts: each of them is somebody awake. A press recorded against the
+verdict's card (carrying `hr-<event_id>`) counts for the front-door alert it
+belongs to, because that is where the button actually lives.
+
+Three conditions before an alert is eligible, each one load-bearing:
+
+| | why |
+| --- | --- |
+| it was **delivered** | an alert that never left is not unacknowledged, it is undelivered — and the dead-letter alarm already owns that story |
+| it is **untouched** | no card action for it, by event id or by correlation id |
+| it has **not escalated** | stamped before the second delivery is enqueued, so a cold alert escalates once and not once per worker tick |
+
+The escalation is an ordinary delivery against the **same event**, so it
+inherits the retry, the rate limit, the dead letter and the ledger row — and the
+board reads it as what it is: this alert, sent somewhere else, later. It is not a
+new event, because a second event about the first one makes the ledger lie about
+how many alerts arrived.
+
+Unconfigured, misrouted or impossible values fail **at boot**, like every other
+name in this file.
+
 ### Retention
 
 `HOOKRELAY_RETENTION_DAYS` (default 14, `0` = keep forever): an hourly sweep
