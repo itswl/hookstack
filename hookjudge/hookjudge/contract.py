@@ -9,7 +9,14 @@ IN — the pipe's normalized event:
 
     {"meta":  {"source", "correlation_id", "received_at", "template"},
      "event": {"title", "body", "level", "fields": {...}},
-     "raw":   {...}}                      # the original, for analysis context
+     "raw":   {...}}                      # the original — DELIBERATELY ignored
+
+`raw` is read off the wire by nothing here. It was parsed and held for a while
+as "analysis context", and reaching neither the prompt nor the ledger it was a
+claim rather than a feature. Using it would also be the wrong direction: the
+untrusted span in the prompt is bounded on purpose (see build_ai_request), and
+the original payload is the one part of a delivery whose size and shape nobody
+normalized.
 
 OUT — the judgement, posted back to a pipe door:
 
@@ -17,7 +24,7 @@ OUT — the judgement, posted back to a pipe door:
                   "correlation_id", "is_recovery", "timestamp"},
      "analysis": {"summary", "event_type", "impact_scope", "importance"},
      "identity": {...},                   # the fields the pipe should lay out
-     "links":    [],
+     "links":    [],                      # always empty; the pipe owns links
      "actions":  [{"kind", "text", ...}]} # which buttons this verdict deserves
 
 Both are the pipe's published shapes. Keeping them in one file means a change
@@ -28,7 +35,8 @@ dict three layers down.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 # Markers that say a condition ENDED. Used for two different questions, which
@@ -90,6 +98,34 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _epoch_or(value: Any, fallback: float) -> float:
+    """A receipt time off the wire, as seconds since the epoch.
+
+    Bare float() was called on whatever the sender put there. Every upstream
+    this service has met sends epoch seconds — but ISO-8601 is what the rest of
+    the monitoring world sends, and one signed delivery carrying
+    "2026-08-19T09:14:02Z" raised ValueError INSIDE ingest: a 500 to the pipe
+    and an alert dropped on the floor, for a field that is only ever used to
+    order rows.
+
+    ISO-8601 is parsed rather than discarded, because received_at drives the
+    reuse window and retention — throwing it away would file a replayed capture
+    as brand new. A naive stamp is read as UTC: that is what these systems emit,
+    and guessing the process's local zone would be a silent hour-scale error.
+    """
+    if isinstance(value, bool) or value is None or value == "":
+        return fallback
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        stamp = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return fallback
+    return (stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)).timestamp()
+
+
 def condition_title(title: str) -> str:
     """The title with any "it ended" decoration removed.
 
@@ -121,6 +157,35 @@ ROUTE_RULE = "rule"  # the model was unavailable or refused; rules decided
 ROUTE_RULE_REUSE = "rule-reuse"  # a prior AI verdict for the same alert RULE answered
 
 IMPORTANCE = ("critical", "high", "medium", "low")
+
+# Upstream severity words that MEAN one of ours. Prometheus, Alertmanager and
+# Grafana all say `warning` where this vocabulary says `medium`, and the rule
+# floor has always read it that way — but the agreement ledger compared the two
+# columns raw, so every `warning` row was scored as the judge overruling the
+# platform. `warning` is the most common severity those systems emit, which made
+# the shadow run's headline agreement number wrong for the majority case, in the
+# flattering direction: it manufactured disagreements to review.
+LEVEL_SYNONYMS = {"warning": "medium"}
+
+# Every platform level that can be compared with a judge importance at all. A
+# level outside this set ("info", "none", a vendor's own word) is not a verdict
+# in this vocabulary, so comparing it would invent an opinion the platform never
+# expressed.
+COMPARABLE_LEVELS = IMPORTANCE + tuple(LEVEL_SYNONYMS)
+
+
+def platform_importance(level: str) -> str:
+    """The platform's severity, said in this service's four words.
+
+    One map, three readers — the rule floor, the agreement matrix and the review
+    queue. It was three copies of the intent and only one of them (the floor)
+    actually held the mapping, which is how `warning` came to be equivalent to
+    `medium` when a verdict was DERIVED from it and a disagreement when the two
+    were COMPARED.
+    """
+    cleaned = level.strip().lower()
+    return LEVEL_SYNONYMS.get(cleaned, cleaned)
+
 
 # The buttons a verdict can ask for. Three, and no more: `silence` (stop
 # restating this condition for a while) and the `useful`/`useless` pair (was
@@ -184,7 +249,6 @@ class Incoming:
     body: str
     level: str
     fields: dict[str, str]
-    raw: dict[str, Any]
     correlation_id: str
     received_at: float
     # The pipe's explicit recovery flag, when the upstream platform stated the
@@ -223,7 +287,6 @@ class Incoming:
             body=str(event.get("body") or ""),
             level=str(event.get("level") or "").lower(),
             fields={str(k): str(v) for k, v in fields.items() if str(v).strip()},
-            raw=_dict_or_empty(payload.get("raw")),
             # Precedence: the body says it, else the transport header did, else
             # the pipe's own hr-<event_id> convention. The header matters
             # because the flat shape carries no correlation id at all, and
@@ -234,7 +297,7 @@ class Incoming:
                 or correlation_id
                 or (f"hr-{event['event_id']}" if str(event.get("event_id") or "").strip() else "")
             ),
-            received_at=float(meta.get("received_at") or event.get("received_at") or now),
+            received_at=_epoch_or(meta.get("received_at") or event.get("received_at"), now),
             recovery_flag=recovery_flag,
         )
 
@@ -382,7 +445,6 @@ class Outgoing:
     incoming: Incoming
     verdict: Verdict
     brain: str = "hookjudge"
-    links: list[dict[str, str]] = field(default_factory=list)
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -410,7 +472,11 @@ class Outgoing:
             # Identity as DATA: choosing separators and order is layout, and
             # layout belongs to the pipe.
             "identity": dict(self.incoming.fields),
-            "links": list(self.links),
+            # Present and empty, always. The key is part of the pipe's published
+            # shape, so it stays; a settable field was not, because a link is a
+            # URL into somebody's console and this brain is given none — the
+            # pipe, which knows the channel, is the one that can build them.
+            "links": [],
             # Which buttons this verdict deserves. A card used to be a dead end:
             # the operator could read it and do nothing. What each button MEANS
             # is judgement and lives here; the token behind it and the callback

@@ -7,12 +7,17 @@ sent / dead, with the attempt count and last error kept in the open.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import logging
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import aiosqlite
+
+logger = logging.getLogger("hookrelay.store")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -65,6 +70,11 @@ CREATE TABLE IF NOT EXISTS deliveries (
 );
 CREATE INDEX IF NOT EXISTS ix_deliveries_due ON deliveries (status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS ix_deliveries_channel_sent ON deliveries (channel, sent_at);
+-- Every read of this table that is not the worker's queue looks it up BY EVENT:
+-- the status page's ledger rows, /trace, and the retention sweep's "is anything
+-- still queued for this event". Without an index each of those is a full scan,
+-- and /status asks it once per event on the page.
+CREATE INDEX IF NOT EXISTS ix_deliveries_event ON deliveries (event_id);
 
 CREATE TABLE IF NOT EXISTS silences (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,6 +107,90 @@ CREATE INDEX IF NOT EXISTS ix_card_actions_correlation ON card_actions (correlat
 """
 
 
+class Transaction:
+    """The write side of one atomic unit — statements only, never a commit.
+
+    Every method here is a plain statement against the shared connection. What
+    makes them a unit is Store.transaction(), which holds the write lock around
+    them and commits once at the end; a commit in here would defeat the whole
+    point by ending the transaction early. That is also why this class is
+    handed out rather than exposed: you cannot get one without the lock.
+
+    Reads live here too, so a read taken as part of a decision sees the same
+    snapshot as the writes that follow it — which is what closes the dedup race:
+    "is this a duplicate" and "insert it" used to be two transactions with a gap
+    wide enough for a second copy of the same webhook to pass through.
+    """
+
+    def __init__(self, db: aiosqlite.Connection) -> None:
+        self._db = db
+
+    async def recent_duplicate(self, fp: str, window_seconds: int, now: float) -> dict[str, Any] | None:
+        cursor = await self._db.execute(
+            "SELECT id, received_at FROM events WHERE fingerprint = ? AND received_at >= ? ORDER BY id DESC LIMIT 1",
+            (fp, now - window_seconds),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def insert_event(
+        self,
+        source: str,
+        fp: str,
+        extracted: dict[str, Any],
+        payload_json: str,
+        now: float,
+        correlation_id: str | None = None,
+    ) -> int:
+        cursor = await self._db.execute(
+            "INSERT INTO events (source, received_at, fingerprint, title, body, level, fields_json, payload_json,"
+            "                   correlation_id, is_recovery)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                source,
+                now,
+                fp,
+                extracted["title"],
+                extracted["body"],
+                extracted["level"],
+                json.dumps(extracted["fields"], ensure_ascii=False),
+                payload_json,
+                correlation_id or None,
+                # Tri-state: absent key -> NULL (nothing stated), bool -> 0/1.
+                (int(bool(extracted["is_recovery"])) if "is_recovery" in extracted else None),
+            ),
+        )
+        return int(cursor.lastrowid or 0)
+
+    async def insert_decision(
+        self, event_id: int, outcome: str, skip_code: str | None, channels: list[str], steps: list[dict[str, Any]]
+    ) -> None:
+        await self._db.execute(
+            "INSERT INTO decisions (event_id, outcome, skip_code, channels_json, steps_json) VALUES (?, ?, ?, ?, ?)",
+            (
+                event_id,
+                outcome,
+                skip_code,
+                json.dumps(channels, ensure_ascii=False),
+                json.dumps(steps, ensure_ascii=False),
+            ),
+        )
+
+    async def enqueue_deliveries(self, event_id: int, channels: list[str], now: float) -> None:
+        """Every channel this event routed to, in one statement.
+
+        executemany rather than a loop of inserts: the fan-out is the common case
+        and each insert was its own commit and its own board announcement, so a
+        four-channel event cost four fsyncs and woke every open board four times.
+        """
+        if not channels:
+            return
+        await self._db.executemany(
+            "INSERT INTO deliveries (event_id, channel, next_attempt_at) VALUES (?, ?, ?)",
+            [(event_id, channel, now) for channel in channels],
+        )
+
+
 class Store:
     def __init__(self, path: str) -> None:
         # Set by the app to a Live.changed; None everywhere else, so the store
@@ -104,11 +198,15 @@ class Store:
         self.on_change: Callable[[], None] | None = None
         self._path = path
         self._db: aiosqlite.Connection | None = None
+        # EVERY writer holds this — see transaction() for why a single-statement
+        # write needs it just as much as a grouped one.
+        self._write_lock = asyncio.Lock()
 
     async def open(self) -> None:
         self._db = await aiosqlite.connect(self._path)
         try:
             self._db.row_factory = aiosqlite.Row
+            await self._apply_pragmas()
             await self._db.executescript(_SCHEMA)
             await self._migrate()
             await self._db.commit()
@@ -119,6 +217,44 @@ class Store:
             await self._db.close()
             self._db = None
             raise
+
+    async def _apply_pragmas(self) -> None:
+        """Three settings that decide how this ledger behaves under real load.
+
+        open() ran the schema and nothing else, which means the ledger inherited
+        SQLite's defaults — tuned for one program touching a file now and then,
+        not for a webhook door with a delivery worker writing underneath it and a
+        status page reading over the top. The first real outage is where that
+        gets found out, so say it here instead:
+
+        journal_mode=WAL — a commit appends to a log instead of writing a
+          rollback journal and fsyncing the database file, and a reader no longer
+          has to take turns with the writer. That second half is what matters the
+          moment somebody opens the ledger with the sqlite3 CLI to answer a
+          question during an incident: under the default journal that read blocks
+          the delivery worker. WAL is a persistent property of the file, so this
+          also upgrades a ledger written by an older build.
+        synchronous=NORMAL — one fsync per WAL checkpoint rather than one per
+          commit. What survives is a process crash, which is exactly the promise
+          the outbox makes; what is traded away is durability across an OS or
+          power loss, which is not what this ledger defends against.
+        busy_timeout=5000 — wait for a held lock instead of raising SQLITE_BUSY
+          on contact. Without it, a lock contended for milliseconds surfaces as
+          "database is locked" — an inbound event refused, or a delivery whose
+          bookkeeping was lost, for a wait nobody would have noticed.
+        """
+        db = self._db
+        if db is None:  # only ever called from open(), immediately after connect
+            raise RuntimeError("store is not open")
+        for pragma in ("journal_mode=WAL", "synchronous=NORMAL", "busy_timeout=5000"):
+            await db.execute(f"PRAGMA {pragma}")  # nosec B608 — a constant from the tuple above
+        cursor = await db.execute("PRAGMA journal_mode")
+        row = await cursor.fetchone()
+        mode = str(row[0]).lower() if row else "?"
+        if mode != "wal":
+            # An in-memory or network-mounted file can refuse WAL. Not fatal —
+            # the ledger still works — but it must not look like it was applied.
+            logger.warning("ledger journal_mode is %s, not wal (a WAL upgrade was requested and refused)", mode)
 
     async def _migrate(self) -> None:
         """Additive column migrations for ledgers created by older builds.
@@ -155,6 +291,41 @@ class Store:
             raise RuntimeError("Store.open() was not called")
         return self._db
 
+    # ── the atomic unit ───────────────────────────────────────────────────
+
+    @contextlib.asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Transaction]:
+        """Several writes that land together, or not at all.
+
+        The header above promises an outbox: "a row is a promise to send". An
+        event, its decision and its delivery rows were three separate
+        transactions, so a crash in the gaps left a `routed` event with fewer
+        deliveries than it had channels — an alert the ledger says was sent to
+        four places and was sent to two, which is worse than a visible failure
+        because nothing looks wrong.
+
+        THE LOCK IS NOT OPTIONAL, and it is why every single-statement writer in
+        this file takes it too. All of them share ONE aiosqlite connection, and a
+        connection has one transaction: a `commit()` from another task landing
+        between two of the statements below would commit half of this unit and
+        call it done. Serialising writers is what makes "one transaction" mean
+        anything here. The critical section is a handful of local inserts — no
+        network, no user code — so nothing waits long on it.
+        """
+        async with self._write_lock:
+            try:
+                yield Transaction(self.db)
+            except BaseException:
+                # Nothing partial survives. Safe to roll back the whole
+                # connection precisely BECAUSE the lock means this transaction is
+                # the only uncommitted work on it.
+                await self.db.rollback()
+                raise
+            await self.db.commit()
+        # One announcement for the unit, not one per row: the boards want to know
+        # the ledger moved, not how many statements it took.
+        self._announce()
+
     # ── events & decisions ────────────────────────────────────────────────
 
     async def insert_event(
@@ -166,27 +337,8 @@ class Store:
         now: float,
         correlation_id: str | None = None,
     ) -> int:
-        cursor = await self.db.execute(
-            "INSERT INTO events (source, received_at, fingerprint, title, body, level, fields_json, payload_json,"
-            "                   correlation_id, is_recovery)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                source,
-                now,
-                fp,
-                extracted["title"],
-                extracted["body"],
-                extracted["level"],
-                json.dumps(extracted["fields"], ensure_ascii=False),
-                payload_json,
-                correlation_id or None,
-                # Tri-state: absent key -> NULL (nothing stated), bool -> 0/1.
-                (int(bool(extracted["is_recovery"])) if "is_recovery" in extracted else None),
-            ),
-        )
-        await self.db.commit()
-        self._announce()
-        return int(cursor.lastrowid or 0)
+        async with self.transaction() as tx:
+            return await tx.insert_event(source, fp, extracted, payload_json, now, correlation_id)
 
     def _announce(self) -> None:
         """Say that the ledger moved; the boards decide what to refetch."""
@@ -194,38 +346,19 @@ class Store:
             self.on_change()
 
     async def recent_duplicate(self, fp: str, window_seconds: int, now: float) -> dict[str, Any] | None:
-        cursor = await self.db.execute(
-            "SELECT id, received_at FROM events WHERE fingerprint = ? AND received_at >= ? ORDER BY id DESC LIMIT 1",
-            (fp, now - window_seconds),
-        )
-        row = await cursor.fetchone()
-        return dict(row) if row else None
+        return await Transaction(self.db).recent_duplicate(fp, window_seconds, now)
 
     async def insert_decision(
         self, event_id: int, outcome: str, skip_code: str | None, channels: list[str], steps: list[dict[str, Any]]
     ) -> None:
-        await self.db.execute(
-            "INSERT INTO decisions (event_id, outcome, skip_code, channels_json, steps_json) VALUES (?, ?, ?, ?, ?)",
-            (
-                event_id,
-                outcome,
-                skip_code,
-                json.dumps(channels, ensure_ascii=False),
-                json.dumps(steps, ensure_ascii=False),
-            ),
-        )
-        await self.db.commit()
-        self._announce()
+        async with self.transaction() as tx:
+            await tx.insert_decision(event_id, outcome, skip_code, channels, steps)
 
     # ── deliveries ────────────────────────────────────────────────────────
 
     async def enqueue_delivery(self, event_id: int, channel: str, now: float) -> None:
-        await self.db.execute(
-            "INSERT INTO deliveries (event_id, channel, next_attempt_at) VALUES (?, ?, ?)",
-            (event_id, channel, now),
-        )
-        await self.db.commit()
-        self._announce()
+        async with self.transaction() as tx:
+            await tx.enqueue_deliveries(event_id, [channel], now)
 
     async def due_deliveries(self, now: float, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.db.execute(

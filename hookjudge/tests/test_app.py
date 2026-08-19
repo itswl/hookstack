@@ -314,7 +314,15 @@ async def test_a_malformed_body_is_a_named_refusal(app_client):
 def test_gate_matches_ci():
     """scripts/gate.sh must run what CI runs — a local list that is merely
     'close enough' is how a red CI arrives as a surprise. Adding a check to
-    one requires adding it to the other in the same change."""
+    one requires adding it to the other in the same change.
+
+    This test used to match by substring and named neither mypy, bandit nor
+    pip-audit: three tools both files run, none of them pinned, any of them
+    free to disappear from one side. And the substring `compileall -q hookjudge
+    tests` was satisfied whether or not ` scripts` followed it, which is how
+    this service's scripts/ directory could stop being compiled and linted with
+    the contract test still green. Commands are pinned to the END of a line now.
+    """
     from pathlib import Path
 
     here = Path(__file__).resolve().parent.parent
@@ -324,15 +332,30 @@ def test_gate_matches_ci():
     # is one level up, under its own name.
     ci = (here.parent / ".github" / "workflows" / "ci-hookjudge.yml").read_text()
 
-    for check in (
-        "compileall -q hookjudge tests",
-        "ruff check hookjudge tests",
-        "ruff format --check hookjudge tests",
-        "status.html",
+    def runs(text: str, command: str) -> bool:
+        """`$PY -m mypy hookjudge` and `- run: python -m mypy hookjudge` differ
+        only in how the interpreter is spelled, so the tail is the contract."""
+        return any(line.rstrip().endswith(command) for line in text.splitlines())
+
+    # Every tool the gate runs, carrying the arguments that decide what it
+    # covers — ` scripts` included, because eval.py lives there and is shipped
+    # advice about how to measure this service.
+    for command in (
+        "compileall -q hookjudge tests scripts",
+        "ruff check hookjudge tests scripts",
+        "ruff format --check hookjudge tests scripts",
+        "mypy hookjudge",
+        "bandit -q -r hookjudge",
         "pytest -q",
+        "pip_audit --progress-spinner off",
     ):
-        assert check in gate, f"gate.sh is missing {check!r}"
-        assert check in ci, f"ci.yml is missing {check!r}"
+        assert runs(gate, command), f"gate.sh does not run {command!r}"
+        assert runs(ci, command), f"ci-hookjudge.yml does not run {command!r}"
+
+    # Not a command: the file the inline node step reads. Its name is the only
+    # evidence in either file that the step is still there.
+    assert "status.html" in gate, "gate.sh no longer parses the ledger page"
+    assert "status.html" in ci, "ci-hookjudge.yml no longer parses the ledger page"
 
 
 class DualSink:

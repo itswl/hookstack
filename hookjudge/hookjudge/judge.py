@@ -25,11 +25,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import replace
 from typing import Any
 
 import httpx
 
 from hookjudge.contract import (
+    COMPARABLE_LEVELS,
     ROUTE_AI,
     ROUTE_RECOVERY,
     ROUTE_REUSE,
@@ -37,6 +39,7 @@ from hookjudge.contract import (
     ROUTE_RULE_REUSE,
     Incoming,
     Verdict,
+    platform_importance,
 )
 
 logger = logging.getLogger("hookjudge.judge")
@@ -174,8 +177,8 @@ def rule_verdict(event: Incoming, *, degraded_reason: str = "") -> Verdict:
         importance = "low"
     elif any(word in haystack for word in _RULE_HIGH):
         importance = "high"
-    elif event.level in ("critical", "high", "warning", "medium", "low"):
-        importance = {"warning": "medium"}.get(event.level, event.level)
+    elif event.level in COMPARABLE_LEVELS:
+        importance = platform_importance(event.level)
     else:
         importance = "medium"
 
@@ -267,7 +270,16 @@ _VERDICT_SCHEMA: dict[str, Any] = {
 #            not support this tool_choice".
 #   object — JSON with nothing enforced; _extract_json digs it out. Always works.
 _DIALECTS = ("schema", "tools", "object")
-_FORMAT_REJECTED = re.compile(r"response_format|json_schema|tool_choice|tools|unavailable|not support", re.IGNORECASE)
+# Only a 400 that NAMES the request field counts as a format rejection. `and
+# "unavailable"` / `not support` were in here as loose catches and they matched
+# the whole neighbouring class of transient 400s — "model unavailable",
+# "service temporarily unavailable" — so a blip on the strongest dialect stepped
+# down, succeeded on the weaker one, and pinned the model to it for the rest of
+# the process: every later alert judged with the enums unenforced because of one
+# unrelated outage. The two real messages both name the field
+# ("This response_format type is unavailable now", "Thinking mode does not
+# support this tool_choice"), which is what makes the narrower test sufficient.
+_FORMAT_REJECTED = re.compile(r"response_format|json_schema|json_object|tool_choice|\btools\b", re.IGNORECASE)
 
 # Negotiated once per model per process. A step-down costs one 400, not one per
 # alert, and the alert that paid it is still judged on the next attempt.
@@ -286,6 +298,34 @@ def _parse_verdict(body: dict[str, Any]) -> dict[str, Any] | None:
     return _extract_json(str(message.get("content") or ""))
 
 
+_OMITTED_KEY = "_omitted"
+
+
+def _bounded_fields(fields: dict[str, str], *, block_limit: int, value_limit: int) -> dict[str, str]:
+    """The identity fields, capped in both directions.
+
+    Count and length are both unbounded on the wire, and this dict is inside the
+    untrusted span, so "the prompt is bounded" was only ever true of `body`: a
+    single 200 KB field, or ten thousand tiny ones, went to the model verbatim
+    and onto the token bill. The cap is stated rather than silent — a model that
+    cannot see the fields it is missing would otherwise describe the scope of an
+    incident from a fragment while sounding just as certain.
+
+    Sorted so the truncation is deterministic: the same alert must produce the
+    same prompt twice, or a reused verdict and a fresh one stop being comparable.
+    """
+    kept: dict[str, str] = {}
+    spent = 0
+    for key in sorted(fields):
+        value = fields[key][:value_limit]
+        spent += len(key) + len(value)
+        if spent > max(0, block_limit):
+            kept[_OMITTED_KEY] = f"{len(fields) - len(kept)} more fields dropped to fit the prompt budget"
+            break
+        kept[key[:value_limit]] = value
+    return kept
+
+
 def build_ai_request(settings: Any, event: Incoming, dialect: str = "object") -> dict[str, Any]:
     """The exact request the judge sends, so the trust boundary is testable.
 
@@ -295,13 +335,20 @@ def build_ai_request(settings: Any, event: Incoming, dialect: str = "object") ->
     came back as low/test. The fence tells the model where the untrusted span
     begins and ends, and the closing marker is neutralised inside the payload so
     the span cannot be closed early from within.
+
+    Every part of that span is bounded, not just the body. `ai_title_limit` caps
+    each one-line string — title, source, level, one field value — and
+    `ai_fields_limit` caps the field block as a whole; the door accepts 256 KB,
+    so an unbounded title was 256 KB of prompt that nobody was ever going to
+    read, billed per alert.
     """
+    one_line = max(1, settings.ai_title_limit)
     context = {
-        "source": event.source,
-        "title": event.title,
+        "source": event.source[:one_line],
+        "title": event.title[:one_line],
         "body": event.body[: settings.ai_body_limit],
-        "level": event.level,
-        "fields": event.fields,
+        "level": event.level[:one_line],
+        "fields": _bounded_fields(event.fields, block_limit=settings.ai_fields_limit, value_limit=one_line),
     }
     captured = json.dumps(context, ensure_ascii=False).replace(_ALERT_CLOSE, "<\\/alert>")
     request: dict[str, Any] = {
@@ -374,13 +421,32 @@ async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) 
         break
     _dialect_for_model[settings.ai_model] = dialect
 
-    parsed = _parse_verdict(body)
-    if not parsed or not str(parsed.get("summary") or "").strip():
-        return rule_verdict(event, degraded_reason="AI answer unparseable")
-
+    # Read the bill BEFORE deciding whether the answer was usable. A model that
+    # returns prose instead of JSON still charges for the tokens it burned
+    # doing it, and this path used to return the rule floor with cost=0 — so a
+    # provider having a bad afternoon spent real money that appeared nowhere: no
+    # cost on /status, no spend in the metric, and paid_ratio_pct reporting the
+    # alerts as free rule verdicts. The route stays `rule`, because a rule is
+    # what actually judged this alert; only the accounting was wrong.
     usage = body.get("usage") or {}
     tokens_in = int(usage.get("prompt_tokens") or 0)
     tokens_out = int(usage.get("completion_tokens") or 0)
+    cost = round(
+        (tokens_in / 1000) * settings.ai_price_in_per_1k + (tokens_out / 1000) * settings.ai_price_out_per_1k,
+        6,
+    )
+    model = str(body.get("model") or settings.ai_model)
+
+    parsed = _parse_verdict(body)
+    if not parsed or not str(parsed.get("summary") or "").strip():
+        return replace(
+            rule_verdict(event, degraded_reason="AI answer unparseable"),
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost=cost,
+            model=model,
+        )
+
     return Verdict(
         summary=str(parsed.get("summary") or ""),
         importance=str(parsed.get("importance") or ""),
@@ -389,11 +455,8 @@ async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) 
         route=ROUTE_AI,
         tokens_in=tokens_in,
         tokens_out=tokens_out,
-        cost=round(
-            (tokens_in / 1000) * settings.ai_price_in_per_1k + (tokens_out / 1000) * settings.ai_price_out_per_1k,
-            6,
-        ),
-        model=str(body.get("model") or settings.ai_model),
+        cost=cost,
+        model=model,
     ).normalized()
 
 

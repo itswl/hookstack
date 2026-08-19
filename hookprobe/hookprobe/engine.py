@@ -23,6 +23,7 @@ from hookprobe import inputs
 from hookprobe.files import system_prompt_path
 from hookprobe.guard import bash_deny_reason
 from hookprobe.hygiene import post_tool_hook
+from hookprobe.redact import redact
 from hookprobe.settings import Settings
 
 logger = logging.getLogger("hookprobe.engine")
@@ -125,14 +126,23 @@ def _hook_list(*fns: Callable[..., Any]) -> list[Any]:
 
 
 def _tool_detail(tool_input: Any) -> str:
-    """One line saying what a tool call is about, for the live process feed."""
+    """One line saying what a tool call is about, for the live process feed.
+
+    Redacted HERE rather than at the sinks, because this one string is the most
+    copied in the service: it reaches the run's event feed and `results/*.json`,
+    the flight recorder's `audit/*.jsonl`, and — via distill — the case block of
+    a generated SKILL.md that every later run loads and /v1/skills serves. Three
+    sinks today and a fourth one feature away; masking at each of them is
+    masking the next one leaks around. See hookprobe/redact.py for what it does
+    and does not catch.
+    """
     data = tool_input if isinstance(tool_input, dict) else {}
     for key in ("command", "file_path", "pattern", "query", "url", "path", "skill", "description"):
         value = data.get(key)
         if value:
-            return str(value)[:300]
+            return redact(str(value))[:300]
     try:
-        return json.dumps(data, ensure_ascii=False)[:200]
+        return redact(json.dumps(data, ensure_ascii=False))[:200]
     except (TypeError, ValueError):
         return ""
 

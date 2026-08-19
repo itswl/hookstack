@@ -381,8 +381,13 @@ def test_the_wrapped_envelope_still_parses():
         now=1.0,
     )
     assert parsed.source == "alertmanager" and parsed.correlation_id == "hr-9"
-    assert parsed.level == "high" and parsed.raw == {"state": "firing"}
+    assert parsed.level == "high"
     assert parsed.received_at == 5.0
+    # `raw` is accepted on the wire and deliberately dropped — see the module
+    # docstring. Holding it was a claim, not a feature: it reached neither the
+    # prompt nor the ledger, and the prompt's untrusted span is bounded on
+    # purpose. The envelope carrying it must still parse.
+    assert not hasattr(parsed, "raw")
 
 
 @pytest.mark.parametrize(

@@ -8,12 +8,15 @@ the memory and the account are the same thing rather than a cache beside a log.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Callable
 from typing import Any
 
 import aiosqlite
+
+from hookjudge.contract import COMPARABLE_LEVELS, LEVEL_SYNONYMS, platform_importance
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS judgements (
@@ -54,11 +57,47 @@ CREATE INDEX IF NOT EXISTS ix_identity_time ON judgements (identity, received_at
 CREATE INDEX IF NOT EXISTS ix_return ON judgements (return_status, id);
 """
 
+# Indexes over a column _migrate ADDS, so they cannot live in _SCHEMA: that runs
+# first, against a ledger which may still have the old shape, and an index on a
+# column that does not exist yet is an error — the service would fail to open its
+# own database.
+_INDEXES = """
+CREATE INDEX IF NOT EXISTS ix_burst ON judgements (origin, received_at);
+"""
+
+
+def _comparable_level_sql() -> tuple[str, tuple[str, ...]]:
+    """`level` said in the judge's four words, as a SQL expression.
+
+    One CASE arm per documented synonym, with the values parametrized. Generated
+    from contract.LEVEL_SYNONYMS rather than written out here, because the whole
+    defect this repairs was the mapping existing in one place (the rule floor)
+    and being re-implemented by absence in two others.
+    """
+    arms = "".join(" WHEN ? THEN ?" for _ in LEVEL_SYNONYMS)
+    values = tuple(value for pair in LEVEL_SYNONYMS.items() for value in pair)
+    return f"CASE level{arms} ELSE level END", values
+
+
+# A row is BILLED when tokens were actually consumed, whatever route judged it.
+# The two are not the same thing and that is the point: a provider answering
+# prose instead of JSON still charges for the attempt, so those alerts land on
+# the `rule` route carrying a real cost. Counting by route alone reported them
+# as free rule verdicts and the spend appeared nowhere.
+_BILLED_SQL = "sum(CASE WHEN tokens_in > 0 OR tokens_out > 0 THEN 1 ELSE 0 END)"
+
 
 class Store:
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, *, burst_window_seconds: int = 600) -> None:
         self._path = path
         self._db: aiosqlite.Connection | None = None
+        self._burst_window_seconds = burst_window_seconds
+        # Every write goes through this. One connection is shared by the ingest
+        # tasks, the return worker and the purge, and sqlite3's implicit
+        # transaction is per-CONNECTION, not per-caller — so a commit() anywhere
+        # publishes whatever any other task has half-written. The lock is what
+        # makes "these statements are one fact" true; see record().
+        self._write = asyncio.Lock()
         # Set by the app to a Live.changed; left None everywhere else, so the
         # store keeps working with nobody listening.
         self.on_change: Callable[[], None] | None = None
@@ -67,8 +106,19 @@ class Store:
         self._db = await aiosqlite.connect(self._path)
         try:
             self._db.row_factory = aiosqlite.Row
+            # WAL buys concurrent readers: /status, /metrics and every board
+            # refetch read this file while verdicts are being written to it, and
+            # under the default rollback journal a reader and the writer lock
+            # each other out. busy_timeout buys patience when two writers do
+            # collide — without it sqlite fails the statement instantly with
+            # "database is locked", which on this connection meant a lost
+            # attempt count on the return leg or a lost alert that had already
+            # been answered 202.
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA busy_timeout=5000")
             await self._db.executescript(_SCHEMA)
             await self._migrate()
+            await self._db.executescript(_INDEXES)
             await self._db.commit()
         except Exception:
             # A connection runs a thread; leaving it open on a failed start
@@ -111,6 +161,19 @@ class Store:
             # The judge cannot resolve it to a person and does not try; it is
             # provenance, the way label_source is.
             "mattered_actor": "TEXT NOT NULL DEFAULT ''",
+            # The upstream system an alert came FROM (fields.origin, else
+            # source), resolved once at write time. Burst grouping used to read
+            # it back out of fields_json in Python, which is exactly why it
+            # could not filter on it in SQL — see _burst_id_for. Not backfilled:
+            # grouping only ever looks one window back, so the cost of leaving
+            # history blank is that the ten minutes either side of a restart
+            # cannot form a burst, and the cost of a backfill is parsing every
+            # row in the ledger before the service will answer at all.
+            "origin": "TEXT NOT NULL DEFAULT ''",
+            # When the return leg last TRIED, as opposed to when the alert
+            # arrived. NULL on rows queued before this column existed, and the
+            # worker falls back to received_at for those.
+            "return_attempted_at": "REAL",
         }
         for column, ddl in typed.items():
             if column not in have:
@@ -181,68 +244,76 @@ class Store:
         return dict(row) if row else None
 
     async def record(self, event: Any, verdict: Any, latency_ms: int) -> int:
-        burst = await self._burst_id_for(event)
-        cursor = await self.db.execute(
-            "INSERT INTO judgements (received_at, source, identity, rule_key, level, correlation_id, title, body,"
-            " fields_json, is_recovery, summary, importance, event_type, impact_scope, route, degraded_reason, model,"
-            " tokens_in, tokens_out, cost, latency_ms, burst_id)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                event.received_at,
-                event.source,
-                event.identity,
-                event.rule_key,
-                event.level,
-                event.correlation_id or None,
-                event.title,
-                event.body[:4000],
-                json.dumps(event.fields, ensure_ascii=False),
-                1 if event.is_recovery else 0,
-                verdict.summary,
-                verdict.importance,
-                verdict.event_type,
-                verdict.impact_scope,
-                verdict.route,
-                verdict.degraded_reason,
-                verdict.model,
-                verdict.tokens_in,
-                verdict.tokens_out,
-                verdict.cost,
-                latency_ms,
-                burst,
-            ),
-        )
-        await self.db.commit()
+        # The burst UPDATE and this INSERT are ONE fact — "these rows are the
+        # same incident, and here is the member that proved it" — and they were
+        # two statements with no transaction of their own. On a shared
+        # connection, any other task's commit() landing between them published
+        # the UPDATE alone; if the INSERT then failed, the ledger held a burst
+        # whose triggering member is missing from it. The lock is the transaction.
+        origin = self._origin_of(event.fields, event.source)
+        async with self._write:
+            burst = await self._burst_id_for(event, origin)
+            cursor = await self.db.execute(
+                "INSERT INTO judgements (received_at, source, origin, identity, rule_key, level, correlation_id,"
+                " title, body, fields_json, is_recovery, summary, importance, event_type, impact_scope, route,"
+                " degraded_reason, model, tokens_in, tokens_out, cost, latency_ms, burst_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    event.received_at,
+                    event.source,
+                    origin,
+                    event.identity,
+                    event.rule_key,
+                    event.level,
+                    event.correlation_id or None,
+                    event.title,
+                    event.body[:4000],
+                    json.dumps(event.fields, ensure_ascii=False),
+                    1 if event.is_recovery else 0,
+                    verdict.summary,
+                    verdict.importance,
+                    verdict.event_type,
+                    verdict.impact_scope,
+                    verdict.route,
+                    verdict.degraded_reason,
+                    verdict.model,
+                    verdict.tokens_in,
+                    verdict.tokens_out,
+                    verdict.cost,
+                    latency_ms,
+                    burst,
+                ),
+            )
+            await self.db.commit()
         self._announce()
         return int(cursor.lastrowid or 0)
-
-    # A burst is DIFFERENT rules from one upstream origin inside one window —
-    # the shape of a cascading incident. Same-rule repeats are already the
-    # reuse route's business; a burst is the cross-alert layer above it.
-    BURST_WINDOW_SECONDS = 600
 
     @staticmethod
     def _origin_of(fields: dict[str, Any], source: str) -> str:
         return str(fields.get("origin") or source or "")
 
-    async def _burst_id_for(self, event: Any) -> str:
-        origin = self._origin_of(event.fields, event.source)
+    # A burst is DIFFERENT rules from one upstream origin inside one window —
+    # the shape of a cascading incident. Same-rule repeats are already the
+    # reuse route's business; a burst is the cross-alert layer above it.
+    async def _burst_id_for(self, event: Any, origin: str) -> str:
+        """Called with the write lock held; see record()."""
         if not origin or event.is_recovery:
             return ""
-        cutoff = float(event.received_at) - self.BURST_WINDOW_SECONDS
+        cutoff = float(event.received_at) - max(1, self._burst_window_seconds)
+        # Both filters are IN the query now. The origin match used to run in
+        # Python over "the last 50 rows in the window", so 120 unrelated alerts
+        # from other systems inside those ten minutes hid every peer this alert
+        # had: two rules from one origin came out with no burst_id at all, and
+        # cross-alert grouping stopped working on exactly the busy ledger it
+        # exists for. LIMIT 50 stays as a cap on a genuine storm — it just caps
+        # the peers now instead of the search.
         cursor = await self.db.execute(
-            "SELECT id, rule_key, burst_id, fields_json, source FROM judgements"
-            " WHERE received_at >= ? AND is_recovery = 0 ORDER BY id DESC LIMIT 50",
-            (cutoff,),
+            "SELECT id, burst_id FROM judgements"
+            " WHERE origin = ? AND rule_key != ? AND received_at >= ? AND is_recovery = 0"
+            " ORDER BY id DESC LIMIT 50",
+            (origin, event.rule_key, cutoff),
         )
-        peers = []
-        for row in await cursor.fetchall():
-            try:
-                fields = json.loads(row["fields_json"] or "{}")
-            except ValueError:
-                fields = {}
-            if self._origin_of(fields, str(row["source"])) == origin and str(row["rule_key"]) != event.rule_key:
-                peers.append(row)
+        peers = await cursor.fetchall()
         if not peers:
             return ""
         existing = next((str(row["burst_id"]) for row in peers if row["burst_id"]), "")
@@ -261,13 +332,22 @@ class Store:
 
     async def disagreements(self, limit: int = 50) -> list[dict[str, Any]]:
         """Unlabeled rows where the platform and the judge picked different
-        importances — the queue the review page drains, newest first."""
-        vocab = ("critical", "high", "medium", "low")
+        importances — the queue the review page drains, newest first.
+
+        `warning` is admitted, and compared as the `medium` it means. It was
+        excluded from the vocabulary while ALSO being scored as a disagreement by
+        the agreement matrix, which is the worst of both: the most common
+        severity Prometheus and Grafana emit was counted against the judge on
+        /status and then could not be brought up for review to be corrected.
+        """
+        level_sql, level_params = _comparable_level_sql()
+        # `level_sql` is CASE arms generated from a constant map; every value,
+        # including the arms', is parametrized.
         cursor = await self.db.execute(
-            "SELECT * FROM judgements WHERE label_importance = ''"
-            " AND level != '' AND importance != '' AND level != importance"
-            f" AND level IN ({','.join('?' * len(vocab))}) ORDER BY id DESC LIMIT ?",  # nosec B608
-            (*vocab, max(1, min(200, limit))),
+            "SELECT * FROM judgements WHERE label_importance = ''"  # nosec B608
+            f" AND level != '' AND importance != '' AND {level_sql} != importance"
+            f" AND level IN ({','.join('?' * len(COMPARABLE_LEVELS))}) ORDER BY id DESC LIMIT ?",
+            (*level_params, *COMPARABLE_LEVELS, max(1, min(200, limit))),
         )
         return [dict(row) for row in await cursor.fetchall()]
 
@@ -470,17 +550,23 @@ class Store:
 
     async def summary(self, since: float) -> dict[str, Any]:
         cursor = await self.db.execute(
-            "SELECT route, count(*) AS n, coalesce(sum(cost),0) AS cost, coalesce(avg(latency_ms),0) AS latency"
+            "SELECT route, count(*) AS n, coalesce(sum(cost),0) AS cost, coalesce(avg(latency_ms),0) AS latency,"
+            f" {_BILLED_SQL} AS billed"  # nosec B608 — a module constant, no caller input reaches it
             " FROM judgements WHERE received_at >= ? GROUP BY route",
             (since,),
         )
+        by_route = await cursor.fetchall()
         routes = {
             str(row["route"]): {
                 "count": int(row["n"]),
                 "cost": round(float(row["cost"]), 6),
                 "avg_latency_ms": int(row["latency"]),
+                # Rows on THIS route that a provider actually charged for. On
+                # `ai` it equals count; anywhere else a non-zero number is a
+                # degraded answer that still cost money.
+                "billed": int(row["billed"] or 0),
             }
-            for row in await cursor.fetchall()
+            for row in by_route
         }
         cursor = await self.db.execute(
             "SELECT return_status, count(*) AS n FROM judgements WHERE received_at >= ? GROUP BY return_status",
@@ -506,16 +592,24 @@ class Store:
         compared = agree = 0
         for row in await cursor.fetchall():
             lvl, imp, n = str(row["level"]), str(row["importance"]), int(row["n"])
+            # The matrix keeps the platform's own word as the key — `warning` is
+            # what it said — while agreement is scored on what that word MEANS.
+            # Comparing the strings raw made every `warning` row a disagreement
+            # with a judge that had said the same thing, and `warning` is the
+            # majority of what these platforms send.
             matrix.setdefault(lvl, {})[imp] = n
             compared += n
-            if lvl == imp:
+            if platform_importance(lvl) == imp:
                 agree += n
+        level_sql, level_params = _comparable_level_sql()
+        # `level_sql` is CASE arms generated from a constant map; the values are
+        # parametrized.
         cursor = await self.db.execute(
-            "SELECT id, title, level, importance, route FROM judgements"
+            "SELECT id, title, level, importance, route FROM judgements"  # nosec B608
             " WHERE received_at >= ? AND level != '' AND importance != ''"
-            "   AND coalesce(is_recovery, 0) = 0 AND level != importance"
+            f"   AND coalesce(is_recovery, 0) = 0 AND {level_sql} != importance"
             " ORDER BY id DESC LIMIT 5",
-            (since,),
+            (since, *level_params),
         )
         disagreements = [dict(row) for row in await cursor.fetchall()]
         return {
