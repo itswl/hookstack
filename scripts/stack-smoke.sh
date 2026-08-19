@@ -62,12 +62,15 @@ python3 scripts/assert_agent_notes.py
 # it is not — the alternative is marking it `required: false`, which would
 # weaken production so that CI could pass. Wrong way round.
 if [ -f .env ]; then
-  # Both need --env-file: compose interpolates ${...} relative to the compose
-  # FILE's directory, not the cwd, so without the flag the pipe's prod compose
-  # was reading hookrelay/deploy/.env — a file that does not exist — and its
-  # ${HOOKRELAY_CONFIG_FILE:?} guard passed or failed for reasons unrelated to
-  # the .env this checkout actually has. Its sibling on the next line always
-  # had the flag; that inconsistency is the whole bug.
+  # Both lines carry --env-file, and the pipe's did not. Compose interpolates
+  # ${...} from the compose FILE's own directory, so without the flag this one
+  # resolves against hookrelay/deploy/.env — a file that has never existed —
+  # while its sibling below resolves against the deployment root's. Today the
+  # pipe's prod compose interpolates nothing, so the flag changes no answer;
+  # the point is that the day someone adds a ${VAR} to it, it reads the .env
+  # this branch just tested for, instead of silently reading nothing. Two
+  # sibling lines disagreeing about their own contract is how that lands
+  # unnoticed.
   docker compose --env-file .env -f hookrelay/deploy/docker-compose.prod.yml config >/dev/null
   docker compose --env-file .env -f hookprobe/deploy/docker-compose.prod.yml config >/dev/null
   echo "production composes parse"
