@@ -77,6 +77,16 @@ class Run:
     # only logged — "it silently did nothing again" is the failure the feature
     # exists to end, and a log line nobody greps is how that hides.
     distilled: dict = field(default_factory=dict)
+    # A human's ruling on whether this investigation earned its bill:
+    # "useful", "useless", or empty until somebody says. The cost side has been
+    # measured to the cent since the ledger existed — per model, per turn, cache
+    # reads and all — and the worth side was measured nowhere, so the first
+    # question anyone asks about adopting this ("you want me to pay a model per
+    # alert?") had no number on this side to answer with. ruled_by is the opaque
+    # IM user id the channel gave the pipe, when it gave one.
+    ruling: str = ""
+    ruled_at: float | None = None
+    ruled_by: str = ""
     # The message of the turn currently in flight (or the last one asked).
     current_message: str = ""
     # Finished turns, oldest first: {"message", "text", "error", "run_id",
@@ -120,6 +130,17 @@ class RunStore:
 
     def checkpoint(self, run: Run) -> None:
         """Persist an in-flight run, so a restart can settle it instead of losing it."""
+        self._write(run)
+
+    def annotate(self, run: Run) -> None:
+        """Persist something recorded ABOUT a run, without moving its clock.
+
+        finish() stamps finished_at, which is right for a turn that just settled
+        and wrong for everything that happens after one. An operator ruling on a
+        week-old investigation is the case: through finish() it would restamp
+        that run as having just landed, sorting it to the top of the board and
+        into the middle of the spend window it never belonged to.
+        """
         self._write(run)
 
     def _write(self, run: Run) -> None:
@@ -166,6 +187,27 @@ class RunStore:
                 if finished and finished >= cutoff and turn.get("cost_usd") is None:
                     count += 1
         return count
+
+    def rulings_since(self, cutoff: float) -> tuple[int, int, int]:
+        """(investigations, ruled useful, ruled useless) over the spend window.
+
+        Counted off the same turn timestamps spend_since reads, so "N
+        investigations, $X, M found the cause" is one sentence about one set of
+        runs rather than three numbers from three different periods. A ruling
+        arriving late still lands on its own run's window: the ruling is not what
+        puts a run in the count, the turn it billed for is.
+        """
+        self._scan_disk_once()
+        investigations = useful = useless = 0
+        for run in self._runs.values():
+            if not any((turn.get("finished_at") or 0) >= cutoff for turn in run.turns):
+                continue
+            investigations += 1
+            if run.ruling == "useful":
+                useful += 1
+            elif run.ruling == "useless":
+                useless += 1
+        return investigations, useful, useless
 
     def cache_since(self, cutoff: float) -> tuple[int, int]:
         """(fresh_input_tokens, cache_read_tokens) across turns after `cutoff`.

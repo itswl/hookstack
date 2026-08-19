@@ -17,7 +17,8 @@ OUT — the judgement, posted back to a pipe door:
                   "correlation_id", "is_recovery", "timestamp"},
      "analysis": {"summary", "event_type", "impact_scope", "importance"},
      "identity": {...},                   # the fields the pipe should lay out
-     "links":    []}
+     "links":    [],
+     "actions":  [{"kind", "text", ...}]} # which buttons this verdict deserves
 
 Both are the pipe's published shapes. Keeping them in one file means a change
 to either is a change you can SEE, rather than a field quietly appearing in a
@@ -120,6 +121,21 @@ ROUTE_RULE = "rule"  # the model was unavailable or refused; rules decided
 ROUTE_RULE_REUSE = "rule-reuse"  # a prior AI verdict for the same alert RULE answered
 
 IMPORTANCE = ("critical", "high", "medium", "low")
+
+# The buttons a verdict can ask for. Three, and no more: `silence` (stop
+# restating this condition for a while) and the `useful`/`useless` pair (was
+# being interrupted for this worth it). `followup` and `approve` are the
+# investigator's — they answer "act on this report", and a verdict is not a
+# proposal, so it has nothing to approve.
+ACTION_SILENCE = "silence"
+ACTION_USEFUL = "useful"
+ACTION_USELESS = "useless"
+ACTION_KINDS = (ACTION_SILENCE, ACTION_USEFUL, ACTION_USELESS)
+
+# How long a verdict is willing to stop talking about its own condition, by how
+# bad it just said that condition is. The window IS the judgement: nobody but
+# the brain knows whether four hours of quiet is a relief or a missed outage.
+_SILENCE_MINUTES = {"critical": 15, "high": 15, "medium": 60, "low": 240}
 
 # Fields that must never enter an identity. Identity answers ONE question —
 # which condition is this? — so anything answering a different question about
@@ -307,6 +323,58 @@ class Verdict:
         )
 
 
+def _silence_text(minutes: int) -> str:
+    """Scaled to the unit, like every other duration the family prints: 90m is a
+    number nobody reads as an hour and a half."""
+    return f"Silence {minutes}m" if minutes % 60 else f"Silence {minutes // 60}h"
+
+
+def declared_actions(verdict: Verdict, *, is_recovery: bool) -> list[dict[str, Any]]:
+    """Which buttons a card deserves — a judgement, so it is made here.
+
+    Declaring is all this service does: the pipe mints the signed token behind
+    the button and owns the callback, because a signature is the channel edge's
+    business and this brain never holds a secret. The pipe also drops any kind
+    it has not been configured to accept, so every entry below is a request.
+
+    A RECOVERY declares nothing. There is nothing to silence — the condition
+    already ended, and a window opened on it would land on the next genuine
+    firing, which is the "a mute hides an escalation" failure arriving through a
+    door nobody was watching. Nor is the feedback pair coherent there: "was
+    waking me for this worth it" on a resolution notice asks whether the channel
+    should send resolution notices at all, and that is a channel setting the pipe
+    owns, not something the judge can learn about this condition.
+
+    Everything else declares all three, the free routes included. That is
+    deliberate. A storm of twelve restatements interrupted a human twelve times,
+    and eleven of those cards costing nothing is exactly the contrast the cost
+    figures hide; withholding the pair from them would leave the noise unrulable
+    and "I was interrupted 40 times and 3 mattered" uncomputable, which is the
+    sentence the measurement beside this exists to answer.
+
+    Route is not read here, on purpose. Offering a longer mute on a restatement
+    than on a first firing would be the judge quietly writing a suppression
+    policy, and who owns noise when a verdict is reused is a decision left open
+    on the record (.agents/notes/proposed/2026-08-12-who-owns-noise-when-a-
+    verdict-is-reused.md). Only importance and is_recovery are read, and both of
+    them survive a round trip through the ledger — which the return leg depends
+    on, since it rebuilds this payload from a stored row and must declare the
+    same buttons it would have declared the first time.
+    """
+    if is_recovery:
+        return []
+    # 15 minutes is still offered on a critical alert rather than nothing. An
+    # operator working an incident is getting the same card every thirty seconds,
+    # and when the card offers no way to stop it the alternative they reach for
+    # is muting the whole channel — which hides everything, not just this.
+    minutes = _SILENCE_MINUTES.get(verdict.importance, 60)
+    return [
+        {"kind": ACTION_SILENCE, "text": _silence_text(minutes), "minutes": minutes},
+        {"kind": ACTION_USEFUL, "text": "Worth waking me"},
+        {"kind": ACTION_USELESS, "text": "Not worth it"},
+    ]
+
+
 @dataclass(frozen=True, slots=True)
 class Outgoing:
     """The result envelope the pipe knows how to dress."""
@@ -343,4 +411,9 @@ class Outgoing:
             # layout belongs to the pipe.
             "identity": dict(self.incoming.fields),
             "links": list(self.links),
+            # Which buttons this verdict deserves. A card used to be a dead end:
+            # the operator could read it and do nothing. What each button MEANS
+            # is judgement and lives here; the token behind it and the callback
+            # that catches the press are the pipe's.
+            "actions": declared_actions(self.verdict, is_recovery=self.incoming.is_recovery),
         }

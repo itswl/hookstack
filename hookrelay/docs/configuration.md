@@ -335,6 +335,61 @@ routes:
 `payload: raw` with a missing/empty path fails INTO the delivery ledger with a
 named error — a misconfiguration must never silently deliver an empty body.
 
+## 4. The card's way back — `card_actions`
+
+A notification card can carry buttons. The brain **declares** which actions its
+result deserves (that is judgement — see the processed-event contract); this
+block decides which of those a deployment actually offers, and where a press
+goes. A kind that is absent here is dropped before a button is minted, so a
+brain asking for one is making a request, not a guarantee.
+
+```yaml
+card_actions:
+  silence:                          # the pipe owns silences — no channel needed
+    params: {minutes: 60}           # optional: override what the brain asked for
+  followup:
+    forward_to: probe-action        # a channel; must exist
+  approve:
+    forward_to: probe-action
+  useful:
+    forward_to: judge-feedback
+  useless:
+    forward_to: judge-feedback
+```
+
+Five kinds exist: `silence`, `followup`, `approve`, `useful`, `useless`. Unknown
+kinds, a `forward_to` naming no channel, and any non-`silence` kind without a
+`forward_to` all fail **at boot** — a button that 404s when an operator finally
+presses it is worse than no button.
+
+`HOOKRELAY_ACTION_SECRET` signs the buttons and verifies them on the way back.
+**Empty means no card carries an action at all**, which is the right default: an
+unsigned button is a URL anyone in the group chat can press on your behalf. A
+token is single-use (a second press answers `already_done`) and expires after
+`HOOKRELAY_ACTION_TTL_SECONDS` (default 86400) — a card forwarded into a chat is
+a token in everyone's scrollback.
+
+Presses arrive at `POST /card-action`. `silence` is performed here; every other
+kind becomes an event plus a delivery to its channel, so a forwarded press
+inherits the retry, the rate limit, the dead letter and the ledger row. The
+receiving door verifies the channel's signature, so **the channel's `secret`
+must equal the door's own secret** — the same coupling `to-judge` and `to-probe`
+already have. Set `HOOKRELAY_CARD_CALLBACK_SECRET` to additionally require the
+family's timestamped signature on the callback itself; useful when a gateway
+sits in front of the IM platform.
+
+The forwarded body:
+
+```json
+{"action": {"kind": "followup", "params": {"prompt": "Why do you believe that?"}},
+ "correlation_id": "hr-11", "event_id": 11, "actor": "ou_z", "at": 1787135929}
+```
+
+`actor` is whatever opaque user id the platform sent, never a display name.
+Every honoured press is a ledger row, and `GET /trace/{event_id}` returns them
+under `human_actions` — so the timeline answers "and what did a person do about
+it", not only what the machine did.
+
 ### Retention
 
 `HOOKRELAY_RETENTION_DAYS` (default 14, `0` = keep forever): an hourly sweep

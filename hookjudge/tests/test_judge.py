@@ -311,7 +311,7 @@ def test_the_result_carries_judgement_and_no_presentation():
         verdict=rule_verdict(event()),
     ).payload()
 
-    assert set(out) == {"meta", "analysis", "identity", "links"}
+    assert set(out) == {"meta", "analysis", "identity", "links", "actions"}
     assert out["meta"]["brain"] == "hookjudge"
     assert out["meta"]["correlation_id"] == "hr-86", "the pipe can gather this under the original"
     assert out["analysis"]["summary"]
@@ -458,6 +458,88 @@ def test_the_result_names_the_condition_and_states_its_state_separately():
         "a condition and its recovery must present the same name to the pipe"
     )
     assert firing_payload["meta"]["is_recovery"] is False
+
+
+# ── the buttons a verdict declares ───────────────────────────────────────────
+
+
+def test_a_live_verdict_declares_the_three_buttons_it_deserves():
+    """A card used to be a dead end: the operator could read it and nothing else."""
+    from hookjudge.contract import Verdict
+
+    actions = Outgoing(
+        incoming=event(), verdict=Verdict(summary="s", importance="medium", route=ROUTE_AI).normalized()
+    ).payload()["actions"]
+
+    assert [a["kind"] for a in actions] == ["silence", "useful", "useless"]
+    assert actions[0] == {"kind": "silence", "text": "Silence 1h", "minutes": 60}
+    assert all(a["text"] for a in actions), "kind and text are both required by the pipe's contract"
+
+
+def test_a_recovery_declares_nothing_to_press():
+    """There is nothing left to silence, and a window opened on an ended
+    condition lands on its NEXT genuine firing — a mute hiding an escalation
+    through a door nobody was watching. "Was this worth waking me" on a
+    resolution notice asks whether the channel should send resolution notices at
+    all, which is the pipe's setting, not something to learn per condition."""
+    ended = Incoming.parse({"source": "s", "title": "[RESOLVED] Payment gateway 5xx 8%"}, now=1.0)
+    assert Outgoing(incoming=ended, verdict=rule_verdict(ended)).payload()["actions"] == []
+
+
+@pytest.mark.parametrize(
+    ("importance", "text", "minutes"),
+    [
+        ("critical", "Silence 15m", 15),
+        ("high", "Silence 15m", 15),
+        ("medium", "Silence 1h", 60),
+        ("low", "Silence 4h", 240),
+    ],
+)
+def test_the_silence_window_scales_with_what_the_verdict_just_said(importance: str, text: str, minutes: int):
+    """The window IS the judgement: a low verdict can afford to go quiet for the
+    afternoon and a critical one cannot, because a long mute on a loud condition
+    is how an escalation goes unseen. A critical is still offered 15 minutes
+    rather than nothing — an operator whose card offers no way to stop the noise
+    reaches for muting the whole channel, and that hides everything."""
+    from hookjudge.contract import Verdict
+
+    silence = Outgoing(
+        incoming=event(), verdict=Verdict(summary="s", importance=importance, route=ROUTE_AI).normalized()
+    ).payload()["actions"][0]
+    assert silence["text"] == text
+    assert silence["minutes"] == minutes
+
+
+def test_a_reused_verdict_declares_exactly_what_a_fresh_one_does():
+    """Route is deliberately not read. The eleventh restatement interrupted a
+    human just as the first one did, and offering it a longer mute would be the
+    judge quietly writing a suppression policy — the decision that is on record
+    as still open."""
+    from hookjudge.contract import Verdict
+
+    fresh = Verdict(summary="s", importance="high", route=ROUTE_AI).normalized()
+    restated = Verdict(summary="s", importance="high", route=ROUTE_REUSE).normalized()
+    floored = Verdict(summary="s", importance="high", route=ROUTE_RULE, degraded_reason="AI not configured")
+
+    declared = [Outgoing(incoming=event(), verdict=v).payload()["actions"] for v in (fresh, restated, floored)]
+    assert declared[0] == declared[1] == declared[2]
+
+
+def test_the_declared_buttons_carry_no_token_and_name_no_channel():
+    """The split: the brain says WHICH actions a verdict deserves, the pipe mints
+    the signed token and owns the callback. A brain holding a secret is a brain
+    that has to know which channel it is talking to."""
+    from hookjudge.contract import Verdict
+
+    actions = Outgoing(
+        incoming=event(), verdict=Verdict(summary="s", importance="critical", route=ROUTE_AI).normalized()
+    ).payload()["actions"]
+
+    blob = json.dumps(actions, ensure_ascii=False).lower()
+    for leak in ("secret", "signature", "token", "sign", "url", "feishu", "dingtalk", "wecom", "webhook"):
+        assert leak not in blob, f"{leak} belongs to the channel edge, not to a verdict"
+    for action in actions:
+        assert set(action) <= {"kind", "text", "minutes"}, "anything else is an opaque param the pipe carries"
 
 
 # ── the Alertmanager ecosystem, whose recovery has no marker in its text ──────
@@ -805,4 +887,134 @@ async def test_agreement_compares_platform_level_with_judge_importance(tmp_path)
     assert agreement["matrix"]["high"] == {"high": 1, "medium": 1}
     rows = agreement["recent_disagreements"]
     assert len(rows) == 1 and rows[0]["title"] == "b"
+    await store.close()
+
+
+# ── attention: the bill the cost figures cannot show ─────────────────────────
+
+
+async def test_a_running_ledger_gains_the_attention_columns(tmp_path):
+    """The ruling columns are added by migration, so a deployment that has been
+    judging for weeks gains them without losing a row. _SCHEMA does not name
+    them at all — CREATE TABLE IF NOT EXISTS would do nothing to a table that is
+    already there, so ALTER is the only thing that can reach one."""
+    import aiosqlite
+
+    from hookjudge.store import _SCHEMA, Store
+
+    path = str(tmp_path / "running.db")
+    async with aiosqlite.connect(path) as db:
+        await db.executescript(_SCHEMA)
+        await db.execute(
+            "INSERT INTO judgements (received_at, source, identity, title, summary, importance, route)"
+            " VALUES (1.0, 's', 'i', 'an alert judged before any of this existed', 'x', 'high', 'ai')"
+        )
+        await db.commit()
+
+    store = Store(path)
+    await store.open()
+    cursor = await store.db.execute("PRAGMA table_info(judgements)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    assert {"mattered", "mattered_at", "mattered_actor"} <= columns
+    attention = await store.attention(0.0)
+    assert attention["interruptions"] == 1, "the row that predates the columns still counts as an interruption"
+    assert attention["mattered"] == 0 and attention["ruled"] == 0
+    await store.close()
+
+
+async def test_the_ledger_counts_the_interruptions_a_storms_cost_hides(tmp_path):
+    """Twelve restatements of one condition interrupted a human twelve times.
+
+    Eleven of them took the free `reuse` route, so the spend figure says nothing
+    about it at all — which is the whole complaint: reuse saves money, not
+    attention. `interruptions` is deliberately the same number as `judged`,
+    because that identity is the finding: every judgement becomes a card.
+    """
+    store = await _ledger(tmp_path)
+    reused = replace(ai_ok(), route=ROUTE_REUSE, cost=0.0)
+    await store.record(event(title="checkout 5xx", correlation_id="hr-1"), replace(ai_ok(), cost=0.004), 900)
+    for n in range(11):
+        await store.record(event(title="checkout 5xx", correlation_id=f"hr-r{n}"), reused, 2)
+    await store.record(event(title="disk full on db-1", correlation_id="hr-2"), replace(ai_ok(), cost=0.004), 800)
+
+    summary = await store.summary(0.0)
+    attention = summary["attention"]
+    assert attention["interruptions"] == summary["judged"] == 13
+    assert attention["conditions"] == 2
+    assert attention["repeats"] == 11, "cards that restated something the operator had already been told"
+    assert summary["cost"] == 0.008, "and the money says two events happened, not thirteen"
+    await store.close()
+
+
+async def test_the_noisiest_view_names_where_to_go_turn_something_off(tmp_path):
+    """Identity, how many interruptions, how many were ruled useful — the one
+    view an operator can act on. A condition that interrupted once is not noise,
+    so it is not padded into the list."""
+    store = await _ledger(tmp_path)
+    for n in range(4):
+        await store.record(event(title="cert expiring in 29 days", correlation_id=f"hr-c{n}"), ai_ok(), 5)
+    for n in range(2):
+        await store.record(event(title="checkout 5xx", correlation_id=f"hr-p{n}"), ai_ok(), 5)
+    await store.record(event(title="one-off deploy notice", correlation_id="hr-once"), ai_ok(), 5)
+
+    await store.record_mattered("hr-p0", mattered="yes", at=100.0)
+    await store.record_mattered("hr-c0", mattered="no", at=100.0)
+
+    noisiest = (await store.attention(0.0))["noisiest"]
+    assert [c["title"] for c in noisiest] == ["cert expiring in 29 days", "checkout 5xx"]
+    assert [c["interruptions"] for c in noisiest] == [4, 2]
+    assert noisiest[0]["mattered"] == 0 and noisiest[0]["did_not_matter"] == 1, "four wake-ups, none of them wanted"
+    assert noisiest[1]["mattered"] == 1
+    assert "cert expiring in 29 days" in noisiest[0]["identity"]
+    assert all("one-off" not in c["title"] for c in noisiest), "one interruption is not noise"
+    await store.close()
+
+
+async def test_a_ruling_is_idempotent_and_cannot_be_undone_by_a_late_retry(tmp_path):
+    """The pipe redelivers. A press replayed must not move anything, and a press
+    the operator has since changed their mind about must not be reinstated by a
+    retry that arrives after the newer one."""
+    store = await _ledger(tmp_path)
+    await store.record(event(title="checkout 5xx", correlation_id="hr-9"), ai_ok(), 5)
+
+    first = await store.record_mattered("hr-9", mattered="no", at=100.0)
+    assert first == {"id": 1, "mattered": "no", "applied": True}
+    assert await store.record_mattered("hr-9", mattered="no", at=100.0) == {"id": 1, "mattered": "no", "applied": False}
+
+    changed = await store.record_mattered("hr-9", mattered="yes", at=200.0)
+    assert changed["applied"] is True and changed["mattered"] == "yes"
+    stale = await store.record_mattered("hr-9", mattered="no", at=100.0)
+    assert stale == {"id": 1, "mattered": "yes", "applied": False}
+    assert (await store.attention(0.0))["mattered"] == 1
+    await store.close()
+
+
+async def test_a_press_finds_its_judgement_by_the_pipes_event_id_convention(tmp_path):
+    """The flat wire shape carries no correlation id, so the row was stamped with
+    the pipe's own hr-<event_id> — the same precedence Incoming.parse uses."""
+    store = await _ledger(tmp_path)
+    await store.record(Incoming.parse({"source": "ww", "title": "gateway 5xx", "event_id": 123}, now=1.0), ai_ok(), 5)
+    assert await store.record_mattered("", mattered="yes", at=1.0, event_id="123") is not None
+    assert await store.record_mattered("", mattered="yes", at=1.0, event_id="404") is None
+    await store.close()
+
+
+async def test_a_ruling_on_the_interruption_never_touches_the_eval_label(tmp_path):
+    """Two questions, two columns. label_importance answers what importance the
+    alert should have HAD and every row carrying it becomes an eval row; this
+    answers whether the interruption was worth it. A correctly-rated `high` can
+    still not be worth waking anyone, so both answers stand on one row — and
+    writing 'yes' into the eval column would have emitted expect.importance="yes"
+    into the eval set and drained the review queue of a row nobody reviewed."""
+    store = await _ledger(tmp_path)
+    await store.record(event(title="checkout 5xx", level="low", correlation_id="hr-7"), ai_ok(importance="high"), 5)
+
+    await store.record_mattered("hr-7", mattered="no", at=100.0, actor="ou_abc")
+    assert len(await store.disagreements()) == 1, "a button press is not a review"
+    assert await store.labeled() == [], "and it is not an eval row"
+
+    await store.set_label(1, "high", "judge", 200.0)
+    row = (await store.labeled())[0]
+    assert row["label_importance"] == "high" and row["mattered"] == "no"
+    assert row["mattered_actor"] == "ou_abc", "provenance, the way label_source is — never resolved to a person"
     await store.close()

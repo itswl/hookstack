@@ -575,3 +575,214 @@ async def test_different_rules_from_one_origin_in_one_window_share_a_burst(app_c
     assert rows["disk full on db-1"]["burst_id"], "the first member joins retroactively"
     assert rows["disk full on db-1"]["burst_id"] == rows["api latency p99 over 2s"]["burst_id"]
     assert rows["unrelated"]["burst_id"] == "", "a different origin is not this incident"
+
+
+# ── interactive cards: the buttons out, the ruling back ──────────────────────
+
+
+async def test_the_handed_back_verdict_carries_the_buttons_it_declared(app_client, monkeypatch):
+    """A card was a dead end — readable, and nothing else. The verdict now says
+    which buttons it deserves; the pipe mints the token and owns the callback,
+    so nothing signed and no channel name travels in this direction."""
+    sink = Sink()
+    monkeypatch.setattr(app_client.app.state, "client", sink)
+    await app_client.post("/events", json=EVENT)
+    await _settle(app_client)
+    for _ in range(80):
+        await asyncio.sleep(0.01)
+        if sink.received:
+            break
+
+    actions = sink.received[0]["body"]["actions"]
+    assert [a["kind"] for a in actions] == ["silence", "useful", "useless"]
+    # EVENT is judged `high` on the rule floor, so the mute offered is short.
+    assert actions[0] == {"kind": "silence", "text": "Silence 15m", "minutes": 15}
+    assert "value" not in json.dumps(actions), "no pre-signed payload: the token is the pipe's to mint"
+
+
+async def test_a_returned_recovery_offers_nothing_to_silence(app_client, monkeypatch):
+    """The return leg rebuilds this payload from a stored row, so it has to read
+    the recovery FACT from the row rather than re-sniffing the stored title.
+
+    This is the Alertmanager shape: the platform stated status=resolved and the
+    body is a reused firing summary, so there is no recovery word anywhere in the
+    text to sniff. Re-deriving it during the rebuild put "Silence 15m" on a card
+    about something already over — and a window opened there lands on the next
+    genuine firing.
+    """
+    sink = Sink()
+    monkeypatch.setattr(app_client.app.state, "client", sink)
+    await app_client.post(
+        "/events",
+        json={
+            "source": "alertmanager",
+            "title": "HighErrorRate",
+            "body": "error ratio above 5% for 10m on pay",
+            "level": "high",
+            "fields": {"alertname": "HighErrorRate", "env": "prod"},
+            "event_id": 501,
+            "is_recovery": True,
+        },
+    )
+    await _settle(app_client)
+    for _ in range(80):
+        await asyncio.sleep(0.01)
+        if sink.received:
+            break
+
+    payload = sink.received[0]["body"]
+    assert payload["meta"]["is_recovery"] is True
+    assert payload["actions"] == [], "nothing to silence, and no ruling to ask for on a resolution notice"
+
+
+async def test_a_press_is_recorded_against_the_judgement_that_interrupted_someone(app_client):
+    """The half the cost figures cannot show. `useful` says being woken was worth
+    it; the ledger already knew how many times it woke somebody."""
+    await app_client.post("/events", json=EVENT)
+    await _settle(app_client)
+
+    pressed = await app_client.post(
+        "/feedback",
+        json={
+            "action": {"kind": "useful", "params": {}},
+            "correlation_id": "hr-86",
+            "event_id": 86,
+            "actor": "ou_9",
+            "at": time.time(),
+        },
+    )
+    assert pressed.status_code == 202
+    assert pressed.json()["recorded"] is True and pressed.json()["mattered"] == "yes"
+
+    attention = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()["summary"]["attention"]
+    assert attention["interruptions"] == 1, "every judgement became a card"
+    assert attention["mattered"] == 1 and attention["ruled"] == 1
+    assert attention["mattered_pct"] == 100.0
+
+    row = (await app_client.app.state.store.recent(1))[0]
+    assert row["mattered"] == "yes" and row["mattered_actor"] == "ou_9"
+    assert row["label_importance"] == "", "a ruling on the interruption is not an eval label"
+
+
+async def test_a_redelivered_press_is_not_counted_twice(app_client):
+    """The pipe retries. Pressing once must not read as pressing twice."""
+    await app_client.post("/events", json=EVENT)
+    await _settle(app_client)
+
+    press = {"action": {"kind": "useless"}, "correlation_id": "hr-86", "at": 1786037727}
+    first = await app_client.post("/feedback", json=press)
+    again = await app_client.post("/feedback", json=press)
+    assert first.json()["applied"] is True
+    assert again.status_code == 202 and again.json()["applied"] is False
+
+    attention = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()["summary"]["attention"]
+    assert attention["did_not_matter"] == 1 and attention["ruled"] == 1
+
+
+async def test_a_silence_press_is_answered_and_says_it_recorded_no_ruling(app_client):
+    """Pressing "make it stop" is not saying "it did not matter" — an operator
+    silences a real
+    incident they are already working. Counting it as noise would corrupt the one
+    number this door exists to keep honest, and answering 202 while silently
+    doing nothing is the same lie as a verdict that hides its downgrade."""
+    await app_client.post("/events", json=EVENT)
+    await _settle(app_client)
+
+    answered = await app_client.post(
+        "/feedback", json={"action": {"kind": "silence", "params": {"minutes": 60}}, "correlation_id": "hr-86"}
+    )
+    assert answered.status_code == 202
+    assert answered.json()["recorded"] is False and "not a ruling" in answered.json()["reason"]
+
+    row = (await app_client.app.state.store.recent(1))[0]
+    assert row["mattered"] == "", "no suppression behaviour changed and no ruling was invented"
+
+
+async def test_a_press_for_a_card_nobody_judged_is_answered_not_retried_forever(app_client):
+    """202 with the reason named rather than 404: a retry cannot conjure the
+    judgement, and a pipe reading this as a failure would redeliver a press
+    nobody can ever file."""
+    answered = await app_client.post(
+        "/feedback", json={"action": {"kind": "useful"}, "correlation_id": "hr-nothing-here"}
+    )
+    assert answered.status_code == 202
+    assert answered.json() == {"recorded": False, "reason": "no judgement carries that correlation id"}
+
+
+async def test_the_feedback_door_refuses_strangers_and_kinds_it_never_declared(tmp_path):
+    """Same timestamped HMAC and the same secret as /events: it is the same
+    sender through the same edge. A kind this brain never declares is a refusal,
+    not a silent no-op — `approve` belongs to the investigator's reports."""
+    app = create_app(settings=_settings(tmp_path, ingest_secret="s3", db_path=str(tmp_path / "fb.db")))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        body = json.dumps({"action": {"kind": "useful"}, "correlation_id": "hr-1"}).encode()
+        assert (await client.post("/feedback", content=body)).status_code == 401
+
+        stale = str(int(time.time()) - 3600)
+        sig = hmac.new(b"s3", stale.encode() + b"." + body, hashlib.sha256).hexdigest()
+        replayed = await client.post(
+            "/feedback", content=body, headers={"X-Hook-Signature": sig, "X-Hook-Timestamp": stale}
+        )
+        assert replayed.status_code == 401, "a captured press expires"
+
+        def signed(payload: dict[str, Any]) -> tuple[bytes, dict[str, str]]:
+            raw = json.dumps(payload).encode()
+            fresh = str(int(time.time()))
+            return raw, {
+                "X-Hook-Signature": hmac.new(b"s3", fresh.encode() + b"." + raw, hashlib.sha256).hexdigest(),
+                "X-Hook-Timestamp": fresh,
+            }
+
+        raw, headers = signed({"action": {"kind": "useful"}, "correlation_id": "hr-1"})
+        assert (await client.post("/feedback", content=raw, headers=headers)).status_code == 202
+
+        raw, headers = signed({"action": {"kind": "approve"}, "correlation_id": "hr-1"})
+        refused = await client.post("/feedback", content=raw, headers=headers)
+        assert refused.status_code == 400 and "kind must be one of" in refused.json()["detail"]
+
+        raw, headers = signed({"correlation_id": "hr-1"})
+        assert (await client.post("/feedback", content=raw, headers=headers)).status_code == 400
+
+
+async def test_status_and_metrics_account_for_attention_not_only_spend(app_client):
+    """A condition judged three times interrupted a human three times even though
+    two of them were free. The noisiest view is what says where to go turn
+    something off; only the capped top of it becomes a Prometheus label, because
+    an alert identity as a label value is unbounded cardinality."""
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    def press(n: int) -> Incoming:
+        return Incoming.parse(
+            {"event": {"title": 'cert "prod-api" expiring', "level": "low", "fields": {"env": "prod"}}},
+            now=time.time(),
+            correlation_id=f"hr-{n}",
+        )
+
+    await store.record(press(1), Verdict(summary="s", importance="low", route="ai", model="m").normalized(), 900)
+    for n in (2, 3):
+        await store.record(press(n), Verdict(summary="s", importance="low", route="reuse").normalized(), 3)
+
+    await app_client.post("/feedback", json={"action": {"kind": "useless"}, "correlation_id": "hr-2", "at": 100.0})
+
+    summary = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()["summary"]
+    attention = summary["attention"]
+    assert attention["interruptions"] == summary["judged"] == 3
+    assert attention["conditions"] == 1 and attention["repeats"] == 2
+    assert attention["did_not_matter"] == 1 and attention["mattered_pct"] == 0.0
+    noisiest = attention["noisiest"]
+    assert len(noisiest) == 1 and noisiest[0]["interruptions"] == 3 and noisiest[0]["paid"] == 1
+
+    text = (await app_client.get("/metrics", headers={"X-Read-Token": "read-t"})).text
+    assert "hookjudge_interruptions 3" in text
+    assert "hookjudge_conditions 1" in text
+    assert "hookjudge_repeat_interruptions 2" in text
+    assert 'hookjudge_attention_rulings{ruling="did_not_matter"} 1' in text
+    # The identity carries the alert's own quoting; one raw quote would turn the
+    # whole scrape into a parse error, so every condition's numbers vanish.
+    assert 'cert \\"prod-api\\" expiring' in text
+    assert "hookjudge_condition_mattered{" in text

@@ -1,7 +1,8 @@
 """hookjudge — a brain behind a pipe. It judges; it does nothing else.
 
     POST /events    the pipe's normalized event. Answers 202 immediately.
-    GET  /status    the ledger: verdicts, routes, cost, return state
+    POST /feedback  a human pressed a button on a card. Answers 202.
+    GET  /status    the ledger: verdicts, routes, cost, attention, return state
     GET  /metrics   Prometheus text
     GET  /healthz
 
@@ -29,7 +30,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from hookjudge.alarm import SelfAlarm
-from hookjudge.contract import IMPORTANCE, Incoming, Outgoing
+from hookjudge.contract import ACTION_KINDS, ACTION_SILENCE, ACTION_USEFUL, IMPORTANCE, Incoming, Outgoing
 from hookjudge.judge import ai_verdict, reuse_verdict, rule_reuse_verdict, rule_verdict
 from hookjudge.live import Live
 from hookjudge.settings import Settings
@@ -50,6 +51,16 @@ def constant_time_eq(expected: str, provided: str | None) -> bool:
     bytes keeps the constant-time property and answers the way it should.
     """
     return hmac.compare_digest(expected.encode("utf-8"), (provided or "").encode("utf-8"))
+
+
+def _prom_label(value: str) -> str:
+    """A Prometheus label value: backslash, quote and newline are the three
+    characters the text exposition format cannot carry raw. An alert identity is
+    "source|title|k=v", and a title arrives with whatever punctuation the
+    monitoring stack felt like putting in it — one unescaped quote turns the
+    whole scrape into a parse error, so every condition's numbers vanish rather
+    than just that one's."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def verify_signature(secret: str, body: bytes, provided: str | None, timestamp: str | None, now: float) -> bool:
@@ -142,6 +153,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raw={},
             correlation_id=str(row["correlation_id"] or ""),
             received_at=float(row["received_at"]),
+            # The stored fact, not a re-sniff of the stored title. It was only
+            # ever needed for meta.is_recovery, which was patched onto the
+            # payload below — but the declared ACTIONS now turn on it too, and
+            # an Alertmanager recovery whose body reuses the firing's summary
+            # contains no recovery word to sniff. Re-deriving it here would have
+            # put "Silence 4h" on a card about something already over.
+            recovery_flag=bool(row["is_recovery"]),
         )
         from hookjudge.contract import Verdict
 
@@ -153,7 +171,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             route=str(row["route"]),
         )
         payload = Outgoing(incoming=event, verdict=verdict).payload()
-        payload["meta"]["is_recovery"] = bool(row["is_recovery"])
         body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
         headers = {"content-type": "application/json"}
         if app_settings.return_secret:
@@ -290,6 +307,75 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         task.add_done_callback(app.state.judge_tasks.discard)
         return JSONResponse({"accepted": True, "identity": event.identity}, status_code=202)
 
+    @app.post("/feedback")
+    async def feedback(
+        request: Request,
+        x_hook_signature: str | None = Header(default=None),
+        x_hook_timestamp: str | None = Header(default=None),
+    ) -> JSONResponse:
+        """A human pressed a button on a card, and the pipe brought the press here.
+
+        Signed with the SAME timestamped HMAC and the same secret as /events,
+        because it arrives from the same sender through the same edge. hookrelay
+        owns the callback and the token behind the button; what reaches this door
+        is the ruling with the channel already stripped off it — an opaque actor
+        id at most. The judge still cannot name a channel or hold a secret.
+
+        `useful` says being interrupted was worth it, `useless` says it was not.
+        `silence` is answered but NOT recorded as a ruling: "make it stop" is not
+        "it did not matter" — an operator silences a real incident they are
+        already working on, and counting that as noise would corrupt the one
+        number this door exists to keep honest. Nothing here suppresses anything;
+        whether a reused verdict should stop producing cards is a decision that
+        remains open, and measuring it is not deciding it.
+        """
+        body = await request.body()
+        if len(body) > app_settings.max_body_bytes:
+            raise HTTPException(status_code=413, detail="body too large")
+        if not verify_signature(app_settings.ingest_secret, body, x_hook_signature, x_hook_timestamp, now_ts()):
+            raise HTTPException(status_code=401, detail="bad signature")
+        try:
+            parsed = json.loads(body or b"{}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="body is not JSON") from None
+        payload = parsed if isinstance(parsed, dict) else {}
+        action = payload.get("action")
+        if not isinstance(action, dict):
+            action = {}
+        kind = str(action.get("kind") or "").strip().lower()
+        if kind not in ACTION_KINDS:
+            raise HTTPException(status_code=400, detail=f"kind must be one of {', '.join(ACTION_KINDS)}")
+        correlation_id = str(payload.get("correlation_id") or "").strip()
+        event_id = str(payload.get("event_id") or "").strip()
+        try:
+            at = float(payload.get("at") or now_ts())
+        except (TypeError, ValueError):
+            at = now_ts()
+        if kind == ACTION_SILENCE:
+            # Named in the answer rather than swallowed. A door that returns 202
+            # for something it did nothing about is the same lie as a verdict
+            # that hides its own downgrade.
+            logger.info("silence pressed on %s; not a ruling, and the judge suppresses nothing", correlation_id)
+            return JSONResponse(
+                {"recorded": False, "reason": "silence is a request to the pipe, not a ruling on whether it mattered"},
+                status_code=202,
+            )
+        ruling = await store.record_mattered(
+            correlation_id,
+            mattered="yes" if kind == ACTION_USEFUL else "no",
+            at=at,
+            actor=str(payload.get("actor") or ""),
+            event_id=event_id,
+        )
+        if ruling is None:
+            # 202 with the reason named, not 404: a retry cannot conjure the
+            # judgement, and a pipe that reads this as a failure would redeliver
+            # a press nobody can file forever.
+            return JSONResponse(
+                {"recorded": False, "reason": "no judgement carries that correlation id"}, status_code=202
+            )
+        return JSONResponse({"recorded": True, **ruling}, status_code=202)
+
     @app.get("/live")
     async def live_stream(
         x_read_token: str | None = Header(default=None),
@@ -424,6 +510,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ]
         for name, count in sorted(data["returns"].items()):
             lines.append(f'hookjudge_returns{{status="{name}"}} {count}')
+        attention = data["attention"]
+        lines += [
+            "# HELP hookjudge_interruptions Cards a human received in the last 24h — every judgement becomes one.",
+            "# TYPE hookjudge_interruptions gauge",
+            f"hookjudge_interruptions {attention['interruptions']}",
+            "# HELP hookjudge_conditions Distinct conditions behind those interruptions.",
+            "# TYPE hookjudge_conditions gauge",
+            f"hookjudge_conditions {attention['conditions']}",
+            "# HELP hookjudge_repeat_interruptions Interruptions restating a condition already reported.",
+            "# TYPE hookjudge_repeat_interruptions gauge",
+            f"hookjudge_repeat_interruptions {attention['repeats']}",
+            "# HELP hookjudge_attention_rulings Human rulings on whether an interruption was worth it.",
+            "# TYPE hookjudge_attention_rulings gauge",
+            f'hookjudge_attention_rulings{{ruling="mattered"}} {attention["mattered"]}',
+            f'hookjudge_attention_rulings{{ruling="did_not_matter"}} {attention["did_not_matter"]}',
+            "# HELP hookjudge_condition_interruptions Interruptions per condition, noisiest first.",
+            "# TYPE hookjudge_condition_interruptions gauge",
+        ]
+        # Only the noisiest few carry a per-condition label. An alert identity as
+        # a label value is unbounded cardinality, which is how a metrics store
+        # gets taken down by the very storm it was meant to describe; the store
+        # caps the list, and that cap is what makes these safe to emit.
+        for condition in attention["noisiest"]:
+            label = _prom_label(str(condition["identity"]))
+            lines.append(f'hookjudge_condition_interruptions{{condition="{label}"}} {condition["interruptions"]}')
+            lines.append(f'hookjudge_condition_mattered{{condition="{label}"}} {condition["mattered"]}')
         return "\n".join(lines) + "\n"
 
     @app.get("/healthz")

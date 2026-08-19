@@ -2,6 +2,7 @@
 
 POST /hooks/agent               -> {"runId": ...}                  (trigger)
 POST /hooks/event               -> the pipe's escalation door      (family)
+POST /hooks/action              -> a button pressed on the card    (family)
 GET  /sessions/{key}/final      -> 200 isFinal:true / 202 / 404    (poll)
 POST /sessions/{key}/continue   -> follow-up turn, same session    (explore)
 GET  /v1/runs                   -> session list, newest first      (UI)
@@ -16,7 +17,7 @@ of running stability heuristics against a moving answer.
 What stays in this module is the contract above, the two live streams, and the
 routes that act on a run: start it, follow it, stop it, approve the procedure it
 proposed. The rest of the surface is grouped by what it is about and mounted from
-there — hookprobe.events owns the family door and its prompts, hookprobe.library
+there — hookprobe.events owns the family doors and their prompts, hookprobe.library
 the files a person edits and a run reads, hookprobe.ops the read-only view of
 what this process is doing. Each of them takes the settings and the service
 explicitly and registers its own routes; the bearer-token dependency is defined
@@ -104,6 +105,11 @@ def _summary(run: Run) -> dict[str, Any]:
         # What the run left for the next one: {"installed": name} or
         # {"skipped": reason}, empty when the loop is off.
         "distilled": dict(run.distilled),
+        # "useful" / "useless" / "" — a person's ruling on whether this
+        # investigation earned its bill. On the summary rather than only the
+        # detail record, because the aggregate on /v1/budget is unreadable
+        # without being able to see which run it counted.
+        "ruling": run.ruling,
     }
 
 

@@ -31,6 +31,7 @@ caller ── POST /hooks/agent ───────────────▶
 |---|---|
 | `POST /hooks/agent` | Body: `{message, sessionKey, timeoutSeconds, ...}` (extra OpenClaw fields accepted and ignored). Starts a run, idempotent per `sessionKey`. Returns `{runId, sessionKey}`. |
 | `POST /hooks/event` | The family's escalation door: hookrelay's `to-probe` channel delivers normalized events here (`X-Hook-Signature` timestamped HMAC when `HOOKPROBE_EVENT_SECRET` is set). Levels outside `HOOKPROBE_ESCALATE_LEVELS` are acknowledged and skipped; the rest start an investigation, idempotent per `(source, event_id)` — redelivery of one event funds one investigation, not N. A restatement that arrives as a NEW event id is a new investigation (the judge's `reuse` has no equivalent here); the budget breaker is the backstop for that. |
+| `POST /hooks/action` | The card's way back in, signed like the door above. Body: `{action: {kind, params}, correlation_id, event_id, actor, at}`. `kind` is one of `followup` (resume the investigation with `params.prompt`, or a default question), `approve` (`params.ref` names a remediation proposal), `useful` / `useless` (a human's ruling on the report). `202` with what it did, **including** what it refused — a denial is a sentence somebody reads in a chat, and an HTTP error on an IM callback becomes a retry loop. `401` unsigned, `400` malformed, `404` naming a session or proposal that does not exist. Idempotent per `(correlation_id, kind, at)`: this door starts paid turns and runs commands, so a redelivery reads back the first press's answer instead of buying a second turn. |
 | `GET /sessions/{key}/final` | `202` while running · `200 {"isFinal": true, "text", "messageCount"}` when done · `404` unknown (e.g. in-flight run lost to a restart). `isFinal` is always true on a 200. |
 | `POST /sessions/{key}/continue` | Body: `{message, timeoutSeconds?}`. Follow-up turn in the **same** engine session — full investigation context retained. `409` while a turn is in flight, `404` unknown. Poll `/final` again for the new answer. |
 | `POST /sessions/{key}/stop` | Cancel the in-flight turn; it settles as a failed turn ("stopped by operator") within one poll. `409` when nothing is running. |
@@ -242,6 +243,17 @@ seconds. The session's running total sits beside the session key, and the header
 chip carries the window's spend and its **cache %** — how much context was reused
 rather than paid for again.
 
+The other half of that arithmetic is **whether any of it helped**, which nothing
+measured. Cost was countable to the cent from the first commit and worth was
+countable nowhere, so the first question anyone asks about adopting this — *you
+want me to pay a model per alert?* — had a dollar figure and nothing to set
+against it. A delivered report now carries **Found the cause** / **Missed it**
+buttons, `GET /v1/budget` reports `investigations`, `ruled_useful`,
+`ruled_useless` and the sentence assembled from them, and the console prints it
+under the spend bars: *12 investigations, $3.42, 5 found the cause*. Only a
+person can supply that side, so an investigation nobody ruled on stays unrated —
+never counted as a miss.
+
 That number matters more than it looks, because the part of the bill you cannot
 negotiate is large. An investigation carries roughly 29k input tokens before its
 alert is even mentioned, and measured on a running container it does not shrink:
@@ -387,7 +399,41 @@ reports itself: runs are checkpointed at spawn, and the next boot sweeps
 whatever a dead process left mid-flight into failure reports). The plain demo compose
 points the escalation at the sink's `/probe-standin` so the shape is visible
 without a model key; `--profile probe` (plus `HOOKPROBE_EVENT_URL` in `.env`)
-swaps in the real investigator. First live run of the loop: a "host CPU high"
+swaps in the real investigator.
+
+### The card is not a dead end
+
+A report reaches a person as a chat card, and for a while that was where the
+loop stopped: asking a follow-up or approving the procedure the report proposed
+meant leaving the chat, finding the console URL and presenting a bearer token —
+at 3am, on a phone. So the returned payload now **declares** the actions its
+report deserves, as `actions: [{kind, text, …}]` alongside `meta`/`analysis`:
+`followup` when the run left a session that can be resumed, one `approve` per
+proposal still waiting (with the **command** in the label — a button that does
+not say what will run is a trap), and the ruling pair on every report including
+the failures. Declaring is a request, not a guarantee: the pipe drops kinds it
+is not configured to accept, and only channels that have callbacks render any of
+them.
+
+The division of labour is the family's usual one. This side judges *which*
+actions a report earns; hookrelay mints the signed card token and owns the IM
+callback, because a card token is channel edge — nothing here names a channel or
+signs a button. A press comes back to `POST /hooks/action`, signed exactly like
+the event door, and lands on the paths that already existed: the same
+`continue` a console follow-up takes, the same `approve` behind its two gates.
+
+Two properties carry the weight. **A press stands in for the operator's console
+click and for nothing else** — the allowlist is a file an operator edits on the
+host, no button, IM user or pipe can reach it, so a press has the blast radius
+of a click and a denial comes back as a denial (what the press adds is a *who*,
+which the console click never had, so the actor lands on the row as its
+approving note). And **each press is claimed by `(correlation_id, kind, at)`
+before anything happens** — with an `O_EXCL` create, so there is no window
+between looking and acting — because `followup` starts a paid turn and `approve`
+runs commands at a live target, while an IM platform retries any callback it did
+not hear an answer to. A redelivery reads back the first press's answer.
+
+First live run of the loop: a "host CPU high"
 alert came in, the judge ruled it medium within a second, and 3.7 minutes
 later the investigator's report landed on the same channels calling it a
 false alarm — with the one actionable finding named.

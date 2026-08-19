@@ -26,7 +26,7 @@ from typing import Any
 
 import httpx
 
-from hookrelay import channels, metrics
+from hookrelay import actions, channels, metrics
 from hookrelay.alarm import SelfAlarm
 from hookrelay.breaker import CircuitBreaker
 from hookrelay.config import Config
@@ -37,6 +37,37 @@ _RATE_DEFER_SECONDS = 10
 _BREAKER_DEFER_SECONDS = 15
 _BACKOFF_BASE_SECONDS = 30
 _BACKOFF_CAP_SECONDS = 600
+
+
+def _mint_card_actions(message: dict[str, Any], cfg: Config, settings: Settings, now: float) -> None:
+    """Replace a brain's action DECLARATIONS with signed buttons, in place.
+
+    Silently leaves the payload alone when there is nothing to do — no secret,
+    no configured kinds, or a payload that is not a brain's result. A verdict
+    must reach its channel whether or not this deployment offers buttons.
+    """
+    if not settings.action_secret or not cfg.card_actions:
+        return
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        return
+    declared = payload.get("actions")
+    if not isinstance(declared, list) or not declared:
+        return
+    raw_meta = payload.get("meta")
+    meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+    payload["actions"] = actions.offered(
+        settings.action_secret,
+        [item for item in declared if isinstance(item, dict)],
+        {kind: {"params": spec.params} for kind, spec in cfg.card_actions.items()},
+        event_id=int(message["event_id"]),
+        # The brain's correlation_id points at the ORIGINAL alert; this row is
+        # the verdict's own event. A button means "act on the alert", so the
+        # correlation is the handle that matters and the event id is the trail.
+        correlation_id=str(meta.get("correlation_id") or message.get("_correlation_id") or ""),
+        now=now,
+        ttl_seconds=settings.action_ttl_seconds,
+    )
 
 
 def backoff_delay(attempts: int) -> float:
@@ -134,6 +165,11 @@ async def _drain_channel(
             # another door: the return event can then be linked to this one.
             "_correlation_id": f"hr-{row['event_id']}",
         }
+        # A brain DECLARED which actions its verdict deserves; the pipe decides
+        # which are on offer here and signs them. Done at delivery rather than
+        # in the renderer so the token's clock starts when the card is actually
+        # sent, and so the renderer stays a pure function of the payload.
+        _mint_card_actions(message, cfg, settings, now)
         ok, detail, body = await channels.send(client, channel, message)
         sent_body = channels.redact_for_ledger(body)
         processed += 1

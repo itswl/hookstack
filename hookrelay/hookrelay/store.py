@@ -73,6 +73,27 @@ CREATE TABLE IF NOT EXISTS silences (
     note TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL
 );
+
+-- Every card button a human actually pressed. Two jobs in one table:
+--   single use — `jti` is UNIQUE, so the second press of a button that spends
+--     money (a follow-up turn, an approved command) is refused by identity
+--     rather than by guessing. A card forwarded into a group chat is a token in
+--     everyone's scrollback; this is what stops it being a reusable key.
+--   the human half of the timeline — the ledger recorded what the machine did
+--     to an alert and stopped there. /trace can now answer "and what did a
+--     person do about it", which is the question a morning review opens with.
+CREATE TABLE IF NOT EXISTS card_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    jti TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    event_id INTEGER,
+    correlation_id TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL DEFAULT '',       -- opaque IM user id; never a name
+    outcome TEXT NOT NULL DEFAULT '',     -- what the pipe did with it
+    pressed_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_card_actions_event ON card_actions (event_id);
+CREATE INDEX IF NOT EXISTS ix_card_actions_correlation ON card_actions (correlation_id);
 """
 
 
@@ -274,6 +295,51 @@ class Store:
         await self.db.commit()
         return cursor.rowcount > 0
 
+    # ── card actions ──────────────────────────────────────────────────────
+
+    async def spend_action(
+        self,
+        jti: str,
+        *,
+        kind: str,
+        event_id: int | None,
+        correlation_id: str,
+        actor: str,
+        now: float,
+    ) -> bool:
+        """Claim a token, or False if it was already spent.
+
+        The UNIQUE constraint on jti is the whole mechanism, and claiming BEFORE
+        acting is the whole point: two presses arriving together must not both
+        get through to something that spends money or restarts a service. The
+        row is written first and annotated with its outcome afterwards.
+        """
+        try:
+            await self.db.execute(
+                "INSERT INTO card_actions (jti, kind, event_id, correlation_id, actor, pressed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (jti, kind, event_id, correlation_id, actor[:120], now),
+            )
+        except aiosqlite.IntegrityError:
+            return False
+        await self.db.commit()
+        self._announce()
+        return True
+
+    async def record_action_outcome(self, jti: str, outcome: str) -> None:
+        """What the press achieved, for the timeline and for a dispute later."""
+        await self.db.execute("UPDATE card_actions SET outcome = ? WHERE jti = ?", (outcome[:200], jti))
+        await self.db.commit()
+        self._announce()
+
+    async def recent_actions(self, limit: int = 50) -> list[dict[str, Any]]:
+        cursor = await self.db.execute(
+            "SELECT kind, event_id, correlation_id, actor, outcome, pressed_at "
+            "FROM card_actions ORDER BY id DESC LIMIT ?",
+            (max(1, min(limit, 500)),),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
     # ── silences ──────────────────────────────────────────────────────────
 
     async def active_silence(self, source: str, now: float) -> dict[str, Any] | None:
@@ -331,7 +397,17 @@ class Store:
         for item in returns:
             if item is not None:
                 item["latency_seconds"] = round(float(item["received_at"]) - float(origin["received_at"]), 3)
-        return {"origin": origin, "returns": [r for r in returns if r is not None]}
+        # And what a PERSON did about it. The machine half of this timeline was
+        # always here; a morning review opens with the other half.
+        cursor = await self.db.execute(
+            "SELECT kind, actor, outcome, pressed_at FROM card_actions "
+            "WHERE correlation_id = ? OR event_id = ? ORDER BY pressed_at",
+            (f"hr-{anchor_id}", anchor_id),
+        )
+        human = [dict(row) for row in await cursor.fetchall()]
+        for act in human:
+            act["latency_seconds"] = round(float(act["pressed_at"]) - float(origin["received_at"]), 3)
+        return {"origin": origin, "returns": [r for r in returns if r is not None], "human_actions": human}
 
     async def _event_row(self, event_id: int) -> dict[str, Any] | None:
         cursor = await self.db.execute(
