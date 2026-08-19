@@ -364,7 +364,16 @@ def test_generic_signature_covers_the_exact_wire_bytes():
 def test_gate_matches_ci():
     """scripts/gate.sh must run what CI runs — a local list that is merely
     'close enough' is how a red CI arrives as a surprise. Adding a check to
-    one requires adding it to the other in the same change."""
+    one requires adding it to the other in the same change.
+
+    This test used to match by substring and skipped mypy entirely: both files
+    could have lost the type check with nothing failing, and `pip_audit` was
+    pinned without the flag that makes it usable on a runner. Commands are now
+    pinned to the END of a line, because a substring is satisfied by
+    `compileall -q hookrelay tests` whether or not another directory follows
+    it — a contract test that passes while the contract has drifted is worse
+    than no test.
+    """
     from pathlib import Path
 
     here = Path(__file__).resolve().parent.parent
@@ -374,16 +383,27 @@ def test_gate_matches_ci():
     # one level up.
     ci = (here.parent / ".github" / "workflows" / "ci.yml").read_text()
 
-    for check in (
+    def runs(text: str, command: str) -> bool:
+        """`$PY -m mypy hookrelay` and `- run: python -m mypy hookrelay` differ
+        only in how the interpreter is spelled, so the tail is the contract."""
+        return any(line.rstrip().endswith(command) for line in text.splitlines())
+
+    # Every tool the gate runs, carrying the arguments that decide what it
+    # covers.
+    for command in (
         "compileall -q hookrelay tests",
         "ruff check hookrelay tests",
         "ruff format --check hookrelay tests",
+        "mypy hookrelay",
         "bandit -q -r hookrelay",
-        "status.html",
-        "examples/plugins",
-        "config.example.yaml",
         "pytest -q",
-        "pip_audit",
+        "pip_audit --progress-spinner off",
     ):
-        assert check in gate, f"gate.sh is missing {check!r}"
-        assert check in ci, f"ci.yml is missing {check!r}"
+        assert runs(gate, command), f"gate.sh does not run {command!r}"
+        assert runs(ci, command), f"ci.yml does not run {command!r}"
+
+    # Not commands: the files the inline steps read. Their names are the only
+    # evidence in either file that those steps are still there.
+    for marker in ("status.html", "examples/plugins", "config.example.yaml"):
+        assert marker in gate, f"gate.sh is missing {marker!r}"
+        assert marker in ci, f"ci.yml is missing {marker!r}"

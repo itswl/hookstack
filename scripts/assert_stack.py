@@ -14,6 +14,11 @@ from a distance:
   silent no-op        the stub model started but nothing pointed at it, so
                       every route came back `rule` at $0 and the cost policy
                       looked like it simply did nothing.
+  a skipped check     thirteen of the nineteen sit behind a guard, and the
+                      caller reads the sink log with `|| true`. An empty log
+                      dropped six of them and this script still printed
+                      "every stack assertion passed" — a silence that looked
+                      exactly like a green run. Hence the count below.
 """
 
 from __future__ import annotations
@@ -22,10 +27,20 @@ import json
 import sys
 from pathlib import Path
 
+# What a complete run asserts. Stated as a total because most of these live
+# behind a guard — `if sink:` and `if len(rows) >= 4:` — and a guard that does
+# not hold produces no output at all, which is indistinguishable from success
+# unless somebody is counting. Change this number and STACK.md's "Nineteen
+# assertions" in the same commit; they are the same fact written twice.
+EXPECTED_ASSERTIONS = 19
+
 FAILURES: list[str] = []
+RAN: list[str] = []
+SKIPPED: list[str] = []
 
 
 def check(condition: bool, message: str, detail: str = "") -> None:
+    RAN.append(message)
     if condition:
         print(f"  ok    {message}")
     else:
@@ -49,7 +64,12 @@ def main() -> int:
     check(summary["returns"].get("sent") == 4, "all four judgements reached the pipe", f"{summary['returns']}")
     check(summary["cost"] > 0, "the paid route actually priced its tokens", f"cost={summary['cost']}")
 
-    if len(rows) >= 4:
+    if len(rows) < 4:
+        SKIPPED.append(
+            f"the recovery contract and identity (7 assertions) — the ledger returned {len(rows)} recent row(s), "
+            "so there was no firing/recovery pair to read"
+        )
+    else:
         firing, recovery = rows[3], rows[4]
         print("\nthe recovery contract")
         check(bool(recovery["is_recovery"]), "the resolve was read as a recovery")
@@ -80,7 +100,12 @@ def main() -> int:
             rows[3]["identity"],
         )
 
-    if sink:
+    if not sink:
+        SKIPPED.append(
+            "downstream (6 assertions) — the sink log was empty or unreadable, so nothing was checked about what "
+            "any downstream actually received"
+        )
+    else:
         print("\ndownstream")
         check("feishu card" in sink, "the sink received a rendered Feishu card")
         check("[green]" in sink, "the recovery card is green")
@@ -109,7 +134,25 @@ def main() -> int:
     if FAILURES:
         print(f"\033[1;31m{len(FAILURES)} assertion(s) failed\033[0m")
         return 1
-    print("\033[1;32mevery stack assertion passed\033[0m")
+
+    # Only now is a short count a failure on its own: whatever did run was
+    # right, so the remaining question is whether enough of it ran to mean
+    # anything. Reporting this as red is the point — the alternative is the
+    # green that thirteen skipped assertions used to produce.
+    if len(RAN) != EXPECTED_ASSERTIONS:
+        print(f"\033[1;31m{len(RAN)} of {EXPECTED_ASSERTIONS} assertions ran — the rest were skipped\033[0m")
+        for line in SKIPPED:
+            print(f"  skipped  {line}")
+        if not SKIPPED:
+            # No guard explains it, so the list itself changed. Say so plainly
+            # instead of reporting a phantom skip.
+            print(
+                f"  no guard was skipped, so the assertion list itself changed — "
+                f"update EXPECTED_ASSERTIONS to {len(RAN)} and STACK.md with it"
+            )
+        return 1
+
+    print(f"\033[1;32mevery stack assertion passed\033[0m — all {len(RAN)} of them")
     return 0
 
 

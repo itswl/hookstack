@@ -61,6 +61,27 @@ class Settings:
     # turning it on. Last in the field list so it stays optional.
     rule_reuse_window_seconds: int = 0
 
+    # The rest of the untrusted span in the prompt. `ai_body_limit` bounded the
+    # body and nothing else, so a title or a field block could be the whole 256
+    # KB the door accepts — verbatim into the prompt, billed per alert.
+    # ai_title_limit caps every one-line string (title, source, level, a single
+    # field value); ai_fields_limit caps the field block as a whole.
+    ai_title_limit: int = 300
+    ai_fields_limit: int = 2000
+
+    # A burst is different rules from one origin inside one window. It was the
+    # only window in this service hardcoded in the class that uses it, while
+    # every peer — reuse, rule reuse, retention, the alarm's quiet time — is a
+    # setting, so it was the one correlation behaviour nobody could tune without
+    # a deploy.
+    burst_window_seconds: int = 600
+
+    # Where to listen. Read here rather than in __main__ so that "what is this
+    # process configured to do" is one object and not one object plus two
+    # os.environ calls at the entrypoint — hookprobe's shape, and the better one.
+    host: str = "127.0.0.1"
+    port: int = 8200
+
     @classmethod
     def load(cls) -> Settings:
         return cls(
@@ -82,7 +103,12 @@ class Settings:
             ai_model=os.environ.get("HOOKJUDGE_AI_MODEL", "gpt-4o-mini"),
             ai_timeout_seconds=_float("HOOKJUDGE_AI_TIMEOUT_SECONDS", 60.0),
             ai_body_limit=_int("HOOKJUDGE_AI_BODY_LIMIT", 4000),
+            ai_title_limit=_int("HOOKJUDGE_AI_TITLE_LIMIT", 300),
+            ai_fields_limit=_int("HOOKJUDGE_AI_FIELDS_LIMIT", 2000),
             ai_price_in_per_1k=_float("HOOKJUDGE_AI_PRICE_IN_PER_1K", 0.0),
             ai_price_out_per_1k=_float("HOOKJUDGE_AI_PRICE_OUT_PER_1K", 0.0),
             ai_structured_output=os.environ.get("HOOKJUDGE_AI_STRUCTURED_OUTPUT", "auto"),
+            burst_window_seconds=_int("HOOKJUDGE_BURST_WINDOW_SECONDS", 600),
+            host=os.environ.get("HOOKJUDGE_HOST", "127.0.0.1"),
+            port=_int("HOOKJUDGE_PORT", 8200),
         )
