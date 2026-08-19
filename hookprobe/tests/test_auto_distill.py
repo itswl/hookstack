@@ -6,6 +6,8 @@ closes on the terms in distill.py's docstring — create-only, never from a run
 that misbehaved, capped, and stamped.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 from pathlib import Path

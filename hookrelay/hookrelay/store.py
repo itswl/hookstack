@@ -185,7 +185,13 @@ class Store:
     ) -> None:
         await self.db.execute(
             "INSERT INTO decisions (event_id, outcome, skip_code, channels_json, steps_json) VALUES (?, ?, ?, ?, ?)",
-            (event_id, outcome, skip_code, json.dumps(channels), json.dumps(steps, ensure_ascii=False)),
+            (
+                event_id,
+                outcome,
+                skip_code,
+                json.dumps(channels, ensure_ascii=False),
+                json.dumps(steps, ensure_ascii=False),
+            ),
         )
         await self.db.commit()
         self._announce()
@@ -234,15 +240,24 @@ class Store:
     async def mark_failed(
         self, delivery_id: int, attempts: int, error: str, next_at: float | None, sent_body: str | None = None
     ) -> None:
-        """next_at None = out of attempts → dead letter, visible forever."""
+        """next_at None = out of attempts → dead letter, visible forever.
+
+        A None sent_body means "this attempt produced no bytes" — the builder
+        refused, or the channel vanished from config — and that must not erase
+        what an earlier attempt actually posted. COALESCE keeps the last real
+        bytes: overwriting them with NULL destroyed the only record of what the
+        receiver was sent, on the exact rows an operator opens to find out.
+        """
         if next_at is None:
             await self.db.execute(
-                "UPDATE deliveries SET status = 'dead', attempts = ?, last_error = ?, sent_body = ? WHERE id = ?",
+                "UPDATE deliveries SET status = 'dead', attempts = ?, last_error = ?, "
+                "sent_body = COALESCE(?, sent_body) WHERE id = ?",
                 (attempts, error[:500], sent_body, delivery_id),
             )
         else:
             await self.db.execute(
-                "UPDATE deliveries SET attempts = ?, last_error = ?, next_attempt_at = ?, sent_body = ? WHERE id = ?",
+                "UPDATE deliveries SET attempts = ?, last_error = ?, next_attempt_at = ?, "
+                "sent_body = COALESCE(?, sent_body) WHERE id = ?",
                 (attempts, error[:500], next_at, sent_body, delivery_id),
             )
         await self.db.commit()
@@ -252,7 +267,8 @@ class Store:
         """Operator second chance: a dead delivery back to queued, due now.
         Attempts reset — the operator's judgement outranks the backoff ledger."""
         cursor = await self.db.execute(
-            "UPDATE deliveries SET status = 'queued', attempts = 0, next_attempt_at = ? WHERE id = ? AND status = 'dead'",
+            "UPDATE deliveries SET status = 'queued', attempts = 0, next_attempt_at = ? "
+            "WHERE id = ? AND status = 'dead'",
             (now, delivery_id),
         )
         await self.db.commit()

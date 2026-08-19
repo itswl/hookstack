@@ -176,7 +176,7 @@ def _headline(turns: list[dict[str, Any]], current_message: str) -> str:
     return first
 
 
-def draft_skill(run: Any, *, title: str = "", unreviewed: bool = False) -> dict[str, str]:
+def draft_skill(run: Any, *, unreviewed: bool = False) -> dict[str, str]:
     """A SKILL.md draft for the condition this run investigated.
 
     `unreviewed` switches the closing caveat: a draft on its way to an operator
@@ -184,7 +184,7 @@ def draft_skill(run: Any, *, title: str = "", unreviewed: bool = False) -> dict[
     has been saved automatically and is being read by the next investigation.
     """
     turns = list(getattr(run, "turns", []) or [])
-    headline = title or _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
+    headline = _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
     name = slug(headline)
     steps = _steps(turns)
     conclusion = _conclusion(turns)

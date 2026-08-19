@@ -16,6 +16,7 @@ import hmac
 
 from hookrelay import registry
 from hookrelay.extract import extract_event
+from hookrelay.security import constant_time_eq
 
 
 @registry.source_adapter("github")
@@ -29,7 +30,10 @@ class GitHubAdapter:
         if not provided.startswith("sha256="):
             return False
         expected = hmac.new(source.secret.encode(), body, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, provided[len("sha256=") :].lower())
+        # Via security.constant_time_eq, not hmac.compare_digest directly: that
+        # one raises TypeError on the non-ASCII str Starlette hands back for a
+        # header carrying a high byte, which is an unauthenticated 500.
+        return constant_time_eq(expected, provided[len("sha256=") :].lower())
 
     def parse(self, source, payload):
         return extract_event(source, payload)

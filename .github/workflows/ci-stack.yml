@@ -19,6 +19,16 @@ on:
 permissions:
   contents: read
 
+# The cost of having no paths filter: every push runs the stack job, which builds
+# all three images and boots the family — about fifteen minutes. Three commits
+# pushed in a row used to queue three full stack builds, of which only the last
+# one's answer mattered. Superseded runs are cancelled instead; nothing here
+# publishes or mutates anything outside the runner, so a cancelled run costs only
+# the answer it was about to give about a commit that is no longer the tip.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docs:
     runs-on: ubuntu-latest

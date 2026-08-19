@@ -4,8 +4,14 @@
 # The external network name below is this deployment's actual network — set
 # yours in the `networks:` block at the bottom.
 #
-#   cd /opt/docker-compose/hookrelay
+#   cd /opt/docker-compose/hookstack
 #   docker compose -f hookrelay/deploy/docker-compose.prod.yml up -d --build
+#
+# That directory is the checkout of this repository, and it is the one name all
+# four deployment files have to agree on: `.env`, `data/` and `probe-data/` are
+# read from it by relative path, and scripts/backup_probe_data.sh defaults to it
+# when it goes looking for state to tar. The prod files used to say `hookrelay`
+# here, from when this repository was only the pipe.
 #
 # Paths are deliberately asymmetric: the BUILD context is this service's
 # directory, but `.env` and `data/` are read from the deployment root two
@@ -18,6 +24,13 @@
 #   - port bound to 127.0.0.1 only (senders live on the docker network;
 #     the host binding exists for ssh-tunnel access to the status page)
 #   - joins webhookwise_webhook_net (external) under the DNS name `hookrelay`
+
+# Explicit, because compose otherwise derives the project name from the compose
+# FILE's directory — which is `deploy` for this file and `deploy` for the
+# investigator's prod file too. Two production deployments then share one
+# project name, and a `docker compose down` aimed at either one is aimed at
+# both.
+name: hookrelay-prod
 
 services:
   hookrelay:

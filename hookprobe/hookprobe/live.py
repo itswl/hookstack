@@ -43,10 +43,6 @@ class Live:
                 with contextlib.suppress(asyncio.QueueFull):
                     queue.put_nowait("changed")
 
-    @property
-    def watcher_count(self) -> int:
-        return len(self._watchers)
-
     async def stream(self, *, keepalive_seconds: float = 20.0, settle_seconds: float = 0.3) -> AsyncIterator[bytes]:
         """NDJSON: a `changed` per burst of writes, a `ping` through the quiet.
 

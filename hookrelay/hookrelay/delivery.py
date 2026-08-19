@@ -105,6 +105,11 @@ async def _drain_channel(
             if sent_last_minute >= channel.max_per_minute:
                 await store.defer_delivery(row["id"], now + _RATE_DEFER_SECONDS)
                 metrics.record_delivery(channel.name, "deferred")
+                # The breaker may have just handed this row the half-open probe
+                # slot. We are not going to use it, so give it back — holding it
+                # while sending nothing stalls the channel until a restart.
+                if breaker is not None:
+                    breaker.release_probe(channel.name)
                 continue
 
         message = {
@@ -130,7 +135,7 @@ async def _drain_channel(
             "_correlation_id": f"hr-{row['event_id']}",
         }
         ok, detail, body = await channels.send(client, channel, message)
-        sent_body = body.decode("utf-8", "replace") if body is not None else None
+        sent_body = channels.redact_for_ledger(body)
         processed += 1
         if ok:
             await store.mark_sent(row["id"], now, sent_body)

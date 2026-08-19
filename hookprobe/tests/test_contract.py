@@ -5,6 +5,8 @@ how it polls /final; change these tests only together with the callers that
 speak this dialect.
 """
 
+from __future__ import annotations
+
 import json
 import time
 
@@ -62,6 +64,26 @@ def test_auth_is_required_on_contract_routes(tmp_path) -> None:
         assert client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=bad).status_code == 401
         assert client.get("/sessions/x/final").status_code == 401
         assert client.get("/v1/runs/x", headers=bad).status_code == 401
+
+
+def test_a_high_byte_in_a_credential_header_is_a_refusal_not_a_crash(tmp_path) -> None:
+    """hmac.compare_digest raises TypeError on a str holding non-ASCII, and
+    Starlette decodes header bytes as latin-1 — so one 0xF6 byte in the bearer
+    token or the pipe's signature used to answer HTTP 500 to a caller holding
+    no credential at all. A wrong credential is a refusal whatever bytes it is
+    made of."""
+    with make_client(tmp_path, FakeEngine()) as client:
+        bearer = client.get("/v1/runs", headers={b"Authorization": b"Bearer t\xf6ken"})
+        assert bearer.status_code == 401
+
+        # The event door verifies a signature rather than a token, and it is
+        # reachable without one — so its crash was the cheaper of the two.
+        signed = client.post(
+            "/hooks/event",
+            json={"source": "grafana", "title": "x", "body": "y", "level": "critical", "event_id": "e1"},
+            headers={b"X-Hook-Signature": b"t\xf6ken", b"X-Hook-Timestamp": str(int(time.time())).encode()},
+        )
+        assert signed.status_code != 500
 
 
 def test_trigger_then_poll_roundtrip(tmp_path) -> None:

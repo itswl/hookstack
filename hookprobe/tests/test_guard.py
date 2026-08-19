@@ -1,3 +1,13 @@
+"""The bash guard's verb blocklist, from both sides.
+
+Second of the three read-only layers — the read-only credentials are the real
+boundary and the container is the third. What is asserted here is the guard's
+own claim: the mutating verbs of kubectl, helm, systemctl and terraform, plus
+ssh/scp, are denied before the tool runs.
+"""
+
+from __future__ import annotations
+
 from hookprobe.guard import bash_deny_reason
 
 ALLOWED = [

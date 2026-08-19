@@ -15,6 +15,18 @@ import hmac
 import time
 
 
+def constant_time_eq(expected: str, provided: str | None) -> bool:
+    """Compare two header-derived strings without leaking length by timing.
+
+    Wraps hmac.compare_digest because that function raises TypeError on a
+    str holding non-ASCII, and Starlette decodes header bytes as latin-1 — so
+    a single 0xF6 byte in the signature or the bearer token turned every gate
+    into an unauthenticated HTTP 500 instead of a 401. Comparing the utf-8
+    bytes keeps the constant-time property and answers the way it should.
+    """
+    return hmac.compare_digest(expected.encode("utf-8"), (provided or "").encode("utf-8"))
+
+
 def sign_timestamped(secret: str, body: bytes, *, now: float | None = None) -> dict[str, str]:
     """Headers for an outbound family delivery; empty when unsigned."""
     if not secret:
@@ -47,4 +59,4 @@ def verify_timestamped(
         return False
     provided = signature.strip().removeprefix("sha256=").lower()
     expected = hmac.new(secret.encode(), timestamp.strip().encode() + b"." + body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, provided)
+    return constant_time_eq(expected, provided)

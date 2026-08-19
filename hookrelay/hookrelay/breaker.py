@@ -53,6 +53,20 @@ class CircuitBreaker:
         state.probe_in_flight = True
         return True
 
+    def release_probe(self, channel: str) -> None:
+        """Give the probe slot back without judging the channel.
+
+        `allows()` claims the slot, and only record_success/record_failure ever
+        returned it — but the caller can still decline to send after being
+        allowed (the rate limiter defers the row, and deferring must burn no
+        attempt and reach no peer). That path left the slot claimed forever, so
+        a channel that had recovered never sent again until a restart: every
+        later `allows()` saw a probe in flight and deferred.
+        """
+        state = self._states.get(channel)
+        if state is not None:
+            state.probe_in_flight = False
+
     def record_success(self, channel: str) -> None:
         self._states[channel] = _State()
 

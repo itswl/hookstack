@@ -4,36 +4,35 @@ The failure shape is a deliberate choice: a run that dies (exception,
 timeout, empty output) still completes the contract — isFinal true, with a
 well-formed report whose root_cause says the runner failed. The caller sees
 the error within one poll instead of waiting out its own timeout window.
+
+What this module keeps is the part that has to be in one place: the task set, so
+a shutdown knows what is in flight; the semaphore, so a storm queues instead of
+stampeding; and the guarantee that every run reaches a final state and reports
+itself. Everything a run leads to afterwards lives with the thing it is about —
+hookprobe.reports writes the report-shaped refusals, hookprobe.notify carries a
+relay-born report back to the pipe, hookprobe.remediation runs an approved
+procedure, hookprobe.distill_loop decides what the run leaves for the next one.
+Those are four different failure modes, and none of them is allowed to cost a
+finished report.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from hookprobe import distill, remediation, suggestions
+from hookprobe import distill_loop, remediation, suggestions
 from hookprobe.engine import EngineResult
+from hookprobe.notify import ReturnDelivery
+from hookprobe.reports import budget_report, failure_report
 from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
-from hookprobe.wire import sign_timestamped
 
 logger = logging.getLogger("hookprobe.service")
-
-
-def _report_summary(text: str) -> str:
-    """The one paragraph a channel card shows; the full text stays on the run."""
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict) and parsed.get("summary"):
-            return str(parsed["summary"])[:800]
-    except (TypeError, ValueError):
-        pass
-    return text.strip()[:800]
 
 
 class Engine(Protocol):
@@ -63,78 +62,6 @@ class NotResumableError(ValueError):
     """The run left no engine session behind to resume."""
 
 
-def failure_report(reason: str) -> str:
-    """A minimal report-shaped JSON so an OpenClaw-dialect caller renders the failure."""
-    return json.dumps(
-        {
-            "summary": f"hookprobe run failed: {reason}",
-            "root_cause": {
-                "status": "unknown",
-                "description": f"The analysis runner failed before reaching a conclusion: {reason}",
-            },
-            "evidence": [],
-            "impact": {
-                "scope": "analysis pipeline",
-                "severity": "unknown",
-                "description": "No analysis was produced for this alert.",
-            },
-            "timeline": [],
-            "recommendations": [
-                {
-                    "priority": "P1",
-                    "action": "Retry the analysis from the caller's side",
-                    "reason": "The failure was in the runner, not necessarily in the alert itself.",
-                }
-            ],
-            "unknowns": ["The investigation did not run to completion."],
-            "assumptions": [],
-            "next_checks": [],
-            "confidence": 0.0,
-        },
-        ensure_ascii=False,
-    )
-
-
-def budget_report(spent: float, budget: float, window_hours: float) -> str:
-    """A report-shaped refusal, so the family loop completes without an engine run."""
-    summary = (
-        f"Budget breaker open: investigations have spent ${spent:.2f} in the last "
-        f"{window_hours:g}h (budget ${budget:.2f}), so this alert was NOT investigated. "
-        "The judge's verdict is unaffected. Investigations resume when the window slides "
-        "or HOOKPROBE_BUDGET_USD is raised."
-    )
-    return json.dumps(
-        {
-            "summary": summary,
-            "root_cause": {
-                "status": "not_investigated",
-                "description": "The investigation budget for the current window is exhausted; "
-                "the run was refused before the engine started.",
-            },
-            "evidence": [],
-            "impact": {
-                "scope": "analysis pipeline",
-                "severity": "none",
-                "description": "Only the deep investigation was skipped; the alert and its verdict are unaffected.",
-            },
-            "timeline": [],
-            "recommendations": [
-                {
-                    "priority": "P2",
-                    "action": "Raise HOOKPROBE_BUDGET_USD or wait for the window to slide, "
-                    "then re-send the event if the alert still matters",
-                    "reason": "The breaker refuses new autonomous investigations; it does not queue them.",
-                }
-            ],
-            "unknowns": ["No investigation was run for this alert."],
-            "assumptions": [],
-            "next_checks": [],
-            "confidence": 0.0,
-        },
-        ensure_ascii=False,
-    )
-
-
 class RunService:
     def __init__(self, settings: Settings, engine: Engine, store: RunStore) -> None:
         self._settings = settings
@@ -153,11 +80,10 @@ class RunService:
         # returned its report. Separate from the per-run feed above, because a
         # list and a transcript answer different questions.
         self.on_board_change: Callable[[], None] | None = None
+        # The family loop's last mile, and the alarm behind it.
+        self._returns = ReturnDelivery(settings, store)
         # Return-retry pacing, an instance attr so tests can collapse it.
         self._return_delays: tuple[float, ...] = (0.0, 2.0, 5.0)
-        # Self-alarm throttle state (see _alarm_return_failure).
-        self._alarm_last_sent = 0.0
-        self._alarm_suppressed = 0
 
     def start(self, payload: dict[str, Any], *, origin: str = "") -> Run:
         """Idempotent per sessionKey: re-triggering an existing run returns it."""
@@ -210,6 +136,11 @@ class RunService:
         run.text = ""
         run.error = None
         run.finished_at = None
+        # The previous turn's bill is not this turn's. Left in place, a follow-up
+        # that died before the engine reported anything recorded the earlier
+        # figure again, so a $2 turn plus a failed follow-up billed $4 to
+        # window_spend() and to the session total the console shows.
+        run.cost_usd = None
         run.current_message = message
         self._spawn(run, message, timeout_s, resume=run.engine_session_id)
         return run
@@ -261,6 +192,72 @@ class RunService:
             logger.warning("swept %s orphaned run(s) left by a previous process", swept)
         return swept
 
+    def sweep_interrupted_remediations(self) -> int:
+        """Settle procedures a previous process died in the middle of, at startup.
+
+        The twin of the run sweep above, for the worse case. `running` is a
+        state only a live task can leave, and both approve and reject require
+        `proposed` — so a restart between step 1 and step 3 stranded the row
+        there for good: the remaining steps unrun, and no record anywhere that
+        half a procedure had been applied to the target. "Steps 1 and 3 ran" is
+        the outcome approve_remediation refuses a proposal whole to avoid; this
+        is the same accident arriving by way of a dead process, and it must at
+        least be written down.
+        """
+        settled = remediation.settle_interrupted(self._settings.workdir)
+        for row in settled:
+            interrupted = row.get("interrupted") or {}
+            logger.warning(
+                "remediation interrupted by a restart id=%s ran=%s not_run=%s",
+                row.get("id"),
+                len(interrupted.get("ran") or []),
+                len(interrupted.get("not_run") or []),
+            )
+        if settled:
+            self._board_changed()
+        return len(settled)
+
+    async def shutdown(self, *, grace_seconds: float = 5.0) -> int:
+        """Settle background work before the process goes away; returns how many
+        tasks had to be cancelled at the deadline.
+
+        Every task here runs detached from the request that started it — a turn,
+        a return delivery, an approved procedure — and nothing used to wait for
+        any of them. The procedure is why this exists: its steps run
+        sequentially, stop-on-first-failure, so a process that exits between
+        step 1 and step 3 leaves a half-applied change and a row still saying
+        `running`, which no operator action can move.
+
+        A turn in flight is cancelled outright rather than waited for: _execute
+        settles it as a failure that reports itself, which beats both the next
+        boot's sweep and holding the container's stop timeout open for a
+        thirty-minute investigation. The grace period is for the work with no
+        such recovery — the procedure mid-sequence, and the deliveries those
+        settlements just queued.
+        """
+        for task in tuple(self._running.values()):
+            task.cancel()
+        deadline = time.monotonic() + max(0.0, grace_seconds)
+        while True:
+            pending = {task for task in self._tasks if not task.done()}
+            if not pending:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            logger.info("shutdown: waiting on %s background task(s)", len(pending))
+            await asyncio.wait(pending, timeout=remaining)
+        cancelled = 0
+        for task in tuple(self._tasks):
+            if not task.done():
+                task.cancel()
+                cancelled += 1
+        if self._tasks:
+            await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+        if cancelled:
+            logger.warning("shutdown cancelled %s task(s) unfinished after %.1fs", cancelled, grace_seconds)
+        return cancelled
+
     def budget_state(self) -> tuple[float, float] | None:
         """(spent_in_window, budget) — None when the breaker is disabled."""
         if self._settings.budget_usd <= 0:
@@ -271,6 +268,16 @@ class RunService:
         """(fresh, cached) input tokens over the budget window."""
         cutoff = time.time() - self._settings.budget_window_hours * 3600
         return self._store.cache_since(cutoff)
+
+    def window_unpriced(self) -> int:
+        """How many turns in the window spent money nobody could count.
+
+        The figure below is a floor, not an invoice, and this says how far the
+        floor might be off: one timed-out investigation is the most expensive
+        kind of turn there is and the one the engine never gets to bill.
+        """
+        cutoff = time.time() - self._settings.budget_window_hours * 3600
+        return self._store.unpriced_since(cutoff)
 
     def window_spend(self) -> float:
         """What the window has cost so far, ceiling or no ceiling.
@@ -523,11 +530,11 @@ class RunService:
             # A consolidation run's product is a PROPOSAL beside the manifest,
             # waiting for review — and it must never itself be distilled, or
             # the loop would write runbooks about rewriting runbooks.
-            self._accept_consolidation(run, result)
+            distill_loop.accept_consolidation(run, result, self._settings)
         else:
             # After the turn is recorded, because the runbook is assembled from it.
-            self._auto_distill(run, result)
-            self._maybe_consolidate(run)
+            distill_loop.auto_distill(run, result, self._settings)
+            distill_loop.maybe_consolidate(run, self._settings, self._store, self.start)
         self._settle(run)
         self._schedule_return(run)
         logger.info(
@@ -537,303 +544,54 @@ class RunService:
             result.cost_usd,
         )
 
-    def _auto_distill(self, run: Run, result: EngineResult) -> None:
-        """Leave the next investigation a runbook, if the operator asked for it.
-
-        The write happens here, in the service, and never through the agent's
-        tools — that separation is the whole reason the input guard can stay on
-        while the loop closes. Failure is never the run's problem: the report is
-        already written and somebody is waiting for it.
-        """
-        if self._settings.auto_distill_max <= 0:
-            return
-        try:
-            outcome = distill.auto_write(
-                run,
-                skills_dir=self._settings.workdir / ".claude" / "skills",
-                limit=self._settings.auto_distill_max,
-                input_changes=result.input_changes,
-            )
-        except Exception:  # noqa: BLE001 — distilling must never cost a finished report
-            logger.exception("auto-distill failed session=%s", run.session_key)
-            return
-        run.distilled = outcome
-        if "skipped" in outcome:
-            logger.info("auto-distill skipped session=%s reason=%s", run.session_key, outcome["skipped"])
-        else:
-            verb, name = next(iter(outcome.items()))
-            logger.info("auto-distill %s session=%s runbook=%s", verb, run.session_key, name)
-
-    def _maybe_consolidate(self, run: Run) -> None:
-        """At the case threshold, spend one run turning the pile into a draft.
-
-        Spawned from the completion path, so it never delays the report; the
-        draft lands as proposal.md and waits for review. Deliberately outside
-        the event-door budget breaker (an operator set the threshold, so this
-        spend was asked for), but every run is recorded, so the window spend
-        and the board both show it.
-        """
-        threshold = self._settings.consolidate_at
-        if threshold <= 0:
-            return
-        name = (run.distilled or {}).get("updated") or (run.distilled or {}).get("installed")
-        if not name:
-            return
-        skill_dir = self._settings.workdir / ".claude" / "skills" / str(name)
-        manifest = skill_dir / "SKILL.md"
-        if (skill_dir / "proposal.md").exists():
-            return  # one open proposal at a time; approving or rejecting re-arms
-        try:
-            count = distill.case_count(manifest.read_text(encoding="utf-8"))
-        except OSError:
-            return
-        if count < threshold:
-            return
-        for other in self._store.list_runs(limit=50):
-            if not other.finished and other.meta.get("consolidates") == name:
-                return  # already being consolidated
-        message = distill.CONSOLIDATION_MESSAGE.format(path=str(manifest), count=count, name=name)
-        payload = {
-            "message": message,
-            "sessionKey": f"consolidate:{name}:{uuid.uuid4().hex[:6]}",
-            "_meta": {"consolidates": str(name), "title": f"consolidate: {name}"},
-        }
-        consolidation = self.start(payload, origin="system")
-        logger.info("consolidation spawned session=%s runbook=%s cases=%s", consolidation.session_key, name, count)
-
-    def _accept_consolidation(self, run: Run, result: EngineResult) -> None:
-        """Park the draft as a proposal — or say exactly why not."""
-        name = str(run.meta.get("consolidates") or "")
-        skill_dir = self._settings.workdir / ".claude" / "skills" / name
-        if not (skill_dir / "SKILL.md").is_file():
-            run.distilled = {"skipped": f"runbook '{name}' vanished mid-consolidation"}
-            return
-        if result.input_changes:
-            run.distilled = {"skipped": "run changed its own inputs"}
-            return
-        draft = distill.valid_consolidation(result.text or "", name)
-        if not draft:
-            run.distilled = {"skipped": "draft did not validate as a manifest"}
-            logger.warning("consolidation draft rejected session=%s runbook=%s", run.session_key, name)
-            return
-        try:
-            distill.write_proposal(skill_dir, draft)
-        except OSError as exc:
-            run.distilled = {"skipped": f"write failed: {exc}"}
-            return
-        run.distilled = {"proposed": name}
-        logger.info("consolidation proposed session=%s runbook=%s", run.session_key, name)
-
     def approve_remediation(self, proposal_id: str, note: str = "") -> dict[str, Any]:
-        """The operator's click. Gate-checks EVERY step against the allowlist
-        before anything runs — a proposal that is half executable is refused
-        whole, because "steps 1 and 3 ran" is the worst possible outcome of a
-        procedure written as 1-2-3."""
-        row = remediation.load(self._settings.workdir, proposal_id)
-        if row is None:
-            raise LookupError("no such proposal")
-        if row.get("status") != "proposed":
-            raise ValueError(f"proposal is {row.get('status')}, not proposed")
-        patterns = remediation.allowlist_patterns(self._settings.remediation_allowlist)
-        for step in row.get("steps", []):
-            reason = remediation.deny_reason(str(step.get("command") or ""), patterns)
-            if reason is not None:
-                raise PermissionError(f"step '{step.get('action')}': {reason}")
-        row["status"] = "running"
-        row["approved_at"] = round(time.time(), 3)
-        row["approved_note"] = note[:300]
-        remediation.save(self._settings.workdir, row)
-        task = asyncio.create_task(self._execute_remediation(row))
+        """The operator's click, and the only path that runs anything. The gate
+        checks and the execution are hookprobe.remediation's; what belongs here
+        is the task the sequence runs in, because shutdown has to wait for it."""
+        row = remediation.approve(
+            self._settings.workdir,
+            proposal_id,
+            allowlist=self._settings.remediation_allowlist,
+            note=note,
+        )
+        task = asyncio.create_task(self._apply_remediation(row))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         self._board_changed()
         return row
 
     def reject_remediation(self, proposal_id: str) -> dict[str, Any]:
-        row = remediation.load(self._settings.workdir, proposal_id)
-        if row is None:
-            raise LookupError("no such proposal")
-        if row.get("status") != "proposed":
-            raise ValueError(f"proposal is {row.get('status')}, not proposed")
-        row["status"] = "rejected"
-        row["resolved_at"] = round(time.time(), 3)
-        remediation.save(self._settings.workdir, row)
+        row = remediation.reject(self._settings.workdir, proposal_id)
         self._board_changed()
         return row
 
-    async def _execute_remediation(self, row: dict[str, Any]) -> None:
-        """Approved commands run EXACTLY as written: sequentially, stop on the
-        first failure, output captured, every command on the audit log. No
-        agent in this loop — an agent that adapts an approved command is
-        executing something nobody approved."""
-        timeout = max(30.0, (self._settings.bash_timeout_ms or 120000) / 1000.0)
-        failed = False
-        for step in row.get("steps", []):
-            command = str(step.get("command") or "")
-            started = time.monotonic()
-            try:
-                process = await asyncio.create_subprocess_shell(  # noqa: S604 — operator-approved, allowlist-gated
-                    command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                    cwd=str(self._settings.workdir),
-                )
-                try:
-                    output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-                except TimeoutError:
-                    process.kill()
-                    await process.wait()
-                    output, returncode = b"(timed out)", -1
-                else:
-                    returncode = int(process.returncode or 0)
-            except OSError as exc:
-                output, returncode = str(exc).encode(), -1
-            result = {
-                "command": command,
-                "exit": returncode,
-                "ms": int((time.monotonic() - started) * 1000),
-                "output": output.decode("utf-8", "replace")[-10000:],
-            }
-            row.setdefault("results", []).append(result)
-            self._audit_remediation(row["id"], command, returncode != 0)
-            if returncode != 0:
-                failed = True
-                break
-        row["status"] = "failed" if failed else "executed"
-        row["executed_at"] = round(time.time(), 3)
-        remediation.save(self._settings.workdir, row)
+    async def _apply_remediation(self, row: dict[str, Any]) -> None:
+        await remediation.execute(self._settings.workdir, row, bash_timeout_ms=self._settings.bash_timeout_ms)
         self._board_changed()
-        logger.info("remediation %s id=%s", row["status"], row["id"])
-
-    def _audit_remediation(self, proposal_id: str, command: str, error: bool) -> None:
-        """Same flight recorder the agent's tools write to — one account."""
-        try:
-            audit_dir = self._settings.workdir / "audit"
-            audit_dir.mkdir(parents=True, exist_ok=True)
-            line = {
-                "ts": round(time.time(), 3),
-                "session": f"remediation:{proposal_id}",
-                "tool": "Exec",
-                "detail": command[:300],
-                "error": error,
-            }
-            with (audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")).open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(line, ensure_ascii=False) + "\n")
-        except OSError:
-            logger.debug("remediation audit write failed", exc_info=True)
 
     def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:
         run.status = FAILED
         run.error = reason
         run.text = failure_report(reason)
+        # A failure that got a result still knows its bill; one that was cut off
+        # mid-turn — wall clock, crash, Stop — never will, because the engine
+        # reports dollars only with its result. Recording None there is the
+        # honest answer, and _record_turn says why it is not the same as $0.
+        if result is not None:
+            run.cost_usd = result.cost_usd
         self._record_turn(run, result)
         self._settle(run)
         self._schedule_return(run)
         logger.warning("run failed session=%s reason=%s", run.session_key, reason)
 
-    # -- the family loop: relay-born runs report back to the pipe ------------
-
     def _schedule_return(self, run: Run) -> None:
+        """The family loop: relay-born runs report back to the pipe. Detached,
+        because nobody is waiting on this side — see hookprobe.notify."""
         if run.origin != "relay" or not self._settings.return_url:
             return
-        task = asyncio.create_task(self._deliver_return(run))
+        task = asyncio.create_task(self._returns.deliver(run, self._return_delays))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
-
-    async def _deliver_return(self, run: Run) -> None:
-        summary = _report_summary(run.text)
-        alert_title = str(run.meta.get("title") or run.session_key)
-        body = json.dumps(
-            {
-                # The PROCESSED-EVENT dialect (hookrelay/processed.py): the
-                # investigator is a brain, and a brain hands the pipe its
-                # RESULT in the one shape every channel renderer knows how to
-                # dress. Speaking anything else renders as an empty card.
-                "meta": {
-                    "alert_name": f"{alert_title} · investigation",
-                    "source": str(run.meta.get("source") or "hookprobe"),
-                    "importance": str(run.meta.get("level") or "medium"),
-                    "event_id": run.meta.get("event_id"),
-                    "brain": "hookprobe",
-                    "timestamp": time.time(),
-                    # The loop's own facts, for the pipe's fields and ledger:
-                    "session_key": run.session_key,
-                    "status": run.status,
-                    "cost_usd": run.cost_usd,
-                    "error": run.error,
-                },
-                "analysis": {"summary": summary, "event_type": "investigation"},
-                "identity": {"session": run.session_key},
-                "report": {"summary": summary, "text": run.text},
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-
-        last_error = "unknown"
-        for attempt, delay in enumerate(self._return_delays, start=1):
-            if delay:
-                await asyncio.sleep(delay)
-            try:
-                status = await asyncio.to_thread(self._post_return, body)
-                if 200 <= status < 300:
-                    run.return_status = "sent"
-                    self._store.finish(run)
-                    logger.info("return delivered session=%s status=%s", run.session_key, status)
-                    return
-                last_error = f"HTTP {status}"
-            except OSError as exc:
-                last_error = str(exc) or type(exc).__name__
-            logger.warning(
-                "return delivery attempt %s failed session=%s error=%s", attempt, run.session_key, last_error
-            )
-        run.return_status = f"failed: {last_error}"
-        self._store.finish(run)
-        await self._alarm_return_failure(run, last_error)
-
-    async def _alarm_return_failure(self, run: Run, error: str) -> None:
-        """Who watches the watchman: the pipe is the broken link right now, so
-        the news travels around it — straight to a bot/collector URL. Rate
-        limited, the suppressed count folds into the next message, and it
-        never raises: an alarm failure must not become a delivery failure."""
-        if not self._settings.alarm_url:
-            return
-        now = time.time()
-        if now - self._alarm_last_sent < self._settings.alarm_min_interval_seconds:
-            self._alarm_suppressed += 1
-            return
-        held = self._alarm_suppressed
-        self._alarm_suppressed = 0
-        self._alarm_last_sent = now
-        text = f"[hookprobe] report return failed\nsession: {run.session_key}\nreason: {error[:200]}"
-        if held:
-            text += f"\n({held} more folded into this one during the quiet window)"
-        body = json.dumps({"msg_type": "text", "content": {"text": text}}, ensure_ascii=False).encode()
-        try:
-            await asyncio.to_thread(self._post_alarm, body)
-        except Exception:  # noqa: BLE001 — an alarm must never raise into delivery
-            self._alarm_last_sent = 0.0  # let the next failure try again
-
-    def _post_alarm(self, body: bytes) -> None:
-        import urllib.request
-
-        request = urllib.request.Request(
-            self._settings.alarm_url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=5):  # noqa: S310 — operator URL  # nosec B310
-            pass
-
-    def _post_return(self, body: bytes) -> int:
-        import urllib.request
-
-        headers = {"Content-Type": "application/json", **sign_timestamped(self._settings.return_secret, body)}
-        request = urllib.request.Request(self._settings.return_url, data=body, headers=headers, method="POST")
-        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 — operator URL  # nosec B310
-            return int(response.status)
 
     def _record_turn(self, run: Run, result: EngineResult | None) -> None:
         run.turns.append(
@@ -842,6 +600,11 @@ class RunService:
                 "text": run.text,
                 "error": run.error,
                 "run_id": run.run_id,
+                # None means "nobody counted", 0.0 means "cost nothing" — a
+                # refusal is free, a run the wall clock cut off is not, and the
+                # ledger must not read the second as the first. window_spend()
+                # can only add up what was reported; window_unpriced() says how
+                # many turns are missing from it.
                 "cost_usd": run.cost_usd,
                 "finished_at": time.time(),
                 "usage": result.usage if result else None,

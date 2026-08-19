@@ -1,5 +1,7 @@
 """The family loop: the pipe's event door in, the return delivery out."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import threading
@@ -82,6 +84,43 @@ def test_event_door_requires_signature_when_secret_set(tmp_path) -> None:
         response = client.post("/hooks/event", content=body, headers=headers)
         assert response.status_code == 200
         assert response.json()["status"] == "accepted"
+
+
+def test_the_event_door_bounds_what_reaches_the_prompt(tmp_path) -> None:
+    """Only `body` was ever capped. `title`, `source` and `fields` arrive from an
+    upstream payload nobody in this family controls, and `fields` is a json.dumps
+    of an arbitrary object — so a 5 MB one reached the model verbatim, on the
+    token bill of every turn of that investigation and in its case file for as
+    long as the volume keeps it."""
+    engine = FakeEngine()
+    with make_client(tmp_path, engine) as client:
+        fat = dict(
+            EVENT,
+            event_id=11,
+            title="T" * 5000,
+            source="S" * 5000,
+            body="B" * 50000,
+            fields={f"key-{i}": "v" * 200 for i in range(200)},
+        )
+        accepted = client.post("/hooks/event", json=fat).json()
+        assert accepted["status"] == "accepted"
+        # The key names the case file and every audit line for this session.
+        assert accepted["sessionKey"] == "probe:" + "S" * 120 + ":11"
+        for _ in range(300):
+            if engine.messages:
+                break
+            time.sleep(0.01)
+
+        prompt = engine.messages[0]
+        assert len(prompt) < 12000, f"the prompt was {len(prompt)} characters"
+        assert "T" * 301 not in prompt and "S" * 121 not in prompt and "B" * 4001 not in prompt
+        assert "truncated" in prompt, "the fence says where the object went"
+        _drain(client, accepted["sessionKey"])
+
+        # A body nobody could have meant is refused before it is parsed.
+        oversize = client.post("/hooks/event", content=b'{"body": "' + b"y" * 200_000 + b'"}')
+        assert oversize.status_code == 413
+        assert engine.calls == 1
 
 
 class _Capture(BaseHTTPRequestHandler):

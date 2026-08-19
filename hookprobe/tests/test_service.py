@@ -1,3 +1,12 @@
+"""The run service: one engine call per task, and what happens when it fails.
+
+Every test here injects a fake engine (tests never import the SDK), so what is
+under test is the bookkeeping around the call — checkpointing, settling a
+crash or a timeout as a well-formed failure report, and resuming a session.
+"""
+
+from __future__ import annotations
+
 import asyncio
 import json
 
@@ -104,6 +113,92 @@ def test_completed_run_survives_restart(tmp_path) -> None:
         assert recovered.text == '{"summary": "ok"}'
 
     asyncio.run(scenario())
+
+
+def test_two_long_session_keys_keep_their_own_case_files(tmp_path) -> None:
+    """The case file's name used to be the key truncated to 200 characters, and
+    the event door builds keys from an unbounded source and event id. Two long
+    keys differing only past the cut named one file: each finish() overwrote the
+    other's report, and after a restart a lookup for one answered with the
+    other's — the wrong investigation under the right name."""
+
+    async def scenario() -> None:
+        settings = make_settings(tmp_path)
+        results = tmp_path / "results"
+        service = RunService(settings, FakeEngine(), RunStore(results))
+        stem = "probe:inbound:" + "x" * 240
+        first, second = stem + "A", stem + "B"
+        service.start({"message": "the first alert", "sessionKey": first})
+        service.start({"message": "the second alert", "sessionKey": second})
+        await _wait_finished(service, first)
+        await _wait_finished(service, second)
+        assert len(list(results.glob("*.json"))) == 2
+
+        # A key that fits keeps its literal name: the case files already on the
+        # volume were written that way and have to stay readable.
+        service.start({"message": "a short one", "sessionKey": "probe:inbound:7"})
+        await _wait_finished(service, "probe:inbound:7")
+        assert (results / "probe:inbound:7.json").is_file()
+
+        # A fresh store over the same directory: every answer comes off disk.
+        reborn = RunService(settings, FakeEngine(), RunStore(results))
+        assert reborn.get(first).turns[0]["message"] == "the first alert"
+        assert reborn.get(second).turns[0]["message"] == "the second alert"
+
+    asyncio.run(scenario())
+
+
+def test_a_timed_out_follow_up_is_not_billed_the_previous_turn(tmp_path) -> None:
+    """Two accounting errors met on this path. The follow-up reset the text and
+    the error but not the cost, so a turn that died before the engine reported
+    anything re-recorded the first turn's bill — a $2 investigation plus a
+    failed follow-up read as $4 in the window and in the session total. What is
+    left is the opposite error, and it is not fixable by guessing: the engine
+    reports dollars only with its result, so a turn the wall clock cut off
+    records no cost at all. That has to read as unknown, never as free."""
+    from hookprobe.app import _summary  # the session total the console shows
+    from hookprobe.engine import EngineResult
+
+    async def scenario() -> None:
+        engine = FakeEngine(
+            result=EngineResult(text='{"summary": "ok"}', message_count=2, cost_usd=2.0, session_id="sdk-1")
+        )
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.start({"message": "analyze", "sessionKey": "hook:bill"})
+        first = await _wait_finished(service, "hook:bill")
+        assert first.turns[0]["cost_usd"] == 2.0
+
+        engine.delay = 5.0  # the follow-up never reaches a result
+        service.continue_run("hook:bill", {"message": "more", "timeoutSeconds": 1})
+        done = await _wait_finished(service, "hook:bill", deadline=4.0)
+
+        assert done.status == FAILED and done.error is not None and "timed out" in done.error
+        assert done.turns[1]["cost_usd"] is None, "nobody counted this turn, and that is not $2"
+        assert service.window_spend() == 2.0
+        assert _summary(done)["cost_usd"] == 2.0
+        # The undercount that remains is at least no longer silent.
+        assert service.window_unpriced() == 1
+
+    asyncio.run(scenario())
+
+
+def test_a_turn_that_really_cost_nothing_still_counts_as_counted(tmp_path) -> None:
+    """0.0 is a price; None is the absence of one. _summary filtered turn costs
+    by truthiness, so a genuinely free turn — a budget refusal — was dropped and
+    the session total silently fell back to the run-level figure, erasing the
+    one distinction the rest of this accounting works to keep."""
+    from hookprobe.app import _summary
+    from hookprobe.runs import Run
+
+    free = Run(session_key="k", run_id="r", current_message="m")
+    free.turns = [{"message": "m", "cost_usd": 0.0}]
+    free.cost_usd = 7.77
+    assert _summary(free)["cost_usd"] == 0.0, "a counted zero must outrank a stale run-level total"
+
+    unpriced = Run(session_key="k", run_id="r", current_message="m")
+    unpriced.turns = [{"message": "m", "cost_usd": None}]
+    unpriced.cost_usd = 2.0
+    assert _summary(unpriced)["cost_usd"] == 2.0, "nothing was counted, so the fallback still applies"
 
 
 def test_concurrency_cap_is_respected(tmp_path) -> None:

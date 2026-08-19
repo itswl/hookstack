@@ -35,6 +35,33 @@ async def test_bad_signature_is_401_and_leaves_no_trace(client):
     assert status.json()["recent"] == []
 
 
+async def test_a_high_byte_in_any_credential_header_is_401_not_500(client):
+    """Every gate here compares a header the caller controls.
+
+    hmac.compare_digest raises TypeError on a str holding non-ASCII, and
+    Starlette decodes header bytes as latin-1 — so one 0xF6 byte used to turn
+    all four gates into an unauthenticated HTTP 500. A wrong credential is a
+    401 whatever bytes it is made of.
+    """
+    body = json.dumps(PAYLOAD).encode()
+    high_byte = b"t\xf6ken"
+
+    signature = await client.post("/hook/grafana", content=body, headers={b"X-Hook-Signature": high_byte})
+    assert signature.status_code == 401
+
+    read = await client.get("/status", headers={b"X-Read-Token": high_byte})
+    assert read.status_code == 401
+
+    bearer = await client.get("/status", headers={b"Authorization": b"Bearer t\xf6ken"})
+    assert bearer.status_code == 401
+
+    # The admin side answers 403 rather than 401 — its own convention, pinned
+    # by test_admin_endpoints_refuse_without_token. What matters is that it is
+    # a refusal and not a crash.
+    admin = await client.post("/silences", json={"scope": "all"}, headers={b"X-Admin-Token": high_byte})
+    assert admin.status_code == 403
+
+
 async def test_unsigned_source_accepts_without_header(client):
     response = await client.post("/hook/ci", json={"job": "build", "detail": "ok"})
     assert response.status_code == 200

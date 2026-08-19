@@ -82,6 +82,10 @@ if [ "${FORCE:-0}" != "1" ] && [ -n "$PROBE_VOLUMES" ]; then
   printf 'when something else is pointed at it.\n\n'
   printf 'Run it in a scratch checkout, or accept the loss:\n\n'
   printf '  FORCE=1 bash scripts/stack-smoke.sh\n'
+  # The EXIT trap is already armed, and cleanup() is `down -v` — so a bare
+  # `exit 1` here deleted the very volume this guard just refused to delete.
+  # Disarm the wipe on the way out; refusing must cost nothing.
+  KEEP=1
   exit 1
 fi
 docker compose down -v >/dev/null 2>&1 || true

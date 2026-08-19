@@ -9,11 +9,19 @@ an operator's:
     proposed ──(operator approves)──► running ──► executed | failed
         └─────(operator rejects)───► rejected
 
-Execution is service-side and dumb on purpose: the approved commands run
-exactly as written, sequentially, stop-on-first-failure, each output captured
-and each command appended to the same audit JSONL the agent's tools write to.
-No agent in the loop at execution time — an agent that "adapts" an approved
-command is executing something nobody approved.
+`running` is the one state no operator can leave: only the executing task
+writes it, so a process that dies mid-sequence used to strand the row there
+forever — approve and reject both require `proposed`. The next boot settles
+those into `failed`, recording which commands ran and which never did
+(`settle_interrupted`).
+
+Execution is dumb on purpose, and lives here beside the persistence rather than
+in the service: the approved commands run exactly as written, sequentially,
+stop-on-first-failure, each output captured and each command appended to the
+same audit JSONL the agent's tools write to. No agent in the loop at execution
+time — an agent that "adapts" an approved command is executing something nobody
+approved. The service owns only the task the sequence runs in, because that is
+what its shutdown has to wait for.
 
 The gate that makes any of this runnable is the allowlist file
 (HOOKPROBE_REMEDIATION_ALLOWLIST): one regex per line, hot-read at execution
@@ -31,12 +39,18 @@ proposal's provenance. (A bash write around that guard still produces only a
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from hookprobe.files import atomic_write
+
+logger = logging.getLogger("hookprobe.remediation")
 
 DIRNAME = "remediation"
 
@@ -133,10 +147,35 @@ def save(workdir: Path, row: dict[str, Any]) -> None:
     _write(workdir / DIRNAME / f"{row['id']}.json", row)
 
 
+def settle_interrupted(workdir: Path) -> list[dict[str, Any]]:
+    """Terminate rows a dead process left mid-execution; returns what it settled.
+
+    A procedure is written as 1-2-3 and runs stop-on-first-failure, so the fact
+    an operator needs before touching the target again is which commands landed.
+    The results list already holds one entry per command that ran, in order —
+    everything past it never started. `failed` is the terminal state for a
+    sequence that did not complete, and unlike `running` it is a state the row
+    can be read in.
+    """
+    settled: list[dict[str, Any]] = []
+    for row in list_all(workdir, limit=1000):
+        if row.get("status") != "running":
+            continue
+        commands = [str(step.get("command") or "") for step in row.get("steps") or []]
+        ran = len(row.get("results") or [])
+        row["status"] = "failed"
+        row["executed_at"] = round(time.time(), 3)
+        row["interrupted"] = {"ran": commands[:ran], "not_run": commands[ran:]}
+        try:
+            save(workdir, row)
+        except OSError:
+            continue
+        settled.append(row)
+    return settled
+
+
 def _write(path: Path, row: dict[str, Any]) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(row, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    atomic_write(path, (json.dumps(row, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
 
 
 def allowlist_patterns(path: Path | None) -> list[str]:
@@ -161,3 +200,106 @@ def deny_reason(command: str, patterns: list[str]) -> str | None:
         except re.error:
             continue  # a broken pattern must fail closed, not open
     return "command matches no allowlist pattern"
+
+
+def approve(workdir: Path, proposal_id: str, *, allowlist: Path | None, note: str = "") -> dict[str, Any]:
+    """The operator's click. Gate-checks EVERY step against the allowlist
+    before anything runs — a proposal that is half executable is refused
+    whole, because "steps 1 and 3 ran" is the worst possible outcome of a
+    procedure written as 1-2-3."""
+    row = load(workdir, proposal_id)
+    if row is None:
+        raise LookupError("no such proposal")
+    if row.get("status") != "proposed":
+        raise ValueError(f"proposal is {row.get('status')}, not proposed")
+    patterns = allowlist_patterns(allowlist)
+    for step in row.get("steps", []):
+        reason = deny_reason(str(step.get("command") or ""), patterns)
+        if reason is not None:
+            raise PermissionError(f"step '{step.get('action')}': {reason}")
+    row["status"] = "running"
+    row["approved_at"] = round(time.time(), 3)
+    row["approved_note"] = note[:300]
+    save(workdir, row)
+    return row
+
+
+def reject(workdir: Path, proposal_id: str) -> dict[str, Any]:
+    row = load(workdir, proposal_id)
+    if row is None:
+        raise LookupError("no such proposal")
+    if row.get("status") != "proposed":
+        raise ValueError(f"proposal is {row.get('status')}, not proposed")
+    row["status"] = "rejected"
+    row["resolved_at"] = round(time.time(), 3)
+    save(workdir, row)
+    return row
+
+
+async def execute(workdir: Path, row: dict[str, Any], *, bash_timeout_ms: int) -> None:
+    """Approved commands run EXACTLY as written: sequentially, stop on the
+    first failure, output captured, every command on the audit log. No
+    agent in this loop — an agent that adapts an approved command is
+    executing something nobody approved."""
+    timeout = max(30.0, (bash_timeout_ms or 120000) / 1000.0)
+    failed = False
+    for step in row.get("steps", []):
+        command = str(step.get("command") or "")
+        started = time.monotonic()
+        try:
+            process = await asyncio.create_subprocess_shell(  # noqa: S604 — operator-approved, allowlist-gated
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=str(workdir),
+            )
+            try:
+                output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+                output, returncode = b"(timed out)", -1
+            else:
+                returncode = int(process.returncode or 0)
+        except OSError as exc:
+            output, returncode = str(exc).encode(), -1
+        result = {
+            "command": command,
+            "exit": returncode,
+            "ms": int((time.monotonic() - started) * 1000),
+            "output": output.decode("utf-8", "replace")[-10000:],
+        }
+        row.setdefault("results", []).append(result)
+        _audit(workdir, row["id"], command, returncode != 0)
+        if returncode != 0:
+            failed = True
+            break
+    row["status"] = "failed" if failed else "executed"
+    row["executed_at"] = round(time.time(), 3)
+    try:
+        save(workdir, row)
+    except OSError:
+        # The commands have already run; losing the write would leave the row
+        # saying `running` with nobody to correct it, so it is worth a loud
+        # line. The audit log above still has every command, and the next
+        # boot's sweep settles the row.
+        logger.exception("remediation %s id=%s but the row could not be written", row["status"], row["id"])
+    logger.info("remediation %s id=%s", row["status"], row["id"])
+
+
+def _audit(workdir: Path, proposal_id: str, command: str, error: bool) -> None:
+    """Same flight recorder the agent's tools write to — one account."""
+    try:
+        audit_dir = workdir / "audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        line = {
+            "ts": round(time.time(), 3),
+            "session": f"remediation:{proposal_id}",
+            "tool": "Exec",
+            "detail": command[:300],
+            "error": error,
+        }
+        with (audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")).open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+    except OSError:
+        logger.debug("remediation audit write failed", exc_info=True)
