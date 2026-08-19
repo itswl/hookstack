@@ -100,13 +100,46 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      # Only the immutable version tag here. `:latest` is moved by the promote
+      # job below, once all three have succeeded — see the comment there.
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.service }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ steps.version.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:latest
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
+  # `:latest` moves for all three or for none of them.
+  #
+  # The matrix above publishes per service, so a failure in the third leg used to
+  # leave the first two already pointing `:latest` at the new release and the
+  # third at the old one — a split stack, and nothing anywhere recording that it
+  # is split. The three components speak one wire contract to each other; half of
+  # them being a version ahead is exactly the shape of problem that takes a day
+  # to see. The version tags are immutable and land per leg, so a partial run
+  # leaves them harmlessly published and nobody's `:latest` moved.
+  #
+  # imagetools re-tags the existing multi-arch manifest — no rebuild, no pull,
+  # and the digest `:latest` gains is the same one the version tag already has.
+  promote:
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: move :latest to this release
+        run: |
+          for service in hookrelay hookjudge hookprobe; do
+            repo="ghcr.io/${{ github.repository_owner }}/$service"
+            docker buildx imagetools create \
+              --tag "$repo:latest" "$repo:${{ steps.version.outputs.version }}"
+          done

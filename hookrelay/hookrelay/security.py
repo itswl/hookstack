@@ -2,8 +2,9 @@
 
 Inbound: X-Hook-Signature = hex HMAC-SHA256 with the source's secret
 ("sha256=" prefix tolerated). With X-Hook-Timestamp the signature covers
-"{timestamp}.{body}" and must be FRESH, which is what stops a captured
-request from being replayed forever; without it the legacy body-only form is
+"{timestamp}.{body}" and must be FRESH, which BOUNDS how long a captured
+request stays useful rather than preventing replay outright (see
+verify_signature); without it the legacy body-only form is
 accepted unless the door sets require_timestamp. A source configured without
 a secret is accepted unsigned — a deliberate, documented decision for trusted
 private networks, not a fallback.
@@ -45,12 +46,26 @@ def verify_signature(
 
       timestamped (preferred): X-Hook-Timestamp present, signature covers
         "{timestamp}.{body}", and the timestamp must be within max_skew
-        seconds. This is what makes a captured request un-replayable.
+        seconds.
       body-only (legacy): no timestamp header, signature covers the body.
         Replayable forever, which is why require_timestamp exists per door:
         senders migrate first, then the door refuses the old form.
 
     A door with require_timestamp=True rejects the legacy form outright.
+
+    WHAT THE TIMESTAMP ACTUALLY BUYS, stated exactly, because this used to claim
+    it made a captured request "un-replayable" and that is more than it does:
+    it BOUNDS the replay window to max_skew seconds. Inside that window the same
+    signature is accepted again — there is no nonce cache, so a capture replayed
+    within five minutes is indistinguishable from the original.
+
+    That is a deliberate position, not an oversight. Closing it needs a store of
+    spent signatures, and the window it would close is already narrower than the
+    dedup window a door carries (120s by default), so a replay landing inside it
+    mostly arrives as a duplicate and is skipped as one. The card-action tokens
+    in hookrelay/actions.py DO get single use, because those spend money and
+    restart services; an inbound alert delivered twice costs a duplicate row.
+    Revisit this if a door ever grows an action whose second execution matters.
     """
     if not secret:
         return True
