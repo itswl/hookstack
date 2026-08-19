@@ -76,6 +76,12 @@
 .rv button:hover{border-color:var(--accent)}
 .rv select{font:inherit;font-size:11px;background:transparent;color:var(--text);border:1px solid var(--line);border-radius:6px}
 .badge.burst{color:var(--warn);border-color:var(--warn)}
+.att{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);
+     border:1px solid var(--border);border-radius:10px;padding:8px 14px;margin-bottom:6px;font-size:12.5px}
+.att .t{flex:1 1 260px;font-weight:600;overflow-wrap:anywhere}
+.att .n{color:var(--muted);font-family:var(--mono);font-size:11.5px;white-space:nowrap}
+/* The count that says "go turn this off": nobody ruled it worth the interruption. */
+.att .n.cold{color:var(--warn)}
 </style>
 </head>
 <body>
@@ -97,6 +103,11 @@
     It renders no cards and knows no channels — that is the pipe's job; it runs no deep
     investigation — that is the investigator's. The judge answers exactly one question: is this
     alert worth interrupting a human for.</p>
+    <p>It also declares which <b>buttons</b> that verdict deserves — <code>silence</code> for a window
+    scaled to how bad it just said the condition is, and the <code>useful</code>/<code>useless</code> pair
+    — because what a button means is judgement. A recovery declares none: there is nothing left to silence,
+    and whether resolution notices are wanted at all is a channel setting. Minting the signed token behind
+    a button and catching the press stay the pipe's, so this service still holds no secret.</p>
     <h2>Four routes = the cost policy (the order IS the policy)</h2>
     <table>
       <tr><th>Route</th><th>When it is taken</th><th>Costs?</th></tr>
@@ -107,14 +118,31 @@
     </table>
     <p class="muted-p">The saving does not come from a cheaper model. It comes from most events never reaching ai at all.</p>
     <h2>Reading this board</h2>
-    <p>Five cards: verdicts in 24h / paid share (the ai fraction) / spend in 24h / <b>failed returns</b>
+    <p>Seven cards: verdicts in 24h / paid share (the ai fraction) / spend in 24h / <b>failed returns</b>
     (&gt;0 means the pipe is not receiving verdicts — with <code>HOOKJUDGE_ALARM_URL</code> set, the news
     travels around the pipe as a direct self-alarm) / <b>platform agreement</b> — on shadow deployments
     the pipe delivers each event with the upstream platform's own verdict as <code>level</code>, so the
     ledger can say how often the judge and the platform agree. Recoveries are excluded (their importance
     is inherited from the firing by design), and the <code>/status</code> JSON carries the full
-    level×importance matrix plus the latest disagreements — the rows worth reading. Each verdict row is
-    badged with its route, next to the latency and what that one verdict cost.</p>
+    level×importance matrix plus the latest disagreements — the rows worth reading / <b>repeat
+    interruptions</b> and <b>mattered</b>, below. Each verdict row is badged with its route, next to the
+    latency and what that one verdict cost.</p>
+    <h2>Attention, which is not the same bill as spend</h2>
+    <p>Every verdict goes back to the pipe and becomes a card, so <b>verdicts 24h has always been the
+    number of times somebody was interrupted</b> — it was only ever read as throughput. A condition judged
+    twelve times inside an hour interrupted a human twelve times, and because eleven of those took the free
+    <code>reuse</code> route the spend figure says nothing about it. <b>repeat interruptions</b> is that
+    hidden part: cards that restated a condition this window had already reported. <b>mattered</b> is the
+    other half — when an operator presses a button on a card, <code>useful</code> and <code>useless</code>
+    come back to <code>POST /feedback</code> and are recorded against the judgement that caused the
+    interruption. It is a different question from the review queue below, which asks what importance the
+    alert should have had: a correctly-rated <code>high</code> can still not be worth waking anyone, so
+    both answers live on the row.</p>
+    <p class="muted-p"><b>Noisiest conditions</b> is the view to act on — every condition that interrupted
+    more than once, with how many of those interruptions were paid for and how many anyone ruled worth it.
+    A row with several interruptions and nothing ruled useful is where to go turn something off. Nothing
+    here suppresses anything: the judge still returns every verdict, and who owns noise when a verdict is
+    reused stays an open decision — this only makes the bill legible enough to settle it on evidence.</p>
     <p class="muted-p">This page keeps no clock. It holds one streaming connection to <code>/live</code> and refetches
     what it is showing when the service says a verdict landed, so a burst of events is one refetch rather than a tick
     each. The header's ↻ refetches on demand, the badge beside it reads <b>live</b> or <b>offline</b> (a dropped stream
@@ -124,6 +152,7 @@
     <table>
       <tr><th>Endpoint</th><th>Purpose</th></tr>
       <tr><td><code>POST /events</code></td><td>A normalized event from the pipe (timestamped HMAC optional). Answers 202 at once — the verdict travels back through the return door rather than holding the connection</td></tr>
+      <tr><td><code>POST /feedback</code></td><td>A human pressed a button on a card, forwarded by the pipe with the channel stripped off it (same signature scheme and secret as <code>/events</code>). <code>useful</code>/<code>useless</code> are recorded against the judgement; <code>silence</code> is a request to the pipe, and this service answers it without recording a ruling — "make it stop" is not "it did not matter"</td></tr>
       <tr><td><code>GET /status</code></td><td>What this page reads (X-Read-Token)</td></tr>
       <tr><td><code>GET /healthz</code> · <code>GET /metrics</code></td><td>Liveness / Prometheus text</td></tr>
     </table>
@@ -142,7 +171,11 @@
     <div class="card"><div class="label">spend 24h</div><div class="value" id="cCost">–</div></div>
     <div class="card"><div class="label">failed returns</div><div class="value" id="cDead">–</div></div>
     <div class="card"><div class="label">platform agreement</div><div class="value" id="cAgree">–</div></div>
+    <div class="card" title="cards that restated a condition this window had already reported"><div class="label">repeat interruptions</div><div class="value" id="cRepeat">–</div></div>
+    <div class="card" title="of the interruptions a human actually ruled on"><div class="label">mattered</div><div class="value" id="cMattered">–</div></div>
   </div>
+  <h2>Noisiest conditions</h2>
+  <div id="atRows"><div class="empty">…</div></div>
   <h2>Recent verdicts</h2>
   <div id="reviewSec" class="review" style="display:none">
     <h3>review · <span id="rvCount">0</span> disagreements <button id="rvExport" style="float:right">export labels</button></h3>
@@ -207,6 +240,15 @@
       var ag = s.agreement || {};
       document.getElementById("cAgree").textContent =
         ag.agree_pct == null ? "–" : ag.agree_pct + "% of " + ag.compared;
+      // Attention, not spend. "verdicts 24h" has always BEEN the number of times
+      // somebody was interrupted — these two say how much of it was repetition
+      // and how much of it anyone said was worth it.
+      var at = s.attention || {};
+      document.getElementById("cRepeat").textContent =
+        at.interruptions == null ? "–" : at.repeats + " of " + at.interruptions;
+      document.getElementById("cMattered").textContent =
+        at.ruled ? at.mattered + " of " + at.ruled : "–";
+      renderAttention(at.noisiest || []);
       var rows = d.recent || [];
       fetch("/disagreements?limit=20", { headers: readHeaders() })
         .then(function (r) { return r.ok ? r.json() : { queue: [] }; })
@@ -227,6 +269,18 @@
       }).join("") : '<div class="empty">no verdicts yet</div>';
       document.getElementById("stamp").textContent = "refreshed " + new Date().toTimeString().slice(0,8);
     }).catch(function () { document.getElementById("stamp").textContent = "connection failed"; });
+  }
+  // Where to go turn something off. One line per condition that interrupted a
+  // human more than once, with the contrast the cost cards cannot show: twelve
+  // interruptions, one of them paid for, and how many anyone said were worth it.
+  function renderAttention(list) {
+    document.getElementById("atRows").innerHTML = list.length ? list.map(function (c) {
+      var cold = c.mattered ? "" : " cold";   // repeated wake-ups, none of them wanted
+      return '<div class="att"><span class="t" title="' + esc(c.identity) + '">' + esc(c.title) + "</span>" +
+        '<span class="n' + cold + '">' + esc(c.interruptions) + " interruptions</span>" +
+        '<span class="n">' + esc(c.paid) + " paid</span>" +
+        '<span class="n">' + esc(c.mattered) + " useful · " + esc(c.did_not_matter) + " not</span></div>";
+    }).join("") : '<div class="empty">no condition interrupted twice in this window</div>';
   }
   // The review queue: every row is a platform-vs-judge disagreement, and one
   // click is one eval label — the cheapest labelling this dataset will get.

@@ -52,11 +52,39 @@ ratio that produces looks like excellent cost savings.
  "analysis": {"summary": "...", "event_type": "business",
               "impact_scope": "...", "importance": "high"},
  "identity": {"env": "prod"},
- "links":    []}
+ "links":    [],
+ "actions":  [{"kind": "silence", "text": "Silence 15m", "minutes": 15},
+              {"kind": "useful",  "text": "Worth waking me"},
+              {"kind": "useless", "text": "Not worth it"}]}
 ```
 
 `identity` goes back as **data**, not a rendered string: choosing separators
 and order is layout, and layout belongs to the pipe.
+
+`actions` are the buttons the verdict says it deserves. Declaring them is
+judgement, so it happens here; minting the signed token behind a button and
+catching the press are the channel edge's, so they happen in the pipe — which
+also drops any `kind` it has not been configured to accept, making each entry a
+request rather than a guarantee. `kind` and `text` are required and anything
+else rides along as an opaque param. The vocabulary is exactly three:
+`silence`, `useful`, `useless` (`followup` and `approve` answer "act on this
+report", and a verdict is not a proposal).
+
+Which ones a verdict deserves comes from the verdict:
+
+- a **recovery** declares none. Nothing is left to silence, and a window opened
+  on an ended condition lands on its *next* genuine firing — a mute hiding an
+  escalation through a door nobody was watching. "Was this worth waking me" on a
+  resolution notice asks whether the channel should send resolution notices at
+  all, which is a channel setting.
+- everything else declares all three, and the silence **window** is where the
+  judgement shows: 15m on critical/high, 1h on medium, 4h on low. A critical is
+  still offered 15 minutes rather than nothing, because an operator whose card
+  offers no way to stop the noise reaches for muting the whole channel.
+- the **route** is not read. Offering a longer mute on the eleventh restatement
+  than on the first firing would be the judge quietly writing a suppression
+  policy, and who owns noise when a verdict is reused is a decision that is
+  deliberately still open.
 
 ## Four routes, and the order is the cost policy
 
@@ -101,12 +129,69 @@ The return leg is `queued → sent | dead`, retried on a backoff
 judgement, and the ledger does not pretend otherwise. Retention purging never
 deletes a queued return.
 
+### It accounts for attention, not only spend
+
+The operator's complaint is not "this cost too much", it is "I was interrupted
+40 times last week and 3 mattered". Every judgement is returned to the pipe and
+becomes a card, so **`judged` has always BEEN the number of times somebody was
+interrupted** — it was only ever read as throughput. A condition judged twelve
+times inside an hour interrupted a human twelve times, and because eleven of
+those took the free `reuse` route the spend figure says nothing at all about it.
+`/status` and `/metrics` now say it out loud, under `summary.attention`:
+
+| key                       | what it says                                          |
+| ------------------------- | ----------------------------------------------------- |
+| `interruptions`           | cards a human received in the window (= `judged`)     |
+| `conditions`              | distinct conditions behind them                       |
+| `repeats`                 | interruptions that restated something already reported |
+| `mattered` / `did_not_matter` | rulings from `POST /feedback`                     |
+| `mattered_pct`            | of the **ruled** ones — an unruled card is not evidence |
+| `noisiest`                | conditions that interrupted more than once, with how many were paid for and how many anyone ruled useful |
+
+`noisiest` is the view to act on: several interruptions and nothing ruled useful
+is where to go turn something off. It is capped, and the cap is load-bearing —
+the top of that list is also emitted as Prometheus labels, and an alert identity
+as a label value is unbounded cardinality.
+
+**This changes no suppression behaviour.** Every verdict is still returned
+exactly as before. Whether a reused verdict should stop producing a card is an
+open decision on the record (`reuse` saves money, not attention); measuring the
+bill is not settling it, but it is what makes settling it possible on evidence.
+
+`POST /feedback` is how a ruling arrives — signed with the same timestamped HMAC
+and the same `HOOKJUDGE_INGEST_SECRET` as `/events`, because it comes from the
+same sender through the same edge, with the channel already stripped off it:
+
+```json
+{"action": {"kind": "useful", "params": {}}, "correlation_id": "hr-2481",
+ "event_id": 2481, "actor": "<opaque IM user id or empty>", "at": 1786037727}
+```
+
+`useful` → it mattered, `useless` → it did not, recorded against the judgement
+carrying that correlation id (newest first, since a retried delivery is two rows
+under one id). Idempotent by `(kind, at)`: a redelivered press changes nothing,
+and a press older than the ruling on record is dropped rather than applied, so a
+late retry cannot reinstate an answer the operator has since changed. `silence`
+is answered **202 without recording a ruling** — "make it stop" is not "it did
+not matter", since an operator silences a real incident they are already working.
+A press with no matching judgement is also 202 with the reason named, not 404: a
+retry cannot conjure the judgement, and a pipe reading it as a failure would
+redeliver a press nobody can ever file.
+
+The ruling is a **different axis** from `label_importance`, which answers what
+importance the alert should have had and feeds `/labels/export`. An alert
+correctly rated `high` can still not be worth waking anyone, so they are two
+columns and both can stand on one row. Sharing the column would have emitted
+`expect.importance: "yes"` into the eval set and quietly drained the review
+queue of rows nobody reviewed.
+
 ## Endpoints
 
 | method | path       | notes                                            |
 | ------ | ---------- | ------------------------------------------------ |
 | POST   | `/events`  | the pipe's event. Answers **202** immediately.    |
-| GET    | `/status`  | ledger JSON: routes, cost, returns, recent        |
+| POST   | `/feedback`| a human pressed a button. Answers **202**.        |
+| GET    | `/status`  | ledger JSON: routes, cost, attention, returns, recent |
 | GET    | `/live`    | the board's wake-up line: NDJSON, `changed` per burst of writes, `ping` through the quiet |
 | GET    | `/metrics` | Prometheus text                                   |
 | GET    | `/healthz` | liveness                                          |
@@ -127,8 +212,10 @@ Both legs speak the pipe's scheme: HMAC-SHA256 over `{timestamp}.{body}`, with
 a 300s freshness window so a captured delivery expires. Body-only is accepted
 inbound when no timestamp header is present.
 
-- inbound: `HOOKJUDGE_INGEST_SECRET` — empty means accept unsigned, which is a
-  decision for a private network and never a default to drift into.
+- inbound: `HOOKJUDGE_INGEST_SECRET` — guards `/events` and `/feedback`, which
+  are the same sender arriving through the same edge. Empty means accept
+  unsigned, which is a decision for a private network and never a default to
+  drift into.
 - outbound: `HOOKJUDGE_RETURN_SECRET` — must match the pipe door's secret.
 
 ## Configuration

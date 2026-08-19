@@ -208,11 +208,15 @@ path, admin/read tokens, body-size cap, max attempts.
 | `GET/PUT /config`, `POST /config/reload` | the config file, validated-or-nothing, hot-applied (admin token) |
 | `POST /silences`, `DELETE /silences/{id}` | the valve (admin token) |
 | `POST /deliveries/{id}/retry` | a dead letter's second chance (admin token) |
+| `POST /card-action` | a button pressed on a notification card — authorised by the signed single-use token in the button, not by the caller |
 
 Environment knobs beyond the doors: `HOOKRELAY_RETENTION_DAYS` (14),
 `HOOKRELAY_ALARM_URL` + `HOOKRELAY_ALARM_MIN_INTERVAL_SECONDS` (dead-letter
 self-alarm), `HOOKRELAY_BREAKER_THRESHOLD` / `_COOLDOWN_SECONDS`,
-`HOOKRELAY_MAX_ATTEMPTS`, `HOOKRELAY_PLUGINS`.
+`HOOKRELAY_MAX_ATTEMPTS`, `HOOKRELAY_PLUGINS`,
+`HOOKRELAY_ACTION_SECRET` + `HOOKRELAY_ACTION_TTL_SECONDS` +
+`HOOKRELAY_CARD_CALLBACK_SECRET` (card buttons — empty secret means no card
+carries one, see [docs/configuration.md](docs/configuration.md)).
 
 ## Tests
 

@@ -24,19 +24,53 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
-from hookrelay import metrics, registry
+from hookrelay import actions, metrics, registry
 from hookrelay.alarm import SelfAlarm
 from hookrelay.breaker import CircuitBreaker
-from hookrelay.config import Config, ConfigError
+from hookrelay.config import CardAction, Config, ConfigError
 from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
 from hookrelay.live import Live
 from hookrelay.pipeline import handle_hook, record_storm_suppressed
-from hookrelay.security import token_ok
+from hookrelay.security import token_ok, verify_signature
 from hookrelay.settings import Settings
 from hookrelay.store import Store, now_ts
 
 logger = logging.getLogger("hookrelay.app")
+
+# The synthetic source a card press is recorded under. Named rather than blank
+# so it is obvious in the ledger that a human, not an upstream, made this event.
+_ACTION_SOURCE = "card-action"
+
+
+def _card_token(payload: dict[str, Any]) -> str:
+    """Find our token in whatever envelope the IM platform wrapped it in.
+
+    Feishu posts the button's `value` under action.value; a plain caller may
+    post it at the top level. Both, rather than a per-platform parser: the
+    token is what carries the authority, so where it was nested is a detail.
+    """
+    for candidate in (payload, payload.get("action"), payload.get("event"), payload.get("value")):
+        if isinstance(candidate, dict):
+            nested = candidate.get("value")
+            if isinstance(nested, dict) and nested.get("hookrelay_action"):
+                return str(nested["hookrelay_action"])
+            if candidate.get("hookrelay_action"):
+                return str(candidate["hookrelay_action"])
+    return ""
+
+
+def _im_actor(payload: dict[str, Any]) -> str:
+    """An opaque user id if the platform sent one — never a display name.
+
+    Who pressed it belongs in the timeline; who they are does not belong in this
+    service's ledger.
+    """
+    for key in ("open_id", "user_id", "operator_id", "senderId"):
+        for holder in (payload, payload.get("event"), payload.get("operator")):
+            if isinstance(holder, dict) and holder.get(key):
+                return str(holder[key])
+    return ""
 
 
 def create_app(settings: Settings | None = None, cfg: Config | None = None) -> FastAPI:
@@ -203,6 +237,135 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             dry_run=True,
         )
         return JSONResponse(result)
+
+    # ── the card's way back ───────────────────────────────────────────────
+
+    @app.post("/card-action")
+    async def card_action(request: Request) -> JSONResponse:
+        """A human pressed a button on a notification card.
+
+        This is the return leg the cards never had: a report arrived in chat and
+        every useful response to it — quiet this, ask the investigator, approve
+        that fix — lived behind a web board and a token. So nobody used them.
+
+        WHAT AUTHORISES THIS. The token in the button, minted by this service
+        (hookrelay/actions.py), signed, short-lived and single-use. Not the
+        caller's identity: an IM platform's callback arrives as whatever that
+        platform is, and pinning a scheme per platform is how this would grow
+        four verifiers. When HOOKRELAY_CARD_CALLBACK_SECRET is set the ordinary
+        family signature is also required, which is defence in depth for anyone
+        who can put a gateway in front; the token is the control that always
+        applies.
+
+        Claim BEFORE acting, always: the actions on the far side of this door
+        spend money and restart services, so a double press must lose the race
+        rather than be handled twice.
+        """
+        body = await request.body()
+        if len(body) > app_settings.max_body_bytes:
+            raise HTTPException(status_code=413, detail="body too large")
+        callback_secret = app_settings.card_callback_secret
+        if callback_secret and not verify_signature(
+            callback_secret,
+            body,
+            request.headers.get("x-hook-signature"),
+            timestamp_value=request.headers.get("x-hook-timestamp"),
+            now=now_ts(),
+            require_timestamp=True,
+        ):
+            raise HTTPException(status_code=401, detail="bad callback signature")
+        try:
+            payload = json.loads(body or b"{}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="body is not JSON") from None
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="body is not an object")
+
+        token = _card_token(payload)
+        if not token:
+            raise HTTPException(status_code=400, detail="no hookrelay_action in the callback value")
+        now = now_ts()
+        try:
+            claims = actions.verify(app_settings.action_secret, token, now=now)
+        except actions.ActionError as error:
+            # The reason is for our log; the caller learns only that it failed.
+            logger.warning("card action refused: %s", error)
+            raise HTTPException(status_code=401, detail="action token refused") from None
+
+        kind = str(claims["k"])
+        configured = app.state.config.card_actions.get(kind)
+        if configured is None:
+            # Enabled when the button was minted, since gone. Refuse rather than
+            # act on a capability this deployment has withdrawn.
+            raise HTTPException(status_code=409, detail=f"action {kind!r} is no longer offered")
+
+        correlation_id = str(claims.get("c") or "")
+        event_id = int(claims.get("e") or 0) or None
+        actor = str(payload.get("actor") or _im_actor(payload))
+        if not await app.state.store.spend_action(
+            str(claims["j"]),
+            kind=kind,
+            event_id=event_id,
+            correlation_id=correlation_id,
+            actor=actor,
+            now=now,
+        ):
+            # Not an error: the human pressed twice, or the platform retried.
+            return JSONResponse({"outcome": "already_done", "kind": kind}, status_code=200)
+
+        outcome = await _dispatch_action(kind, configured, claims, correlation_id, event_id, actor, now)
+        await app.state.store.record_action_outcome(str(claims["j"]), outcome)
+        return JSONResponse({"outcome": outcome, "kind": kind, "correlation_id": correlation_id})
+
+    async def _dispatch_action(
+        kind: str,
+        configured: CardAction,
+        claims: dict[str, Any],
+        correlation_id: str,
+        event_id: int | None,
+        actor: str,
+        now: float,
+    ) -> str:
+        """Silence is ours; everything else rides the outbox to whoever owns it."""
+        raw_params = claims.get("p")
+        params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+        if kind == "silence":
+            minutes = int(params.get("minutes") or 60)
+            minutes = max(1, min(minutes, 7 * 24 * 60))
+            source = str(params.get("source") or "*")
+            if source != "*" and source not in app.state.config.sources:
+                source = "*"
+            await app.state.store.add_silence(
+                source, now + minutes * 60, f"silenced from a card by {actor or 'an operator'}", now
+            )
+            return f"silenced {source} for {minutes}m"
+
+        # An action press becomes an EVENT and a delivery, so forwarding it
+        # inherits the retry, the rate limit, the dead letter and the ledger row
+        # rather than becoming a second, thinner delivery mechanism.
+        envelope = {
+            "action": {"kind": kind, "params": params},
+            "correlation_id": correlation_id,
+            "event_id": event_id,
+            "actor": actor,
+            "at": int(now),
+        }
+        extracted = {
+            "title": f"card action: {kind}",
+            "body": f"{actor or 'an operator'} pressed {kind} on {correlation_id or f'event #{event_id}'}",
+            "level": "info",
+            "fields": {"kind": kind, "actor": actor},
+        }
+        action_event_id = await app.state.store.insert_event(
+            _ACTION_SOURCE,
+            f"card-action:{claims['j']}",
+            extracted,
+            json.dumps(envelope, ensure_ascii=False),
+            now,
+            correlation_id=correlation_id or None,
+        )
+        await app.state.store.enqueue_delivery(action_event_id, configured.forward_to, now)
+        return f"forwarded {kind} to {configured.forward_to}"
 
     # ── read side ─────────────────────────────────────────────────────────
 

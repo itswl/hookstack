@@ -41,6 +41,17 @@ class Settings:
     breaker_threshold: int
     breaker_cooldown_seconds: int
     worker_interval_seconds: float
+    # Signs the buttons on a notification card and verifies them on the way
+    # back. Empty = no card carries an action and /card-action refuses
+    # everything, which is the right default: an unsigned button is a URL
+    # anyone in the group chat can press on your behalf.
+    action_secret: str = ""
+    action_ttl_seconds: int = 24 * 3600
+    # Optional second layer on /card-action: when set, the callback must ALSO
+    # carry the family's timestamped signature. Defence in depth for anyone who
+    # can put a gateway in front of the IM platform's callback; the action token
+    # is the control that applies either way.
+    card_callback_secret: str = ""
 
     @classmethod
     def load(cls) -> Settings:
@@ -58,4 +69,7 @@ class Settings:
             breaker_threshold=_int("HOOKRELAY_BREAKER_THRESHOLD", 5),
             breaker_cooldown_seconds=_int("HOOKRELAY_BREAKER_COOLDOWN_SECONDS", 60),
             worker_interval_seconds=float(os.environ.get("HOOKRELAY_WORKER_INTERVAL", "1.0")),
+            action_secret=os.environ.get("HOOKRELAY_ACTION_SECRET", ""),
+            action_ttl_seconds=_int("HOOKRELAY_ACTION_TTL_SECONDS", 24 * 3600),
+            card_callback_secret=os.environ.get("HOOKRELAY_CARD_CALLBACK_SECRET", ""),
         )

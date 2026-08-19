@@ -16,7 +16,11 @@ different doors:
   there) and are never returned; the key names alone prove the wiring.
 * /v1/budget — the spend either way, ceiling or no ceiling. Knowing the cost and
   capping it are different questions, and an operator wants the first answered
-  even when they declined to ask the second.
+  even when they declined to ask the second. It also carries the other half of
+  that arithmetic: how many of the window's investigations a person said found
+  the cause. Cost was countable from the start and worth was countable nowhere,
+  which left "you want me to pay a model per alert?" with a dollar figure and no
+  answer to put beside it.
 * /metrics and /healthz — the two the machines read, and the only routes here
   without a bearer token. The scraper is on the private network and nothing in
   them is more sensitive than counts and a dollar figure. That is not a
@@ -38,6 +42,17 @@ from hookprobe.engine import _load_mcp_servers, _system_prompt_append
 from hookprobe.files import system_prompt_path
 from hookprobe.service import RunService
 from hookprobe.settings import Settings
+
+
+def _worth_line(investigations: int, spent: float, useful: int) -> str:
+    """The one sentence the adoption question actually asks for.
+
+    Assembled here rather than on the board, which prints the string as it
+    arrives: the same reason the bearer dependency is defined once and handed
+    around. A sentence written in two places is a sentence that will eventually
+    say two things, and this one is quoted at people deciding whether to pay.
+    """
+    return f"{investigations} investigation{'' if investigations == 1 else 's'}, ${spent:.2f}, {useful} found the cause"
 
 
 def register(app: FastAPI, settings: Settings, service: RunService, guard: Callable[..., None]) -> None:
@@ -118,9 +133,11 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
         # The spend is reported either way: "what has this cost" is a question
         # worth answering even for an operator who declined to set a ceiling.
         fresh, cached = service.window_cache()
+        spend = service.window_spend()
+        investigations, useful, useless = service.window_rulings()
         window = {
             "window_hours": settings.budget_window_hours,
-            "spent_usd": round(service.window_spend(), 6),
+            "spent_usd": round(spend, 6),
             # The prefix an investigation pays for is the harness's, not ours,
             # so the only lever left is reuse — which means this is the number
             # to watch. Reads over reads-plus-fresh: the provider caches
@@ -133,6 +150,13 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             # and the one that bills nothing. Non-zero means the figure above is
             # a floor.
             "unpriced_turns": service.window_unpriced(),
+            # Was any of it worth it. Only a person can say, so these stay 0
+            # until somebody rules on a report — an unruled investigation is
+            # unrated, never "not useful".
+            "investigations": investigations,
+            "ruled_useful": useful,
+            "ruled_useless": useless,
+            "worth": _worth_line(investigations, spend, useful),
         }
         state = service.budget_state()
         if state is None:

@@ -7,6 +7,11 @@ because this side pushes it — in the PROCESSED-EVENT dialect
 how to dress. Speaking anything else renders as an empty card, which is why the
 body is assembled in one place instead of by whoever happens to be delivering.
 
+That payload also DECLARES what its report is worth a button for — a follow-up,
+an approval of the procedure it proposed, a ruling on whether it helped. The
+judgement of which is hookprobe.actions'; the signed card token and the channel
+are the pipe's, and a press comes back to /hooks/action.
+
 Delivery retries; when the retries are gone it alarms *around* the pipe rather
 than through it. That is the whole design of the self-alarm: the pipe is the
 broken link at that moment, so the news must not travel over the path whose
@@ -27,6 +32,7 @@ import logging
 import time
 import urllib.request
 
+from hookprobe import actions
 from hookprobe.reports import report_summary
 from hookprobe.runs import Run, RunStore
 from hookprobe.settings import Settings
@@ -70,6 +76,12 @@ class ReturnDelivery:
                 "analysis": {"summary": summary, "event_type": "investigation"},
                 "identity": {"session": run.session_key},
                 "report": {"summary": summary, "text": run.text},
+                # What this report is worth a button for — the judgement is
+                # ours, the token and the channel are the pipe's. Declaring is
+                # a request, not a guarantee: the pipe drops kinds it is not
+                # configured to accept, and only channels that HAVE callbacks
+                # render any of them. See hookprobe.actions.
+                "actions": actions.declare(run, self._settings.workdir),
             },
             ensure_ascii=False,
             sort_keys=True,
