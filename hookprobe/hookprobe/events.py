@@ -291,7 +291,19 @@ def _dispatch(
         return _approve(service, params, actor=actor, correlation_id=correlation_id)
     run = _resolve_run(service, correlation_id, event_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="no investigation matches this card")
+        # 202-with-a-reason, not 404. A card in a chat outlives its run —
+        # retention prunes case files — so somebody scrolling up and pressing a
+        # stale button is the expected steady state, not a fault. The pipe reads
+        # a non-2xx as a delivery failure, so a 404 here would retry with
+        # backoff, dead-letter, and fire the self-alarm: the one alarm that must
+        # not cry wolf, for a miss that is permanent anyway (_resolve_run has
+        # already scanned the disk).
+        #
+        # The line: what an OPERATOR must fix stays non-2xx and earns the alarm
+        # (401 the secrets disagree, 400 the shape is wrong). The world having
+        # moved on is 202 — the same information, no retry storm. hookjudge's
+        # /feedback answers its equivalent the same way.
+        return {"status": "no_such_investigation", "kind": kind, "correlation_id": correlation_id}
     if kind == "followup":
         return _followup(service, run, params)
     return _rule(service, run, kind, actor=actor)
@@ -410,12 +422,12 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
     # and the press arrives here as a kind and some opaque params.
     #
     # The status codes are deliberately narrow. 202 for every delivery this door
-    # processed, INCLUDING the ones it refused: an allowlist denial and a
-    # proposal somebody already approved are answers a person needs to read in a
-    # chat window, and an HTTP error on an IM callback path becomes a retry loop
-    # instead of a message. Non-202 is reserved for deliveries it could not
-    # process at all — 401 unsigned, 400 malformed, 404 naming a session or a
-    # proposal that does not exist.
+    # processed, INCLUDING the ones it refused: an allowlist denial, a proposal
+    # somebody already approved and a card whose investigation has since been
+    # pruned are all answers a person needs to read in a chat window, and an HTTP
+    # error on an IM callback path becomes a retry loop instead of a message.
+    # Non-202 is reserved for what an OPERATOR must fix — 401 the secrets
+    # disagree, 400 the shape is wrong, 404 a proposal id that never existed.
     @app.post("/hooks/action")
     async def action_door(request: Request) -> JSONResponse:
         body = await _signed_object(request, settings.event_secret, _ACTION_MAX_BYTES)

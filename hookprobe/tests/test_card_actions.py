@@ -248,13 +248,21 @@ def test_a_followup_with_no_question_asks_the_default_one(tmp_path: Path) -> Non
     assert "Why do you believe that?" in engine.messages[1]
 
 
-def test_a_press_for_an_alert_with_no_investigation_is_a_clean_404(tmp_path: Path) -> None:
+def test_a_press_on_a_card_whose_investigation_is_gone_costs_nothing_and_alarms_nobody(tmp_path: Path) -> None:
+    """202 with a reason, not 404.
+
+    A card in a chat outlives its run — retention prunes case files — so
+    scrolling up and pressing a stale button is the expected steady state. The
+    pipe reads a non-2xx as a delivery failure, so a 404 would retry with
+    backoff, dead-letter and fire the self-alarm: the one alarm that must not
+    cry wolf, for a miss that is permanent anyway.
+    """
     client, engine = _investigated(tmp_path)
     with client:
         response = _press(client, "followup", event_id=999, correlation_id="hr-unknown")
-        assert response.status_code == 404
-        assert "no investigation" in response.json()["detail"]
-        assert engine.calls == 1
+        assert response.status_code == 202
+        assert response.json()["status"] == "no_such_investigation"
+        assert engine.calls == 1, "no turn was started, so nothing was paid for"
 
 
 def test_a_correlation_id_that_names_a_session_is_honoured(tmp_path: Path) -> None:
