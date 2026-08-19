@@ -80,11 +80,15 @@ buttons at all rather than unsigned ones.
 - A forwarded action's channel secret must equal the receiving door's secret,
   the same coupling the existing `to-judge` and `to-probe` channels already
   have.
-- The two doors answer differently when nothing matches the card: hookprobe
-  404s, hookjudge 202s with a reason. hookjudge's is deliberate (a retry cannot
-  conjure a judgement), but a 404 makes the pipe retry and eventually dead-letter
-  a stale button press, which is more alarm than a stale press deserves. Worth
-  settling the next time either door is touched.
+- Both doors answer a card whose subject no longer exists with **202 and a
+  reason**, and the dividing line is now written down: what an *operator* must
+  fix stays non-2xx and earns the self-alarm (401 the secrets disagree, 400 the
+  shape is wrong, 404 an id that never existed); the world having moved on is a
+  202. The deciding case is retention — a card in a chat outlives its run, since
+  `HOOKPROBE_RETENTION_DAYS` prunes case files, so scrolling up and pressing a
+  stale button is the expected steady state. The pipe reads a non-2xx as a
+  delivery failure, so a 404 there would retry with backoff, dead-letter and fire
+  the one alarm that must not cry wolf — for a miss that is permanent anyway.
 
 ## Rejected
 
