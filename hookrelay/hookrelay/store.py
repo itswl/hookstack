@@ -39,7 +39,12 @@ CREATE TABLE IF NOT EXISTS events (
     -- platform stated the fact. Deliberately NOT a field: fields build
     -- identity, and a flag that flips between firing and recovery would
     -- split the pair.
-    is_recovery INTEGER
+    is_recovery INTEGER,
+    -- When a second delivery was sent because nobody had touched this alert.
+    -- NULL = never escalated, which is also what every row says when the
+    -- feature is off. Stamped BEFORE the deliveries are enqueued, so it bounds
+    -- the escalation to one per event rather than one per worker tick.
+    escalated_at REAL
 );
 CREATE INDEX IF NOT EXISTS ix_events_fp_time ON events (fingerprint, received_at);
 -- ix_events_correlation is created in _migrate(), NOT here: this script runs
@@ -279,6 +284,8 @@ class Store:
         delivery_columns = {str(row["name"]) for row in await cursor.fetchall()}
         if "sent_body" not in delivery_columns:
             await db.execute("ALTER TABLE deliveries ADD COLUMN sent_body TEXT")
+        if "escalated_at" not in columns:
+            await db.execute("ALTER TABLE events ADD COLUMN escalated_at REAL")
 
     async def close(self) -> None:
         if self._db is not None:
@@ -424,6 +431,52 @@ class Store:
             "UPDATE deliveries SET status = 'queued', attempts = 0, next_attempt_at = ? "
             "WHERE id = ? AND status = 'dead'",
             (now, delivery_id),
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    async def cold_events(self, *, before: float, levels: tuple[str, ...], limit: int = 50) -> list[dict[str, Any]]:
+        """Alerts that were delivered, nobody touched, and have gone cold.
+
+        Three conditions, and each one is load-bearing:
+
+          delivered — an event whose deliveries never left is not unacknowledged,
+            it is undelivered, and the dead-letter alarm already owns that story.
+          untouched — no row in card_actions for it. That ledger is the only
+            evidence this service has that a person was there, which is why this
+            question could not be asked before the buttons existed.
+          not escalated — `escalated_at` is stamped when the second delivery is
+            enqueued, so a cold alert escalates once and not once per tick.
+
+        Returns the ORIGINAL front-door events, never the verdict returns that
+        quote them: escalating a return would send the same card twice under two
+        names. A return carries correlation_id; a front-door event does not.
+        """
+        clause = ""
+        params: list[Any] = [before]
+        if levels:
+            clause = f" AND lower(e.level) IN ({','.join('?' for _ in levels)})"
+            params.extend(level.lower() for level in levels)
+        params.append(max(1, min(limit, 200)))
+        cursor = await self.db.execute(
+            "SELECT e.id, e.source, e.title, e.level, e.received_at FROM events e"
+            " WHERE e.received_at <= ?"
+            "   AND e.correlation_id IS NULL"
+            "   AND e.escalated_at IS NULL"
+            "   AND EXISTS (SELECT 1 FROM deliveries d WHERE d.event_id = e.id AND d.status = 'sent')"
+            "   AND NOT EXISTS (SELECT 1 FROM card_actions a WHERE a.event_id = e.id"
+            "                     OR a.correlation_id = 'hr-' || e.id)"
+            f"{clause}"  # nosec B608 — placeholders only; the fragment is built from the tuple's length
+            " ORDER BY e.id LIMIT ?",
+            tuple(params),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def mark_escalated(self, event_id: int, now: float) -> bool:
+        """Stamp it before the deliveries are enqueued, so a crash mid-enqueue
+        cannot turn one cold alert into an escalation every tick forever."""
+        cursor = await self.db.execute(
+            "UPDATE events SET escalated_at = ? WHERE id = ? AND escalated_at IS NULL", (now, event_id)
         )
         await self.db.commit()
         return cursor.rowcount > 0
