@@ -1,0 +1,17 @@
+# Keep the build context to what the Dockerfile actually COPYs (pyproject.toml,
+# README.md, requirements.lock, hookprobe/). README.md stays — pyproject names
+# it as the package readme, so excluding it breaks `pip install .`.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.git/
+.gitignore
+tests/
+scripts/
+deploy/
+probe-data/
+data/
+.env

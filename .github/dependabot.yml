@@ -1,0 +1,62 @@
+# Nobody maintains a version they cannot see going stale. Twenty-three action
+# references live across the five workflows and every one of them is a floating
+# major tag — which is a deliberate policy here, not an oversight: a major tag
+# takes patches for free, and pinning to SHAs would trade that for a permanent
+# manual chore. What the floating tag does NOT do is move you off a major that
+# has been superseded, and that is exactly the drift that happened —
+# release.yml sat on build-push-action@v6 and setup-buildx-action@v3 while the
+# CI workflows had moved to v7 and v4, so the thing that publishes was built by
+# older tooling than the thing that verifies.
+#
+# So: no SHA pinning, but the majors get a nag. Same reasoning for the Python
+# side — every tool the gates run (ruff, mypy, bandit, pip-audit, pytest) is
+# pinned exactly in requirements.txt precisely so CI and a laptop agree, and an
+# exact pin is a pin that stops moving unless something moves it.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    # One PR for the lot. Twenty-three references bumping independently would
+    # be twenty-three runs of the whole stack build for what is, in practice,
+    # one decision.
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(actions)
+
+  # One entry per service: the three requirements.txt files are separate on
+  # purpose — each is its own venv, its own gate, its own image — so a bump that
+  # breaks one must be reviewable without dragging the other two along.
+  - package-ecosystem: pip
+    directory: "/hookrelay"
+    schedule:
+      interval: weekly
+    groups:
+      hookrelay-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(hookrelay)
+
+  - package-ecosystem: pip
+    directory: "/hookjudge"
+    schedule:
+      interval: weekly
+    groups:
+      hookjudge-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(hookjudge)
+
+  - package-ecosystem: pip
+    directory: "/hookprobe"
+    schedule:
+      interval: weekly
+    groups:
+      hookprobe-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(hookprobe)

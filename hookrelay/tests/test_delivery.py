@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import hookrelay.channels as channels_mod
 from hookrelay.delivery import backoff_delay, process_due
 from hookrelay.pipeline import handle_hook
@@ -119,6 +121,44 @@ async def test_send_returns_the_exact_bytes_posted(cfg):
     assert ok, detail
     assert isinstance(captured["content"], bytes)
     assert body == captured["content"]
+
+
+async def test_the_ledger_keeps_the_alert_but_not_what_signs_it(cfg):
+    """The schema promises "body only, never the headers: headers carry
+    signatures and tokens" — true for every dialect except Feishu's custom bot,
+    which signs in the BODY. So a live `sign` was stored and /trace served it
+    under a read guard that is open until a token is configured: anyone who
+    could reach the board could lift it and post into the group. The alert text
+    is what answers a receiver's dispute; the signature is derived and is
+    nobody's evidence."""
+    from hookrelay import channels
+
+    signed = cfg.channels["feishu-main"]
+    message = {
+        "event_id": 7,
+        "source": "grafana",
+        "title": "db down",
+        "body": "x",
+        "level": "high",
+        "fields": {},
+        "received_at": 0.0,
+        "payload": {},
+    }
+    _url, payload, _headers = channels.build_feishu(signed, message, 1000.0)
+    payload.update(channels._feishu_sign_fields("bot-secret", 1000.0))
+    wire = json.dumps(payload, ensure_ascii=False).encode()
+
+    # The bytes that leave the socket carry the signature; the ledger copy does not.
+    assert b"sign" in wire
+    stored = channels.redact_for_ledger(wire)
+    assert stored is not None
+    assert json.loads(stored)["sign"] == "[redacted]"
+    assert "db down" in stored, "the alert content still answers a dispute"
+
+    # A body with nothing to hide is passed through untouched.
+    assert channels.redact_for_ledger(b'{"to":"mirror"}') == '{"to":"mirror"}'
+    assert channels.redact_for_ledger(b"not json") == "not json"
+    assert channels.redact_for_ledger(None) is None
 
 
 async def test_rate_limit_defers_without_burning_attempts(store, cfg, settings, monkeypatch):

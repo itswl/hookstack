@@ -285,6 +285,28 @@ async def test_a_signed_door_refuses_strangers_and_replays(tmp_path):
         assert accepted.status_code == 202
 
 
+async def test_a_high_byte_in_a_credential_header_is_401_not_500(tmp_path):
+    """hmac.compare_digest raises TypeError on a str holding non-ASCII, and
+    Starlette decodes header bytes as latin-1 — so one 0xF6 byte used to turn
+    both gates into an unauthenticated HTTP 500. A wrong credential is a 401
+    whatever bytes it is made of."""
+    app = create_app(settings=_settings(tmp_path, ingest_secret="s3", db_path=str(tmp_path / "hb.db")))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        signature = await client.post(
+            "/events",
+            content=json.dumps(EVENT).encode(),
+            headers={b"X-Hook-Signature": b"t\xf6ken", b"X-Hook-Timestamp": str(int(time.time())).encode()},
+        )
+        assert signature.status_code == 401
+
+        assert (await client.get("/status", headers={b"X-Read-Token": b"t\xf6ken"})).status_code == 401
+        assert (await client.get("/status", headers={b"Authorization": b"Bearer t\xf6ken"})).status_code == 401
+
+
 async def test_a_malformed_body_is_a_named_refusal(app_client):
     assert (await app_client.post("/events", content=b"not json")).status_code == 400
 
@@ -364,7 +386,6 @@ async def test_dead_return_fires_the_self_alarm(tmp_path, monkeypatch):
         assert "Single top-up over 500" in sink.alarms[0]
 
 
-@pytest.mark.asyncio
 async def test_a_recorded_verdict_wakes_every_watching_board(app_client):
     """The boards have no clock any more, so the write has to be the signal.
 
@@ -386,7 +407,6 @@ async def test_a_recorded_verdict_wakes_every_watching_board(app_client):
     assert live.watcher_count == 0
 
 
-@pytest.mark.asyncio
 async def test_consecutive_writes_collapse_into_one_wake_up(app_client):
     """A storm must not queue a wake-up per row: the board refetches once."""
     live = app_client.app.state.store.on_change.__self__
@@ -399,13 +419,11 @@ async def test_consecutive_writes_collapse_into_one_wake_up(app_client):
         live.unwatch(watcher)
 
 
-@pytest.mark.asyncio
 async def test_live_stream_needs_the_read_token(app_client):
     response = await app_client.get("/live")
     assert response.status_code == 401
 
 
-@pytest.mark.asyncio
 async def test_a_burst_of_writes_becomes_one_wake_up_on_the_wire():
     """One alert touches a ledger many times; a board must look once, not N times."""
     import asyncio

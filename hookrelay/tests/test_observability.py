@@ -8,7 +8,6 @@ consumer do not belong, so this file doubles as the consumer list.
 from __future__ import annotations
 
 import httpx
-import pytest
 
 from hookrelay import metrics
 from hookrelay.alarm import SelfAlarm
@@ -66,7 +65,6 @@ class _RecordingClient:
         return object()
 
 
-@pytest.mark.asyncio
 async def test_alarm_sends_once_then_throttles_and_folds_the_count() -> None:
     alarm = SelfAlarm("https://bot.example/hook", min_interval_seconds=600)
     client = _RecordingClient()
@@ -88,7 +86,6 @@ async def test_alarm_sends_once_then_throttles_and_folds_the_count() -> None:
     assert "4 more dead letters" in client.posts[1]["json"]["content"]["text"]
 
 
-@pytest.mark.asyncio
 async def test_alarm_failure_never_raises_and_permits_a_retry() -> None:
     alarm = SelfAlarm("https://bot.example/hook", min_interval_seconds=600)
     client = _RecordingClient(fail=True)
@@ -99,7 +96,27 @@ async def test_alarm_failure_never_raises_and_permits_a_retry() -> None:
     assert len(client.posts) == 2
 
 
-@pytest.mark.asyncio
+async def test_a_failed_alarm_still_owes_the_count_it_swallowed() -> None:
+    """Clearing the tally happens on the way in, for a message that may never
+    arrive. When the post fails, that scale is owed to the next one — otherwise
+    throttling hides how bad it is exactly when the alarm path is broken too,
+    and "the suppressed count folds into the next message" stops being true."""
+    alarm = SelfAlarm("https://bot.example/hook", min_interval_seconds=600)
+    failing = _RecordingClient(fail=True)
+
+    # One sent-and-lost, then three folded into the window behind it.
+    await alarm.dead_letter(failing, channel="c", event_id=1, error="e", now=1000.0)
+    for event_id in (2, 3, 4):
+        await alarm.dead_letter(failing, channel="c", event_id=event_id, error="e", now=1000.0)
+
+    working = _RecordingClient()
+    await alarm.dead_letter(working, channel="c", event_id=5, error="e", now=1001.0)
+
+    assert len(working.posts) == 1
+    text = working.posts[0]["json"]["content"]["text"]
+    assert "4 more dead letters" in text, f"the lost message and its folded count went missing: {text}"
+
+
 async def test_unconfigured_alarm_is_inert() -> None:
     alarm = SelfAlarm("", min_interval_seconds=600)
     client = _RecordingClient()
@@ -172,6 +189,65 @@ def test_breaker_opens_after_threshold_then_probes_once() -> None:
     breaker.record_success("feishu")
     assert breaker.allows("feishu", 1062.0)
     assert breaker.snapshot(1062.0) == {}
+
+
+def test_a_declined_probe_gives_the_slot_back() -> None:
+    """`allows()` claims the half-open probe slot, but the caller can still
+    decline to send after being allowed — the rate limiter defers the row, and
+    deferring must burn no attempt and reach no peer. Only success and failure
+    returned the slot, so that path stalled a recovered channel forever: every
+    later allows() saw a probe in flight and deferred, until a restart."""
+    from hookrelay.breaker import CircuitBreaker
+
+    breaker = CircuitBreaker(threshold=1, cooldown_seconds=60)
+    breaker.record_failure("feishu", 1000.0)
+    assert not breaker.allows("feishu", 1001.0), "open during the cooldown"
+
+    # Half-open: the slot is claimed, then handed back unused.
+    assert breaker.allows("feishu", 1061.0)
+    breaker.release_probe("feishu")
+
+    assert breaker.allows("feishu", 1062.0), "the channel is still probeable"
+    assert breaker.snapshot(1062.0) == {"feishu": "half-open"}
+
+
+async def test_a_rate_limited_probe_does_not_stall_the_channel(store, cfg, settings, monkeypatch) -> None:
+    """The two gates in one path, which is why each passing alone was not enough.
+
+    `mirror` is capped at one per minute. Fill the cap, open its breaker, wait
+    out the cooldown: the breaker hands the next row the half-open probe slot
+    and the rate limiter then defers that very row. Both are "scheduling, not
+    failure" — but the slot stayed claimed, and the channel could never send
+    again until a restart.
+    """
+    import hookrelay.delivery as delivery_mod
+    from hookrelay.breaker import CircuitBreaker
+    from hookrelay.delivery import process_due
+    from hookrelay.pipeline import handle_hook
+
+    async def ok_send(client, channel, message):
+        return True, "http 200", b"{}"
+
+    monkeypatch.setattr(delivery_mod.channels, "send", ok_send)
+
+    breaker = CircuitBreaker(threshold=1, cooldown_seconds=60)
+    breaker.record_failure("mirror", 1000.0)
+
+    # A send at 1030 fills the one-per-minute allowance for the window the probe
+    # will land in — the two gates only collide when the cap is still full when
+    # the cooldown ends.
+    await handle_hook(store, cfg, cfg.sources["ci"], {"job": "a", "detail": "d"}, now=1030.0)
+    await process_due(store, cfg, settings, object(), now=1030.0)
+
+    # A second alert, arriving as the breaker goes half-open at 1000 + 60.
+    await handle_hook(store, cfg, cfg.sources["ci"], {"job": "b", "detail": "d"}, now=1035.0)
+    await process_due(store, cfg, settings, object(), now=1061.0, breaker=breaker)
+
+    cursor = await store.db.execute("SELECT status FROM deliveries WHERE channel = 'mirror' ORDER BY id")
+    statuses = [row["status"] for row in await cursor.fetchall()]
+    assert statuses == ["sent", "queued"], "the probe row was rate-limited, not sent"
+
+    assert breaker.allows("mirror", 1062.0), "the probe slot was held by a row that never left"
 
 
 def test_breaker_is_per_channel() -> None:

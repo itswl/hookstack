@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from hookprobe import inputs
+from hookprobe.files import system_prompt_path
 from hookprobe.guard import bash_deny_reason
 from hookprobe.hygiene import post_tool_hook
 from hookprobe.settings import Settings
@@ -213,7 +214,7 @@ def _system_prompt_append(settings: Settings) -> str:
     The configured path wins; otherwise the convention path
     {workdir}/system-prompt.md applies when it exists. Empty means "engine
     default prompt only"."""
-    path = settings.system_prompt_append or (settings.workdir / "system-prompt.md")
+    path = system_prompt_path(settings)
     try:
         return path.read_text(encoding="utf-8").strip()
     except OSError:
@@ -336,9 +337,7 @@ class ClaudeAgentEngine:
                 "config": sorted(self._agents_raw),
                 "files": _agent_names(self._workdir / ".claude" / "agents"),
             },
-            "system_prompt_append": file_fact(
-                self._settings.system_prompt_append or (self._workdir / "system-prompt.md")
-            ),
+            "system_prompt_append": file_fact(system_prompt_path(self._settings)),
             "memory": file_fact(self._workdir / "CLAUDE.md"),
             "mcp_servers": sorted(_load_mcp_servers(self._settings.mcp_config)),
             "resumed": bool(resume),

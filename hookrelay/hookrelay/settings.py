@@ -6,6 +6,8 @@ channels, routes) lives in config.yaml, because routing is versioned content an
 operator reviews in git, not a machine detail.
 """
 
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 
@@ -41,7 +43,7 @@ class Settings:
     worker_interval_seconds: float
 
     @classmethod
-    def load(cls) -> "Settings":
+    def load(cls) -> Settings:
         return cls(
             config_path=os.environ.get("HOOKRELAY_CONFIG", "config.yaml"),
             db_path=os.environ.get("HOOKRELAY_DB", "hookrelay.db"),

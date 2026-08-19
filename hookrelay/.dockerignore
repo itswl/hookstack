@@ -1,0 +1,19 @@
+# Keep the build context to what the Dockerfile actually COPYs. Without this
+# every build ships the venv and four cache directories into the context —
+# slower uploads, and a stale .pyc layer is a debugging session nobody wants.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.git/
+.gitignore
+tests/
+scripts/
+docs/
+deploy/
+*.db
+data/
+.env
+README.md

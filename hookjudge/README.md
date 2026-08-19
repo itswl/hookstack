@@ -271,5 +271,7 @@ bash scripts/gate.sh   # the full gate — an exact replica of the CI job
 
 Run it before every push. A local list that is merely "close enough" is how a
 red CI arrives as a surprise; a test pins `scripts/gate.sh` and
-`.github/workflows/ci.yml` to each other, so adding a check to one requires
-adding it to the other in the same change.
+`.github/workflows/ci-hookjudge.yml` to each other, so adding a check to one
+requires adding it to the other in the same change. That workflow lives at the
+repository root under its own name because GitHub only reads workflows from
+there — this service is a subdirectory, so it cannot keep its own `.github/`.

@@ -1,5 +1,7 @@
 """The agent may not rewrite what steers the next run — and if it does, we see it."""
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
 

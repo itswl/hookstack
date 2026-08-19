@@ -18,6 +18,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import logging
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -34,7 +35,21 @@ from hookjudge.live import Live
 from hookjudge.settings import Settings
 from hookjudge.store import Store, now_ts
 
+logger = logging.getLogger("hookjudge.app")
+
 _BACKOFF_SECONDS = (5, 30, 120, 600, 1800)
+
+
+def constant_time_eq(expected: str, provided: str | None) -> bool:
+    """Compare two header-derived strings without leaking length by timing.
+
+    Wraps hmac.compare_digest because that function raises TypeError on a
+    str holding non-ASCII, and Starlette decodes header bytes as latin-1 — so
+    a single 0xF6 byte in a signature or token header turned both gates here
+    into an unauthenticated HTTP 500 instead of a 401. Comparing the utf-8
+    bytes keeps the constant-time property and answers the way it should.
+    """
+    return hmac.compare_digest(expected.encode("utf-8"), (provided or "").encode("utf-8"))
 
 
 def verify_signature(secret: str, body: bytes, provided: str | None, timestamp: str | None, now: float) -> bool:
@@ -53,9 +68,9 @@ def verify_signature(secret: str, body: bytes, provided: str | None, timestamp: 
         if abs(now - sent_at) > 300:
             return False
         expected = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, given)
+        return constant_time_eq(expected, given)
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, given)
+    return constant_time_eq(expected, given)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -183,8 +198,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if app_settings.retention_days > 0 and now >= next_purge:
                     next_purge = now + 3600
                     await store.purge_older_than(now - app_settings.retention_days * 86400)
-            except Exception as error:  # noqa: BLE001 — the loop must survive anything
-                print(f"[hookjudge] worker: {error.__class__.__name__}: {error}")
+            except Exception:  # noqa: BLE001 — the loop must survive anything
+                logger.exception("worker error")
             await asyncio.sleep(app_settings.worker_interval_seconds)
 
     @contextlib.asynccontextmanager
@@ -237,9 +252,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not configured:
             return
         bearer = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None
-        if not (
-            (token and hmac.compare_digest(configured, token)) or (bearer and hmac.compare_digest(configured, bearer))
-        ):
+        if not ((token and constant_time_eq(configured, token)) or (bearer and constant_time_eq(configured, bearer))):
             raise HTTPException(status_code=401, detail="read token required")
 
     @app.post("/events")
