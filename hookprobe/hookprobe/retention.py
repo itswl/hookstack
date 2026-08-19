@@ -26,6 +26,11 @@ def prune(workdir: Path, home: Path, days: int) -> int:
     targets = (
         (workdir / "results", "*.json"),
         (workdir / "audit", "*.jsonl"),
+        # One row per card button press, kept only so a redelivery of that press
+        # can be answered instead of repeated. An IM platform retries within
+        # seconds, so a row this old is bookkeeping nobody will read again —
+        # unlike the case files above, which are the agent's episodic memory.
+        (workdir / "actions", "*.json"),
         (home / ".claude" / "projects", "**/*.jsonl"),
     )
     for root, pattern in targets:

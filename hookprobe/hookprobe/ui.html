@@ -111,6 +111,7 @@ details.q summary{cursor:pointer;color:var(--dim);white-space:normal}
 .spend-bar{width:9px;display:inline-flex;align-items:flex-end;height:24px;cursor:default}
 .spend-bar i{display:block;width:100%;background:var(--accent);opacity:.55;border-radius:1px}
 .spend-total{color:var(--dim);font-size:10px;font-family:var(--mono);margin-left:6px;align-self:center}
+#worth{color:var(--dim);font-size:10px;font-family:var(--mono);padding:0 2px 6px}
 .ev-sub{padding-left:16px;opacity:.85}
 .ev-err .ev-tool{color:var(--bad)}
 .ev-changed{color:var(--amber)}
@@ -222,6 +223,7 @@ button.danger{color:var(--red);border-color:var(--red)}
   <aside>
     <input id="q" placeholder="filter sessions…" autocomplete="off">
     <div id="spend" title=""></div>
+    <div id="worth"></div>
     <div id="list"><div class="empty">loading…</div></div>
   </aside>
   <section>
@@ -355,6 +357,15 @@ function returnFlag(x) {
   return '<span class="flag">relay</span>';
 }
 
+// A person's ruling on this investigation, pressed on the card it arrived as.
+// Absent until somebody says: an unruled run is unrated, never "not useful",
+// and the aggregate under the spend bars counts it the same way.
+function rulingFlag(x) {
+  if (x.ruling === "useful") return '<span class="flag sent">found the cause</span>';
+  if (x.ruling === "useless") return '<span class="flag retfail">missed it</span>';
+  return "";
+}
+
 // Fourteen days of spend as one quiet row of bars — the answer to "what is
 // this costing lately" without a metrics stack. Computed from the same list
 // the board already fetched; unfiltered on purpose, so searching for a
@@ -399,6 +410,7 @@ async function refreshList() {
         <div class="meta">
           <span class="badge ${esc(x.status)}">${esc(x.status)}</span>
           ${returnFlag(x)}
+          ${rulingFlag(x)}
           <span>${x.turn_count} turn${x.turn_count > 1 ? "s" : ""}</span>
           ${x.model ? `<span>${esc(String(x.model).replace(/^claude-/, ""))}</span>` : ""}
           ${x.cost_usd ? `<span>$${Number(x.cost_usd).toFixed(3)}</span>` : ""}
@@ -1337,6 +1349,13 @@ that: the <b>budget breaker</b> (once the window's spend hits the ceiling the ev
 investigations — and says so on a card), <b>idempotency</b> (an alert storm funds one investigation,
 not N), and <b>failure completes the loop</b> (timeout, crash, restart or refusal all return a
 report).</p>
+<p>A report's card carries buttons, and <code>POST /hooks/action</code> is where a press lands —
+signed by the pipe exactly like the event door, because both are the pipe talking. A press stands in
+for the console click on a remediation proposal and for <b>nothing else</b>: the allowlist is a file
+an operator edits on the host, no button can reach it, so a press has the same blast radius as a
+click and a denial comes back as a denial. Each press is claimed by
+<code>(correlation_id, kind, at)</code> before anything runs, so the redelivery an IM platform sends
+when it does not hear an answer cannot buy a second turn or approve twice.</p>
 
 <h2>Loop hygiene (the run's context and bill)</h2>
 <p>Two advisory guards plus one record — none is a security boundary, all exist because an unattended
@@ -1352,6 +1371,11 @@ cannot hold a slot until the whole run times out.</td></tr>
 <tr><td><b>what it cost</b></td><td>Each turn carries its own line — model, tokens in/out, cache reads and writes,
 dollars, seconds. The session's running total sits in the header line beside the session key, and the chip top-right
 is the whole window's spend (with the ceiling next to it when <code>HOOKPROBE_BUDGET_USD</code> is set).</td></tr>
+<tr><td><b>was it worth it</b></td><td>The line under the spend bars — <i>N investigations, $X, M found the
+cause</i>. Cost has always been countable and worth was countable nowhere, so "you want me to pay a model per
+alert?" had a dollar figure and nothing to put beside it. The rulings come from the <b>Found the cause</b> /
+<b>Missed it</b> buttons on the delivered card, and a session that carries one shows it in the list. An
+investigation nobody ruled on is unrated, never counted as a miss.</td></tr>
 <tr><td><b>cache %</b></td><td>How much of the context was reused instead of paid for again. An investigation carries
 about 29k tokens before its alert is even mentioned — the harness's own system prompt and tool schemas, which neither a
 smaller tool list nor a different prompt preset shrinks — so reuse is the only lever left. It is high inside a session
@@ -1458,6 +1482,16 @@ async function refreshBudget() {
       ? "spend in the budget window, the ceiling the event door refuses at, and how much context was reused rather than re-paid"
       : "spend in the window · no ceiling set (HOOKPROBE_BUDGET_USD) · cache = context reused rather than re-paid";
     el.classList.toggle("hot", !!b.exhausted);
+    // The other half of the bill. Printed as the service worded it rather than
+    // reassembled here: the sentence gets quoted at people deciding whether to
+    // pay for this, and one written in two places eventually says two things.
+    const worth = $("#worth");
+    if (worth) {
+      worth.textContent = b.worth || "";
+      worth.title = "investigations in the spend window, what they cost, and how many a person said found the cause"
+        + (b.ruled_useless ? ` · ${b.ruled_useless} ruled a miss` : "")
+        + " · rulings come from the card buttons on a delivered report";
+    }
   } catch { el.hidden = true; }
 }
 

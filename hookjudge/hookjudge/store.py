@@ -99,6 +99,18 @@ class Store:
             # Cross-alert correlation, v1: same upstream origin, multiple
             # rules, one window -> one burst id.
             "burst_id": "TEXT NOT NULL DEFAULT ''",
+            # A person's ruling on whether THIS interruption was worth it:
+            # 'yes' | 'no' | '' for unruled. A different axis from
+            # label_importance, which answers what importance the alert should
+            # have had — an alert correctly rated `high` can still not be worth
+            # waking anyone at 3am. Both live on the row and neither overwrites
+            # the other, because both answers are true at once.
+            "mattered": "TEXT NOT NULL DEFAULT ''",
+            "mattered_at": "REAL",
+            # The opaque IM user id the pipe passed through, when it had one.
+            # The judge cannot resolve it to a person and does not try; it is
+            # provenance, the way label_source is.
+            "mattered_actor": "TEXT NOT NULL DEFAULT ''",
         }
         for column, ddl in typed.items():
             if column not in have:
@@ -268,6 +280,67 @@ class Store:
         self._announce()
         return cursor.rowcount > 0
 
+    # ── the human's ruling on whether the interruption was worth it ───────────
+
+    async def _by_correlation(self, correlation_id: str, event_id: str = "") -> dict[str, Any] | None:
+        """The judgement a card was made from, newest first.
+
+        Newest because a delivery the pipe retried is two rows carrying one
+        correlation id, and the ruling belongs to the card the operator was
+        actually looking at — the last one sent.
+
+        The hr-<event_id> fallback is the same precedence Incoming.parse uses on
+        the way in: the flat wire shape carries no correlation id at all, so
+        that convention is what the row ended up stamped with.
+        """
+        candidates = [correlation_id.strip()]
+        if str(event_id).strip():
+            candidates.append(f"hr-{str(event_id).strip()}")
+        for candidate in candidates:
+            if not candidate:
+                continue
+            cursor = await self.db.execute(
+                "SELECT * FROM judgements WHERE correlation_id = ? ORDER BY id DESC LIMIT 1", (candidate,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    async def record_mattered(
+        self, correlation_id: str, *, mattered: str, at: float, actor: str = "", event_id: str = ""
+    ) -> dict[str, Any] | None:
+        """One person's ruling on one interruption, against the judgement that caused it.
+
+        Deliberately not label_importance. Every row carrying that column
+        becomes an eval row in /labels/export, so writing 'yes' into it would
+        emit expect.importance="yes" into the eval set, and /disagreements
+        selects on label_importance = '' — a button press in a chat window
+        would have quietly drained the review queue of a row nobody reviewed.
+
+        Idempotent by (kind, at): a redelivered press finds its own ruling
+        already on the row and changes nothing. A press OLDER than the ruling on
+        record is dropped rather than applied, which is the same defect from the
+        other side — an operator who pressed "not worth it" and then changed
+        their mind must not have the first press reinstated by a retry that
+        arrived late.
+        """
+        row = await self._by_correlation(correlation_id, event_id)
+        if row is None:
+            return None
+        row_id = int(row["id"])
+        standing = str(row["mattered"] or "")
+        stood_at = None if row["mattered_at"] is None else float(row["mattered_at"])
+        if stood_at is not None and (at < stood_at or (at == stood_at and standing == mattered)):
+            return {"id": row_id, "mattered": standing, "applied": False}
+        await self.db.execute(
+            "UPDATE judgements SET mattered = ?, mattered_at = ?, mattered_actor = ? WHERE id = ?",
+            (mattered, at, actor[:120], row_id),
+        )
+        await self.db.commit()
+        self._announce()
+        return {"id": row_id, "mattered": mattered, "applied": True}
+
     async def labeled(self, limit: int = 1000) -> list[dict[str, Any]]:
         cursor = await self.db.execute(
             "SELECT * FROM judgements WHERE label_importance != '' ORDER BY id ASC LIMIT ?",
@@ -315,6 +388,85 @@ class Store:
             tuple(params),
         )
         return [dict(row) for row in await cursor.fetchall()]
+
+    # The noisiest conditions, capped. The cap is not cosmetic: this list is
+    # also emitted as Prometheus labels, and an alert identity as a label value
+    # is unbounded cardinality — the classic way to take a metrics store down.
+    # Five is the same depth `recent_disagreements` shows, for the same reason:
+    # a board's job is to name where to GO, not to be the report.
+    NOISIEST_LIMIT = 5
+
+    async def attention(self, since: float, *, limit: int | None = None) -> dict[str, Any]:
+        """The bill the cost figures cannot show: how often a human was INTERRUPTED.
+
+        `interruptions` is the same number as `judged`, and that identity is the
+        finding rather than a redundancy. Every judgement is returned to the pipe
+        and becomes a card, so the ledger's headline count has always BEEN the
+        number of times somebody was interrupted; it was only ever read as
+        throughput. A condition judged twelve times inside an hour interrupted a
+        human twelve times, and "$0.004 spend" — eleven of those twelve being
+        free `reuse` routes — says nothing whatsoever about that. `repeats` is
+        the part that was invisible: cards that restated a condition the operator
+        had already been told about in this window.
+
+        Nothing here changes what is returned. Who owns noise when a verdict is
+        reused is deliberately still open (the proposed note of 2026-08-12), and
+        this closes none of it — it makes the bill for attention legible so that
+        decision can eventually be taken on evidence instead of taste.
+        """
+        cursor = await self.db.execute(
+            "SELECT count(*) AS n, count(DISTINCT identity) AS conditions,"
+            " coalesce(sum(mattered = 'yes'), 0) AS mattered,"
+            " coalesce(sum(mattered = 'no'), 0) AS did_not_matter"
+            " FROM judgements WHERE received_at >= ?",
+            (since,),
+        )
+        totals = await cursor.fetchone()
+        interruptions = int(totals["n"]) if totals else 0
+        conditions = int(totals["conditions"]) if totals else 0
+        mattered = int(totals["mattered"]) if totals else 0
+        did_not_matter = int(totals["did_not_matter"]) if totals else 0
+        ruled = mattered + did_not_matter
+        # A condition that interrupted once is not noise, so the view that is
+        # meant to say "go turn something off" refuses to pad itself with
+        # one-offs. `title` is a bare column beside max(id): SQLite documents it
+        # as coming from the row the max was found on, which is the most recent
+        # wording of a condition whose title may have been decorated since.
+        cursor = await self.db.execute(
+            "SELECT identity, title, max(id) AS last_id, max(received_at) AS last_seen, count(*) AS n,"
+            " coalesce(sum(route = 'ai'), 0) AS paid,"
+            " coalesce(sum(mattered = 'yes'), 0) AS mattered,"
+            " coalesce(sum(mattered = 'no'), 0) AS did_not_matter"
+            " FROM judgements WHERE received_at >= ? GROUP BY identity HAVING count(*) > 1"
+            " ORDER BY n DESC, last_id DESC LIMIT ?",
+            (since, max(1, min(50, limit or self.NOISIEST_LIMIT))),
+        )
+        noisiest = [
+            {
+                "identity": str(row["identity"]),
+                "title": str(row["title"]),
+                "interruptions": int(row["n"]),
+                # The contrast, on one line: twelve interruptions, one paid for.
+                "paid": int(row["paid"]),
+                "mattered": int(row["mattered"]),
+                "did_not_matter": int(row["did_not_matter"]),
+                "last_seen": float(row["last_seen"]),
+            }
+            for row in await cursor.fetchall()
+        ]
+        return {
+            "interruptions": interruptions,
+            "conditions": conditions,
+            "repeats": interruptions - conditions,
+            "mattered": mattered,
+            "did_not_matter": did_not_matter,
+            "ruled": ruled,
+            # Of the RULED ones, not of every interruption: an unruled card is
+            # not evidence that it did not matter, and a percentage that treats
+            # silence as a verdict flatters itself.
+            "mattered_pct": round(100.0 * mattered / ruled, 1) if ruled else None,
+            "noisiest": noisiest,
+        }
 
     async def summary(self, since: float) -> dict[str, Any]:
         cursor = await self.db.execute(
@@ -374,6 +526,11 @@ class Store:
             # The number the cost conversation actually turns on: how many of
             # the judgements we served did we have to pay a model for?
             "paid_ratio_pct": round(100.0 * paid / judged, 1) if judged else 0.0,
+            # And the number the cost conversation cannot answer at all: how
+            # many times was somebody interrupted, and did any of it matter?
+            # Nested here, beside `agreement`, because it is read off the same
+            # rows in the same window.
+            "attention": await self.attention(since),
             "agreement": {
                 "compared": compared,
                 "agree_pct": round(100.0 * agree / compared, 1) if compared else None,

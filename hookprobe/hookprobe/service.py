@@ -25,7 +25,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from hookprobe import distill_loop, remediation, suggestions
+from hookprobe import actions, distill_loop, remediation, suggestions
 from hookprobe.engine import EngineResult
 from hookprobe.notify import ReturnDelivery
 from hookprobe.reports import budget_report, failure_report
@@ -268,6 +268,36 @@ class RunService:
         """(fresh, cached) input tokens over the budget window."""
         cutoff = time.time() - self._settings.budget_window_hours * 3600
         return self._store.cache_since(cutoff)
+
+    def window_rulings(self) -> tuple[int, int, int]:
+        """(investigations, ruled useful, ruled useless) over the budget window."""
+        cutoff = time.time() - self._settings.budget_window_hours * 3600
+        return self._store.rulings_since(cutoff)
+
+    def record_ruling(self, session_key: str, ruling: str, *, actor: str = "") -> Run:
+        """Write down whether a human found this investigation worth its bill.
+
+        The cost of an investigation has always been countable and its worth was
+        countable nowhere, which left the adoption question — "you want me to pay
+        a model per alert?" — with a dollar figure and no answer. This is the
+        other half of that figure, and it can only come from a person: no
+        property of a report says whether it found the cause.
+
+        Persisted through annotate() rather than finish(), so a ruling on an old
+        investigation does not restamp it as having just finished.
+        """
+        if ruling not in actions.RULINGS:
+            raise ValueError(f"ruling must be one of {', '.join(actions.RULINGS)}")
+        run = self._store.get(session_key)
+        if run is None:
+            raise LookupError("session not found")
+        run.ruling = ruling
+        run.ruled_at = time.time()
+        run.ruled_by = actor[:120]
+        self._store.annotate(run)
+        self._board_changed()
+        logger.info("ruling recorded session=%s ruling=%s", run.session_key, ruling)
+        return run
 
     def window_unpriced(self) -> int:
         """How many turns in the window spent money nobody could count.

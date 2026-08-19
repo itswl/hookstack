@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 
-from hookrelay import registry
+from hookrelay import actions, registry
 from hookrelay.templates import ExtractTemplate, TemplateSelector
 
 _ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
@@ -126,11 +126,32 @@ DEFAULT_PIPELINE: tuple[PipelineStage, ...] = (
 
 
 @dataclass(frozen=True, slots=True)
+class CardAction:
+    """One kind of button this deployment is willing to put on a card.
+
+    A brain DECLARES which actions its verdict deserves; this decides which of
+    those a deployment actually offers, and where the press goes. Absent means
+    not offered — a card cannot grow a button nobody configured, which is what
+    keeps `approve` (it runs commands) an opt-in rather than a default.
+
+    forward_to names a channel: an action press is delivered exactly like any
+    other outbound message, so it inherits the retry, the rate limit and the
+    ledger row instead of becoming a second delivery mechanism. `silence` is the
+    exception — the pipe owns silences, so it needs no channel to reach.
+    """
+
+    kind: str
+    forward_to: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     sources: dict[str, Source]
     channels: dict[str, Channel]
     routes: tuple[Route, ...]  # kept sorted by priority, highest first
     pipeline: tuple[PipelineStage, ...] = DEFAULT_PIPELINE
+    card_actions: dict[str, CardAction] = field(default_factory=dict)
 
     @classmethod
     def from_file(cls, path: str) -> Config:
@@ -327,7 +348,31 @@ class Config:
             # a preference — every event would end no_route.
             raise ConfigError("pipeline has no 'routes' stage")
 
-        return cls(sources=sources, channels=channels, routes=routes and tuple(routes) or (), pipeline=pipeline)
+        # Card actions. Unknown kinds and unknown channels fail AT BOOT, like
+        # every other name in this file: a button that 404s when an operator
+        # finally presses it is worse than no button.
+        card_actions: dict[str, CardAction] = {}
+        for kind, spec in (raw.get("card_actions") or {}).items():
+            name = str(kind).strip().lower()
+            if name not in actions.KINDS:
+                raise ConfigError(f"card_actions: unknown kind {name!r} (known: {', '.join(actions.KINDS)})")
+            spec = spec or {}
+            forward_to = str(spec.get("forward_to") or "")
+            if forward_to and forward_to not in channels:
+                raise ConfigError(f"card_actions.{name}: forward_to {forward_to!r} is not a configured channel")
+            if not forward_to and name != "silence":
+                raise ConfigError(
+                    f"card_actions.{name}: needs forward_to — only 'silence' is something the pipe can do itself"
+                )
+            card_actions[name] = CardAction(kind=name, forward_to=forward_to, params=dict(spec.get("params") or {}))
+
+        return cls(
+            sources=sources,
+            channels=channels,
+            routes=routes and tuple(routes) or (),
+            pipeline=pipeline,
+            card_actions=card_actions,
+        )
 
 
 def _condition_matches(condition: Any, actual: str) -> bool:

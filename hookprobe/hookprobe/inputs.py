@@ -47,7 +47,19 @@ from pathlib import Path
 # remediation/: the agent proposes through its report; a direct write could
 # only forge a proposal's provenance. (Even forged, a proposal is inert —
 # approval and the allowlist stand between any proposal and execution.)
-_PROTECTED = (".claude", "CLAUDE.md", "system-prompt.md", "audit", "memory-suggestions.jsonl", "remediation")
+# actions/: the card door's idempotency ledger. A pre-written claim cannot cause
+# an action, but it can swallow one — the genuine press would read the forged
+# row, decline to act because the key is taken, and report back whatever that
+# row claimed had happened. A record its own subject can write is not a record.
+_PROTECTED = (
+    ".claude",
+    "CLAUDE.md",
+    "system-prompt.md",
+    "audit",
+    "memory-suggestions.jsonl",
+    "remediation",
+    "actions",
+)
 
 # Hashed before and after a run. `audit/` is deliberately absent: the flight
 # recorder appends a line per tool call, so it changes during every healthy run
