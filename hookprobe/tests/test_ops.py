@@ -446,3 +446,53 @@ def test_the_window_reports_how_much_context_was_reused(tmp_path) -> None:
 
     assert (fresh, cached) == (29200, 28800)
     assert round(cached / (cached + fresh), 3) == 0.497
+
+
+def test_gate_matches_ci():
+    """scripts/gate.sh must run what CI runs — a local list that is merely
+    'close enough' is how a red CI arrives as a surprise. Adding a check to
+    one requires adding it to the other in the same change.
+
+    hookprobe went without this test while both its siblings had one, so its
+    gate and its workflow were free to drift with nothing to notice: the pair
+    that ships the investigator was the pair nobody pinned.
+
+    Commands are pinned to the END of a line rather than matched anywhere in
+    the file, because a substring is satisfied by `compileall -q hookprobe
+    tests` whether or not another directory follows it — which is how a whole
+    directory stops being checked on one side with the contract test still
+    green.
+    """
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent.parent
+    gate = (here / "scripts" / "gate.sh").read_text()
+    # hookprobe is one service in the hookstack repo, and GitHub only reads
+    # workflows from the repo ROOT — so the file this gate is pinned to lives
+    # one level up, under its own name.
+    ci = (here.parent / ".github" / "workflows" / "ci-hookprobe.yml").read_text()
+
+    def runs(text: str, command: str) -> bool:
+        """`$PY -m mypy hookprobe` and `- run: python -m mypy hookprobe` differ
+        only in how the interpreter is spelled, so the tail is the contract."""
+        return any(line.rstrip().endswith(command) for line in text.splitlines())
+
+    # Every tool the gate runs, carrying the arguments that decide what it
+    # covers. A tool missing from this list is a tool that can vanish from
+    # either side unnoticed — mypy was exactly that in both siblings.
+    for command in (
+        "compileall -q hookprobe tests",
+        "ruff check hookprobe tests",
+        "ruff format --check hookprobe tests",
+        "mypy hookprobe",
+        "bandit -q -r hookprobe",
+        "pytest -q",
+        "pip_audit --progress-spinner off",
+    ):
+        assert runs(gate, command), f"gate.sh does not run {command!r}"
+        assert runs(ci, command), f"ci-hookprobe.yml does not run {command!r}"
+
+    # Not a command: the file the inline node step reads. Its name is the only
+    # evidence in either file that the step is still there.
+    assert "ui.html" in gate, "gate.sh no longer parses the sessions page"
+    assert "ui.html" in ci, "ci-hookprobe.yml no longer parses the sessions page"

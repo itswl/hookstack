@@ -150,7 +150,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             body=str(row["body"]),
             level="",
             fields=json.loads(row["fields_json"] or "{}"),
-            raw={},
             correlation_id=str(row["correlation_id"] or ""),
             received_at=float(row["received_at"]),
             # The stored fact, not a re-sniff of the stored title. It was only

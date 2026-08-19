@@ -32,9 +32,28 @@ from __future__ import annotations
 import time
 from typing import Any
 
-# Header colour by importance. Green whenever the alert has ENDED, whatever its
-# importance was: a recovery card wearing a red header contradicts its own text.
-_FEISHU_COLOR = {"critical": "red", "high": "red", "warning": "orange", "medium": "orange", "low": "wathet"}
+from hookrelay.markup import escape_markup, markdown_link
+
+# Feishu card header colour by normalized level/importance. Red is reserved for
+# high — the family colour doctrine: alarm colours are earned, not decorative.
+# Green whenever the alert has ENDED, whatever its importance was: a recovery
+# card wearing a red header contradicts its own text.
+#
+# ONE table, exported. channels.py kept a second copy that disagreed about
+# `info`, so the same alert wore a different header depending on which of the two
+# paths rendered it — and a colour that means something different per code path
+# means nothing at all.
+FEISHU_LEVEL_COLOR = {
+    "critical": "red",
+    "high": "red",
+    "warning": "orange",
+    "medium": "orange",
+    "low": "wathet",
+    "info": "blue",
+}
+# Anything the vocabulary does not name: readable, and visibly not an alarm.
+FEISHU_FALLBACK_COLOR = "turquoise"
+
 _LEVEL_TAG = {
     "critical": "🔴 CRITICAL",
     "high": "🔴 HIGH",
@@ -82,7 +101,7 @@ class Processed:
 
     @property
     def color(self) -> str:
-        return "green" if self.is_recovery else _FEISHU_COLOR.get(self.importance, "turquoise")
+        return "green" if self.is_recovery else FEISHU_LEVEL_COLOR.get(self.importance, FEISHU_FALLBACK_COLOR)
 
     @property
     def level_tag(self) -> str:
@@ -128,21 +147,30 @@ class Processed:
 
     def feishu_card(self) -> dict[str, Any]:
         elements: list[dict[str, Any]] = []
+        # Every block below is a `lark_md` element, so every piece of the brain's
+        # text is escaped on the way in — see hookrelay/markup.py for what one
+        # unescaped alert title did to a company's phones. The header title and
+        # the footer note are `plain_text`, which renders no markup, and stay
+        # verbatim: escaping them would only show operators our backslashes.
         # 1) headline: how bad + what happened, the first thing the eye lands on.
-        lead = f"**{self.level_tag}**  {self.summary}" if self.summary else f"**{self.level_tag}**"
+        tag = escape_markup(self.level_tag)
+        summary = escape_markup(self.summary)
+        lead = f"**{tag}**  {summary}" if summary else f"**{tag}**"
         elements.append({"tag": "div", "text": {"tag": "lark_md", "content": lead}})
         # 2) identity breadcrumb
         crumb = self.breadcrumb()
         if crumb:
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": crumb}})
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": escape_markup(crumb)}})
         # 3) impact, titled so it reads as secondary to the headline
         impact = str(self.analysis.get("impact_scope") or "")
         if impact:
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**Impact**\n{impact}"}})
+            content = f"**Impact**\n{escape_markup(impact)}"
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": content}})
         # 4) runbooks at notification time, not after a dashboard visit
         if self.links:
-            lines = "\n".join(f"[{link.get('text') or link.get('url')}]({link.get('url')})" for link in self.links)
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**Runbooks**\n{lines}"}})
+            lines = "\n".join(rendered for rendered in map(self._link, self.links) if rendered)
+            if lines:
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**Runbooks**\n{lines}"}})
         # 5) interactive actions — only Feishu has callbacks; values are opaque
         #    and already signed by the brain.
         if self.actions:
@@ -175,22 +203,34 @@ class Processed:
             },
         }
 
+    @staticmethod
+    def _link(link: dict[str, Any]) -> str:
+        """One `links` entry, rendered only as far as its url earns."""
+        return markdown_link(str(link.get("text") or ""), str(link.get("url") or ""))
+
     def markdown(self, *, heading: bool) -> str:
-        """DingTalk wants a `### heading`; WeCom renders bold instead."""
-        lines = [f"### {self.headline}" if heading else f"**{self.headline}**"]
+        """DingTalk wants a `### heading`; WeCom renders bold instead.
+
+        Unlike the Feishu card, this dialect has no plain_text half — the
+        headline and the footer are markdown here too, so both are escaped.
+        """
+        headline = escape_markup(self.headline)
+        lines = [f"### {headline}" if heading else f"**{headline}**"]
         if self.summary:
-            lines.append(f"{self.level_tag} {self.summary}")
+            lines.append(f"{escape_markup(self.level_tag)} {escape_markup(self.summary)}")
         crumb = self.breadcrumb()
         if crumb:
-            lines.append(crumb)
+            lines.append(escape_markup(crumb))
         impact = str(self.analysis.get("impact_scope") or "")
         if impact:
-            lines.append(f"**Impact**: {impact}")
+            lines.append(f"**Impact**: {escape_markup(impact)}")
         for link in self.links:
-            lines.append(f"[{link.get('text') or link.get('url')}]({link.get('url')})")
+            rendered = self._link(link)
+            if rendered:
+                lines.append(rendered)
         # No buttons: these bots have no callback channel, and a button that
         # does nothing is worse than no button. The links still travel.
         footer = self.footer()
         if footer:
-            lines.append(f"> {footer}")
+            lines.append(f"> {escape_markup(footer)}")
         return "\n\n".join(lines)

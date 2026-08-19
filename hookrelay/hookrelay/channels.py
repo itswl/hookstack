@@ -26,18 +26,8 @@ import httpx
 from hookrelay import registry
 from hookrelay.config import Channel
 from hookrelay.extract import resolve_path
-from hookrelay.processed import Processed
-
-# Feishu card header colours by normalized level. Red is reserved for high —
-# the family colour doctrine: alarm colours are earned, not decorative.
-_FEISHU_LEVEL_COLOR = {
-    "critical": "red",
-    "high": "red",
-    "warning": "orange",
-    "medium": "orange",
-    "low": "wathet",
-    "info": "blue",
-}
+from hookrelay.markup import escape_markup
+from hookrelay.processed import FEISHU_FALLBACK_COLOR, FEISHU_LEVEL_COLOR, Processed
 
 Payload = dict[str, Any] | bytes
 BuiltRequest = tuple[str, Payload, dict[str, str]]
@@ -83,8 +73,15 @@ def _prebuilt(channel: Channel, message: dict[str, Any]) -> Any | None:
 
 
 def _fields_lines(message: dict[str, Any]) -> str:
+    """Extracted fields as markdown lines — escaped, both halves.
+
+    Names as well as values: a field NAME is a config string, but its value came
+    from the payload and both land in the same markup (hookrelay/markup.py).
+    """
     fields = message.get("fields") or {}
-    return "\n".join(f"**{name}**: {value}" for name, value in fields.items() if value)
+    return "\n".join(
+        f"**{escape_markup(str(name))}**: {escape_markup(str(value))}" for name, value in fields.items() if value
+    )
 
 
 def _feishu_sign_fields(secret: str, now: float) -> dict[str, str]:
@@ -140,8 +137,10 @@ def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> Built
         if channel.secret:
             payload.update(_feishu_sign_fields(channel.secret, now))
         return channel.url, payload, {}
-    color = _FEISHU_LEVEL_COLOR.get(str(message.get("level", "info")), "turquoise")
-    body_lines = [part for part in (message.get("body", ""), _fields_lines(message)) if part]
+    color = FEISHU_LEVEL_COLOR.get(str(message.get("level", "info")), FEISHU_FALLBACK_COLOR)
+    # The body element is `lark_md`, so the payload's text is escaped into it;
+    # the header title below is `plain_text` and stays verbatim.
+    body_lines = [part for part in (escape_markup(str(message.get("body", ""))), _fields_lines(message)) if part]
     elements: list[dict[str, Any]] = [
         {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(body_lines) or "(no body)"}},
         {
@@ -176,13 +175,15 @@ def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> Bui
         if not isinstance(prebuilt, dict):
             raise ValueError(f"channel {channel.name}: raw dingtalk payload must be an object")
         return _dingtalk_signed_url(channel, now), prebuilt, {}
-    lines = [f"### {message['title']}"]
+    lines = [f"### {escape_markup(str(message['title']))}"]
     if message.get("body"):
-        lines.append(str(message["body"]))
+        lines.append(escape_markup(str(message["body"])))
     fields = _fields_lines(message)
     if fields:
         lines.append(fields)
     lines.append(f"> hookrelay · {message['source']} · #{message['event_id']}")
+    # `markdown.title` is the push-notification summary, not a rendered block, so
+    # it takes the title verbatim while `text` above takes the escaped one.
     payload = {"msgtype": "markdown", "markdown": {"title": message["title"], "text": "\n\n".join(lines)}}
     return _dingtalk_signed_url(channel, now), payload, {}
 
@@ -210,9 +211,9 @@ def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> BuiltR
         if not isinstance(prebuilt, dict):
             raise ValueError(f"channel {channel.name}: raw wecom payload must be an object")
         return channel.url, prebuilt, {}
-    lines = [f"**{message['title']}**"]
+    lines = [f"**{escape_markup(str(message['title']))}**"]
     if message.get("body"):
-        lines.append(str(message["body"]))
+        lines.append(escape_markup(str(message["body"])))
     fields = _fields_lines(message)
     if fields:
         lines.append(fields)
