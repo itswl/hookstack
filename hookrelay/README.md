@@ -204,7 +204,7 @@ path, admin/read tokens, body-size cap, max attempts.
 | `GET /live` | the board's wake-up line — NDJSON, one `changed` per burst of ledger writes, so the page needs no clock (read token) |
 | `GET /trace/{event_id}` | one alert's whole journey — the original payload as received, every delivery with the exact body that left the socket (`sent_body`; body only, never headers), and what each brain sent back (read token) |
 | `GET /metrics` | Prometheus text: events by door/outcome, deliveries by channel/result, outbox depth, fuse and silences (read token) |
-| `POST /explain/{source}` | dry run — what WOULD this payload do; records nothing, delivers nothing (admin token) |
+| `POST /explain/{source}` | dry run — what WOULD this payload do; records nothing, delivers nothing, calls no brain (admin token) |
 | `GET/PUT /config`, `POST /config/reload` | the config file, validated-or-nothing, hot-applied (admin token) |
 | `POST /silences`, `DELETE /silences/{id}` | the valve (admin token) |
 | `POST /deliveries/{id}/retry` | a dead letter's second chance (admin token) |

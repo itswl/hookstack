@@ -443,10 +443,23 @@ class Store:
         if self.on_change is not None:
             self.on_change()
 
-    async def mark_return(self, row_id: int, status: str, attempts: int, error: str | None) -> None:
+    async def mark_return(
+        self, row_id: int, status: str, attempts: int, error: str | None, *, attempted_at: float | None = None
+    ) -> None:
+        """The return leg's state after one attempt, attempt clock included.
+
+        return_attempted_at was added to the schema for the worker's backoff and
+        then never written, so the column existed, its comment promised the
+        worker used it, and the backoff went on measuring from received_at. It is
+        set on every call — including the caller passing None, which CLEARS it,
+        because a caller putting a row back to `queued` by hand is saying "try
+        this now" and a stale clock would make the worker wait out a delay for an
+        attempt that no longer happened.
+        """
         await self.db.execute(
-            "UPDATE judgements SET return_status = ?, return_attempts = ?, return_error = ? WHERE id = ?",
-            (status, attempts, (error or "")[:400] or None, row_id),
+            "UPDATE judgements SET return_status = ?, return_attempts = ?, return_error = ?,"
+            " return_attempted_at = ? WHERE id = ?",
+            (status, attempts, (error or "")[:400] or None, attempted_at, row_id),
         )
         await self.db.commit()
         self._announce()

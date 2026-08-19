@@ -23,13 +23,18 @@ did nothing again" is the failure this whole loop exists to end.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
+import time
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from hookprobe import distill
 from hookprobe.engine import EngineResult
+from hookprobe.files import atomic_write
 from hookprobe.runs import Run, RunStore
 from hookprobe.settings import Settings
 
@@ -64,6 +69,47 @@ def auto_distill(run: Run, result: EngineResult, settings: Settings) -> None:
         logger.info("auto-distill %s session=%s runbook=%s", verb, run.session_key, name)
 
 
+ATTEMPT_FILE = "consolidation-attempt.json"
+
+
+def _record_attempt(skill_dir: Path, name: str, reason: str) -> None:
+    """Remember that a consolidation was paid for and produced nothing.
+
+    Without this the loop has no memory of failure and re-arms on the ABSENCE of
+    proposal.md — so a draft that never validates spawns another paid run on
+    every later investigation of that alert, forever, and this path is outside
+    the budget breaker by design because an operator set the threshold. One
+    unluckily-worded runbook was an unbounded bill.
+    """
+    try:
+        cases = distill.case_count((skill_dir / "SKILL.md").read_text(encoding="utf-8"))
+    except OSError:
+        cases = 0
+    with contextlib.suppress(OSError):
+        atomic_write(
+            skill_dir / ATTEMPT_FILE,
+            json.dumps({"at": round(time.time(), 3), "cases": cases, "reason": reason}, ensure_ascii=False).encode(),
+        )
+
+
+def _attempt_blocks(skill_dir: Path, count: int, threshold: int) -> bool:
+    """True when the last attempt failed and not enough has changed to retry.
+
+    Retrying at all is deliberate — a write that failed on a full disk should not
+    disable consolidation for a runbook permanently — but it retries at the rate
+    the feature was designed for: one run per `threshold` NEW cases. So a runbook
+    that cannot be consolidated costs the same as one that can, instead of one
+    run per investigation.
+    """
+    try:
+        raw = json.loads((skill_dir / ATTEMPT_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(raw, dict):
+        return False
+    return count < int(raw.get("cases") or 0) + threshold
+
+
 def maybe_consolidate(run: Run, settings: Settings, store: RunStore, start: Callable[..., Run]) -> None:
     """At the case threshold, spend one run turning the pile into a draft.
 
@@ -89,6 +135,8 @@ def maybe_consolidate(run: Run, settings: Settings, store: RunStore, start: Call
         return
     if count < threshold:
         return
+    if _attempt_blocks(skill_dir, count, threshold):
+        return  # the last one was paid for and produced nothing; wait for more cases
     for other in store.list_runs(limit=50):
         if not other.finished and other.meta.get("consolidates") == name:
             return  # already being consolidated
@@ -108,19 +156,25 @@ def accept_consolidation(run: Run, result: EngineResult, settings: Settings) -> 
     skill_dir = settings.workdir / ".claude" / "skills" / name
     if not (skill_dir / "SKILL.md").is_file():
         run.distilled = {"skipped": f"runbook '{name}' vanished mid-consolidation"}
+        _record_attempt(skill_dir, name, f"runbook '{name}' vanished mid-consolidation")
         return
     if result.input_changes:
         run.distilled = {"skipped": "run changed its own inputs"}
+        _record_attempt(skill_dir, name, "run changed its own inputs")
         return
     draft = distill.valid_consolidation(result.text or "", name)
     if not draft:
         run.distilled = {"skipped": "draft did not validate as a manifest"}
         logger.warning("consolidation draft rejected session=%s runbook=%s", run.session_key, name)
+        _record_attempt(skill_dir, name, "draft did not validate as a manifest")
         return
     try:
         distill.write_proposal(skill_dir, draft)
     except OSError as exc:
         run.distilled = {"skipped": f"write failed: {exc}"}
+        _record_attempt(skill_dir, name, f"write failed: {exc}")
         return
+    with contextlib.suppress(OSError):
+        (skill_dir / ATTEMPT_FILE).unlink(missing_ok=True)
     run.distilled = {"proposed": name}
     logger.info("consolidation proposed session=%s runbook=%s", run.session_key, name)

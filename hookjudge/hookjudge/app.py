@@ -92,38 +92,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     alarm = SelfAlarm(app_settings.alarm_url, app_settings.alarm_min_interval_seconds)
 
     async def _judge_and_record(client: httpx.AsyncClient, event: Incoming) -> int:
-        """One event, one verdict, one row. Never raises into the caller."""
+        """One event, one verdict, one row. Never raises into the caller.
+
+        That sentence was here before anything in the code kept it. This runs as
+        a fire-and-forget task whose done-callback only discarded it from a set,
+        so the exception was never retrieved: one sqlite error lost the alert
+        AFTER the pipe had been answered 202 — no ledger row, no log line, and
+        the only trace was "Task exception was never retrieved" on stderr,
+        whenever the garbage collector got round to saying it, without the alert
+        identity in it. Returns the row id, or 0 when nothing was recorded.
+        """
         started = time.monotonic()
-        prior = await store.prior_verdict(
-            event.identity,
-            app_settings.reuse_window_seconds,
-            now_ts(),
-            # A recovery inherits its firing's verdict whatever route produced
-            # it: the point is not to save a call but to agree with the alert
-            # this recovery belongs to.
-            any_route=event.is_recovery,
-        )
-        if prior is not None:
-            verdict = reuse_verdict(prior, recovery=event.is_recovery)
-        elif event.is_recovery:
-            # An ended condition with nothing to reuse: rules, not a model. The
-            # question "how bad is it" is moot once it is over, and paying to
-            # analyse the past is the easiest cost to never incur.
-            verdict = rule_verdict(event, degraded_reason="recovery alerts are not analysed on their own")
-        else:
-            # Cheapest tier that is not a guess: this rule's own last AI verdict.
-            # Measured on 795 production alerts, 28 of 29 rules answered the same
-            # way every single time, so the second firing of a rule is usually a
-            # question already paid for. Off unless a window is configured.
-            by_rule = await store.prior_rule_verdict(
-                event.rule_key, event.level, app_settings.rule_reuse_window_seconds, now_ts()
+        try:
+            prior = await store.prior_verdict(
+                event.identity,
+                app_settings.reuse_window_seconds,
+                now_ts(),
+                # A recovery inherits its firing's verdict whatever route produced
+                # it: the point is not to save a call but to agree with the alert
+                # this recovery belongs to.
+                any_route=event.is_recovery,
             )
-            if by_rule is not None:
-                verdict = rule_reuse_verdict(by_rule, event)
+            if prior is not None:
+                verdict = reuse_verdict(prior, recovery=event.is_recovery)
+            elif event.is_recovery:
+                # An ended condition with nothing to reuse: rules, not a model. The
+                # question "how bad is it" is moot once it is over, and paying to
+                # analyse the past is the easiest cost to never incur.
+                verdict = rule_verdict(event, degraded_reason="recovery alerts are not analysed on their own")
             else:
-                verdict = await ai_verdict(client, app_settings, event)
-        latency_ms = int((time.monotonic() - started) * 1000)
-        return await store.record(event, verdict, latency_ms)
+                # Cheapest tier that is not a guess: this rule's own last AI verdict.
+                # Measured on 795 production alerts, 28 of 29 rules answered the same
+                # way every single time, so the second firing of a rule is usually a
+                # question already paid for. Off unless a window is configured.
+                by_rule = await store.prior_rule_verdict(
+                    event.rule_key, event.level, app_settings.rule_reuse_window_seconds, now_ts()
+                )
+                if by_rule is not None:
+                    verdict = rule_reuse_verdict(by_rule, event)
+                else:
+                    verdict = await ai_verdict(client, app_settings, event)
+            latency_ms = int((time.monotonic() - started) * 1000)
+            return await store.record(event, verdict, latency_ms)
+        except Exception as exc:  # noqa: BLE001 — the promise in the docstring, kept
+            # CancelledError is a BaseException, so shutdown still cancels this
+            # cleanly; only a real failure lands here.
+            logger.exception("alert accepted then judged nowhere: %s", event.identity)
+            # And the alarm, not only the log. This is the one failure mode where
+            # nobody else is holding a copy: the sender was told 202 and will not
+            # retry, the ledger has no row to dead-letter, and /status cannot show
+            # an absence. The dead-return alarm exists because the pipe is the
+            # broken link; this exists because there IS no link left. It goes
+            # through the same rate limit and cannot raise (see alarm.py).
+            await alarm.lost_alert(client, title=event.title, error=f"{exc.__class__.__name__}: {exc}", now=now_ts())
+            return 0
 
     async def _return_once(client: httpx.AsyncClient, row: dict[str, Any], now: float) -> None:
         """Hand one judgement back to the pipe. The only delivery this service
@@ -133,12 +155,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # journey ends in the ledger, by declaration rather than by
             # accident — which is what separates it from the case below.
             await store.mark_return(
-                int(row["id"]), "skipped", int(row["return_attempts"]), "returns disabled (ledger-only deployment)"
+                int(row["id"]),
+                "skipped",
+                int(row["return_attempts"]),
+                "returns disabled (ledger-only deployment)",
+                attempted_at=now,
             )
             return
         if not app_settings.return_url:
             await store.mark_return(
-                int(row["id"]), "dead", int(row["return_attempts"]), "HOOKJUDGE_RETURN_URL is not configured"
+                int(row["id"]),
+                "dead",
+                int(row["return_attempts"]),
+                "HOOKJUDGE_RETURN_URL is not configured",
+                attempted_at=now,
             )
             await alarm.dead_return(
                 client, title=str(row["title"]), error="HOOKJUDGE_RETURN_URL is not configured", now=now
@@ -179,16 +209,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app_settings.return_secret.encode(), stamp.encode() + b"." + body, hashlib.sha256
             ).hexdigest()
         attempts = int(row["return_attempts"]) + 1
+        # Every exit below advances the attempt count, and the delivery is the
+        # only thing inside the try. It used to catch httpx.HTTPError alone, with
+        # the "sent" write inside it too, so anything else — a TypeError from a
+        # stub client, an ssl error httpx does not wrap, a sqlite failure on the
+        # way out — escaped to the worker's catch-all. That abandoned the rest of
+        # the tick AND left the row `queued` with return_attempts unchanged, so
+        # it never backed off and never died; pending_returns is ORDER BY id
+        # LIMIT 50, so one such row holds a queue slot forever and fifty of them
+        # starve every judgement behind them.
+        error: str | None = None
         try:
             response = await client.post(app_settings.return_url, content=body, headers=headers, timeout=10.0)
-            if response.status_code < 300:
-                await store.mark_return(int(row["id"]), "sent", attempts, None)
-                return
-            error = f"http {response.status_code}: {response.text[:200]}"
+            if response.status_code >= 300:
+                error = f"http {response.status_code}: {response.text[:200]}"
         except httpx.HTTPError as exc:
             error = f"transport: {exc.__class__.__name__}"
+        except Exception as exc:  # noqa: BLE001 — a failure we cannot name is still a failed attempt
+            # Named by class and message rather than called "transport", because
+            # a reader debugging a dead letter has only this string, and telling
+            # them the network broke when sqlite did costs them the afternoon.
+            error = f"{exc.__class__.__name__}: {exc}"[:200]
+        if error is None:
+            await store.mark_return(int(row["id"]), "sent", attempts, None, attempted_at=now)
+            return
         status = "queued" if attempts < app_settings.return_max_attempts else "dead"
-        await store.mark_return(int(row["id"]), status, attempts, error)
+        await store.mark_return(int(row["id"]), status, attempts, error, attempted_at=now)
         if status == "dead":
             await alarm.dead_return(client, title=str(row["title"]), error=error, now=now)
 
@@ -206,11 +252,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 client = app.state.client
                 for row in await store.pending_returns():
                     # Backoff by attempt count, so a pipe that is down is
-                    # retried patiently rather than hammered.
+                    # retried patiently rather than hammered. Measured from the
+                    # last ATTEMPT: it read received_at, which is when the alert
+                    # arrived, so an hour-old row satisfied every wait in the
+                    # table instantly and was re-posted on every tick — patient
+                    # for the first ten minutes of a row's life and a hammer
+                    # after that, which is backwards. return_attempted_at is
+                    # NULL on rows queued before that column existed, and those
+                    # fall back to arrival.
                     wait = _BACKOFF_SECONDS[min(int(row["return_attempts"]), len(_BACKOFF_SECONDS) - 1)]
-                    if int(row["return_attempts"]) and now - float(row["received_at"]) < wait:
+                    last = row["return_attempted_at"]
+                    since = float(last) if last is not None else float(row["received_at"])
+                    if int(row["return_attempts"]) and now - since < wait:
                         continue
-                    await _return_once(client, row, now)
+                    try:
+                        await _return_once(client, row, now)
+                    except Exception:  # noqa: BLE001 — one row's failure is not the tick's
+                        # _return_once handles a failed DELIVERY itself; this is
+                        # for a row whose own bookkeeping cannot be written at
+                        # all. Rethrowing here would abandon every row after it
+                        # in the same tick, forever, because the queue is ordered
+                        # by id and the broken row is always first again.
+                        logger.exception("return leg failed for judgement %s", row["id"])
                 if app_settings.retention_days > 0 and now >= next_purge:
                     next_purge = now + 3600
                     await store.purge_older_than(now - app_settings.retention_days * 86400)
@@ -257,6 +320,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 identity_locks[event.identity] = (lock_again, holders_now - 1)
 
+    def _judge_task_done(task: asyncio.Task[None]) -> None:
+        """Release the task and RETRIEVE its exception.
+
+        The callback used to be `set.discard` alone, which never touches
+        task.exception() — so anything escaping the judge became asyncio's
+        "Task exception was never retrieved" on stderr at collection time, with
+        no alert identity in it and no timestamp anyone could line up with a
+        request. _judge_and_record now guards the judging itself; this is the
+        backstop for what is left around it — the lock bookkeeping above, and
+        any future caller of this task — so that no path can lose an alert
+        silently again.
+        """
+        app.state.judge_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("judge task failed outside the guard: %r", exc)
+
     app = FastAPI(title="hookjudge", lifespan=lifespan)
     app.state.settings = app_settings
     app.state.store = store
@@ -270,6 +352,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         bearer = authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None
         if not ((token and constant_time_eq(configured, token)) or (bearer and constant_time_eq(configured, bearer))):
             raise HTTPException(status_code=401, detail="read token required")
+
+    def _write_guard(token: str | None, authorization: str | None) -> None:
+        """The same token as the read side, the opposite answer when it is unset.
+
+        Reads staying open with no token configured is deliberate across this
+        family — /status on a laptop should not need a credential — and that
+        stays. A mutating endpoint cannot borrow the rule: _read_guard returns
+        early on an empty token, so an unconfigured instance let whoever found
+        the port rewrite the operator labels the eval set is built from and
+        download every alert body in the ledger, and the more locked-down the
+        deployment (no token set because nothing was meant to be exposed) the
+        wider these two doors stood open. hookrelay settled this for the family;
+        its security.py token_ok says it outright — "dev mode for read, endpoint
+        disabled for admin — the CALLER decides which semantic applies". This is
+        the caller that decides the second way.
+
+        403 rather than 401: 401 invites a credential, and there is no credential
+        that opens this. The endpoint is off until one is configured.
+        """
+        if not app_settings.read_token:
+            raise HTTPException(status_code=403, detail="endpoint disabled: set HOOKJUDGE_READ_TOKEN to enable it")
+        _read_guard(token, authorization)
 
     @app.post("/events")
     async def ingest(
@@ -303,7 +407,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Held, or the garbage collector may cancel a fire-and-forget task
         # mid-judgement — the documented asyncio footgun.
         app.state.judge_tasks.add(task)
-        task.add_done_callback(app.state.judge_tasks.discard)
+        task.add_done_callback(_judge_task_done)
         return JSONResponse({"accepted": True, "identity": event.identity}, status_code=202)
 
     @app.post("/feedback")
@@ -431,10 +535,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         x_read_token: str | None = Header(default=None),
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        """Record the operator's ruling. Guarded by the read token on purpose:
-        this service has exactly one operator surface and one token; a label is
-        an annotation on history, not a mutation of behaviour."""
-        _read_guard(x_read_token, authorization)
+        """Record the operator's ruling. The read token on purpose: this service
+        has exactly one operator surface and one token, and a label is an
+        annotation on history, not a mutation of behaviour. But it is still a
+        WRITE, so an empty token disables it rather than opening it — see
+        _write_guard."""
+        _write_guard(x_read_token, authorization)
         importance = str(payload.get("importance") or "").strip().lower()
         if importance not in IMPORTANCE:
             raise HTTPException(status_code=400, detail=f"importance must be one of {', '.join(IMPORTANCE)}")
@@ -452,8 +558,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> PlainTextResponse:
         """Every ruling as eval-harness JSONL (see eval/README.md) — pipe it
         straight into eval/data. The note keeps the provenance: what the
-        platform said, what the judge said, whose answer the operator took."""
-        _read_guard(x_read_token, authorization)
+        platform said, what the judge said, whose answer the operator took.
+
+        A GET, but held to the write rule: one request hands over the full body
+        of every labelled alert, which is the most sensitive payload this service
+        holds. A bulk export with nothing configured to protect it disables
+        itself — see _write_guard.
+        """
+        _write_guard(x_read_token, authorization)
         lines = []
         for row in await store.labeled():
             try:

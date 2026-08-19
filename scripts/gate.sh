@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The whole-repo gate: run every component's OWN gate, then the stack checks
-# that no component gate covers (ci-stack's docs/design/notes trio).
+# that no component gate covers (ci-stack's docs/design/notes/locks quartet).
 #
 # This wrapper delegates — it never replicates a check. Each component's
 # scripts/gate.sh is the exact CI replica for that component, pinned by its
@@ -30,5 +30,11 @@ printf '\033[1m════ stack ════\033[0m\n'
 python3 scripts/check-docs.py
 python3 scripts/assert_design.py
 python3 scripts/assert_agent_notes.py
+# Runs here and not inside a component gate on purpose: it compares three
+# services' requirements.txt against their locks, and the component that forgot
+# to relock is often not the component being tested. Cheap and offline — it
+# resolves nothing, it only reads the two files (see the script for what that
+# does and does not catch).
+python3 scripts/assert_locks.py
 
 printf '\033[1;32mSTACK GATE GREEN\033[0m — every component gate + the stack checks.\n'

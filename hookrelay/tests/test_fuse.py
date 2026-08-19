@@ -13,7 +13,9 @@ import json
 import httpx
 import pytest
 
+from hookrelay import registry
 from hookrelay.app import create_app
+from hookrelay.extract import extract_event
 from hookrelay.fuse import StormFuse
 from hookrelay.settings import Settings
 
@@ -146,6 +148,97 @@ async def test_unfused_source_is_untouched(fused_client):
         assert response.json()["outcome"] == "routed"
     status = (await fused_client.get("/status")).json()
     assert status["fuse"] == {}, "no fuse configured, no fuse behaviour"
+
+
+class _EnvelopeAdapter:
+    """A RESHAPING adapter: the real alert arrives inside a JSON string.
+
+    Not exotic — it is what examples/plugins/aws_sns_source.py does for SNS,
+    whose `Message` field is a JSON *string* that templates cannot reach into.
+    The default adapter hides this whole class of bug, which is why the storm
+    path has to be tested through one of these.
+    """
+
+    def verify(self, source, body, headers):
+        return True
+
+    def parse(self, source, payload):
+        return extract_event(source, json.loads(payload.get("Message") or "{}"))
+
+
+# Registered once; tolerate re-registration across runs, as test_extensibility
+# does for the shipped examples.
+if "envelope-test" not in registry.SOURCE_ADAPTERS:
+    registry.source_adapter("envelope-test")(_EnvelopeAdapter)
+
+
+ENVELOPE_YAML = """
+sources:
+  - name: wrapped
+    secret: ""
+    adapter: envelope-test
+    title: "{AlarmName}"
+    body: "{NewStateReason}"
+    storm_threshold: 2
+    storm_window_seconds: 60
+channels:
+  - name: sink
+    type: generic
+    url: https://sink.example/in
+routes:
+  - name: all
+    source: "*"
+    send_to: [sink]
+"""
+
+
+@pytest.fixture
+async def envelope_client(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(ENVELOPE_YAML, encoding="utf-8")
+    settings = Settings(
+        config_path=str(config_path),
+        db_path=str(tmp_path / "t.db"),
+        plugins_dir=str(tmp_path / "none"),
+        admin_token="admin-t",
+        read_token="",
+        max_body_bytes=256 * 1024,
+        max_attempts=3,
+        retention_days=14,
+        alarm_url="",
+        alarm_min_interval_seconds=600,
+        breaker_threshold=5,
+        breaker_cooldown_seconds=60,
+        worker_interval_seconds=0.01,
+    )
+    app = create_app(settings=settings)
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        yield client
+
+
+async def test_a_suppressed_event_is_read_by_the_doors_own_adapter(envelope_client):
+    """The storm path used to re-extract with the door's templates alone,
+    skipping the adapter — so on a reshaping door every row a storm produced was
+    titled "webhook from <door>". The rows kept precisely so the storm stays
+    accountable were the ones nobody could identify afterwards."""
+    for n in range(4):
+        response = await envelope_client.post(
+            "/hook/wrapped",
+            json={"TopicArn": "arn:aws:sns:eu-west-1:1:alarms", "Message": json.dumps({"AlarmName": f"rds-cpu-{n}"})},
+        )
+        assert response.status_code == 200
+
+    recent = (await envelope_client.get("/status")).json()["recent"]
+    suppressed = [event for event in recent if event["skip_code"] == "storm_suppressed"]
+    assert len(suppressed) == 2, "threshold 2, four arrivals — the last two are fused"
+    assert sorted(event["title"] for event in suppressed) == ["rds-cpu-2", "rds-cpu-3"]
+    assert not any(event["title"] == "webhook from wrapped" for event in recent), (
+        "an unidentifiable row is as good as a lost one"
+    )
 
 
 async def test_signature_check_still_precedes_the_fuse(tmp_path):
