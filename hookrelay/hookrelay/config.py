@@ -52,6 +52,15 @@ def _resolve_deep(value: Any) -> Any:
 # the collision is refused at load time instead of surprising someone at 3am.
 RESERVED_FIELD_NAMES = ("source", "level", "title")
 
+# Extracted keys that exist on every event whatever the templates say, and are
+# read straight off it rather than out of `fields` (see extract.fingerprint).
+BUILTIN_EXTRACTED_NAMES = ("title", "body", "level")
+
+# Processors that cannot put a new name into an event's fields. The fingerprint
+# vocabulary is fully knowable only when the walk up to the fingerprint is made
+# of these (plus `set`, whose additions are written down in the config itself).
+_FIELD_PRESERVING_PROCESSORS = frozenset({"dedup", "silence", "routes", "filter"})
+
 
 @dataclass(frozen=True, slots=True)
 class Source:
@@ -249,7 +258,7 @@ class Config:
                 adapter=str(item.get("adapter", "default")),
                 level_map={str(k).lower(): str(v) for k, v in (item.get("level_map") or {}).items()},
                 fields={str(k): str(v) for k, v in (item.get("fields") or {}).items()},
-                fingerprint_fields=tuple(item.get("fingerprint_fields") or ()),
+                fingerprint_fields=tuple(str(name) for name in (item.get("fingerprint_fields") or ())),
                 dedup_window_seconds=int(item.get("dedup_window_seconds", 120)),
                 storm_threshold=max(0, int(item.get("storm_threshold", 0))),
                 storm_window_seconds=max(1, int(item.get("storm_window_seconds", 60))),
@@ -376,6 +385,27 @@ class Config:
             # a preference — every event would end no_route.
             raise ConfigError("pipeline has no 'routes' stage")
 
+        # fingerprint_fields must name something a door can actually read. A
+        # typo there is the quietest total alert loss this service can suffer:
+        # an unknown name resolves to "" for every event (extract.fingerprint),
+        # so every alert of that source shares ONE fingerprint and everything
+        # after the first is skipped as `duplicate` — which reads on the board
+        # as excellent dedup and is a silent outage. Fails AT BOOT, like every
+        # other name in this file.
+        for src in sources.values():
+            vocabulary = _fingerprint_vocabulary(src, pipeline)
+            if vocabulary is None:
+                continue  # an enrichment stage may add names nobody here knows
+            unknown = [name for name in src.fingerprint_fields if name not in vocabulary]
+            if unknown:
+                raise ConfigError(
+                    f"source {src.name}: fingerprint_fields names {unknown}, which nothing extracts for this "
+                    f"door by the time the fingerprint is taken (available: {sorted(vocabulary)} — every "
+                    f"template's fields, plus any `set` stage ahead of the dedup stage) — an unknown name "
+                    f'resolves to "" for every event, so every alert would share one fingerprint and all but '
+                    f"the first would be skipped as a duplicate"
+                )
+
         # Card actions. Unknown kinds and unknown channels fail AT BOOT, like
         # every other name in this file: a button that 404s when an operator
         # finally presses it is worse than no button.
@@ -420,6 +450,40 @@ class Config:
             card_actions=card_actions,
             escalation=escalation,
         )
+
+
+def _fingerprint_vocabulary(src: Source, pipeline: tuple[PipelineStage, ...]) -> set[str] | None:
+    """Every name `fingerprint_fields` could legitimately mean for this door.
+
+    The union of ALL the door's templates, never one of them: a door's templates
+    are ordered ALTERNATIVES, and a field only one of them extracts can still
+    drive identity (events read by the others simply miss it, which is
+    documented behaviour). Checking against a single template would refuse
+    honest config, and a validator that refuses honest config is worse than the
+    typo it was written to catch.
+
+    Returns None — "cannot be enumerated, do not judge" — when a stage before
+    the fingerprint may invent field names: an `http` brain answers with fields
+    only it knows, and a plugin processor can do anything. `set` is the
+    exception, because its additions are written down right there in the config.
+
+    The fingerprint is taken by the dedup stage, or at record time when there is
+    no dedup stage, so only the walk up to that point can widen the vocabulary.
+    """
+    names = set(BUILTIN_EXTRACTED_NAMES)
+    for template in src.templates:
+        names |= set(template.fields)
+    for stage in pipeline:
+        if stage.type == "set":
+            changes = stage.options.get("set") or {}
+            declared = changes.get("fields") if isinstance(changes, dict) else None
+            if isinstance(declared, dict):
+                names |= {str(key) for key in declared}
+        elif stage.type not in _FIELD_PRESERVING_PROCESSORS:
+            return None
+        if stage.type == "dedup":
+            break
+    return names
 
 
 def _condition_matches(condition: Any, actual: str) -> bool:

@@ -505,3 +505,67 @@ def test_a_fenced_or_mislabeled_draft_is_normalized_or_dropped() -> None:
     assert distill.valid_consolidation("Sure! Here is the file:\n" + good, "x") == ""
     assert distill.valid_consolidation(good.replace("name: x", "name: y"), "x") == ""
     assert distill.valid_consolidation("---\nname: x\n---\nno marker\n", "x") == ""
+
+
+def test_a_draft_that_never_validates_stops_costing_money(tmp_path: Path) -> None:
+    """The unbounded bill this closes.
+
+    `maybe_consolidate` re-armed on the ABSENCE of proposal.md, and every failure
+    path in `accept_consolidation` returns without writing one — so a runbook
+    whose draft never validates spawned another paid consolidation run on every
+    later investigation of that alert, forever, and this path sits outside the
+    budget breaker on purpose because an operator set the threshold.
+
+    It still retries — a write that failed on a full disk must not disable a
+    runbook permanently — but at the rate the feature was designed for: one run
+    per `threshold` NEW cases, not one per investigation.
+    """
+    from hookprobe.distill_loop import ATTEMPT_FILE
+    from hookprobe.engine import EngineResult
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    async def scenario():
+        # FakeEngine returns prose, so every consolidation draft fails to validate.
+        engine = FakeEngine(result=EngineResult(text="Disk on db-1 filled up.", message_count=2))
+        service = RunService(
+            make_settings(tmp_path, auto_distill_max=10, consolidate_at=3),
+            engine,
+            RunStore(tmp_path / "results"),
+        )
+
+        async def investigate(tag: str) -> None:
+            service.start({"message": "Title: disk pressure on db-1\ncheck it", "sessionKey": tag})
+            await wait_finished(service, tag)
+
+        for index in range(3):
+            await investigate(f"k{index}")
+
+        async def consolidations():
+            return [r for r in service.list_runs(limit=40) if r.meta.get("consolidates")]
+
+        for _ in range(200):
+            runs = await consolidations()
+            if runs and all(r.finished for r in runs):
+                break
+            await asyncio.sleep(0.01)
+
+        first = await consolidations()
+        assert len(first) == 1, "the threshold bought exactly one run"
+        assert first[0].distilled == {"skipped": "draft did not validate as a manifest"}
+
+        # Three more investigations of the same condition. Each one used to spawn
+        # another paid consolidation.
+        for index in range(3, 6):
+            await investigate(f"k{index}")
+        for _ in range(60):
+            await asyncio.sleep(0.01)
+        return service, await consolidations()
+
+    service, runs = asyncio.run(scenario())
+    assert len(runs) == 1, f"the failed draft was retried on every investigation ({len(runs)} runs)"
+
+    skill_dir = tmp_path / ".claude" / "skills" / "disk-pressure-on-db-1"
+    assert (skill_dir / ATTEMPT_FILE).is_file(), "the loop kept no memory of having paid and got nothing"
+    assert not (skill_dir / "proposal.md").exists(), "nothing valid was produced, so nothing is awaiting review"

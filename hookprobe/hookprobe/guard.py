@@ -17,14 +17,31 @@ from __future__ import annotations
 
 import re
 
-# Segment-scoped: each pattern stops at a pipeline separator, so one scan of
-# the full command string still catches every chained segment via re.search.
+# Segment-scoped: each pattern stops at a pipeline separator, so a mutating verb
+# in the SECOND half of `kubectl get pods; kubectl delete pod x` is still caught
+# — one re.search over the whole string finds it in its own segment.
+#
+# WHAT THIS DOES NOT CATCH, stated because the comment here used to claim it
+# caught "every chained segment" and that reads as more than it is. Each rule
+# needs a binary and a verb in ONE segment, so an adversary who separates them
+# gets through, and three ways of doing that are known and verified:
+#
+#   echo delete | xargs kubectl      — binary and verb in different segments
+#   V=delete; kubectl $V pod x       — the verb is a variable at match time
+#   kubectl "de""lete" pod x         — the verb is assembled by the shell
+#
+# None of these is closable without parsing the shell, and a regex that tried
+# would either miss the next trick or refuse ordinary queries. That is fine, and
+# saying so is the point: this layer is defence in depth for an over-eager MODEL,
+# not a sandbox against an adversary. The boundary that holds against one is the
+# read-only credential mounted into the container — and for the remediation path,
+# the allowlist plus exec-without-a-shell (see hookprobe/remediation.py).
 _SEG = r"[^|;&\n]*"
 
 _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
-            rf"\bkubectl\b{_SEG}\b(apply|create|delete|edit|patch|replace|scale|autoscale|rollout|"
+            rf"\bkubectl\b{_SEG}\b(apply|create|delete|edit|patch|replace|scale|autoscale|rollout|run|"
             rf"cordon|uncordon|drain|taint|label|annotate|expose|set|exec|attach|cp|port-forward|proxy|debug)\b"
         ),
         "kubectl mutation or pod entry",
@@ -35,12 +52,12 @@ _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(
-            rf"\b(docker|podman|nerdctl|crictl)\b{_SEG}\b(run|exec|rm|rmi|stop|kill|restart|build|push|prune|create)\b"
+            rf"\b(docker|podman|nerdctl|crictl)\b{_SEG}\b(run|exec|rm|rmi|stop|start|kill|restart|unpause|cp|build|push|prune|create)\b"
         ),
         "container runtime mutation",
     ),
     (
-        re.compile(rf"\bsystemctl\b{_SEG}\b(start|stop|restart|reload|enable|disable|mask|isolate)\b"),
+        re.compile(rf"\bsystemctl\b{_SEG}\b(start|stop|restart|reload|enable|disable|mask|unmask|kill|isolate)\b"),
         "service state change",
     ),
     (

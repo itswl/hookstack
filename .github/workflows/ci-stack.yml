@@ -41,6 +41,12 @@ jobs:
         run: python3 scripts/assert_design.py
       - name: agent notes keep their shape
         run: python3 scripts/assert_agent_notes.py
+      # Not a dependency resolve — that would need a network round trip per
+      # service and minutes per run, so it would end up scheduled and skipped.
+      # This reads the two files and asks whether they still agree, which is
+      # what "somebody bumped a floor and forgot scripts/relock.sh" looks like.
+      - name: every requirements.lock still answers its requirements.txt
+        run: python3 scripts/assert_locks.py
 
   stack:
     runs-on: ubuntu-latest
@@ -48,8 +54,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
+      # No "logs on failure" step. There was one, and it could never print
+      # anything: the smoke arms an EXIT trap that runs `docker compose down -v`,
+      # so by the time a failure:() step ran there were no containers left to
+      # read logs from — every red run showed an empty log dump and sent people
+      # looking for the real output somewhere else. That output already exists:
+      # fail() in the smoke dumps `docker compose logs --tail 40` inline, at the
+      # moment of the failure, while the stack is still standing. Deleting the
+      # step is the fix; adding KEEP=1 here to keep containers alive for it would
+      # make CI run something different from what a developer runs, which is the
+      # one thing this repo's gates are built not to do.
       - name: the whole family comes up and judges correctly
         run: bash scripts/stack-smoke.sh
-      - name: logs on failure
-        if: failure()
-        run: docker compose logs --tail 100

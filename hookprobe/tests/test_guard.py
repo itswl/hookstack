@@ -63,3 +63,42 @@ def test_read_only_commands_pass() -> None:
 def test_mutating_commands_are_denied() -> None:
     for command in DENIED:
         assert bash_deny_reason(command) is not None, command
+
+
+def test_the_verbs_that_do_the_same_thing_as_a_blocked_one() -> None:
+    """Each of these was missing while its twin was blocked, which is the worst
+    shape for a denylist to be in: `systemctl start` refused and `systemctl kill`
+    allowed reads as a considered decision when it was an omission."""
+    for command in (
+        "kubectl run nginx --image=nginx",  # starts a workload; `create` was blocked
+        "docker start api",  # `stop` and `restart` were blocked
+        "docker unpause api",
+        "docker cp ./x api:/tmp/x",  # writes into a running container
+        "systemctl kill nginx",  # `stop` was blocked
+        "systemctl unmask nginx",  # `mask` was blocked
+    ):
+        assert bash_deny_reason(command), f"still allowed: {command}"
+
+
+def test_the_evasions_this_guard_does_not_claim_to_stop() -> None:
+    """Pinned as KNOWN, not as acceptable-in-general.
+
+    Each rule needs a binary and a verb in one pipeline segment, so separating
+    them gets through. None of it is closable without parsing the shell, and the
+    module docstring now says so rather than claiming to catch every chained
+    segment. What holds against an adversary is the read-only credential; this
+    layer is for an over-eager model.
+
+    The test exists so that if someone ever DOES close one of these, they find
+    out here and can delete the line — and so nobody rediscovers them believing
+    the guard was supposed to have covered them.
+    """
+    known_gaps = (
+        "echo delete | xargs kubectl",  # binary and verb in different segments
+        "V=delete; kubectl $V pod x",  # the verb is a variable at match time
+        'kubectl "de""lete" pod x',  # the verb is assembled by the shell
+    )
+    for command in known_gaps:
+        assert bash_deny_reason(command) is None, (
+            f"{command!r} is now blocked — good; remove it from known_gaps and from the guard's docstring"
+        )

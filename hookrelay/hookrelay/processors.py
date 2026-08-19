@@ -17,6 +17,15 @@ Built-ins:
 The pipeline ORDER is config, so "dedup on the raw title, then let the brain
 rewrite it" and "let the brain rewrite it, then dedup on the rewrite" are both
 one line apart — order sensitivity is the feature, not a trap.
+
+A DRY RUN (Runtime.dry_run, from /explain) walks these same stages with this
+same code — one walk, or the explanation drifts from the behaviour it explains
+— so a stage with a SIDE EFFECT must check the flag and report instead of act.
+The `http` stage is the one built-in that has one, and it used to POST during
+an explain: a route whose docstring promised the answer could never leave the
+process was handing a real payload to a real external service (and, for a
+per-call brain, a real bill) for a question about a payload nobody sent. A
+plugin processor that touches anything outside the context owes the same check.
 """
 
 from __future__ import annotations
@@ -65,6 +74,11 @@ class Runtime:
     config: Config
     settings: Settings | None  # None when embedded/tested outside the app
     http_client: httpx.AsyncClient | None  # None only in unit tests that stub
+    # Set by /explain: the caller is asking what WOULD happen, so a stage with
+    # a side effect must report it rather than perform it. Threaded here rather
+    # than by duplicating the walk — a second walk that "does the same minus
+    # the sends" is a walk that quietly stops matching the first one.
+    dry_run: bool = False
 
 
 Verdict = tuple[str, Any]
@@ -173,10 +187,28 @@ class HttpProcessor:
     slower belongs in the async topology — deliver TO the brain as a channel
     and let it re-enter through its own door, which is how a 47-second AI
     analysis is wired in production.
+
+    A DRY RUN never calls the brain — see the module docstring. It still says
+    where the call would have gone, because showing the walk is the whole point
+    of an explain, and "the verdict comes from here" is part of the walk.
     """
 
     async def run(self, rt: Runtime, ctx: EventContext, options: dict[str, Any]) -> Verdict:
         name = options["_name"]
+        if rt.dry_run:
+            # The one thing this stage cannot honestly show is the verdict it
+            # never asked for, so it says that too — an operator reading the
+            # steps below must not take them for what the brain would have made
+            # of this event.
+            ctx.steps.append(
+                {
+                    "gate": name,
+                    "result": "would_post",
+                    "url": str(options["url"]),
+                    "note": "dry run — the brain was not called, so nothing below reflects its verdict",
+                }
+            )
+            return PASS
         on_error = str(options.get("on_error") or "pass")
         request_body = {
             "source": ctx.source.name,

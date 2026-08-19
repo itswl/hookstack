@@ -24,6 +24,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from hookprobe.files import atomic_write, locked
+
 QUEUE_FILE = "memory-suggestions.jsonl"
 HEADING = "## Learned from investigations"
 
@@ -51,27 +53,31 @@ def append(workdir: Path, session_key: str, facts: list[str]) -> int:
     """Queue what a run suggested; returns how many were actually queued."""
     if not facts:
         return 0
-    open_now = sum(1 for row in load(workdir) if row.get("status") == "open")
-    queued = 0
     path = workdir / QUEUE_FILE
-    with path.open("a", encoding="utf-8") as handle:
-        for fact in facts:
-            if open_now + queued >= _QUEUE_CAP:
-                break
-            handle.write(
-                json.dumps(
-                    {
-                        "id": uuid.uuid4().hex[:10],
-                        "ts": round(time.time(), 3),
-                        "session_key": session_key,
-                        "line": fact,
-                        "status": "open",
-                    },
-                    ensure_ascii=False,
+    # Locked across the count AND the append: the cap is read from the file, so
+    # two runs appending at once would each see the same "open_now" and together
+    # sail past it.
+    with locked(path):
+        open_now = sum(1 for row in load(workdir) if row.get("status") == "open")
+        queued = 0
+        with path.open("a", encoding="utf-8") as handle:
+            for fact in facts:
+                if open_now + queued >= _QUEUE_CAP:
+                    break
+                handle.write(
+                    json.dumps(
+                        {
+                            "id": uuid.uuid4().hex[:10],
+                            "ts": round(time.time(), 3),
+                            "session_key": session_key,
+                            "line": fact,
+                            "status": "open",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
-            queued += 1
+                queued += 1
     return queued
 
 
@@ -98,26 +104,30 @@ def resolve(workdir: Path, suggestion_id: str, *, accept: bool) -> dict[str, Any
     machine-suggested, operator-approved — distinct from what the operator
     wrote unprompted.
     """
-    rows = load(workdir)
-    target = next((row for row in rows if row.get("id") == suggestion_id and row.get("status") == "open"), None)
-    if target is None:
-        return None
-    target["status"] = "accepted" if accept else "dismissed"
-    target["resolved_at"] = round(time.time(), 3)
     path = workdir / QUEUE_FILE
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
-    tmp.replace(path)
+    # The whole read-modify-write under one lock. This rewrites EVERY row from a
+    # copy read a moment earlier, so an append landing in between was simply
+    # dropped — the loudest version of the lost update this service can have,
+    # because what goes missing is a fact a run asked a human to remember.
+    with locked(path):
+        rows = load(workdir)
+        target = next((row for row in rows if row.get("id") == suggestion_id and row.get("status") == "open"), None)
+        if target is None:
+            return None
+        target["status"] = "accepted" if accept else "dismissed"
+        target["resolved_at"] = round(time.time(), 3)
+        atomic_write(path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows).encode("utf-8"))
     if accept:
         memory = workdir / "CLAUDE.md"
-        try:
-            text = memory.read_text(encoding="utf-8")
-        except OSError:
-            text = ""
-        if HEADING not in text:
-            text = (text.rstrip() + f"\n\n{HEADING}\n\n") if text.strip() else f"{HEADING}\n\n"
-        text = text.rstrip() + f"\n- {target['line']}\n"
-        tmp = memory.with_suffix(".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        tmp.replace(memory)
+        # A second lock, on the memory file: this is another read-append-write,
+        # and the operator's own editor writes the same file through PUT /v1/memory.
+        with locked(memory):
+            try:
+                text = memory.read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            if HEADING not in text:
+                text = (text.rstrip() + f"\n\n{HEADING}\n\n") if text.strip() else f"{HEADING}\n\n"
+            text = text.rstrip() + f"\n- {target['line']}\n"
+            atomic_write(memory, text.encode("utf-8"))
     return target

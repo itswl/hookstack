@@ -337,6 +337,31 @@ async def test_http_processor_error_policies(store):
     assert result["skip_code"] == "processor_error", "fail-closed must drop with the named code"
 
 
+async def test_a_dry_run_reports_the_brain_call_instead_of_making_it(store):
+    """/explain promises an answer that cannot leave this process, and its
+    docstring said so — while the http stage POSTed the payload to the
+    configured brain on the way past. A dry run was handing a real payload to a
+    real external service (and, for a per-call brain, a real bill) to answer a
+    question about a payload nobody sent. The walk is still worth showing, so
+    the stage says where the call would have gone."""
+    cfg = _pipeline_cfg(["dedup", {"type": "http", "name": "brain", "url": "https://brain.example/triage"}, "routes"])
+    client = _StubClient(_StubResponse(200, {"action": "drop", "skip_code": "brain_said_no"}))
+
+    result = await handle_hook(
+        store, cfg, cfg.sources["ci"], {"job": "deploy", "status": "meh"}, now=1000.0, client=client, dry_run=True
+    )
+
+    assert client.requests == [], "a dry run must not reach the network"
+    step = next(s for s in result["steps"] if s["gate"] == "brain")
+    assert step["result"] == "would_post" and step["url"] == "https://brain.example/triage"
+    # The verdict was never asked for, so the walk continues past the stage —
+    # and says as much, rather than letting the steps below be read as the
+    # brain's opinion.
+    assert result["dry_run"] is True and result["outcome"] == "routed"
+    assert "dry run" in step["note"]
+    assert await store.recent_events(1) == [], "and it still leaves nothing behind"
+
+
 def test_generic_signature_covers_the_exact_wire_bytes():
     """The regression that motivated bytes-exact builders: signature must be
     HMAC of the payload AS SENT, not of a private canonicalization."""

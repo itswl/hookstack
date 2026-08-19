@@ -71,6 +71,29 @@ async def test_unknown_source_is_404(client):
     assert (await client.post("/hook/nope", json={})).status_code == 404
 
 
+async def test_an_oversized_body_is_refused_before_it_is_buffered(client, settings):
+    """The door used to await the WHOLE body and only then check its length, so
+    a 1 GB POST was paid for in memory and refused afterwards. Content-Length
+    answers first — and because that header is the caller's word, the check
+    after the read has to stay.
+    """
+    limit = settings.max_body_bytes
+
+    # Nothing but a header: the body here is three bytes, and the door must
+    # still refuse it — proof the decision was made before any reading.
+    lying_big = await client.post("/hook/grafana", content=b"{}\n", headers={"content-length": str(limit * 4096)})
+    assert lying_big.status_code == 413, "a declared size over the cap is refused on the header alone"
+
+    # The header understates the body — the same lie in the other direction, and
+    # exactly why the post-read check cannot be dropped.
+    lying_small = await client.post("/hook/grafana", content=b"x" * (limit + 1), headers={"content-length": "5"})
+    assert lying_small.status_code == 413, "the caller's word is not the last word"
+
+    # Refused on SIZE, not on credentials: both requests above were unsigned,
+    # and an unsigned request of an honest size is a 401.
+    assert (await client.post("/hook/grafana", content=b"{}\n")).status_code == 401
+
+
 async def test_status_requires_read_token_when_configured(client):
     assert (await client.get("/status")).status_code == 401
     response = await client.get("/status", headers={"X-Read-Token": "read-t"})
