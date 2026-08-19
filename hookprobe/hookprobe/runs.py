@@ -10,21 +10,43 @@ service sweeps these orphans into failed runs that report themselves.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
 import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from hookprobe.files import atomic_write
+
 RUNNING = "running"
 COMPLETED = "completed"
 FAILED = "failed"
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._:-]")
+# Long enough for any key an operator will ever read, short enough to leave
+# room for the digest below inside a filesystem's 255-byte name limit.
+_MAX_STEM = 200
 
 
 def _filename(session_key: str) -> str:
-    return _UNSAFE.sub("_", session_key)[:200] + ".json"
+    """One file per session key — and only ever one key per file.
+
+    Truncation used to be the whole rule, so two keys longer than the limit that
+    differed only past it named the same file: each finish() overwrote the
+    other's report, and after a restart a lookup for one answered with the
+    other's. The event door builds keys from an unbounded source and event id,
+    which is exactly where that happens. A key that fits is still named
+    literally — the case files on the volume predate this and must stay
+    readable — and a longer one carries a digest of the WHOLE key, which is the
+    part truncation threw away.
+    """
+    safe = _UNSAFE.sub("_", session_key)
+    if len(safe) <= _MAX_STEM:
+        return safe + ".json"
+    digest = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:12]
+    return f"{safe[: _MAX_STEM - len(digest) - 1]}-{digest}.json"
 
 
 @dataclass(slots=True)
@@ -103,13 +125,9 @@ class RunStore:
     def _write(self, run: Run) -> None:
         self._runs[run.session_key] = run
         path = self._results_dir / _filename(run.session_key)
-        tmp = path.with_suffix(".tmp")
-        try:
-            tmp.write_text(json.dumps(asdict(run), ensure_ascii=False), encoding="utf-8")
-            tmp.replace(path)
-        except OSError:
-            # Persistence is best-effort; the in-memory copy still serves.
-            tmp.unlink(missing_ok=True)
+        # Persistence is best-effort; the in-memory copy still serves.
+        with contextlib.suppress(OSError):
+            atomic_write(path, json.dumps(asdict(run), ensure_ascii=False).encode("utf-8"))
 
     def active_count(self) -> int:
         return sum(1 for run in self._runs.values() if not run.finished)
@@ -130,6 +148,24 @@ class RunStore:
                 if finished and cost and finished >= cutoff:
                     total += float(cost)
         return total
+
+    def unpriced_since(self, cutoff: float) -> int:
+        """Turns after `cutoff` that never reported a cost — the breaker's blind spot.
+
+        A turn the wall clock cut off spent real money the engine never got to
+        report, and spend_since can only add up what was reported, so the most
+        expensive failures land in the window as $0. This is the count that
+        keeps that undercount from being silent: a refusal records 0.0 and is
+        genuinely free, while an unreported turn records None and is not.
+        """
+        self._scan_disk_once()
+        count = 0
+        for run in self._runs.values():
+            for turn in run.turns:
+                finished = turn.get("finished_at")
+                if finished and finished >= cutoff and turn.get("cost_usd") is None:
+                    count += 1
+        return count
 
     def cache_since(self, cutoff: float) -> tuple[int, int]:
         """(fresh_input_tokens, cache_read_tokens) across turns after `cutoff`.
@@ -181,7 +217,12 @@ class RunStore:
     def _load(self, session_key: str) -> Run | None:
         path = self._results_dir / _filename(session_key)
         if not path.exists():
-            return None
+            # A case file written before _filename learned to keep long keys
+            # apart sits under the old truncated name. The disk scan finds it
+            # by the key recorded inside it, and runs once per process, so a
+            # miss on a key that was never a run stays cheap.
+            self._scan_disk_once()
+            return self._runs.get(session_key)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             run = Run(**data)

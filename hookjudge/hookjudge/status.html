@@ -115,8 +115,10 @@
     is inherited from the firing by design), and the <code>/status</code> JSON carries the full
     level×importance matrix plus the latest disagreements — the rows worth reading. Each verdict row is
     badged with its route, next to the latency and what that one verdict cost.</p>
-    <p class="muted-p">The header's ↻ refreshes now, and the interval beside it (manual / 15s / 60s / 5m,
-    remembered per browser) is the only clock on this page — the stamp says when the data is from.</p>
+    <p class="muted-p">This page keeps no clock. It holds one streaming connection to <code>/live</code> and refetches
+    what it is showing when the service says a verdict landed, so a burst of events is one refetch rather than a tick
+    each. The header's ↻ refetches on demand, the badge beside it reads <b>live</b> or <b>offline</b> (a dropped stream
+    reconnects on its own, backing off), and the stamp says when the data is from.</p>
     <h2>API and addresses</h2>
     <p class="muted-p">Inside the family's docker network: <code>http://hookjudge:8200</code>. From the host: the loopback mapping <code>http://127.0.0.1:8200</code>.</p>
     <table>

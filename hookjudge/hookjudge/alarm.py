@@ -45,3 +45,8 @@ class SelfAlarm:
             await client.post(self._url, json={"msg_type": "text", "content": {"text": text}}, timeout=5.0)
         except Exception:  # noqa: BLE001 — an alarm must never raise into the worker
             self._last_sent = 0.0  # let the next dead return try again
+            # The count was cleared on the way in, for a message that never
+            # arrived. Give it back, or throttling hides the scale of the
+            # problem exactly when the alarm path is also broken — which is the
+            # one discipline this class says it keeps.
+            self._suppressed += held + 1

@@ -12,119 +12,43 @@ GET  /healthz                   -> liveness, unauthenticated
 isFinal is always true on a 200: a run is either still going (202) or done.
 That single guarantee lets a poller trust the first confirming read instead
 of running stability heuristics against a moving answer.
+
+What stays in this module is the contract above, the two live streams, and the
+routes that act on a run: start it, follow it, stop it, approve the procedure it
+proposed. The rest of the surface is grouped by what it is about and mounted from
+there — hookprobe.events owns the family door and its prompts, hookprobe.library
+the files a person edits and a run reads, hookprobe.ops the read-only view of
+what this process is doing. Each of them takes the settings and the service
+explicitly and registers its own routes; the bearer-token dependency is defined
+once here and handed over, because an auth rule duplicated per module is an auth
+rule that will eventually differ per module.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
-import re
-import shutil
-import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from hookprobe import __version__, remediation, suggestions
-from hookprobe.distill import draft_skill, record_revision, snapshot
-from hookprobe.engine import (
-    _load_agents_raw,
-    _load_mcp_servers,
-    _system_prompt_append,
-    file_fact,
-)
+from hookprobe import __version__, events, library, ops, remediation
+from hookprobe.engine import file_fact
+from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
 from hookprobe.retention import prune
 from hookprobe.runs import Run
 from hookprobe.seeds import seed_default_agents
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
-from hookprobe.wire import verify_timestamped
-
-_EVENT_MESSAGE = """Run one read-only investigation of the alert below: find the root cause, \
-assess the impact, and give remediation steps in priority order.
-Open the case files first: Grep/Read /data/results/ for earlier investigations of the same \
-alert, and if you find one, cite it and compare — what was the previous verdict, does this \
-one agree.
-Answer with a short Markdown report, conclusion first: the opening paragraph is a \
-one-sentence conclusion a notification card can quote verbatim.
-If this investigation taught you a durable fact about the ENVIRONMENT itself — topology, \
-a known false alarm, a naming convention; never about this one incident — end the report \
-with a line `MEMORY-SUGGESTION: <the fact, one line>`. At most one; omit it when unsure.
-If concrete commands would remediate the root cause, ALSO append a fenced block:
-```remediation
-[{{"action": "what this does", "command": "the exact command", "target": "what it touches", \
-"risk": "low|medium|high", "rollback": "how to undo it"}}]
-```
-Propose only commands you are confident in; an operator approves each proposal before \
-anything runs, and nothing you write here executes by itself.
-
-Source: {source}
-Level: {level}
-Title: {title}
-Body: {body}
-Fields:
-```json
-{fields}
-```"""
-
-_REFIRE_MESSAGE = """The same alert fired again — this is a follow-up in the investigation you \
-already ran, not a new incident.
-
-Level now: {level}
-Title: {title}
-Body: {body}
-Fields:
-```json
-{fields}
-```
-
-Compare against your previous conclusion: has anything changed (worse, better, different \
-symptom)? If your conclusion stands, restate it in one sentence and say it stands. If it \
-does not, say what changed and revise the remediation order. Keep it short; the channels \
-already carry your full report."""
-
-_MEMORY_MAX_BYTES = 256 * 1024
+from hookprobe.wire import constant_time_eq
 
 _UI_PAGE = Path(__file__).with_name("ui.html")
-
-# Directory names only — no separators, no leading dot, so a crafted skill
-# name can never walk out of the skills directory.
-_SKILL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$")
-
-
-def _skill_description(text: str) -> str:
-    """Best-effort description from SKILL.md frontmatter."""
-    if not text.startswith("---"):
-        return ""
-    for line in text.splitlines()[1:40]:
-        if line.strip() == "---":
-            break
-        if line.startswith("description:"):
-            return line.split(":", 1)[1].strip().strip("\"'")[:200]
-    return ""
-
-
-def _skill_origin(entry: Path) -> dict[str, Any]:
-    """Provenance for a runbook auto-distill wrote, or nothing for a hand-made one."""
-    try:
-        raw = json.loads((entry / "origin.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    return {
-        "written_by": str(raw.get("written_by") or ""),
-        "reviewed": bool(raw.get("reviewed")),
-        "from_session": str(raw.get("session_key") or ""),
-        "written_at": raw.get("written_at"),
-    }
 
 
 def _ndjson(payload: dict[str, Any]) -> bytes:
@@ -136,7 +60,7 @@ def _prompt_files(settings: Settings) -> dict[str, Path]:
     """The two editable prompt inputs, keyed by the name a run records them under."""
     return {
         "memory": settings.workdir / "CLAUDE.md",
-        "system_prompt_append": settings.system_prompt_append or (settings.workdir / "system-prompt.md"),
+        "system_prompt_append": system_prompt_path(settings),
     }
 
 
@@ -159,7 +83,11 @@ def _prompt_digests_now(settings: Settings) -> dict[str, str | None]:
 
 def _summary(run: Run) -> dict[str, Any]:
     title = (run.turns[0]["message"] if run.turns else run.current_message) or ""
-    turn_costs = [t.get("cost_usd") for t in run.turns if t.get("cost_usd")]
+    # `is not None`, not truthiness: a turn that genuinely cost 0.0 (a budget
+    # refusal) is a counted turn, and dropping it fell back to run.cost_usd —
+    # erasing the very distinction the ledger keeps between "nobody counted
+    # this" (None) and "this was free" (0.0).
+    turn_costs = [cost for cost in (t.get("cost_usd") for t in run.turns) if cost is not None]
     return {
         "session_key": run.session_key,
         "status": run.status,
@@ -191,8 +119,10 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         # agents page teaches by example instead of starting empty.
         seed_default_agents(settings.workdir)
         # A restart must not orphan the loop: runs a previous process left
-        # mid-flight settle as failures that report themselves.
+        # mid-flight settle as failures that report themselves, and an approved
+        # procedure it died in the middle of stops claiming to be running.
         service.sweep_orphans()
+        service.sweep_interrupted_remediations()
 
         async def retention_loop() -> None:
             while True:
@@ -205,6 +135,10 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         finally:
             if pruner is not None:
                 pruner.cancel()
+            # The other side of the sweep above: give the work in flight a
+            # moment to record itself, so a graceful stop leaves less for the
+            # next boot to clean up than a crash does.
+            await service.shutdown()
 
     app = FastAPI(
         title="hookprobe",
@@ -219,7 +153,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if not settings.token:
             return  # explicitly unauthenticated deployment (private network only)
         expected = f"Bearer {settings.token}"
-        if not (authorization and hmac.compare_digest(authorization, expected)):
+        if not (authorization and constant_time_eq(expected, authorization)):
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
     @app.post("/hooks/agent", dependencies=[Depends(require_token)])
@@ -256,7 +190,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     async def board_events() -> StreamingResponse:
         """The session list's wake-up line, the same shape the other two boards use.
 
-        The per-run stream above carries a run's steps; this one carries only
+        The per-run stream below carries a run's steps; this one carries only
         "something moved" — a run started, finished, or returned its report —
         so the list refetches itself without the page keeping a clock.
         """
@@ -301,13 +235,14 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         async def lines() -> AsyncIterator[bytes]:
             try:
                 # Open with what already happened, so a watcher that arrives
-                # mid-run is not blind to the steps it missed.
-                snapshot = service.get(session_key)
+                # mid-run is not blind to the steps it missed. Not named
+                # `snapshot`: that is distill's manifest backup.
+                opened = service.get(session_key)
                 yield _ndjson(
                     {
                         "type": "snapshot",
-                        "status": snapshot.status if snapshot else "unknown",
-                        "events": list(snapshot.events) if snapshot else [],
+                        "status": opened.status if opened else "unknown",
+                        "events": list(opened.events) if opened else [],
                     }
                 )
                 while True:
@@ -345,122 +280,6 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
-    # The family's event door: hookrelay's to-probe channel (generic,
-    # payload: normalized) delivers judged-worthy alerts here. The pipe stays
-    # content-blind, so the escalation judgement lives on this side: only
-    # levels in escalate_levels start a paid investigation, everything else
-    # is acknowledged and skipped. Idempotent per (source, event_id) — a storm
-    # of the SAME event id funds one investigation, not N (a restatement with a
-    # new id is a new investigation — the budget breaker is the backstop).
-    @app.post("/hooks/event")
-    async def event_door(request: Request) -> dict[str, Any]:
-        raw = await request.body()
-        if not verify_timestamped(
-            settings.event_secret,
-            raw,
-            request.headers.get("X-Hook-Signature"),
-            request.headers.get("X-Hook-Timestamp"),
-        ):
-            raise HTTPException(status_code=401, detail="bad signature")
-        try:
-            event = json.loads(raw)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="body is not JSON") from exc
-        if not isinstance(event, dict):
-            raise HTTPException(status_code=400, detail="body is not an object")
-
-        level = str(event.get("level") or "").lower()
-        title = str(event.get("title") or "").strip()
-        if level not in settings.escalate_levels:
-            return {"status": "skipped", "reason": f"level {level or 'unknown'} below escalation bar"}
-        if not title:
-            raise HTTPException(status_code=400, detail="event has no title")
-
-        source = str(event.get("source") or "unknown")
-        event_id = event.get("event_id")
-        session_key = f"probe:{source}:{event_id if event_id is not None else title[:80]}"
-        message = _EVENT_MESSAGE.format(
-            source=source,
-            level=level,
-            title=title,
-            body=str(event.get("body") or "")[:4000],
-            fields=json.dumps(event.get("fields") or {}, ensure_ascii=False, indent=1),
-        )
-        payload = {
-            "message": message,
-            "sessionKey": session_key,
-            "_meta": {"title": title, "level": level, "source": source, "event_id": event_id},
-        }
-
-        # Storm coalescing: a re-fire of the same condition (same source+title,
-        # NEW event id — redelivery of the same id stays idempotent below)
-        # joins the session that already investigated it instead of funding a
-        # cold start. The judge's reuse route stops verdict storms; this stops
-        # investigation storms, and does it with a follow-up turn, which keeps
-        # everything the first pass gathered in context.
-        if service.get(session_key) is None:
-            prior = service.same_alert(source, title, settings.coalesce_window_seconds)
-            if prior is not None and not prior.finished:
-                # Already being investigated right now; the re-fire adds no
-                # question the running session is not about to answer.
-                return {
-                    "status": "coalesced",
-                    "state": "investigating",
-                    "sessionKey": prior.session_key,
-                    "runId": prior.run_id,
-                }
-            if prior is not None:
-                budget = service.budget_state()
-                if budget is not None and budget[0] >= budget[1]:
-                    # A follow-up spends money too. The original report has
-                    # already been delivered; standing on it is not a drop.
-                    return {
-                        "status": "skipped",
-                        "reason": "budget exhausted; the previous report stands",
-                        "sessionKey": prior.session_key,
-                    }
-                refire = _REFIRE_MESSAGE.format(
-                    level=level,
-                    title=title,
-                    body=str(event.get("body") or "")[:4000],
-                    fields=json.dumps(event.get("fields") or {}, ensure_ascii=False, indent=1),
-                )
-                try:
-                    run = service.continue_run(prior.session_key, {"message": refire})
-                except RunBusyError:
-                    return {
-                        "status": "coalesced",
-                        "state": "investigating",
-                        "sessionKey": prior.session_key,
-                        "runId": prior.run_id,
-                    }
-                except NotResumableError:
-                    pass  # engine session gone; fall through to a fresh start
-                else:
-                    run.meta["refires"] = int(run.meta.get("refires") or 0) + 1
-                    run.meta["level"] = level
-                    return {"status": "coalesced", "sessionKey": run.session_key, "runId": run.run_id}
-
-        # The budget breaker guards this door only — the one path that spends
-        # money without a human asking. A refusal is not a silent drop: it
-        # settles as a report-shaped run and returns through the family loop,
-        # so the channels say WHY there is no investigation. Redelivery of an
-        # already-funded session stays idempotent and is never refused.
-        state = service.budget_state()
-        if state is not None:
-            spent, limit = state
-            if spent >= limit and service.get(session_key) is None:
-                run = service.refuse_for_budget(payload, origin="relay", spent=spent)
-                return {
-                    "status": "refused",
-                    "reason": "budget exhausted",
-                    "sessionKey": run.session_key,
-                    "runId": run.run_id,
-                }
-
-        run = service.start(payload, origin="relay")
-        return {"status": "accepted", "sessionKey": run.session_key, "runId": run.run_id}
-
     @app.post("/sessions/{session_key}/stop", dependencies=[Depends(require_token)])
     async def stop_session(session_key: str) -> dict[str, Any]:
         """Cancel the in-flight turn; it settles as a failed turn within a poll."""
@@ -472,10 +291,6 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"status": "stopping", "sessionKey": run.session_key}
 
-    # Environment memory: {workdir}/CLAUDE.md is loaded into every engine
-    # session (setting_sources includes "project"), so facts written here —
-    # topology, known false alarms, naming conventions — reach every
-    # investigation from its first turn.
     @app.get("/v1/remediations", dependencies=[Depends(require_token)])
     async def remediations_list() -> dict[str, Any]:
         return {"proposals": remediation.list_all(settings.workdir)}
@@ -505,497 +320,6 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"rejected": True, "id": row["id"]}
 
-    @app.get("/v1/memory/suggestions", dependencies=[Depends(require_token)])
-    async def memory_suggestions() -> dict[str, Any]:
-        """Facts investigations proposed for the environment memory. Open rows
-        wait for a person; the memory itself is never machine-written."""
-        rows = suggestions.load(settings.workdir)
-        return {"open": [row for row in rows if row.get("status") == "open"]}
-
-    @app.post("/v1/memory/suggestions/{suggestion_id}/accept", dependencies=[Depends(require_token)])
-    async def memory_suggestion_accept(suggestion_id: str) -> dict[str, Any]:
-        row = suggestions.resolve(settings.workdir, suggestion_id, accept=True)
-        if row is None:
-            raise HTTPException(status_code=404, detail="no such open suggestion")
-        return {"accepted": True, "line": row["line"]}
-
-    @app.post("/v1/memory/suggestions/{suggestion_id}/dismiss", dependencies=[Depends(require_token)])
-    async def memory_suggestion_dismiss(suggestion_id: str) -> dict[str, Any]:
-        row = suggestions.resolve(settings.workdir, suggestion_id, accept=False)
-        if row is None:
-            raise HTTPException(status_code=404, detail="no such open suggestion")
-        return {"dismissed": True}
-
-    @app.get("/v1/memory", dependencies=[Depends(require_token)])
-    async def memory_read() -> dict[str, Any]:
-        path = settings.workdir / "CLAUDE.md"
-        content = ""
-        if path.is_file():
-            try:
-                content = path.read_text(encoding="utf-8")
-            except OSError as exc:
-                raise HTTPException(status_code=500, detail=f"memory unreadable: {exc}") from exc
-        return {"content": content, "path": str(path)}
-
-    @app.put("/v1/memory", dependencies=[Depends(require_token)])
-    async def memory_write(payload: dict[str, Any]) -> dict[str, Any]:
-        content = payload.get("content")
-        if not isinstance(content, str):
-            raise HTTPException(status_code=400, detail="content must be a string")
-        raw = content.encode("utf-8")
-        if len(raw) > _MEMORY_MAX_BYTES:
-            raise HTTPException(status_code=413, detail=f"memory exceeds {_MEMORY_MAX_BYTES} bytes")
-        path = settings.workdir / "CLAUDE.md"
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(raw)
-        tmp.replace(path)
-        return {"saved": True, "bytes": len(raw)}
-
-    def _skill_layers() -> list[tuple[str, Path]]:
-        """The layers the ENGINE actually loads, in its precedence order —
-        the browser must not show skills that no run would see."""
-        layers = [("project", settings.workdir / ".claude" / "skills")]
-        if "user" in settings.setting_sources:
-            layers.append(("user", Path.home() / ".claude" / "skills"))
-        return layers
-
-    @app.post("/v1/runs/{session_key}/distill", dependencies=[Depends(require_token)])
-    async def run_distill(session_key: str) -> dict[str, str]:
-        """A skill draft for what this run learned — returned, never saved.
-
-        The operator's path: read the draft, prune the dead ends the record
-        cannot tell from the useful steps, save it with PUT /v1/skills/{name}.
-        The automatic path is HOOKPROBE_AUTO_DISTILL_MAX, which writes the same
-        assembly from the service at the end of a run — never through the
-        agent's own tools, which cannot reach .claude/ at all. See
-        hookprobe.distill for why those two are different acts.
-        """
-        run = service.get(session_key)
-        if run is None:
-            raise HTTPException(status_code=404, detail="session not found")
-        if not run.finished:
-            raise HTTPException(status_code=409, detail="the run is still going")
-        return draft_skill(run)
-
-    @app.get("/v1/skills", dependencies=[Depends(require_token)])
-    async def skills_list() -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for layer, skills_dir in _skill_layers():
-            if not skills_dir.is_dir():
-                continue
-            for entry in sorted(skills_dir.iterdir()):
-                manifest = entry / "SKILL.md"
-                if not (entry.is_dir() and manifest.is_file()) or entry.name in seen:
-                    continue
-                try:
-                    text = manifest.read_text(encoding="utf-8")
-                    stat = manifest.stat()
-                    files = sorted(f.name for f in entry.iterdir() if f.is_file())[:20]
-                except OSError:
-                    continue
-                seen.add(entry.name)
-                out.append(
-                    {
-                        "name": entry.name,
-                        "description": _skill_description(text),
-                        "size": stat.st_size,
-                        "modified": stat.st_mtime,
-                        "files": files,
-                        "layer": layer,
-                        # A consolidation draft is waiting for review.
-                        "proposal": (entry / "proposal.md").is_file(),
-                        # Written by a run rather than installed by a person.
-                        # Read from the sidecar, never guessed from the prose:
-                        # the page must be able to say which runbooks nobody
-                        # has looked at, and that is exactly the claim a
-                        # heuristic would get wrong.
-                        **_skill_origin(entry),
-                    }
-                )
-        return out
-
-    @app.get("/v1/skills/{name}", dependencies=[Depends(require_token)])
-    async def skill_detail(name: str) -> dict[str, Any]:
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        for layer, skills_dir in _skill_layers():
-            manifest = skills_dir / name / "SKILL.md"
-            if manifest.is_file():
-                return {"name": name, "content": manifest.read_text(encoding="utf-8"), "layer": layer}
-        raise HTTPException(status_code=404, detail="skill not found")
-
-    @app.get("/v1/skills/{name}/origin", dependencies=[Depends(require_token)])
-    async def skill_origin_detail(name: str) -> dict[str, Any]:
-        """The full provenance record — every revision, not just the last one."""
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        path = settings.workdir / ".claude" / "skills" / name / "origin.json"
-        try:
-            record = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {"name": name, "revisions": []}
-        if not isinstance(record, dict):
-            return {"name": name, "revisions": []}
-        record["name"] = name
-        return record
-
-    @app.get("/v1/skills/{name}/history", dependencies=[Depends(require_token)])
-    async def skill_history(name: str) -> list[dict[str, Any]]:
-        """Every version a write displaced, newest first — the undo the review
-        page stands on. Project layer only: nothing else is ever written to."""
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        history = settings.workdir / ".claude" / "skills" / name / "history"
-        out: list[dict[str, Any]] = []
-        if history.is_dir():
-            for path in sorted(history.glob("*-SKILL.md"), reverse=True):
-                stamp = path.name.split("-", 1)[0]
-                if stamp.isdigit():
-                    out.append({"stamp": int(stamp), "bytes": path.stat().st_size})
-        return out
-
-    @app.get("/v1/skills/{name}/history/{stamp}", dependencies=[Depends(require_token)])
-    async def skill_history_version(name: str, stamp: int) -> dict[str, Any]:
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        path = settings.workdir / ".claude" / "skills" / name / "history" / f"{stamp}-SKILL.md"
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="no such version")
-        return {"name": name, "stamp": stamp, "content": path.read_text(encoding="utf-8")}
-
-    @app.post("/v1/skills/{name}/review", dependencies=[Depends(require_token)])
-    async def skill_review(name: str) -> dict[str, Any]:
-        """Mark a runbook read without changing a character of it.
-
-        "Reviewed" has only ever meant that somebody looked. Saving an edit
-        already flips it; this is for the other outcome of a review — the text
-        was fine as the run wrote it — which previously could not be recorded
-        at all, so an approved runbook kept its unreviewed badge forever.
-        """
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        skill_dir = settings.workdir / ".claude" / "skills" / name
-        if not (skill_dir / "SKILL.md").is_file():
-            raise HTTPException(status_code=404, detail="skill not found")
-        record_revision(skill_dir, by="operator", reviewed=True, at=time.time(), detail={"action": "review"})
-        return {"reviewed": True, "name": name}
-
-    @app.get("/v1/skills/{name}/proposal", dependencies=[Depends(require_token)])
-    async def skill_proposal(name: str) -> dict[str, Any]:
-        """The consolidation draft awaiting review, beside the manifest it
-        would replace. Produced by a consolidation run, written by the service
-        — the same one-proposal-at-a-time slot approving or rejecting re-arms."""
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        path = settings.workdir / ".claude" / "skills" / name / "proposal.md"
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="no proposal")
-        return {"name": name, "content": path.read_text(encoding="utf-8")}
-
-    @app.post("/v1/skills/{name}/proposal/approve", dependencies=[Depends(require_token)])
-    async def skill_proposal_approve(name: str) -> dict[str, Any]:
-        """The consolidation becomes the manifest — through the same door every
-        write uses: the displaced version is snapshotted first, and approving
-        IS the review, so the runbook flips to reviewed."""
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        skill_dir = settings.workdir / ".claude" / "skills" / name
-        proposal = skill_dir / "proposal.md"
-        manifest = skill_dir / "SKILL.md"
-        if not proposal.is_file() or not manifest.is_file():
-            raise HTTPException(status_code=404, detail="no proposal")
-        snapshot(skill_dir, manifest)
-        tmp = manifest.with_suffix(".tmp")
-        tmp.write_text(proposal.read_text(encoding="utf-8"), encoding="utf-8")
-        tmp.replace(manifest)
-        proposal.unlink(missing_ok=True)
-        record_revision(skill_dir, by="operator", reviewed=True, at=time.time(), detail={"action": "consolidated"})
-        return {"approved": True, "name": name}
-
-    @app.post("/v1/skills/{name}/proposal/reject", dependencies=[Depends(require_token)])
-    async def skill_proposal_reject(name: str) -> dict[str, Any]:
-        """Drop the draft, note that somebody did — the manifest is untouched
-        and the threshold will re-arm as cases keep arriving."""
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        skill_dir = settings.workdir / ".claude" / "skills" / name
-        proposal = skill_dir / "proposal.md"
-        if not proposal.is_file():
-            raise HTTPException(status_code=404, detail="no proposal")
-        proposal.unlink(missing_ok=True)
-        record_revision(
-            skill_dir, by="operator", reviewed=False, at=time.time(), detail={"action": "consolidation-rejected"}
-        )
-        return {"rejected": True, "name": name}
-
-    @app.put("/v1/skills/{name}", dependencies=[Depends(require_token)])
-    async def skill_write(name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Writes always land in the project layer: editing a read-only
-        user-layer skill saves a project copy that shadows it from then on."""
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=400, detail="invalid skill name")
-        content = payload.get("content")
-        if not isinstance(content, str):
-            raise HTTPException(status_code=400, detail="content must be a string")
-        raw = content.encode("utf-8")
-        if len(raw) > _MEMORY_MAX_BYTES:
-            raise HTTPException(status_code=413, detail=f"skill exceeds {_MEMORY_MAX_BYTES} bytes")
-        skill_dir = settings.workdir / ".claude" / "skills" / name
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        manifest = skill_dir / "SKILL.md"
-        if manifest.is_file():
-            # Same undo an automatic write gets. A correction typed into the
-            # wrong runbook is the same accident as a run overwriting a good
-            # one, and neither is worth a permission check when the previous
-            # version is still on the volume.
-            snapshot(skill_dir, manifest)
-        tmp = manifest.with_suffix(".tmp")
-        tmp.write_bytes(raw)
-        tmp.replace(manifest)
-        # Someone has now read it, which is the only thing "reviewed" means.
-        record_revision(skill_dir, by="operator", reviewed=True, at=time.time())
-        return {"saved": True, "name": name, "layer": "project", "bytes": len(raw)}
-
-    @app.delete("/v1/skills/{name}", dependencies=[Depends(require_token)])
-    async def skill_delete(name: str) -> dict[str, Any]:
-        """Only the project layer is deletable. Removing a shadow lets the
-        user-layer skill of the same name resurface — the host copy was
-        never touched."""
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="skill not found")
-        skill_dir = settings.workdir / ".claude" / "skills" / name
-        if not (skill_dir / "SKILL.md").is_file():
-            for layer, layer_dir in _skill_layers():
-                if layer != "project" and (layer_dir / name / "SKILL.md").is_file():
-                    raise HTTPException(
-                        status_code=403, detail="user-layer skills are read-only (mounted from the host)"
-                    )
-            raise HTTPException(status_code=404, detail="skill not found")
-        shutil.rmtree(skill_dir)
-        return {"deleted": True, "name": name}
-
-    # Subagent roles: .claude/agents/*.md files in the same layers as skills,
-    # plus config-pinned roles from HOOKPROBE_AGENTS_CONFIG. Same copy-on-write
-    # editing story as skills — writes land in the project layer, the user
-    # layer and the config are never touched from the web.
-    def _agent_layers() -> list[tuple[str, Path]]:
-        layers = [("project", settings.workdir / ".claude" / "agents")]
-        if "user" in settings.setting_sources:
-            layers.append(("user", Path.home() / ".claude" / "agents"))
-        return layers
-
-    @app.get("/v1/agents", dependencies=[Depends(require_token)])
-    async def agents_list() -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for name, spec in _load_agents_raw(settings.agents_config).items():
-            seen.add(name)
-            out.append(
-                {
-                    "name": name,
-                    "description": str(spec.get("description") or "")[:200],
-                    "source": "config",
-                }
-            )
-        for layer, agents_dir in _agent_layers():
-            if not agents_dir.is_dir():
-                continue
-            for entry in sorted(agents_dir.glob("*.md")):
-                name = entry.stem
-                if name in seen:
-                    continue
-                try:
-                    text = entry.read_text(encoding="utf-8")
-                    stat = entry.stat()
-                except OSError:
-                    continue
-                seen.add(name)
-                out.append(
-                    {
-                        "name": name,
-                        "description": _skill_description(text),
-                        "modified": stat.st_mtime,
-                        "source": layer,
-                    }
-                )
-        return out
-
-    @app.get("/v1/agents/{name}", dependencies=[Depends(require_token)])
-    async def agent_detail(name: str) -> dict[str, Any]:
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="agent not found")
-        config_agents = _load_agents_raw(settings.agents_config)
-        if name in config_agents:
-            content = json.dumps(config_agents[name], ensure_ascii=False, indent=2)
-            return {"name": name, "content": content, "source": "config"}
-        for layer, agents_dir in _agent_layers():
-            path = agents_dir / f"{name}.md"
-            if path.is_file():
-                return {"name": name, "content": path.read_text(encoding="utf-8"), "source": layer}
-        raise HTTPException(status_code=404, detail="agent not found")
-
-    @app.put("/v1/agents/{name}", dependencies=[Depends(require_token)])
-    async def agent_write(name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=400, detail="invalid agent name")
-        if name in _load_agents_raw(settings.agents_config):
-            raise HTTPException(status_code=403, detail="config-pinned agents are edited in HOOKPROBE_AGENTS_CONFIG")
-        content = payload.get("content")
-        if not isinstance(content, str):
-            raise HTTPException(status_code=400, detail="content must be a string")
-        raw = content.encode("utf-8")
-        if len(raw) > _MEMORY_MAX_BYTES:
-            raise HTTPException(status_code=413, detail=f"agent exceeds {_MEMORY_MAX_BYTES} bytes")
-        agents_dir = settings.workdir / ".claude" / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
-        path = agents_dir / f"{name}.md"
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(raw)
-        tmp.replace(path)
-        return {"saved": True, "name": name, "source": "project", "bytes": len(raw)}
-
-    @app.delete("/v1/agents/{name}", dependencies=[Depends(require_token)])
-    async def agent_delete(name: str) -> dict[str, Any]:
-        if not _SKILL_NAME.match(name):
-            raise HTTPException(status_code=404, detail="agent not found")
-        path = settings.workdir / ".claude" / "agents" / f"{name}.md"
-        if not path.is_file():
-            if name in _load_agents_raw(settings.agents_config):
-                raise HTTPException(status_code=403, detail="config-pinned agents cannot be deleted here")
-            for layer, agents_dir in _agent_layers():
-                if layer != "project" and (agents_dir / f"{name}.md").is_file():
-                    raise HTTPException(status_code=403, detail="user-layer agents are read-only")
-            raise HTTPException(status_code=404, detail="agent not found")
-        path.unlink()
-        return {"deleted": True, "name": name}
-
-    # The system prompt append: the same editor story as the environment
-    # memory — a file on the volume, hot-read by every run.
-    @app.get("/v1/system-prompt", dependencies=[Depends(require_token)])
-    async def system_prompt_read() -> dict[str, Any]:
-        path = settings.system_prompt_append or (settings.workdir / "system-prompt.md")
-        content = ""
-        if path.is_file():
-            try:
-                content = path.read_text(encoding="utf-8")
-            except OSError as exc:
-                raise HTTPException(status_code=500, detail=f"system prompt unreadable: {exc}") from exc
-        return {"content": content, "path": str(path)}
-
-    @app.put("/v1/system-prompt", dependencies=[Depends(require_token)])
-    async def system_prompt_write(payload: dict[str, Any]) -> dict[str, Any]:
-        content = payload.get("content")
-        if not isinstance(content, str):
-            raise HTTPException(status_code=400, detail="content must be a string")
-        raw = content.encode("utf-8")
-        if len(raw) > _MEMORY_MAX_BYTES:
-            raise HTTPException(status_code=413, detail=f"system prompt exceeds {_MEMORY_MAX_BYTES} bytes")
-        path = settings.system_prompt_append or (settings.workdir / "system-prompt.md")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(raw)
-        tmp.replace(path)
-        return {"saved": True, "bytes": len(raw)}
-
-    @app.get("/v1/audit", dependencies=[Depends(require_token)])
-    async def audit_tail(limit: int = 200, session: str = "") -> dict[str, Any]:
-        """The flight recorder, newest last. Reads the most recent day files
-        only — the full history stays on disk for grep."""
-        limit = max(1, min(1000, limit))
-        audit_dir = settings.workdir / "audit"
-        entries: list[dict[str, Any]] = []
-        if audit_dir.is_dir():
-            for path in sorted(audit_dir.glob("*.jsonl"))[-3:]:
-                for line in path.read_text(encoding="utf-8").splitlines():
-                    try:
-                        entry = json.loads(line)
-                    except ValueError:
-                        continue
-                    if session and session not in str(entry.get("session") or ""):
-                        continue
-                    entries.append(entry)
-        return {"entries": entries[-limit:], "count": len(entries[-limit:])}
-
-    @app.get("/v1/config", dependencies=[Depends(require_token)])
-    async def config_view() -> dict[str, Any]:
-        """The operational knobs, redacted: secret VALUES never appear —
-        booleans say whether they are set."""
-        prompt_path = settings.system_prompt_append or (settings.workdir / "system-prompt.md")
-        return {
-            "model": settings.model,
-            "max_turns": settings.max_turns,
-            "max_concurrent": settings.max_concurrent,
-            "default_timeout_seconds": settings.default_timeout_seconds,
-            "max_timeout_seconds": settings.max_timeout_seconds,
-            "workdir": str(settings.workdir),
-            "setting_sources": list(settings.setting_sources),
-            "skills_filter": settings.skills or None,
-            "escalate_levels": sorted(settings.escalate_levels),
-            "budget_usd": settings.budget_usd or None,
-            "budget_window_hours": settings.budget_window_hours,
-            "retention_days": settings.retention_days or None,
-            "system_prompt": {"path": str(prompt_path), "active": bool(_system_prompt_append(settings))},
-            "agents_config": str(settings.agents_config) if settings.agents_config else None,
-            "mcp_config": str(settings.mcp_config) if settings.mcp_config else None,
-            "return_url": settings.return_url or None,
-            "alarm_configured": bool(settings.alarm_url),
-            "event_secret_set": bool(settings.event_secret),
-            "return_secret_set": bool(settings.return_secret),
-            "token_required": bool(settings.token),
-        }
-
-    @app.get("/v1/mcp", dependencies=[Depends(require_token)])
-    async def mcp_servers() -> dict[str, Any]:
-        """What the next run would load — read fresh from the config file.
-
-        Env VALUES are secrets (API tokens live there) and are never
-        returned; the key names alone prove the wiring."""
-        servers = _load_mcp_servers(settings.mcp_config, include_disabled=True)
-        described: dict[str, Any] = {}
-        for name, spec in servers.items():
-            if not isinstance(spec, dict):
-                described[name] = {"invalid": True}
-                continue
-            described[name] = {
-                key: spec.get(key) for key in ("command", "args", "type", "url") if spec.get(key) is not None
-            }
-            described[name]["env_keys"] = sorted((spec.get("env") or {}).keys())
-            if spec.get("enabled") is False:
-                described[name]["disabled"] = True
-        return {
-            "config": str(settings.mcp_config) if settings.mcp_config else None,
-            "servers": described,
-        }
-
-    @app.get("/v1/budget", dependencies=[Depends(require_token)])
-    async def budget() -> dict[str, Any]:
-        # The spend is reported either way: "what has this cost" is a question
-        # worth answering even for an operator who declined to set a ceiling.
-        fresh, cached = service.window_cache()
-        window = {
-            "window_hours": settings.budget_window_hours,
-            "spent_usd": round(service.window_spend(), 6),
-            # The prefix an investigation pays for is the harness's, not ours,
-            # so the only lever left is reuse — which means this is the number
-            # to watch. Reads over reads-plus-fresh: the provider caches
-            # implicitly here, so cache writes are always zero.
-            "input_tokens": fresh,
-            "cache_read_tokens": cached,
-            "cache_hit_ratio": round(cached / (cached + fresh), 4) if (cached + fresh) else None,
-        }
-        state = service.budget_state()
-        if state is None:
-            return {"enabled": False, **window}
-        spent, limit = state
-        return {
-            "enabled": True,
-            "budget_usd": limit,
-            **window,
-            "remaining_usd": round(max(0.0, limit - spent), 6),
-            "exhausted": spent >= limit,
-        }
-
     # The page itself carries no data — every call it makes presents the
     # bearer token, so serving the markup unauthenticated is safe.
     @app.get("/", include_in_schema=False)
@@ -1006,61 +330,10 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     async def ui() -> HTMLResponse:
         return HTMLResponse(_UI_PAGE.read_text(encoding="utf-8"))
 
-    @app.get("/metrics")
-    async def metrics() -> Any:
-        """Prometheus text format, rendered by hand — three gauges are not a
-        client-library dependency.
-
-        Unauthenticated like /healthz, and for the same reason: the scraper is
-        a machine on the private network, and nothing here is more sensitive
-        than counts and a dollar figure. This is how the platform's existing
-        alerting finally sees the investigator — the platform's own deliveries
-        once failed silently for 8 days, and this service had the same blind
-        spot until now.
-        """
-        from fastapi.responses import PlainTextResponse
-
-        running, queued = service.turn_counts()
-        lines = [
-            "# TYPE hookprobe_up gauge",
-            "hookprobe_up 1",
-            "# TYPE hookprobe_active_runs gauge",
-            f"hookprobe_active_runs {service.active_count()}",
-            "# TYPE hookprobe_running_turns gauge",
-            f"hookprobe_running_turns {running}",
-            "# TYPE hookprobe_queued_turns gauge",
-            f"hookprobe_queued_turns {queued}",
-            "# TYPE hookprobe_window_spend_usd gauge",
-            f"hookprobe_window_spend_usd {service.window_spend():.6f}",
-        ]
-        budget = service.budget_state()
-        if budget is not None:
-            lines += [
-                "# TYPE hookprobe_budget_usd gauge",
-                f"hookprobe_budget_usd {budget[1]:.6f}",
-                "# TYPE hookprobe_budget_exhausted gauge",
-                f"hookprobe_budget_exhausted {1 if budget[0] >= budget[1] else 0}",
-            ]
-        try:
-            runbooks = len(list((settings.workdir / ".claude" / "skills").glob("*/SKILL.md")))
-        except OSError:
-            runbooks = 0
-        lines += ["# TYPE hookprobe_runbooks gauge", f"hookprobe_runbooks {runbooks}"]
-        return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
-
-    @app.get("/healthz")
-    async def healthz() -> dict[str, Any]:
-        running, queued = service.turn_counts()
-        return {
-            "status": "ok",
-            "version": __version__,
-            "active_runs": service.active_count(),
-            # Slot arithmetic: `running` holds a semaphore slot; `queued` is
-            # started but waiting for one. A storm shows up here first.
-            "running_turns": running,
-            "queued_turns": queued,
-            # Reports that never reached the pipe — alert on this going up.
-            "return_failures": service.return_failure_count(),
-        }
+    # The rest of the surface, grouped by what it is about. The event door takes
+    # no token guard on purpose: it is authenticated by hookrelay's signature.
+    events.register(app, settings, service)
+    library.register(app, settings, service, require_token)
+    ops.register(app, settings, service, require_token)
 
     return app

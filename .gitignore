@@ -8,6 +8,12 @@ __pycache__/
 # Rotation backups hold the same credentials as .env.
 .env.bak-*
 data/
+# The investigator's and the shadow run's bind-mount roots. Same reason as
+# data/, higher stakes: these hold session transcripts, distilled skills, the
+# environment memory and the audit log — real hosts and real commands, in a
+# public repository. `data/` alone did not cover them.
+probe-data/
+shadow-data/
 .DS_Store
 docker-compose.override.yml
 

@@ -11,8 +11,79 @@ permissions:
   contents: read
   packages: write
 
+# Grouped but NOT cancel-in-progress: this is the one workflow that publishes.
+# Cancelling a run mid-flight leaves whichever services already finished with a
+# moved `:latest` and the rest pointing at the previous release — a split stack
+# nobody asked for and nothing records. Two tags pushed close together queue and
+# both finish, in order, which is the behaviour a registry wants.
+concurrency:
+  group: release-${{ github.ref }}
+
 jobs:
+  # The header's claim, made true. Nothing used to verify it: tags are cut by
+  # hand, the per-service CI workflows are path-filtered so they may never have
+  # run on the tagged commit at all, and a tag on a red commit published
+  # `:latest` for all three services without a word. The gate was a sentence in
+  # a comment, not a job.
+  #
+  # It delegates to each component's own scripts/gate.sh instead of repeating
+  # the step lists. Those scripts ARE the CI replicas — each component's
+  # test_gate_matches_ci pins its gate and its workflow to each other — and a
+  # third copy of the list here would only be a third thing to drift.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        # Each service gates on the interpreter its own image ships, which is
+        # why this carries a version per service rather than one for all three:
+        # a gate that passes on a Python nobody deploys has proved less than it
+        # looks like. Keep each entry equal to that service's Dockerfile FROM.
+        include:
+          - service: hookrelay
+            python: "3.14"
+          - service: hookjudge
+            python: "3.14"
+          - service: hookprobe
+            python: "3.12"
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: "pip"
+      - run: python -m pip install --upgrade pip
+      # Every tool the gate runs is pinned in the component's requirements.txt,
+      # ruff included — so this install is the whole toolchain, at the versions
+      # the component's own CI job uses.
+      - run: pip install -r requirements.txt
+      # PY has to be a path: the gate tests it with -x before running, and a
+      # bare `python` would look like a missing venv and abort with setup advice.
+      # Node is pre-installed on GitHub-hosted ubuntu runners, which is what the
+      # gate's inline-page-JS step needs.
+      - run: PY="$(command -v python)" bash scripts/gate.sh
+
+  # The three checks no component gate covers — the docs links, the shared
+  # design language, the agent notes. ci-stack.yml runs them on every push, but
+  # "green on main last week" is not "green on this commit", and a tag is cut
+  # from a commit.
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: every relative link in the docs resolves
+        run: python3 scripts/check-docs.py
+      - name: the three pages share one design language
+        run: python3 scripts/assert_design.py
+      - name: agent notes keep their shape
+        run: python3 scripts/assert_agent_notes.py
+
   images:
+    needs: [gate, stack]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -21,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -29,7 +100,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.service }}
           platforms: linux/amd64,linux/arm64

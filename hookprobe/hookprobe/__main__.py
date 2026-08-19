@@ -38,6 +38,29 @@ def _check_transcripts_writable() -> None:
         )
 
 
+def _warn_open_doors(settings: Settings) -> None:
+    """Say at boot which doors are open, where an operator will actually look.
+
+    Both of these are deliberate configurations for a private network, and
+    neither is a state to drift into. The event door is the loud one: it is the
+    only mutating route with no bearer token — that is by design, it is the
+    pipe's door — and verify_timestamped returns True on an empty secret, which
+    is the default. So an operator who sets HOOKPROBE_TOKEN and stops there has
+    locked every door a person uses and left open the one that spends money
+    without anyone asking.
+    """
+    logger = logging.getLogger("hookprobe")
+    if not settings.token:
+        logger.warning("HOOKPROBE_TOKEN is empty — accepting unauthenticated requests")
+    if not settings.event_secret:
+        logger.warning(
+            "HOOKPROBE_EVENT_SECRET is empty — POST /hooks/event accepts unsigned events from "
+            "anyone who can reach this port, and that door starts paid investigations. The bearer "
+            "token does not cover it: set the secret to the value hookrelay signs its to-probe "
+            "channel with."
+        )
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     settings = Settings.load()
@@ -49,8 +72,7 @@ def main() -> None:
     store = RunStore(settings.workdir / "results")
     engine = ClaudeAgentEngine(settings)
     service = RunService(settings, engine, store)
-    if not settings.token:
-        logging.getLogger("hookprobe").warning("HOOKPROBE_TOKEN is empty — accepting unauthenticated requests")
+    _warn_open_doors(settings)
     uvicorn.run(create_app(settings, service), host=settings.host, port=settings.port, log_level="info")
 
 

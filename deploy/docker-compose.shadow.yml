@@ -87,7 +87,13 @@ services:
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
       HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
       HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_B_AI_BASE_URL:-https://api.deepseek.com/v1}
-      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}
+      # Its own key, falling back to A's. Every other B-side knob is
+      # independently settable, and the key was not — so pointing brain B at a
+      # second provider meant editing HOOKJUDGE_AI_API_KEY, which is brain A's
+      # key too, and the comparison quietly became one model against itself. The
+      # fallback keeps the common case (same provider, two models) a one-line
+      # .env, while HOOKJUDGE_B_AI_API_KEY is all it takes to cross providers.
+      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_B_AI_API_KEY:-${HOOKJUDGE_AI_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}}
       HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_B_AI_MODEL:-deepseek-reasoner}
       # Reasoner list price (USD per 1k) as of the v3.2 cut; re-check on change.
       HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_B_AI_PRICE_IN_PER_1K:-0.00028}

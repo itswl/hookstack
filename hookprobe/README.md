@@ -81,7 +81,7 @@ what runs.
 | `HOOKPROBE_MAX_TIMEOUT_SECONDS` | `1800` | Upper clamp on requested timeouts |
 | `HOOKPROBE_WORKDIR` | `/data` | Persistent workspace (skills, results) |
 | `HOOKPROBE_MCP_CONFIG` | *(unset)* | Path to an `.mcp.json`-shaped file of MCP servers |
-| `HOOKPROBE_EVENT_SECRET` | *(empty = unsigned)* | Verifies the pipe's deliveries to `/hooks/event` |
+| `HOOKPROBE_EVENT_SECRET` | *(empty = unsigned)* | Verifies the pipe's deliveries to `/hooks/event`. This is the one mutating route `HOOKPROBE_TOKEN` does not cover — the pipe delivers there, so the signature is its credential — and it is the only door that starts paid investigations. Setting the token and leaving this empty locks every door a person uses and leaves that one open; boot says so in the log |
 | `HOOKPROBE_RETURN_URL` | *(unset = no return)* | Where event-door investigations report back — the pipe's `probe-notify` front door |
 | `HOOKPROBE_RETURN_SECRET` | *(empty = unsigned)* | Signs the return delivery (timestamped HMAC) |
 | `HOOKPROBE_ESCALATE_LEVELS` | `critical,high` | The only content judgement the investigator makes: which levels are worth a paid run |

@@ -7,7 +7,7 @@ name = "hookprobe"
 version = "0.1.0"
 description = "Single-purpose deep-analysis agent runner: OpenClaw-compatible contract, Claude Agent SDK engine, read-only by construction."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
@@ -26,7 +26,12 @@ pythonpath = ["."]
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+# py312 across all three services, and equal to the floor above: the image
+# ships 3.12, so a rule set aimed at an older Python only hides idioms this
+# code may already use.
+target-version = "py312"
 
+# One rule set across all three services, so a file reads the same wherever it
+# lives: pycodestyle, pyflakes, import order, pyupgrade, bugbear, simplify.
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

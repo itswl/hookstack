@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from hookrelay.config import Config
 from hookrelay.pipeline import handle_hook
 
@@ -181,7 +179,6 @@ async def test_trace_endpoint_is_read_guarded_and_assembles(client, store):
     assert body["origin"]["id"] == event_id and body["returns"] == []
 
 
-@pytest.mark.asyncio
 async def test_migration_adds_the_column_to_an_existing_ledger(tmp_path):
     """The production ledger has real events in it: CREATE TABLE IF NOT EXISTS
     would leave an old table untouched and every correlation query would fail."""

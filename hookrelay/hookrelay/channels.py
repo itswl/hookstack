@@ -94,6 +94,33 @@ def _feishu_sign_fields(secret: str, now: float) -> dict[str, str]:
     return {"timestamp": timestamp, "sign": sign}
 
 
+# Ledger hygiene. The schema promises "body only, never the headers: headers
+# carry signatures and tokens" — true for every dialect except Feishu's custom
+# bot, which signs in the BODY. So the ledger stored a live `sign`, /trace
+# served it under a read guard that is open until a token is configured, and
+# anyone who could reach the board could post into the group. The alert content
+# is what answers a receiver's dispute; the signature is derived, reproducible,
+# and nobody's evidence.
+_SIGNING_KEYS = ("sign",)
+
+
+def redact_for_ledger(body: bytes | None) -> str | None:
+    """The bytes that left the socket, minus anything that authenticates them."""
+    if body is None:
+        return None
+    text = body.decode("utf-8", "replace")
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(parsed, dict) or not any(key in parsed for key in _SIGNING_KEYS):
+        return text
+    for key in _SIGNING_KEYS:
+        if key in parsed:
+            parsed[key] = "[redacted]"
+    return json.dumps(parsed, ensure_ascii=False)
+
+
 @registry.channel("feishu")
 def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     processed = _processed(channel, message)
@@ -200,7 +227,8 @@ def build_generic(channel: Channel, message: dict[str, Any], now: float) -> Buil
     normalized (default): hookrelay's event summary.
     payload: raw — the ORIGINAL inbound payload, verbatim in content. This is
     what makes hookrelay a TRANSPARENT edge: point the url at your platform's
-    ingest and the brain receives exactly what the monitoring system sent, unchanged, with hookrelay's ledger in between.
+    ingest and the brain receives exactly what the monitoring system sent,
+    unchanged, with hookrelay's ledger in between.
 
     The signature covers EXACTLY the bytes returned, and the header NAME is
     configurable (signature_header) so hookrelay can speak a receiver's

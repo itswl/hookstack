@@ -11,6 +11,13 @@ on:
 permissions:
   contents: read
 
+# One run per branch or PR at a time; a push supersedes the run it interrupted.
+# Verification only, so a cancelled run costs an answer about a commit that is
+# no longer the tip.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # One job: the suite is hermetic (no database service, no network, no model
   # calls) and sub-second. scripts/gate.sh runs this exact list locally.
@@ -24,7 +31,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          # The version this service SHIPS (Dockerfile: python:3.14-slim). It
+          # tested on 3.12 while production ran 3.14, so the suite never once
+          # ran on the interpreter that serves traffic.
+          python-version: "3.14"
           cache: "pip"
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt

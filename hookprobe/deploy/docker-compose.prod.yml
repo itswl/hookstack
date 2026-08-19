@@ -5,7 +5,7 @@
 # name below is this deployment's actual network — set yours in the
 # `networks:` block at the bottom.
 #
-#   cd /opt/docker-compose/hookrelay
+#   cd /opt/docker-compose/hookstack
 #   docker compose --env-file .env \
 #     -f hookprobe/deploy/docker-compose.prod.yml up -d --build
 #
@@ -28,6 +28,12 @@
 #   - state is a bind mount at the deployment root, not a named volume, so
 #     the accumulated runbooks and transcripts sit in plain sight for
 #     backup and review
+
+# Explicit, because compose otherwise derives the project name from the compose
+# FILE's directory — `deploy`, which is also the pipe's prod file's directory.
+# Two production deployments under one project name means a `down` or a `ps`
+# meant for one of them answers for both.
+name: hookprobe-prod
 
 services:
   hookprobe:

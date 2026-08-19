@@ -192,6 +192,26 @@ def test_rule_floor_is_crude_but_defensible(title: str, expected: str):
     assert rule_verdict(event(title=title, body="", level="")).importance == expected
 
 
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        # "latest" contains "test". Under plain containment this floored to low.
+        ("Payment gateway 5xx 41% on latest deploy", "high"),
+        ("Withdrawal stuck on the latest release", "high"),
+        # A drill that mentions payment is still a drill — LOW is checked first
+        # on purpose, and that only holds while it cannot fire on a fragment.
+        ("Payment breach on test account", "low"),
+        ("Drill: payment failover", "low"),
+    ],
+)
+def test_the_floor_mutes_on_a_word_never_on_a_fragment(title: str, expected: str):
+    """The LOW list is the only one that silences, and the floor carries the
+    load precisely when the model is down — so a payment alert reading "low"
+    because a neighbouring word happened to contain "test" is the worst
+    failure this file has to prevent."""
+    assert rule_verdict(event(title=title, body="", level="")).importance == expected
+
+
 def test_rule_floor_infers_a_type_when_it_can():
     # body="" on purpose: the default fixture body mentions a top-up, and
     # leaving it in makes every case look like business (it did).
@@ -234,6 +254,38 @@ def test_recovery_is_read_not_asked(title: str, expected: bool):
     """Whether the condition ENDED is a fact about the alert, so it is never
     put to the model — and "ok" only counts as a standalone word."""
     assert event(title=title, body="").is_recovery is expected
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Unresolved deadlocks climbing on db-1",  # the word inside a longer word
+        "Backlog not cleared for 30m",  # a recovery word under a negation
+        "恢复中: 支付网关仍在重试",  # recovering, not recovered
+        "未恢复: 数据库仍然不可用",
+    ],
+)
+def test_a_live_incident_is_never_read_as_its_own_recovery(title: str):
+    """The recovery route skips the model and the pipe renders a green card, so
+    a false positive here reports a firing incident as resolved. Each of these
+    read as a recovery under plain containment."""
+    assert event(title=title, body="").is_recovery is False
+
+
+@pytest.mark.parametrize(
+    "firing,resolved",
+    [
+        ("[FIRING:2] Payment API down", "[RESOLVED:2] Payment API down"),
+        ("[FIRING] Payment API down", "[RESOLVED] Payment API down"),
+        ("[FIRING:1] Disk will fill", "[RESOLVED:1] Disk will fill"),
+    ],
+)
+def test_a_grouped_pair_is_one_condition(firing: str, resolved: str):
+    """Alertmanager's own templates put the group state in front of the title.
+    While only [RESOLVED] was stripped, the pair had two identities and every
+    recovery fell through to the rule floor to re-derive an importance — the
+    defect condition_title exists to prevent, arriving through the prefix."""
+    assert event(title=firing, body="").identity == event(title=resolved, body="").identity
 
 
 # ── identity ─────────────────────────────────────────────────────────────────
@@ -530,7 +582,6 @@ async def _ledger(tmp_path: Any) -> Any:
     return store
 
 
-@pytest.mark.anyio
 async def test_a_rule_reuses_its_own_paid_verdict(tmp_path):
     """The second firing of a rule is a question already answered.
 
@@ -556,7 +607,6 @@ async def test_a_rule_reuses_its_own_paid_verdict(tmp_path):
     await store.close()
 
 
-@pytest.mark.anyio
 async def test_rule_reuse_refuses_the_cases_that_would_hide_a_problem(tmp_path):
     store = await _ledger(tmp_path)
     fields = {"alertname": "disk-full"}
@@ -582,7 +632,6 @@ async def test_rule_reuse_refuses_the_cases_that_would_hide_a_problem(tmp_path):
     await store.close()
 
 
-@pytest.mark.anyio
 async def test_an_existing_ledger_gains_the_new_columns(tmp_path):
     """CREATE TABLE IF NOT EXISTS does nothing to a table already there."""
     import aiosqlite
@@ -655,7 +704,6 @@ class _ScriptedAI:
         return _Response(200, _completion('{"summary":"disk filling","importance":"high"}'))
 
 
-@pytest.mark.anyio
 async def test_structured_output_steps_down_to_what_the_provider_accepts():
     """A provider that refuses a format must not cost an alert its verdict.
 
@@ -680,7 +728,6 @@ async def test_structured_output_steps_down_to_what_the_provider_accepts():
     assert ai.dialects == ["schema", "tools", "tools"]
 
 
-@pytest.mark.anyio
 async def test_a_pinned_dialect_is_not_negotiated_away():
     from hookjudge.judge import _dialect_for_model, ai_verdict
 
@@ -693,7 +740,6 @@ async def test_a_pinned_dialect_is_not_negotiated_away():
     assert verdict.route == "ai"
 
 
-@pytest.mark.anyio
 async def test_a_400_that_is_not_about_the_format_still_degrades():
     """Rate limits and bad keys must not be mistaken for a format rejection."""
     from hookjudge.judge import _dialect_for_model, ai_verdict
@@ -726,7 +772,6 @@ def test_explicit_recovery_flag_beats_keyword_sniffing():
     assert Incoming.parse({**flat, "title": "[RESOLVED] top-up"}, now=1.0).is_recovery is True
 
 
-@pytest.mark.anyio
 async def test_agreement_compares_platform_level_with_judge_importance(tmp_path):
     """The shadow run's product: how often the judge and the upstream platform
     agree, from the two columns every row carries. Recoveries are excluded —

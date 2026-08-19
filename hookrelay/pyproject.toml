@@ -8,3 +8,8 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+
+# One rule set across all three services, so a file reads the same wherever it
+# lives: pycodestyle, pyflakes, import order, pyupgrade, bugbear, simplify.
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

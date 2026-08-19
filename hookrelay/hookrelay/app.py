@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import tempfile
 from collections.abc import AsyncIterator
@@ -35,6 +36,8 @@ from hookrelay.security import token_ok
 from hookrelay.settings import Settings
 from hookrelay.store import Store, now_ts
 
+logger = logging.getLogger("hookrelay.app")
+
 
 def create_app(settings: Settings | None = None, cfg: Config | None = None) -> FastAPI:
     """App factory: tests hand in Settings/Config directly; production loads
@@ -45,7 +48,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     # boot, not the first event.
     loaded_plugins = registry.load_plugins(app_settings.plugins_dir)
     if loaded_plugins:
-        print(f"[hookrelay] plugins loaded: {', '.join(loaded_plugins)}")
+        logger.info("plugins loaded: %s", ", ".join(loaded_plugins))
     app_config = cfg or Config.from_file(app_settings.config_path)
     store = Store(app_settings.db_path)
     live = Live()
@@ -71,9 +74,9 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                     next_purge = now + 3600
                     purged = await store.purge_older_than(now - app_settings.retention_days * 86400, now)
                     if purged["events"] or purged["silences"]:
-                        print(f"[hookrelay] retention: purged {purged['events']} events, {purged['silences']} silences")
-            except Exception as error:  # noqa: BLE001 — the loop must survive anything
-                print(f"[hookrelay] worker error: {error.__class__.__name__}: {error}")
+                        logger.info("retention: purged %d events, %d silences", purged["events"], purged["silences"])
+            except Exception:  # noqa: BLE001 — the loop must survive anything
+                logger.exception("worker error")
             await asyncio.sleep(app_settings.worker_interval_seconds)
 
     @contextlib.asynccontextmanager

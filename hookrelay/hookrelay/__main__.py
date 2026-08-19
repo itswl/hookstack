@@ -1,5 +1,8 @@
 """`python -m hookrelay` — run the relay with uvicorn."""
 
+from __future__ import annotations
+
+import logging
 import os
 
 import uvicorn
@@ -8,6 +11,7 @@ from hookrelay.app import create_app
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     uvicorn.run(
         create_app(),
         host=os.environ.get("HOOKRELAY_HOST", "127.0.0.1"),

@@ -100,6 +100,18 @@ _RULE_HIGH = (
     "不可用",
 )
 _RULE_LOW = ("test", "demo", "staging", "drill", "please ignore", "测试", "请忽略", "演练")
+# The LOW list is the only one that SILENCES, so it is the only one that must
+# not fire on a fragment: plain containment read "on latest deploy" as "test"
+# and floored a payment alert to low, and a model outage is exactly when that
+# floor is load-bearing. Latin words anchor on word boundaries (so "tests" no
+# longer matches either — a drill judged normally is the safe direction); the
+# CJK words have no boundary to anchor to and keep matching on containment.
+# _RULE_HIGH and _TYPE_HINTS stay on containment deliberately: their failure
+# direction is escalating or mislabelling, never muting.
+_RULE_LOW_MENTION = re.compile(
+    "|".join(rf"\b{re.escape(word)}\b" if word.isascii() else re.escape(word) for word in _RULE_LOW),
+    re.IGNORECASE,
+)
 _TYPE_HINTS = (
     (
         "business",
@@ -155,7 +167,10 @@ def rule_verdict(event: Incoming, *, degraded_reason: str = "") -> Verdict:
     mistakes it for analysis.
     """
     haystack = f"{event.title} {event.body}".lower()
-    if any(word in haystack for word in _RULE_LOW):
+    # LOW is checked first on purpose: a drill that mentions payment is still a
+    # drill. That only holds while LOW cannot fire on a fragment — see
+    # _RULE_LOW_MENTION.
+    if _RULE_LOW_MENTION.search(haystack):
         importance = "low"
     elif any(word in haystack for word in _RULE_HIGH):
         importance = "high"

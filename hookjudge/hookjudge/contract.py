@@ -47,6 +47,42 @@ _MARKER_EDGE = re.compile(
     re.IGNORECASE,
 )
 
+# [FIRING] / [FIRING:2] / [RESOLVED:2] — Alertmanager's own notification
+# templates put the group state in front of the title, and the `:N` form
+# carries the group size. Neither belongs in an identity: the pair
+# "[FIRING:2] Payment API down" / "[RESOLVED:2] Payment API down" is ONE
+# condition, and leaving the prefix in gave it two identities, which stranded
+# every recovery on the rule floor. _MARKER_BRACKETED cannot do this job — it
+# only knows the recovery words, so it strips [RESOLVED] and leaves [FIRING].
+_FIRING_PREFIX = re.compile(r"^\[(?:FIRING|RESOLVED)(?::\d+)?\]\s*", re.IGNORECASE)
+
+# A recovery word only counts where the text ASSERTS the condition ended.
+# Three ways that went wrong, each verified against live wording:
+#   "Unresolved deadlocks climbing on db-1"  — inside a longer word
+#   "Backlog not cleared for 30m"            — under a negation
+#   "恢复中: 支付网关仍在重试"                  — recovering, not recovered
+# Latin words anchor on word boundaries; the CJK ones have no boundary to
+# anchor to and match on containment, so they lean on the guards below.
+_RECOVERY_MENTION = re.compile(
+    "|".join(rf"\b{re.escape(word)}\b" if word.isascii() else re.escape(word) for word in _RECOVERY_WORDS),
+    re.IGNORECASE,
+)
+_NEGATED_BEFORE = re.compile(r"(?:not|isn't|is not|hasn't|has not|no longer|未|尚未|没有|无法)\s*\W*$", re.IGNORECASE)
+# 恢复中 / 恢复了一部分 — the condition is still moving.
+_IN_PROGRESS_AFTER = ("中",)
+
+
+def _asserts_recovery(text: str) -> bool:
+    """Does this text say the condition ENDED, rather than that it is still going?"""
+    for match in _RECOVERY_MENTION.finditer(text):
+        preceding = text[max(0, match.start() - 24) : match.start()]
+        if _NEGATED_BEFORE.search(preceding):
+            continue
+        if text[match.end() :].startswith(_IN_PROGRESS_AFTER):
+            continue
+        return True
+    return False
+
 
 def _dict_or_empty(value: Any) -> dict[str, Any]:
     """The wire is untyped; a dict where one was hoped for, else nothing."""
@@ -63,8 +99,13 @@ def condition_title(title: str) -> str:
     fell through to the rule floor and re-derived an importance, so a "high"
     alert would end with a "medium" recovery card. That is the contradiction
     this whole design says it prevents.
+
+    The group-state prefix goes first, because it decorates BOTH sides of the
+    pair — [FIRING:2] on the firing, [RESOLVED:2] on its recovery — and only
+    the recovery half looks like a recovery word.
     """
-    cleaned = _MARKER_BRACKETED.sub(" ", title)
+    cleaned = _FIRING_PREFIX.sub("", title)
+    cleaned = _MARKER_BRACKETED.sub(" ", cleaned)
     cleaned = _MARKER_EDGE.sub("", cleaned)
     return " ".join(cleaned.split()) or " ".join(title.split())
 
@@ -72,8 +113,6 @@ def condition_title(title: str) -> str:
 # Judgement routes, in the order the ledger reports them. Every judged event
 # has exactly one, and it is the first question about cost: what did we
 # actually pay for?
-_FIRING_PREFIX = re.compile(r"^\[(?:FIRING|RESOLVED)(?::\d+)?\]\s*")
-
 ROUTE_AI = "ai"  # a model was called
 ROUTE_REUSE = "reuse"  # a prior verdict for the same identity was reused
 ROUTE_RECOVERY = "recovery"  # the alert ended; reuse what its firing said
@@ -234,7 +273,7 @@ class Incoming:
         haystack = f"{self.title} {self.body} {' '.join(self.fields.values())}".lower()
         # "ok" only counts as a standalone word: "okhttp timeout" is not a recovery.
         words = set(haystack.replace("[", " ").replace("]", " ").replace(":", " ").split())
-        return any(word in haystack for word in _RECOVERY_WORDS) or "ok" in words
+        return _asserts_recovery(haystack) or "ok" in words
 
 
 @dataclass(frozen=True, slots=True)

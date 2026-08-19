@@ -1,5 +1,7 @@
 """Operational surfaces: retention pruning and the health slot arithmetic."""
 
+from __future__ import annotations
+
 import json
 import os
 import time
@@ -57,6 +59,34 @@ def test_healthz_slot_arithmetic(tmp_path) -> None:
             time.sleep(0.01)
         assert (health["running_turns"], health["queued_turns"]) == (2, 1)
         engine.release.set()
+
+
+def test_boot_says_out_loud_which_doors_are_open(tmp_path, caplog) -> None:
+    """The event door is the only mutating route with no bearer token — that is
+    deliberate, it is the pipe's door — and an empty secret verifies anything.
+    So an operator who sets HOOKPROBE_TOKEN and stops there has locked every
+    door a person uses and left open the one that spends money.
+    """
+    import logging
+
+    from hookprobe.__main__ import _warn_open_doors
+
+    with caplog.at_level(logging.WARNING):
+        _warn_open_doors(make_settings(tmp_path, token=TOKEN, event_secret=""))
+    assert "HOOKPROBE_EVENT_SECRET is empty" in caplog.text
+    assert "/hooks/event" in caplog.text
+    assert "HOOKPROBE_TOKEN is empty" not in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        _warn_open_doors(make_settings(tmp_path, token="", event_secret="pipe-secret"))
+    assert "HOOKPROBE_TOKEN is empty" in caplog.text
+    assert "HOOKPROBE_EVENT_SECRET" not in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        _warn_open_doors(make_settings(tmp_path, token=TOKEN, event_secret="pipe-secret"))
+    assert caplog.text == "", "a deployment with both set hears nothing"
 
 
 def test_skills_filter_expression() -> None:

@@ -228,7 +228,7 @@
       <tr><th>Area</th><th>How to read it</th></tr>
       <tr><td>The three cards</td><td>Queued = waiting to be delivered. Dead letters &gt; 0 deserves a human — with <code>HOOKRELAY_ALARM_URL</code> set it alarms on its own</td></tr>
       <tr><td>An event row</td><td>Open it for the full decision chain: which routes were considered, why each matched or was skipped, where it was delivered. The round-trip button pulls <code>/trace</code>: the payload as received, the exact body sent per channel, and what each brain sent back</td></tr>
-      <tr><td>The refresh control</td><td>↻ refreshes now; the interval beside it (manual / 15s / 60s / 5m, remembered per browser) is the only clock on the page. The stamp top-right says when the data is from</td></tr>
+      <tr><td>The refresh control</td><td>This page keeps no clock. It holds one streaming connection to <code>/live</code> and refetches what you are currently looking at when the service says something changed — so an alert storm is one refetch, not a tick per event. ↻ refetches on demand, the badge beside it reads <b>live</b> or <b>offline</b> (a dropped stream reconnects on its own, backing off), and the stamp top-right says when the data is from</td></tr>
       <tr><td>The config tab</td><td>An editor for config.yaml (the file is the source of truth): it only writes when validation passes, and applies hot — no restart. Needs the admin token</td></tr>
     </table>
 
