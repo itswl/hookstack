@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 import httpx
@@ -32,6 +33,8 @@ from hookrelay.breaker import CircuitBreaker
 from hookrelay.config import Config
 from hookrelay.settings import Settings
 from hookrelay.store import Store
+
+logger = logging.getLogger("hookrelay.delivery")
 
 _RATE_DEFER_SECONDS = 10
 _BREAKER_DEFER_SECONDS = 15
@@ -91,10 +94,31 @@ async def process_due(
     for row in rows:
         by_channel.setdefault(str(row["channel"]), []).append(row)
 
+    # return_exceptions is not politeness here — it is what stops one channel
+    # group's failure from ABANDONING the others. A bare gather re-raises the
+    # first exception the moment it happens, while the sibling tasks keep
+    # running unawaited: process_due is already gone, the next tick re-picks
+    # rows those orphans are half-way through (due_deliveries selects on
+    # status/next_attempt_at, it claims nothing), and a downstream that has
+    # already received the alert receives it a second time. Collecting the
+    # failures instead means every group is finished before we return, so a
+    # broken channel costs its own rows a tick rather than somebody else's
+    # duplicate.
     counts = await asyncio.gather(
-        *(_drain_channel(store, cfg, settings, client, now, group, alarm, breaker) for group in by_channel.values())
+        *(_drain_channel(store, cfg, settings, client, now, group, alarm, breaker) for group in by_channel.values()),
+        return_exceptions=True,
     )
-    return sum(counts)
+    processed = 0
+    for channel_name, count in zip(by_channel, counts, strict=True):
+        if isinstance(count, BaseException):
+            # Loud, named, and not re-raised: those rows are still queued and
+            # still due, so the next tick retries them — but the sends that DID
+            # succeed elsewhere in this batch are finished, and throwing now
+            # would only hide that they were.
+            logger.error("delivery batch for channel %s failed — its rows stay due", channel_name, exc_info=count)
+            continue
+        processed += count
+    return processed
 
 
 async def _drain_channel(

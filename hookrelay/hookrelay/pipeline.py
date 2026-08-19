@@ -39,6 +39,12 @@ async def handle_hook(
     `extracted` is normally produced by the source's adapter in the HTTP
     layer; direct callers (tests, embedding) may omit it and get the default
     template extraction.
+
+    `dry_run` (from /explain) answers "what WOULD this payload do": nothing is
+    recorded, nothing is enqueued, and the STAGES are told as well, so one with
+    a side effect reports instead of acting. The same walk on purpose — an
+    explanation built from a second code path is one that drifts from the
+    behaviour it claims to explain.
     """
     ctx = EventContext(
         source=source,
@@ -56,7 +62,7 @@ async def handle_hook(
     if quoted:
         ctx.correlation_id = quoted
         ctx.steps.append({"gate": "correlate", "with": quoted})
-    rt = Runtime(store=store, config=cfg, settings=settings, http_client=client)
+    rt = Runtime(store=store, config=cfg, settings=settings, http_client=client, dry_run=dry_run)
 
     for stage in cfg.pipeline:
         processor = registry.PROCESSORS[stage.type]
@@ -76,9 +82,12 @@ async def handle_hook(
         return {"event_id": event_id, "outcome": "skipped", "skip_code": "no_route", "steps": ctx.steps}
 
     if dry_run:
-        # Nothing recorded, nothing enqueued: the answer to "what WOULD this
-        # payload do" must not itself become an event, or the explain button
-        # becomes a way to spam the group.
+        # Nothing recorded, nothing enqueued — and the stages were TOLD (each
+        # got rt.dry_run), because "no event row" was never the whole promise:
+        # the http stage used to POST the payload to the configured brain on the
+        # way past, so the answer to "what WOULD this payload do" reached the
+        # network and handed a real payload to a real service. A dry run does
+        # not leave this process.
         return {
             "dry_run": True,
             "outcome": "routed",
@@ -94,11 +103,32 @@ async def handle_hook(
 
 
 async def record_storm_suppressed(
-    store: Store, source: Source, payload: Any, now: float, count: int, threshold: int
+    store: Store,
+    source: Source,
+    payload: Any,
+    now: float,
+    count: int,
+    threshold: int,
+    *,
+    extracted: dict[str, Any] | None = None,
 ) -> int:
     """A fused event still gets an account — the storm is exactly when you most
-    need to know what arrived. It walks no pipeline and reaches no channel."""
-    ctx = EventContext(source=source, payload=payload, extracted=extract_event(source, payload), now=now)
+    need to know what arrived. It walks no pipeline and reaches no channel.
+
+    `extracted` comes from the source's ADAPTER, exactly as on the live path
+    (direct callers may omit it, as with handle_hook). This used to re-derive
+    the fields with extract_event, which skips the adapter entirely: a reshaping
+    adapter — examples/plugins/aws_sns_source.py unwraps a JSON-string `Message`
+    so the real alert fields sit one level in — then mis-titled every row a
+    storm produced. The rows kept precisely so the storm stays accountable were
+    the ones nobody could identify afterwards.
+    """
+    ctx = EventContext(
+        source=source,
+        payload=payload,
+        extracted=extracted if extracted is not None else extract_event(source, payload),
+        now=now,
+    )
     ctx.steps.append({"gate": "extract", "template": ctx.extracted.get("_template", "inline")})
     ctx.steps.append({"gate": "storm_fuse", "result": "suppressed", "window_count": count, "threshold": threshold})
     return await _record(store, ctx, "skipped", "storm_suppressed", [])

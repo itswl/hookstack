@@ -238,7 +238,7 @@
       <tr><th>Endpoint</th><th>Purpose</th></tr>
       <tr><td><code>POST /hook/{source}</code></td><td>The front door. Each source is declared in config.yaml with its signature, templates and level map</td></tr>
       <tr><td><code>GET /status</code> · <code>GET /trace/{id}</code></td><td>What this board reads / one alert's whole round trip, including the bytes of both directions</td></tr>
-      <tr><td><code>POST /explain/{source}</code></td><td>Dry run: what this payload WOULD do — nothing recorded, nothing delivered (admin)</td></tr>
+      <tr><td><code>POST /explain/{source}</code></td><td>Dry run: what this payload WOULD do — nothing recorded, nothing delivered, no brain called (admin)</td></tr>
       <tr><td><code>GET/PUT /config</code> · <code>POST /config/reload</code></td><td>Read, replace and hot-reload the config (admin)</td></tr>
       <tr><td><code>POST /silences</code> · <code>DELETE /silences/{id}</code></td><td>The silence valve (admin)</td></tr>
       <tr><td><code>POST /deliveries/{id}/retry</code></td><td>A dead letter's second chance (admin)</td></tr>

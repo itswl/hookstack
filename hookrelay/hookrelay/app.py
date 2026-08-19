@@ -73,6 +73,25 @@ def _im_actor(payload: dict[str, Any]) -> str:
     return ""
 
 
+async def _capped_body(request: Request, limit: int) -> bytes:
+    """Read the body, refusing anything over `limit` — cheaply where possible.
+
+    `await request.body()` buffers the WHOLE request before anyone can object,
+    so a length check after it means a 1 GB POST is paid for in memory and only
+    then refused: the door was open the entire time it was being filled.
+    Content-Length is the cheap first gate. It is caller-supplied, so it can lie
+    or be absent (chunked encoding sends none), which is exactly why the
+    post-read check stays — two gates, one answer.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.strip().isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail="body too large")
+    body = await request.body()
+    if len(body) > limit:
+        raise HTTPException(status_code=413, detail="body too large")
+    return body
+
+
 def create_app(settings: Settings | None = None, cfg: Config | None = None) -> FastAPI:
     """App factory: tests hand in Settings/Config directly; production loads
     them from the environment and config.yaml."""
@@ -193,9 +212,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         source = app.state.config.sources.get(source_name)
         if source is None:
             raise HTTPException(status_code=404, detail="unknown source")
-        body = await request.body()
-        if len(body) > app_settings.max_body_bytes:
-            raise HTTPException(status_code=413, detail="body too large")
+        body = await _capped_body(request, app_settings.max_body_bytes)
         # The source's ADAPTER owns both verification and payload reading —
         # GitHub's header scheme and Grafana's are one plugin apart.
         adapter = registry.SOURCE_ADAPTERS[source.adapter]
@@ -213,22 +230,25 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         verdict = app.state.fuse.check(source.name, source.storm_threshold, source.storm_window_seconds, now_ts())
         if verdict == "reject":
             raise HTTPException(status_code=429, detail="storm fuse open (hard)")
+        # The adapter reads the payload for BOTH paths from here on. A suppressed
+        # event is still recorded, so it must be recorded the way this door
+        # actually reads its senders: the storm path used to re-extract with the
+        # door's templates alone, and a reshaping adapter (SNS hides the alert
+        # inside a JSON-string `Message`) mis-titled every row the storm made.
+        # It sits after the hard reject, which stores nothing and so reads nothing.
+        extracted = adapter.parse(source, payload)
         if verdict == "suppress":
-            try:
-                payload_obj = json.loads(body or b"{}")
-            except ValueError:
-                payload_obj = {}
             event_id = await record_storm_suppressed(
                 app.state.store,
                 source,
-                payload_obj,
+                payload,
                 now_ts(),
                 app.state.fuse.window_count(source.name),
                 source.storm_threshold,
+                extracted=extracted,
             )
             return JSONResponse({"event_id": event_id, "outcome": "skipped", "skip_code": "storm_suppressed"})
 
-        extracted = adapter.parse(source, payload)
         result = await handle_hook(
             app.state.store,
             app.state.config,
@@ -250,8 +270,12 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
         Signature verification is skipped ON PURPOSE — you are asking about a
         payload you are holding, not delivering one. Nothing is recorded and
-        nothing is enqueued, so the explain button can never become a way to
-        put a message in the group."""
+        nothing is enqueued, so the explain button can never become a way to put
+        a message in the group; and every stage is TOLD it is a dry run
+        (Runtime.dry_run), because the `http` stage used to POST to the
+        configured brain on the way past — a "side-effect-free" answer that
+        reached the network and handed a real payload to a real service. It
+        reports the call it would have made instead."""
         _admin_guard(x_admin_token)
         source = app.state.config.sources.get(source_name)
         if source is None:
@@ -297,9 +321,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         spend money and restart services, so a double press must lose the race
         rather than be handled twice.
         """
-        body = await request.body()
-        if len(body) > app_settings.max_body_bytes:
-            raise HTTPException(status_code=413, detail="body too large")
+        body = await _capped_body(request, app_settings.max_body_bytes)
         callback_secret = app_settings.card_callback_secret
         if callback_secret and not verify_signature(
             callback_secret,

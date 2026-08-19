@@ -167,6 +167,99 @@ def test_a_field_may_not_shadow_a_routing_key():
         Config.from_dict(inline_shadow)
 
 
+def test_a_fingerprint_field_nothing_extracts_is_refused_at_boot():
+    """The quietest total alert loss this service can suffer: a misspelled name
+    resolves to "" for every event, so every alert of that source shares ONE
+    fingerprint and everything after the first is skipped as `duplicate`. On the
+    board that reads as excellent dedup. So it fails at boot, like every other
+    name in the config."""
+    typo = dict(MULTI)
+    typo["sources"] = [
+        {
+            "name": "inbound",
+            "secret": "",
+            "templates": ["grafana-in", "sns-in", "catch-all"],
+            "fingerprint_fields": ["title", "metirc"],
+        }
+    ]
+    with pytest.raises(ConfigError, match="fingerprint_fields names"):
+        Config.from_dict(typo)
+
+    inline_typo = {
+        "sources": [
+            {"name": "d", "secret": "", "title": "{t}", "fields": {"service": "{s}"}},
+            {"name": "e", "secret": "", "title": "{t}", "fingerprint_fields": ["titel"]},
+        ],
+        "channels": [{"name": "c", "type": "generic", "url": "https://x.example"}],
+        "routes": [{"name": "r", "source": "*", "send_to": ["c"]}],
+    }
+    with pytest.raises(ConfigError, match="fingerprint_fields names"):
+        Config.from_dict(inline_typo)
+
+
+def test_fields_only_one_template_extracts_can_still_carry_identity():
+    """The honest check is the UNION of every template, never one of them: a
+    door's templates are ordered ALTERNATIVES, so `metric` (grafana-in only) and
+    `topic` (sns-in only) are both legitimate identity for this door. Events read
+    by the other template simply miss the one they do not extract, which is
+    documented behaviour and must not become a boot failure — the fingerprint
+    names here are deliberately spread across two templates so that a check
+    against any SINGLE template refuses this config."""
+    from hookrelay.extract import fingerprint
+
+    raw = dict(MULTI)
+    raw["templates"] = [
+        {**MULTI["templates"][1], "fields": {"topic": "{TopicArn}"}} if t["name"] == "sns-in" else t
+        for t in MULTI["templates"]
+    ]
+    raw["sources"] = [
+        {
+            "name": "inbound",
+            "secret": "",
+            "templates": ["grafana-in", "sns-in", "catch-all"],
+            "fingerprint_fields": ["title", "metric", "topic"],
+        }
+    ]
+    door = Config.from_dict(raw).sources["inbound"]
+    assert door.fingerprint_fields == ("title", "metric", "topic")
+
+    # And the fields really reach identity — the check is not just paperwork.
+    other_metric = {**GRAFANA, "evalMatches": [{"metric": "memory"}]}
+    assert fingerprint(door, extract_event(door, GRAFANA)) != fingerprint(door, extract_event(door, other_metric))
+    # Each shape misses the field its own template does not extract, and that is
+    # the point: identity is per reading, not per door.
+    assert extract_event(door, GRAFANA)["fields"] == {"metric": "disk"}
+    assert extract_event(door, SNS)["fields"] == {"topic": "arn:aws:sns:x"}
+
+
+def test_an_enrichment_stage_before_dedup_widens_the_vocabulary():
+    """A `set` stage writes its field names down in the config, so they are
+    knowable and accepted — but only ahead of the dedup stage that takes the
+    fingerprint, because a field set afterwards is still "" when identity is
+    decided. An `http` brain answers with names nobody here can enumerate, so
+    that config is not judged at all: refusing honest config is worse than
+    missing a typo."""
+    base = {
+        "sources": [{"name": "d", "secret": "", "title": "{t}", "fingerprint_fields": ["title", "team"]}],
+        "channels": [{"name": "c", "type": "generic", "url": "https://x.example"}],
+        "routes": [{"name": "r", "source": "*", "send_to": ["c"]}],
+    }
+    tag = {"type": "set", "name": "tag", "set": {"fields": {"team": "db"}}}
+
+    assert Config.from_dict(dict(base, pipeline=[tag, "dedup", "routes"])).sources["d"].fingerprint_fields == (
+        "title",
+        "team",
+    )
+    with pytest.raises(ConfigError, match="ahead of the dedup stage"):
+        Config.from_dict(dict(base, pipeline=["dedup", tag, "routes"]))
+
+    brain = {"type": "http", "name": "brain", "url": "https://b.example"}
+    assert Config.from_dict(dict(base, pipeline=[brain, "dedup", "routes"])).sources["d"].fingerprint_fields == (
+        "title",
+        "team",
+    )
+
+
 async def test_the_ledger_records_which_template_read_the_event(store):
     cfg = Config.from_dict(MULTI)
     result = await handle_hook(store, cfg, cfg.sources["inbound"], SNS, now=1000.0)

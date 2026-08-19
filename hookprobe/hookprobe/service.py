@@ -596,7 +596,14 @@ class RunService:
         return row
 
     async def _apply_remediation(self, row: dict[str, Any]) -> None:
-        await remediation.execute(self._settings.workdir, row, bash_timeout_ms=self._settings.bash_timeout_ms)
+        await remediation.execute(
+            self._settings.workdir,
+            row,
+            bash_timeout_ms=self._settings.bash_timeout_ms,
+            # The second gate needs the file, not the patterns read at the click:
+            # an operator narrowing it mid-procedure should stop what has not run.
+            allowlist=self._settings.remediation_allowlist,
+        )
         self._board_changed()
 
     def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:

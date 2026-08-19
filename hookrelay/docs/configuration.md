@@ -35,6 +35,7 @@ sources:
     fields:                            # extra extracted keys — visible on the page,
       rule: "{ruleId}"                 # usable in route/filter conditions
     fingerprint_fields: [title]        # duplicate identity; empty = title+body
+                                       # names checked AT BOOT (see below)
     dedup_window_seconds: 60
     storm_threshold: 60                # storm FUSE: arrivals per window; 0 = off
     storm_window_seconds: 60
@@ -106,6 +107,17 @@ extracts can still drive a route, and events read by the other templates
 simply miss it. Field names may not collide with `source` / `level` / `title`
 (the routing context merges fields last, so a collision would silently shadow
 a routing key) — config refuses it.
+
+**`fingerprint_fields` is checked against that vocabulary at boot.** A
+misspelled name used to resolve to `""` for every event, so every alert of that
+source shared ONE fingerprint and all but the first were skipped as
+`duplicate` — total alert loss that reads on the board as excellent dedup. The
+check is the UNION of every template the door lists, plus `title` / `body` /
+`level`, plus any `set` stage standing ahead of the dedup stage that takes the
+fingerprint (a field set after it is still empty when identity is decided). A
+pipeline whose enrichment cannot be enumerated — an `http` brain, or a plugin
+processor — is not judged at all: refusing honest config is worse than missing
+a typo.
 
 The single-shape inline form (`title:`/`body:`/`level:` directly on the source)
 stays valid forever; it becomes a one-entry list called `inline`.
@@ -308,9 +320,12 @@ channels:
     secret: ${PLATFORM_SECRET}
     signature_header: X-Webhook-Signature
     options: {payload: raw}
-# edge dedup must not swallow recoveries: put the state in the fingerprint
+# edge dedup must not swallow recoveries: put the state in the fingerprint —
+# and a name in fingerprint_fields must be one this door really extracts
 sources:
   - name: grafana
+    fields:
+      state: "{state}"
     fingerprint_fields: [title, state]
 ```
 

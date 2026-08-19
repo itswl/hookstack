@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
+import sqlite3
 import time
 from dataclasses import replace
 from typing import Any
@@ -809,3 +811,192 @@ async def test_status_and_metrics_account_for_attention_not_only_spend(app_clien
     # whole scrape into a parse error, so every condition's numbers vanish.
     assert 'cert \\"prod-api\\" expiring' in text
     assert "hookjudge_condition_mattered{" in text
+
+
+# ── the promises the code makes about not losing things ───────────────────────
+
+
+async def test_an_alert_that_cannot_be_recorded_is_loud_rather_than_lost(tmp_path, monkeypatch, caplog):
+    """The one failure nobody else holds a copy of. The sender was answered 202
+    and will not retry, and a judging failure leaves no ledger row to
+    dead-letter, so an unguarded exception meant the alert simply never
+    existed — traceable only through asyncio's "Task exception was never
+    retrieved" on stderr, with no identity in it and no timestamp to line up."""
+    caplog.set_level(logging.ERROR)
+    app = create_app(settings=_settings(tmp_path, alarm_url="https://alarm.example/bot"))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        sink = DualSink()
+        monkeypatch.setattr(app.state, "client", sink)
+
+        async def locked(*_args: Any, **_kwargs: Any) -> int:
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(app.state.store, "record", locked)
+
+        accepted = await client.post("/events", json=EVENT)
+        assert accepted.status_code == 202, "the door still answers fast — the loss is behind it"
+
+        for _ in range(300):
+            await asyncio.sleep(0.01)
+            if sink.alarms:
+                break
+        assert sink.alarms, "a lost alert reaches the one channel that does not run through the pipe"
+        assert "no verdict was recorded" in sink.alarms[0], "and it names ITS failure, not the return leg's"
+        assert "Single top-up over 500" in sink.alarms[0]
+        assert "database is locked" in sink.alarms[0]
+        assert "judged nowhere" in caplog.text, "a dropped alert is worth a log line too"
+
+        # The docstring's promise, checked where it is made: it returns, and the
+        # 0 says no row was written.
+        from hookjudge.contract import Incoming
+
+        event = Incoming.parse(EVENT, now=time.time())
+        assert await app.state.judge_and_record(sink, event) == 0
+
+
+async def test_a_non_http_failure_on_the_return_leg_still_counts_as_an_attempt(tmp_path, monkeypatch):
+    """It caught httpx.HTTPError alone, so anything else escaped to the worker's
+    catch-all: the row stayed `queued` with return_attempts unchanged, which
+    means it never backed off and never died. pending_returns is ORDER BY id
+    LIMIT 50, so that row holds a queue slot forever."""
+    app = create_app(settings=_settings(tmp_path, return_max_attempts=1, alarm_url="https://alarm.example/bot"))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+
+        class Broken:
+            """Fails the return in a way httpx.HTTPError does not cover."""
+
+            def __init__(self) -> None:
+                self.alarms: list[str] = []
+
+            async def post(self, url: str, **kwargs: Any) -> Any:
+                if "alarm.example" in url:
+                    self.alarms.append(str(((kwargs.get("json") or {}).get("content") or {}).get("text")))
+
+                    class _R:
+                        status_code = 200
+                        text = "{}"
+
+                    return _R()
+                raise RuntimeError("event loop is closed")
+
+        sink = Broken()
+        monkeypatch.setattr(app.state, "client", sink)
+        await client.post("/events", json=EVENT)
+
+        store = app.state.store
+        for _ in range(300):
+            await asyncio.sleep(0.01)
+            rows = await store.recent(1)
+            if rows and rows[0]["return_status"] != "queued":
+                break
+        row = (await store.recent(1))[0]
+        assert row["return_attempts"] == 1, "a failure we cannot name is still a failed attempt"
+        assert row["return_status"] == "dead", "so the dead-letter path can reach it"
+        assert "RuntimeError" in row["return_error"], "named by class, not called a transport error it was not"
+        assert sink.alarms and "dead-lettered" in sink.alarms[0]
+        assert row["return_attempted_at"], "and the attempt clock the backoff measures from is set"
+
+
+async def test_a_row_that_cannot_be_marked_does_not_starve_the_queue_behind_it(app_client, monkeypatch):
+    """The return queue is ORDER BY id LIMIT 50, so the broken row is first
+    again on every tick. Letting its failure out abandoned every row behind it
+    in that tick — and in every tick after it, which is starvation, not a
+    retry."""
+    store = app_client.app.state.store
+    sink = Sink()
+    monkeypatch.setattr(app_client.app.state, "client", sink)
+    real_mark = store.mark_return
+
+    async def flaky(
+        row_id: int, status: str, attempts: int, error: str | None, *, attempted_at: float | None = None
+    ) -> None:
+        # A fresh ledger per test, so the first judgement is id 1.
+        if row_id == 1:
+            raise sqlite3.OperationalError("database is locked")
+        await real_mark(row_id, status, attempts, error, attempted_at=attempted_at)
+
+    monkeypatch.setattr(store, "mark_return", flaky)
+
+    await app_client.post("/events", json=EVENT)
+    await _settle(app_client)
+    behind = dict(EVENT, event=dict(EVENT["event"], title="the one queued behind it"))
+    await app_client.post("/events", json=behind)
+
+    rows: dict[str, Any] = {}
+    for _ in range(400):
+        await asyncio.sleep(0.01)
+        rows = {r["title"]: r for r in await store.recent(5)}
+        if rows.get("the one queued behind it", {}).get("return_status") == "sent":
+            break
+    assert rows["the one queued behind it"]["return_status"] == "sent", "the row behind the broken one still went"
+    assert rows["Single top-up over 500"]["return_status"] == "queued", "and the broken one is still owed a mark"
+
+
+async def test_the_label_write_and_the_bulk_export_disable_themselves_when_unguarded(tmp_path):
+    """Reads with no token configured stay open — deliberate dev mode across this
+    family. A write cannot borrow that rule, and hookrelay already settled the
+    split for all three services (see its security.py token_ok: "dev mode for
+    read, endpoint disabled for admin"). Unconfigured, these two let whoever
+    found the port rewrite the labels the eval set is built from and download
+    every alert body in the ledger."""
+    app = create_app(settings=_settings(tmp_path, read_token="", db_path=str(tmp_path / "open.db")))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        assert (await client.get("/status")).status_code == 200, "dev mode for read does not change"
+        assert (await client.get("/disagreements")).status_code == 200
+        assert (await client.get("/metrics")).status_code == 200
+
+        # 403, not 401: no credential opens this, so inviting one is a lie.
+        labeled = await client.post("/judgements/1/label", json={"importance": "high"})
+        assert labeled.status_code == 403
+        assert "HOOKJUDGE_READ_TOKEN" in labeled.json()["detail"], "and it says what would enable it"
+        assert (await client.get("/labels/export")).status_code == 403
+
+        # /feedback is signature-authenticated like /events — the same sender
+        # through the same edge — not token-guarded. It is not in this category.
+        pressed = await client.post("/feedback", json={"action": {"kind": "useful"}, "correlation_id": "hr-x"})
+        assert pressed.status_code == 202
+
+
+async def test_a_busy_ledger_does_not_hide_the_peers_of_a_burst(app_client, monkeypatch):
+    """The origin match once ran in Python over "the last 50 rows in the
+    window", so unrelated traffic between two rules from one origin hid every
+    peer either of them had — and cross-alert grouping failed on exactly the
+    busy ledger it exists for. Both filters are in the query now; the LIMIT
+    caps the peers instead of the search, which only a ledger busier than that
+    limit can show."""
+    store = app_client.app.state.store
+    monkeypatch.setattr(app_client.app.state, "client", Sink())
+    from hookjudge.contract import Incoming, Verdict
+
+    verdict = Verdict(summary="s", importance="high", route="ai", model="m").normalized()
+
+    def alert(title: str, origin: str) -> Incoming:
+        return Incoming.parse(
+            {"event": {"title": title, "body": "x", "level": "high", "fields": {"origin": origin}}},
+            now=time.time(),
+        )
+
+    await store.record(alert("disk full on db-1", "prom"), verdict, 10)
+    # More unrelated rows in the window than the peer LIMIT, each from an origin
+    # of its own so none of them form a burst either.
+    for n in range(60):
+        await store.record(alert(f"unrelated rule {n}", f"other-system-{n}"), verdict, 10)
+    await store.record(alert("api latency p99 over 2s", "prom"), verdict, 10)
+
+    rows = {r["title"]: r for r in await store.recent(200)}
+    burst = rows["api latency p99 over 2s"]["burst_id"]
+    assert burst, "the second rule found its peer through 60 rows of unrelated traffic"
+    assert rows["disk full on db-1"]["burst_id"] == burst, "and the first member joined it retroactively"
+    assert rows["unrelated rule 7"]["burst_id"] == "", "a different origin is not this incident"

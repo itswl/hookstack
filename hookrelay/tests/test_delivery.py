@@ -188,6 +188,51 @@ async def test_rate_limit_defers_without_burning_attempts(store, cfg, settings, 
     assert (await store.queue_counts())["queued"] == 0
 
 
+async def test_one_channels_failure_does_not_abandon_its_siblings(store, cfg, settings, monkeypatch):
+    """The fan-out gathered its channel groups without return_exceptions, so a
+    store error in one group propagated out of process_due while the sibling
+    groups kept running ORPHANED — and the next tick re-picked the rows those
+    orphans were half-way through (due_deliveries selects on
+    status/next_attempt_at; it claims nothing), sending a second copy to a
+    downstream that already had the alert.
+
+    So: the failure is contained and named, every other group is FINISHED before
+    process_due returns, and the failed row is left queued for the next tick."""
+    import asyncio
+
+    import hookrelay.delivery as delivery_mod
+
+    await _route_one(store, cfg)
+    sent: list[str] = []
+
+    async def slow_send(client, channel, message):
+        # A real send yields to the loop; an abandoned group is one that has not
+        # come back yet when process_due returns.
+        await asyncio.sleep(0.01)
+        sent.append(channel.name)
+        return True, "http 200", b"{}"
+
+    monkeypatch.setattr(delivery_mod.channels, "send", slow_send)
+
+    doomed = next(row["id"] for row in await store.due_deliveries(now=1001.0) if row["channel"] == "mirror")
+    original_mark_sent = store.mark_sent
+
+    async def flaky_mark_sent(delivery_id, now, sent_body=None):
+        if delivery_id == doomed:
+            raise RuntimeError("database is locked")
+        await original_mark_sent(delivery_id, now, sent_body)
+
+    monkeypatch.setattr(store, "mark_sent", flaky_mark_sent)
+
+    processed = await process_due(store, cfg, settings, FakeClient(), now=1001.0)
+
+    assert processed == 2, "the two healthy groups are accounted for; the broken one is not"
+    assert sorted(sent) == ["ding-main", "feishu-main", "mirror"]
+    counts = await store.queue_counts()
+    assert counts["sent"] == 2, "no sibling was left mid-flight when process_due returned"
+    assert counts["queued"] == 1 and counts["dead"] == 0, "the broken channel's row waits for the next tick"
+
+
 async def test_unconfigured_channel_dead_letters_with_reason(store, cfg, settings):
     await _route_one(store, cfg)
     slim = cfg.__class__(

@@ -17,6 +17,10 @@ because nothing about it looks like an error to the run that loads it.
 
 from __future__ import annotations
 
+import fcntl
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from hookprobe.settings import Settings
@@ -27,6 +31,34 @@ def system_prompt_path(settings: Settings) -> Path:
     return settings.system_prompt_append or (settings.workdir / "system-prompt.md")
 
 
+@contextmanager
+def locked(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on `path` for a read-modify-write cycle.
+
+    Every read-modify-write in this service was correct only because it was
+    synchronous and one event loop serialised it — an invariant nothing wrote
+    down and nothing enforced. It breaks the moment there is a second writer:
+    `uvicorn --workers 2`, or a second replica on the same volume. The
+    suggestions queue is the clearest loss — resolve() reads every row, drops
+    one and writes the rest back, so an append that landed in between is simply
+    gone.
+
+    A neighbouring `.lock` file rather than the file itself, because the cycle
+    replaces its target by rename: locking an inode that is about to be unlinked
+    protects nothing after the rename. flock is advisory and per-open-file, which
+    is exactly the scope wanted here, and it releases when the process dies —
+    a crash mid-cycle must not leave the queue permanently unwritable.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    guard = path.with_name(path.name + ".lock")
+    with guard.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def atomic_write(path: Path, raw: bytes) -> None:
     """Replace `path` with `raw` in one rename, leaving no partial file behind.
 
@@ -35,7 +67,10 @@ def atomic_write(path: Path, raw: bytes) -> None:
     best-effort (a run record persisting itself, where the in-memory copy still
     serves), but neither of them wants the litter left on the volume.
     """
-    tmp = path.with_suffix(".tmp")
+    # The scratch name carries the pid: `path.with_suffix(".tmp")` gave every
+    # writer of one path the SAME scratch file, so two of them interleaved their
+    # bytes there and whichever renamed second published the mixture.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         tmp.write_bytes(raw)
         tmp.replace(path)
