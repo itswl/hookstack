@@ -74,14 +74,28 @@ def main(argv: list[str]) -> int:
     # secret as "unsigned source" — so one typo'd variable name turns the door
     # the platform forwards production traffic to into an open one, quietly, at
     # boot, with nothing in the log to say so. Two failure modes, one check.
+    # An explicit empty secret is allowed on the hops that never leave the
+    # compose network, and only on those: a return door the pipe hands itself,
+    # and the bridge it hands a card to. Everything else must carry a ${NAME},
+    # and a MISSING secret key is still a failure everywhere — the difference
+    # between `secret: ""` and no line at all is the difference between a
+    # decision and an oversight.
+    internal_hops = {"judge-notify", "to-me"}
     for kind in ("sources", "channels"):
         for item in raw.get(kind) or []:
+            name = item.get("name")
             secret = item.get("secret")
             if secret is None:
-                problems.append(f"{kind[:-1]} {item.get('name')!r}: no secret — an unsigned hop in a shadow")
+                problems.append(f"{kind[:-1]} {name!r}: no secret key at all — an unsigned hop by omission")
+            elif str(secret).strip() == "":
+                if name not in internal_hops:
+                    problems.append(
+                        f"{kind[:-1]} {name!r}: secret is empty — only an in-network hop may be unsigned, "
+                        f"and this one is not on the list"
+                    )
             elif not ENV_REF.match(str(secret).strip()):
                 problems.append(
-                    f"{kind[:-1]} {item.get('name')!r}: secret is not a ${{NAME}} reference "
+                    f"{kind[:-1]} {name!r}: secret is not a ${{NAME}} reference "
                     f"— secrets do not belong in a committed file"
                 )
 
@@ -93,18 +107,32 @@ def main(argv: list[str]) -> int:
             print(f"  FAIL  {problem}")
         return 1
 
+    # The platform's door faces outward and must be signed. The return door does
+    # not: it is one container of this deployment handing a verdict to another on
+    # a private network, and requiring a secret there would only mean inventing
+    # one to satisfy this check. Named explicitly rather than inferred, so adding
+    # a THIRD unsigned door stays a decision somebody makes on purpose.
+    internal_doors = {"judge-notify"}
     for name, src in cfg.sources.items():
+        if name in internal_doors:
+            continue
         if not src.secret:
             problems.append(f"source {name!r}: secret resolved empty — the door would accept unsigned events")
 
-    # A shadow that can page somebody is not a shadow. `generic` is the plain
-    # webhook type; the chat types (feishu, dingtalk, wecom) exist to reach
-    # humans. And a hostname with a dot in it is not on the compose network —
-    # that is what pasting a real bot URL in "just to see the cards once" looks
-    # like from here, which is the way this file stops being a shadow.
+    # The rule this file used to enforce was "no chat channel types at all", on
+    # the reasoning that a shadow which can page somebody is not a shadow. That
+    # was right until 2026-08-20, when the shadow gained the one thing it was
+    # missing: somewhere for a human to RULE on a verdict. The ledger could say
+    # the two brains agreed 84% of the time and never which one was right, and a
+    # ruling has to be asked for somewhere.
+    #
+    # So the line moved from "which type" to "how far". A chat channel is allowed
+    # — it is how a card with buttons reaches one person — but every channel must
+    # still resolve on the compose network. A hostname with a dot in it is the
+    # thing actually worth refusing: pasting a real bot URL in "just to see the
+    # cards once" is how this file stops being a shadow and becomes an
+    # unaccountable second notifier for somebody else's alerts.
     for name, ch in cfg.channels.items():
-        if ch.type != "generic":
-            problems.append(f"channel {name!r}: type {ch.type!r} can reach a person — a shadow may not")
         host = urlparse(ch.url).hostname or ""
         if "." in host or host in ("localhost", "127.0.0.1"):
             problems.append(f"channel {name!r}: {ch.url} leaves the compose network — the verdict goes nowhere else")
@@ -119,28 +147,48 @@ def main(argv: list[str]) -> int:
     # the compose file and to `channels` but left out of the route gets nothing,
     # its ledger stays empty, and the three-way comparison has a hole in it that
     # looks exactly like agreement.
-    for source in cfg.sources:
+    #
+    # Checked against the BRAINS specifically, not against every channel. The
+    # earlier version demanded that every source reach every channel, which was
+    # true while the only channels were the two judges and became wrong the
+    # moment a return door and a card channel existed: the platform's door feeds
+    # the brains, the return door feeds the card, and neither should feed the
+    # other. What must not happen is a brain nobody routes to.
+    brains = sorted(name for name in cfg.channels if name.startswith("to-judge") and "feedback" not in name)
+    inbound = sorted(name for name in cfg.sources if name not in internal_doors)
+    for source in inbound:
         reached = {
             channel
             for route in cfg.routes
             if route.source in (source, "*") and not route.when
             for channel in route.send_to
         }
-        missing = sorted(set(cfg.channels) - reached)
+        missing = [brain for brain in brains if brain not in reached]
         if missing:
             problems.append(
                 f"source {source!r} does not reach {', '.join(missing)} unconditionally — "
                 f"a brain that is configured but not routed to is an empty ledger, not a comparison"
             )
+    if len(brains) < 2:
+        problems.append(
+            f"only {len(brains)} brain channel(s) found ({', '.join(brains) or 'none'}) — "
+            f"a shadow run with one brain is not comparing anything"
+        )
 
     for problem in problems:
         print(f"  FAIL  {problem}")
     if problems:
         print(f"\n{len(problems)} shadow config assertion(s) failed")
         return 1
+    # "no way to page anyone" was true until the shadow gained a card somebody
+    # can rule on. Saying it now would be this file telling the same kind of lie
+    # it exists to catch, so it reports what it actually checked: every hop stays
+    # on the compose network, and the brains are both fed.
+    chat_channels = sorted(name for name, ch in cfg.channels.items() if ch.type != "generic")
+    reach = f"{len(chat_channels)} reach a person ({', '.join(chat_channels)})" if chat_channels else "none reach a person"
     print(
-        f"shadow config: {path.name} boots — {len(cfg.sources)} signed door(s), "
-        f"{len(cfg.channels)} in-network channel(s), all reached, no way to page anyone"
+        f"shadow config: {path.name} boots — {len(cfg.sources)} door(s), "
+        f"{len(cfg.channels)} channel(s) all in-network, both brains fed, {reach}"
     )
     return 0
 
