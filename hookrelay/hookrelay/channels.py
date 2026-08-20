@@ -167,7 +167,10 @@ def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> Bui
     if processed is not None:
         payload = {
             "msgtype": "markdown",
-            "markdown": {"title": processed.headline, "text": processed.markdown(heading=True)},
+            "markdown": {
+                "title": processed.headline,
+                "text": processed.markdown(heading=True, action_base=str(message.get("_action_base") or "")),
+            },
         }
         return _dingtalk_signed_url(channel, now), payload, {}
     prebuilt = _prebuilt(channel, message)
@@ -204,7 +207,12 @@ def _dingtalk_signed_url(channel: Channel, now: float) -> str:
 def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     processed = _processed(channel, message)
     if processed is not None:
-        content = {"msgtype": "markdown", "markdown": {"content": processed.markdown(heading=False)}}
+        content = {
+            "msgtype": "markdown",
+            "markdown": {
+                "content": processed.markdown(heading=False, action_base=str(message.get("_action_base") or ""))
+            },
+        }
         return channel.url, content, {}
     prebuilt = _prebuilt(channel, message)
     if prebuilt is not None:

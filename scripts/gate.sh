@@ -36,5 +36,10 @@ python3 scripts/assert_agent_notes.py
 # resolves nothing, it only reads the two files (see the script for what that
 # does and does not catch).
 python3 scripts/assert_locks.py
+# Also a cross-service check, and for the same reason: it weighs the pipe and
+# the brain against the ceilings their own READMEs state. A component gate could
+# hold its own number, but not the fact that all three are measured the same way
+# and that only two of them are capped.
+python3 scripts/assert_weight.py
 
 printf '\033[1;32mSTACK GATE GREEN\033[0m — every component gate + the stack checks.\n'

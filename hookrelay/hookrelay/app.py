@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import json
 import logging
 import os
@@ -92,6 +93,35 @@ async def _capped_body(request: Request, limit: int) -> bytes:
     return body
 
 
+def _escalation_can_work(settings: Settings, cfg: Config) -> bool:
+    """Can a human press anything at all in this deployment?
+
+    Three things have to line up, and if any is missing the escalation sweep is
+    left disarmed with a reason in the log rather than firing on every alert:
+
+      a secret        — without it no card carries an action of any kind.
+      an enabled kind — card_actions decides what is offered; empty offers none.
+      a channel that can carry one — `feishu` posts a callback, and the markdown
+        dialects carry a LINK, which needs public_url to point anywhere.
+
+    KNOWN LIMIT, stated because it is a real one: this is a per-DEPLOYMENT
+    answer, not a per-alert one. A deployment whose critical route reaches only a
+    plain `generic` webhook, while some other route reaches Feishu, passes this
+    check and will still escalate those critical alerts as untouched. Answering
+    per alert means asking which channels each event was delivered to — a query
+    per event on a loop that runs every second — and that cost is not worth
+    paying for a mixed setup nobody has yet reported having.
+    """
+    if not settings.action_secret or not cfg.card_actions:
+        return False
+    for channel in cfg.channels.values():
+        if channel.type == "feishu":
+            return True
+        if channel.type in ("dingtalk", "wecom") and settings.public_url:
+            return True
+    return False
+
+
 def create_app(settings: Settings | None = None, cfg: Config | None = None) -> FastAPI:
     """App factory: tests hand in Settings/Config directly; production loads
     them from the environment and config.yaml."""
@@ -152,7 +182,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         rather than an escalation every tick forever.
         """
         rule = app.state.config.escalation
-        if rule is None:
+        if rule is None or not app.state.escalation_armed:
             return
         cold = await app.state.store.cold_events(before=now - rule.after_minutes * 60, levels=rule.levels, limit=50)
         for event in cold:
@@ -194,6 +224,19 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     app.state.breaker = CircuitBreaker(
         threshold=app_settings.breaker_threshold, cooldown_seconds=app_settings.breaker_cooldown_seconds
     )
+    # Escalation asks "did any human touch this?", and the only evidence of that
+    # is a card action press. So on a deployment where no press can EVER happen
+    # it would read every alert as ignored and escalate all of them — turning a
+    # feature meant to catch the one alert nobody saw into a second copy of every
+    # alert. Decided once here rather than per event, because the answer cannot
+    # change without a restart and this loop runs every second.
+    app.state.escalation_armed = _escalation_can_work(app_settings, app_config)
+    if app_config.escalation is not None and not app.state.escalation_armed:
+        logger.warning(
+            "escalation is configured but disarmed: no card action can be pressed in this deployment "
+            "(needs HOOKRELAY_ACTION_SECRET, a card_actions kind, and either a feishu channel or "
+            "HOOKRELAY_PUBLIC_URL for a dingtalk/wecom link). Every alert would look untouched."
+        )
 
     # ── the page ──────────────────────────────────────────────────────────
     # One self-contained file, no build step, no CDN. The page itself is a
@@ -300,6 +343,38 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     # ── the card's way back ───────────────────────────────────────────────
 
+    @app.get("/card-action", response_class=HTMLResponse)
+    async def card_action_confirm(t: str = "") -> str:
+        """Ask before doing. This GET performs nothing.
+
+        DingTalk and WeCom webhook robots cannot call back, so their actions are
+        LINKS — and a link in a chat message gets fetched by the client to build
+        a preview. A GET that silenced an alert would therefore fire when the
+        card was rendered rather than when a person decided, which is the worst
+        kind of bug: an alert quietly muted by nobody.
+
+        So the link lands here and this page does one thing — a form whose POST
+        is the real action. Deliberately not a designed page: this service serves
+        one board and this is not it, and an operator standing in a corridor
+        wants a button, not a layout.
+        """
+        token = t.strip()
+        if not token:
+            return "<!doctype html><meta charset=utf-8><p>This link is missing its action."
+        # The token is NOT verified here on purpose — verifying it would mean
+        # reporting whether it is valid to anyone who fetches the URL, and a
+        # preview fetch is not a caller worth answering. The POST verifies.
+        safe = html.escape(token, quote=True)
+        return (
+            "<!doctype html><meta charset=utf-8>"
+            "<title>hookrelay</title>"
+            "<style>body{font:16px/1.5 system-ui;margin:3rem auto;max-width:22rem;text-align:center}"
+            "button{font:inherit;padding:.6rem 1.4rem;cursor:pointer}</style>"
+            "<p>Confirm this action on the alert it came from.</p>"
+            f'<form method="post" action="/card-action?t={safe}"><button>Confirm</button></form>'
+            "<p><small>Nothing has happened yet. This link works once.</small></p>"
+        )
+
     @app.post("/card-action")
     async def card_action(request: Request) -> JSONResponse:
         """A human pressed a button on a notification card.
@@ -339,7 +414,10 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="body is not an object")
 
-        token = _card_token(payload)
+        # Two shapes reach here: an IM platform's JSON callback (Feishu), and the
+        # confirm form above, which is a plain HTML POST carrying the token in
+        # the query string because a form has no JSON body to put it in.
+        token = _card_token(payload) or str(request.query_params.get("t") or "").strip()
         if not token:
             raise HTTPException(status_code=400, detail="no hookrelay_action in the callback value")
         now = now_ts()

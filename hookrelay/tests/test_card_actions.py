@@ -229,3 +229,61 @@ async def test_a_refused_token_never_reaches_the_ledger(action_client):
     assert (await action_client.post("/card-action", content=b"not json")).status_code == 400
     assert await store.recent_actions() == []
     assert await store.active_silence("judge-notify", time.time()) is None
+
+
+# ── the channels that cannot call back ───────────────────────────────────────
+
+
+def test_dingtalk_and_wecom_carry_actions_as_links() -> None:
+    """Feishu gets buttons because it posts a callback. A DingTalk or WeCom
+    webhook robot cannot — its ActionCard buttons are URL jumps — so a real
+    button there would do nothing. Without a link these two channels could never
+    take part in the feedback the rest of the family now depends on:
+    `mattered_pct` would stay null forever and the escalation sweep would read
+    every alert as untouched."""
+    from hookrelay.processed import Processed
+
+    minted = actions.offered(
+        "card-s3cret",
+        [{"kind": "silence", "text": "Silence 1h", "minutes": 60}],
+        {"silence": {"params": {}}},
+        event_id=4,
+        correlation_id="hr-4",
+        now=time.time(),
+    )
+    processed = Processed({**PROCESSED, "actions": minted})
+
+    rendered = processed.markdown(heading=True, action_base="https://relay.example")
+    assert "[Silence 1h](https://relay.example/card-action?t=" in rendered
+
+    # No base configured — a link nobody can reach is worse than no link.
+    assert "card-action" not in processed.markdown(heading=True)
+
+
+async def test_the_link_only_asks_and_the_post_acts(action_client):
+    """A chat client fetches a link to build a preview. A GET that silenced an
+    alert would fire when the card was RENDERED rather than when a person
+    decided — an alert quietly muted by nobody. So the GET performs nothing and
+    the confirming POST does the work."""
+    store = action_client.app.state.store
+    token = _mint_now("silence", event_id=1, correlation_id="hr-1", params={"minutes": 30})
+
+    preview = await action_client.get(f"/card-action?t={token}")
+    assert preview.status_code == 200
+    assert "Confirm" in preview.text
+    assert await store.recent_actions() == [], "a preview fetch must change nothing"
+    assert await store.active_silence("judge-notify", time.time()) is None
+
+    # The form's POST carries the token in the query string — a form has no JSON
+    # body to put it in.
+    confirmed = await action_client.post(f"/card-action?t={token}")
+    assert confirmed.status_code == 200 and confirmed.json()["outcome"].startswith("silenced")
+    assert await store.active_silence("judge-notify", time.time()) is not None
+
+    # Still single use: the link works once, as the page says.
+    assert (await action_client.post(f"/card-action?t={token}")).json()["outcome"] == "already_done"
+
+
+async def test_a_link_with_no_token_explains_itself(action_client):
+    response = await action_client.get("/card-action")
+    assert response.status_code == 200 and "missing its action" in response.text

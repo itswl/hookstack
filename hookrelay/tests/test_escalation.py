@@ -166,7 +166,15 @@ async def test_the_worker_escalates_and_the_delivery_is_an_ordinary_one(settings
 
     monkeypatch.setattr(delivery_mod.channels, "send", ok_send)
     cfg = _cfg({"after_minutes": 1, "send_to": ["pager"], "levels": ["critical"]})
-    wired = dataclasses.replace(settings, db_path=str(tmp_path / "esc.db"), worker_interval_seconds=0.01)
+    # action_secret is not decoration here: without it no card carries a button,
+    # so no press is possible and the sweep disarms itself on purpose. A test
+    # that skipped it would have been asserting against a disabled feature.
+    wired = dataclasses.replace(
+        settings,
+        db_path=str(tmp_path / "esc.db"),
+        worker_interval_seconds=0.01,
+        action_secret="card-s3cret",
+    )
     app = create_app(settings=wired, cfg=cfg)
 
     async with (
@@ -189,3 +197,66 @@ async def test_the_worker_escalates_and_the_delivery_is_an_ordinary_one(settings
 
         assert "pager" in sent, f"the cold alert was never escalated (sent: {sent})"
         assert await _channels_for(app.state.store, int(event_id)) == ["ops-feishu", "pager"]
+
+
+# ── it cannot fire where nobody can press anything ──────────────────────────
+
+
+def test_escalation_disarms_itself_when_no_press_is_possible() -> None:
+    """The sweep asks "did any human touch this?" and a card action press is the
+    only evidence there is. On a deployment where no press can ever happen it
+    would read every alert as ignored — turning a feature meant to catch the one
+    alert nobody saw into a second copy of every alert."""
+    from hookrelay.app import _escalation_can_work
+    from hookrelay.settings import Settings
+
+    def settings_with(**kw) -> Settings:
+        base = Settings(
+            config_path="unused",
+            db_path=":memory:",
+            plugins_dir="none",
+            admin_token="a",
+            read_token="r",
+            max_body_bytes=1024,
+            max_attempts=3,
+            retention_days=0,
+            alarm_url="",
+            alarm_min_interval_seconds=600,
+            breaker_threshold=5,
+            breaker_cooldown_seconds=60,
+            worker_interval_seconds=1.0,
+        )
+        return dataclasses.replace(base, **kw)
+
+    feishu = _cfg({"after_minutes": 15, "send_to": ["pager"]})
+    assert _escalation_can_work(settings_with(action_secret="s"), feishu), "feishu posts a callback"
+
+    # No secret: no card carries an action of any kind.
+    assert not _escalation_can_work(settings_with(), feishu)
+
+    # A deployment reaching only channels that cannot call back, and no public
+    # URL for the link that would stand in — the case this guard exists for.
+    linkless = Config.from_dict(
+        {
+            "sources": [{"name": "grafana", "secret": "", "title": "{title}", "body": "{message}"}],
+            "channels": [
+                {"name": "ops-ding", "type": "dingtalk", "url": "https://ding.example/hook"},
+                {"name": "pager", "type": "generic", "url": "https://pager.example/in"},
+            ],
+            "routes": [{"name": "all", "source": "*", "send_to": ["ops-ding"]}],
+            "card_actions": {"silence": {}},
+        }
+    )
+    assert not _escalation_can_work(settings_with(action_secret="s"), linkless)
+    # ...and the same deployment once it can render a reachable link.
+    assert _escalation_can_work(settings_with(action_secret="s", public_url="https://relay.example"), linkless)
+
+    # Actions enabled nowhere: nothing is offered, so nothing can be pressed.
+    no_kinds = Config.from_dict(
+        {
+            "sources": [{"name": "grafana", "secret": "", "title": "{title}", "body": "{message}"}],
+            "channels": [{"name": "ops-feishu", "type": "feishu", "url": "https://feishu.example/hook"}],
+            "routes": [{"name": "all", "source": "*", "send_to": ["ops-feishu"]}],
+        }
+    )
+    assert not _escalation_can_work(settings_with(action_secret="s"), no_kinds)

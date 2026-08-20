@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import quote
 
 from hookrelay.markup import escape_markup, markdown_link
 
@@ -208,11 +209,32 @@ class Processed:
         """One `links` entry, rendered only as far as its url earns."""
         return markdown_link(str(link.get("text") or ""), str(link.get("url") or ""))
 
-    def markdown(self, *, heading: bool) -> str:
+    @staticmethod
+    def _action_link(action: dict[str, Any], base: str) -> str:
+        """One action as a clickable link, or nothing.
+
+        The link lands on a GET that only ASKS — chat clients fetch link
+        previews, and a GET that silenced an alert would fire on a preview
+        rather than on a decision. The confirming POST is behind that page.
+        """
+        if not base:
+            return ""
+        value = action.get("value")
+        if not isinstance(value, dict):
+            return ""
+        token = str(value.get("hookrelay_action") or "")
+        if not token:
+            return ""
+        return markdown_link(str(action.get("text") or "Action"), f"{base}/card-action?t={quote(token, safe='')}")
+
+    def markdown(self, *, heading: bool, action_base: str = "") -> str:
         """DingTalk wants a `### heading`; WeCom renders bold instead.
 
         Unlike the Feishu card, this dialect has no plain_text half — the
         headline and the footer are markdown here too, so both are escaped.
+
+        `action_base` turns the declared actions into LINKS — see _action_link
+        for why these channels get a link where Feishu gets a button.
         """
         headline = escape_markup(self.headline)
         lines = [f"### {headline}" if heading else f"**{headline}**"]
@@ -228,8 +250,15 @@ class Processed:
             rendered = self._link(link)
             if rendered:
                 lines.append(rendered)
-        # No buttons: these bots have no callback channel, and a button that
-        # does nothing is worse than no button. The links still travel.
+        # Actions as LINKS, not buttons. A DingTalk or WeCom webhook robot
+        # cannot call back — its ActionCard buttons are URL jumps — so a real
+        # button here would do nothing, which is worse than none. A link works,
+        # and without one these two channels can never take part in the feedback
+        # the rest of the family now depends on: `mattered_pct` would stay null
+        # forever and the escalation sweep would read every alert as untouched.
+        action_lines = [link for link in (self._action_link(a, action_base) for a in self.actions) if link]
+        if action_lines:
+            lines.append(" · ".join(action_lines))
         footer = self.footer()
         if footer:
             lines.append(f"> {escape_markup(footer)}")
