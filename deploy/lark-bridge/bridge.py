@@ -239,14 +239,24 @@ def forward_press(event: dict) -> None:
         with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310
             answer = response.read(400).decode("utf-8", "replace")
             logger.info("press forwarded: %s %s", response.status, answer[:200])
-        outcome = ""
+        # The relay's own `outcome` reads "forwarded remember to to-probe-action".
+        # Accurate, and it names an internal channel — plumbing language arriving
+        # in somebody's chat window, where `to-probe-action` means nothing. It
+        # stays in the log above, where a maintainer wants exactly that noun.
+        #
+        # `kind` is the one word here that IS the operator's: it is what the
+        # button said it would do. The rest says what is true at this moment and
+        # no more — the pipe took it and passed it on, which is all any component
+        # has observed yet.
+        kind = ""
         try:
-            outcome = str((json.loads(answer) or {}).get("outcome") or "")
+            kind = str((json.loads(answer) or {}).get("kind") or "")
         except ValueError:
             pass
+        did = f"{kind} — " if kind else ""
         acknowledge(
             event,
-            f"✓ pressed {stamp} — {outcome or 'accepted by the pipe'}. These buttons are spent.",
+            f"✓ pressed {stamp} · {did}accepted and passed on. These buttons are spent.",
         )
     except Exception:  # a lost press must not kill the consumer
         # logger.exception already carries the traceback; naming the exception
