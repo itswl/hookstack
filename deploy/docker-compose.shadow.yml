@@ -35,6 +35,11 @@ services:
       # unsigned, which the config guard refuses — so the button is simply
       # not configured until this is set.
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
+      # Signs the token inside a card button. Without it the buttons render
+      # and do nothing — `_mint_card_actions` returns early and every button
+      # ships with an empty value. That was the state of this deployment for
+      # a day while `ruled: 0` was being read as "nobody answers".
+      HOOKRELAY_ACTION_SECRET: ${SHADOW_ACTION_SECRET:-}
     volumes:
       - ./shadow.yaml:/etc/hookrelay/config.yaml:ro
       # Bind mounts at the deployment root, like the investigator's: state in

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -111,6 +112,52 @@ def test_without_a_secret_no_card_carries_a_button() -> None:
         )
         == []
     )
+
+
+def test_an_unsignable_declaration_is_dropped_rather_than_rendered_inert() -> None:
+    """The test above has always been right, and the delivery path never reached it.
+
+    `_mint_card_actions` returned early without a secret, leaving the brain's
+    DECLARATIONS in the payload — and the card renderer turns a declaration into a
+    button with `value: a.get("value") or {}`. So the card carried a button that
+    rendered, was labelled correctly, and sent nothing back when pressed. On
+    production that was true for a day while `ruled: 0` was being read as
+    evidence that nobody answers.
+
+    An absent button is honest. An inert one is a lie the operator cannot see, so
+    doing nothing has to mean offering nothing.
+    """
+    from hookrelay.delivery import _mint_card_actions
+    from hookrelay.settings import Settings
+
+    def message() -> dict:
+        return {"event_id": 1, "_correlation_id": "hr-1", "payload": json.loads(json.dumps(PROCESSED))}
+
+    base = Settings.load()
+
+    # No secret to sign with: the declarations go, rather than shipping inert.
+    msg = message()
+    _mint_card_actions(msg, _cfg_with_actions(), replace(base, action_secret=""), 1000.0)
+    assert "actions" not in msg["payload"], "an unsignable button must not reach the card"
+
+    # No kinds configured: same answer, same reason.
+    bare = Config.from_dict(
+        {
+            "sources": [{"name": "judge-notify", "secret": "", "title": "{meta.alert_name}", "body": "{x}"}],
+            "channels": [{"name": "ops-feishu", "type": "feishu", "url": "https://feishu.example/hook"}],
+            "routes": [{"name": "all", "source": "*", "send_to": ["ops-feishu"]}],
+        }
+    )
+    msg = message()
+    _mint_card_actions(msg, bare, replace(base, action_secret="s"), 1000.0)
+    assert "actions" not in msg["payload"]
+
+    # And with both, real buttons carrying real tokens.
+    msg = message()
+    _mint_card_actions(msg, _cfg_with_actions(), replace(base, action_secret="s"), 1000.0)
+    minted = msg["payload"]["actions"]
+    assert minted, "configured and signable, so the buttons are there"
+    assert all(row.get("value") for row in minted), "and every one of them carries a token"
 
 
 def test_config_refuses_an_action_it_could_never_perform() -> None:
