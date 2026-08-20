@@ -9,6 +9,7 @@ method.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -304,6 +305,33 @@ class ClaudeAgentEngine:
         self._home = Path(os.environ.get("HOME", "") or "/data/home")
         self._agents_raw = _load_agents_raw(settings.agents_config)
         (self._workdir / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
+        # Set for the duration of one run, so a caller that wants the turn to
+        # stop can ask the SDK rather than kill the coroutine. None between runs
+        # and after one finishes — an engine instance runs one turn at a time.
+        self._interrupt: Callable[[], Any] | None = None
+
+    async def stop(self) -> bool:
+        """Ask the running turn to wind down, keeping its ResultMessage.
+
+        This is what makes a stop accountable. Cancelling the coroutine — the
+        only option query() left — discarded the SDK's final message, and with it
+        the cost of a run the provider had already billed. An interrupt lets the
+        turn end on its own terms, so the bill, the stop_reason and the
+        terminal_reason all still arrive.
+
+        False means there was nothing to interrupt, which the caller needs in
+        order to fall back to cancelling: a turn that has not reached the SDK yet
+        cannot be interrupted through it.
+        """
+        interrupt = self._interrupt
+        if interrupt is None:
+            return False
+        try:
+            await interrupt()
+        except Exception:  # noqa: BLE001 — a failed interrupt falls back to cancellation
+            logger.exception("interrupt failed; the caller will cancel instead")
+            return False
+        return True
 
     def _engine_env(self) -> dict[str, str]:
         """Per-command deadlines, armed as deployment policy.
@@ -371,12 +399,12 @@ class ClaudeAgentEngine:
             AgentDefinition,
             AssistantMessage,
             ClaudeAgentOptions,
+            ClaudeSDKClient,
             HookMatcher,
             ResultMessage,
             StreamEvent,
             TextBlock,
             ToolUseBlock,
-            query,
         )
 
         def emit(event: dict[str, Any]) -> None:
@@ -485,8 +513,26 @@ class ClaudeAgentEngine:
         last_text = ""
         message_count = 0
         result: Any = None
+        # ClaudeSDKClient rather than query(), and the reason is the bill.
+        #
+        # query() is a one-shot async generator: the only way to stop it early is
+        # to cancel the coroutine from outside, which is what a wall-clock
+        # timeout, the operator's Stop button and a deploy restart all did. The
+        # SDK reports dollars only on the final ResultMessage, so cancelling
+        # mid-stream threw that message away and the turn recorded cost None —
+        # "nobody counted" — for a run the provider had already billed in full.
+        #
+        # The client can be told to stop instead of being killed. interrupt()
+        # makes the SDK wind the turn down and still emit its ResultMessage, so
+        # the cost, the stop_reason and the terminal_reason all survive. That is
+        # the whole reason for this shape; the message handling below is
+        # unchanged.
+        client = ClaudeSDKClient(options=options)
+        self._interrupt = client.interrupt
         try:
-            async for msg in query(prompt=message, options=options):
+            await client.connect()
+            await client.query(message)
+            async for msg in client.receive_response():
                 message_count += 1
                 if isinstance(msg, StreamEvent):
                     # Transient by design: deltas are for a human watching right now.
@@ -530,6 +576,12 @@ class ClaudeAgentEngine:
                 elif isinstance(msg, ResultMessage):
                     result = msg
         finally:
+            self._interrupt = None
+            # disconnect() cancels any SDK MCP tool still running and gives each
+            # server a short grace period, so it is the counterpart to connect()
+            # and not optional — a client left open holds the CLI subprocess.
+            with contextlib.suppress(Exception):
+                await client.disconnect()
             # In a finally because a run that rewrites its own inputs and
             # then fails is exactly the case a return-path check misses,
             # and the next run cannot see it: its own "before" snapshot

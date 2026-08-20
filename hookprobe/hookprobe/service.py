@@ -19,10 +19,12 @@ finished report.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Protocol
 
 from hookprobe import actions, distill_loop, remediation, suggestions
@@ -44,6 +46,15 @@ class Engine(Protocol):
         resume: str | None = None,
         on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> EngineResult: ...
+
+    async def stop(self) -> bool:
+        """Ask the running turn to wind down; False if there was nothing to ask.
+
+        Optional in practice — the fallback below cancels — but part of the
+        contract because the difference is a recorded cost versus None on every
+        stop and every restart, not just on a rare timeout.
+        """
+        ...
 
     def describe_inputs(self, *, resume: str | None = None) -> dict[str, Any]:
         """The prompt inputs this engine would resolve for the next turn."""
@@ -146,7 +157,19 @@ class RunService:
         return run
 
     def stop(self, session_key: str) -> Run:
-        """Cancel the in-flight turn; it finishes as a failed turn, not a hang."""
+        """End the in-flight turn; it finishes as a failed turn, not a hang.
+
+        INTERRUPT, not cancel. Cancelling the coroutine discarded the SDK's final
+        message and with it the turn's cost, so every Stop an operator pressed
+        recorded None — "nobody counted" — for a run the provider had billed in
+        full. Asking the SDK to stop lets that message arrive.
+
+        The cancel is still there as a fallback, on a short fuse: a turn that has
+        not reached the SDK yet has nothing to interrupt, and an interrupt the SDK
+        ignores must not leave a turn running forever. Answering the operator
+        immediately matters more than waiting to see which path won, so the
+        arrangement runs in the background and this returns now.
+        """
         run = self._store.get(session_key)
         if run is None:
             raise LookupError("session not found")
@@ -154,8 +177,66 @@ class RunService:
         if run.finished or task is None:
             raise NoTurnRunningError("no turn is in flight for this session")
         self._stop_requested.add(session_key)
-        task.cancel()
+        closer = asyncio.create_task(self._interrupt_then_cancel(task))
+        self._tasks.add(closer)
+        closer.add_done_callback(self._tasks.discard)
         return run
+
+    async def _wind_down(self, turn: asyncio.Task[Any], timeout_s: int, grace: float = 15.0) -> Any:
+        """The clock ran out: ask the turn to end, and take its result if it can.
+
+        Returning a real EngineResult here is the point. The SDK reports dollars
+        only on its final message, so a turn killed outright recorded cost None —
+        "nobody counted" — for the longest and therefore most expensive runs
+        there are. Interrupting lets that message arrive, and the result carries
+        both the bill and the SDK's own terminal_reason.
+
+        Re-raises TimeoutError when the interrupt does not land, which is the old
+        behaviour and the honest one: at that point nobody counted, and the
+        unpriced_turns figure is what says so.
+        """
+        stop = getattr(self._engine, "stop", None)
+        if stop is not None:
+            try:
+                if await stop():
+                    settled = await asyncio.wait_for(turn, timeout=grace)
+                    # It ended on OUR clock, not its own. The SDK may report a
+                    # clean finish for an interrupted turn, and letting that read
+                    # as success would turn "we cut it off at 900s" into "it
+                    # answered" — with a truncated report standing in for one.
+                    # The cost is what we came for; the verdict stays a timeout.
+                    return replace(
+                        settled,
+                        error=settled.error or f"timed out after {timeout_s}s (interrupted; cost recorded)",
+                    )
+            except Exception:  # noqa: BLE001 — any failure here falls through to the kill
+                logger.warning("interrupt after timeout did not settle the turn; cancelling")
+        turn.cancel()
+        with contextlib.suppress(BaseException):
+            await turn
+        raise TimeoutError
+
+    async def _interrupt_then_cancel(self, task: asyncio.Task[Any], grace: float = 10.0) -> None:
+        """Ask the SDK to stop, and cancel only if it does not.
+
+        The grace period is what buys the accounting: winding a turn down means
+        the SDK finishes its current step and emits a ResultMessage, which takes
+        a moment. Cancelling immediately would be the old behaviour with extra
+        steps.
+        """
+        interrupted = False
+        stop = getattr(self._engine, "stop", None)
+        if stop is not None:
+            try:
+                interrupted = bool(await stop())
+            except Exception:  # noqa: BLE001 — the fallback below is the point
+                logger.exception("engine stop() raised; cancelling instead")
+        if interrupted:
+            _, pending = await asyncio.wait({task}, timeout=grace)
+            if not pending:
+                return  # it wound down on its own, with its bill
+            logger.warning("interrupt did not settle the turn in %.0fs; cancelling", grace)
+        task.cancel()
 
     def _spawn(self, run: Run, message: str, timeout_s: int, *, resume: str | None) -> None:
         run.events = []
@@ -235,6 +316,15 @@ class RunService:
         such recovery — the procedure mid-sequence, and the deliveries those
         settlements just queued.
         """
+        # Interrupt the turns in flight rather than killing them. This path runs
+        # on every deploy, so it was the most frequent of the three that threw a
+        # turn's bill away — a restart during three investigations lost three
+        # costs, every time, and nothing in the ledger said a number was missing
+        # rather than zero.
+        stop = getattr(self._engine, "stop", None)
+        if stop is not None and self._running:
+            with contextlib.suppress(Exception):
+                await stop()
         for task in tuple(self._running.values()):
             task.cancel()
         deadline = time.monotonic() + max(0.0, grace_seconds)
@@ -502,12 +592,18 @@ class RunService:
             async with self._semaphore:
                 self._in_slot += 1
                 try:
-                    result = await asyncio.wait_for(
-                        self._engine.run(
-                            message=message, session_key=run.session_key, resume=resume, on_event=on_event
-                        ),
-                        timeout=timeout_s,
+                    # The timeout INTERRUPTS before it cancels, for the same
+                    # reason Stop does: wait_for() cancelling the coroutine threw
+                    # away the SDK's final message, so the priciest failures —
+                    # a turn that ran the full clock — recorded no cost at all
+                    # and the budget breaker undercounted exactly them.
+                    turn = asyncio.ensure_future(
+                        self._engine.run(message=message, session_key=run.session_key, resume=resume, on_event=on_event)
                     )
+                    try:
+                        result = await asyncio.wait_for(asyncio.shield(turn), timeout=timeout_s)
+                    except TimeoutError:
+                        result = await self._wind_down(turn, timeout_s)
                 finally:
                     self._in_slot -= 1
         except TimeoutError:

@@ -517,7 +517,11 @@ def test_a_timed_out_turn_shows_up_as_unpriced_on_metrics(tmp_path) -> None:
         poll_until_final(client, "hook:slow", deadline=6.0)
 
         body = client.get("/metrics").text
-        assert "hookprobe_unpriced_turns 1" in body, f"the timed-out turn is not counted:\n{body}"
-        # And the spend it is missing from is beside it, so the pair reads as
-        # "this much counted, this many not counted".
+        # ZERO, and that is the change worth pinning. The engine is interrupted
+        # rather than killed on timeout, so the SDK's final message arrives and
+        # the turn is priced — there is nothing left unpriced to count. The
+        # series stays because what it now measures is the residue: turns the
+        # interrupt could not save (an SDK that ignores it, a turn that had not
+        # reached the SDK yet). A flat zero here is the feature working.
+        assert "hookprobe_unpriced_turns 0" in body, f"the interrupt did not price the turn:\n{body}"
         assert "hookprobe_window_spend_usd" in body
