@@ -11,7 +11,7 @@ RUN apk add --no-cache python3 ca-certificates curl
 # Pinned deliberately. This is the piece that speaks a live protocol to a
 # platform, so "whatever shipped today" is the wrong default — bump it on
 # purpose: docker compose build --build-arg LARK_CLI_VERSION=x.y.z
-ARG LARK_CLI_VERSION=1.0.77
+ARG LARK_CLI_VERSION=1.0.88
 RUN npm install -g "@larksuite/cli@${LARK_CLI_VERSION}" && npm cache clean --force
 
 WORKDIR /app
