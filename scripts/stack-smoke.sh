@@ -48,6 +48,7 @@ echo "stack compose parses"
   # The shadow compose was checked by nothing at all while being the newest file
   # here. It needs no .env branch: its `networks.default.external: true` names a
   # network `config` never looks for, so the parse works in a fresh checkout.
+  export LARK_APP_ID=placeholder LARK_APP_SECRET=placeholder LARK_CHAT_ID=placeholder
   docker compose -f deploy/docker-compose.shadow.yml config >/dev/null
 )
 echo "standalone, family and shadow composes parse"

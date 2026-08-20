@@ -52,6 +52,19 @@ sources:
       triage_verdict: "{analysis.triage_verdict}"
       triage_confidence: "{analysis.triage_confidence}"
 
+  # Brain A's verdict, coming back to be dressed as a card. Unsigned: it is a
+  # loopback hop inside hookstack_net between two containers of one deployment,
+  # and the platform's own door above is the one that faces outward. Give it a
+  # secret the day this deployment stops being a single compose file.
+  - name: judge-notify
+    secret: ""
+    title: "{meta.alert_name}"
+    body: "{analysis.summary}"
+    level: "{meta.importance}"
+    recovery: "{meta.is_recovery}"
+    fields:
+      origin: "{meta.source}"
+
 channels:
   - name: to-judge
     type: generic
@@ -65,9 +78,35 @@ channels:
     secret: ${SHADOW_INGEST_SECRET}
     options: {payload: normalized}
 
+  # Where a ruling lands. `payload: raw` because the action envelope IS the
+  # content — the pipe recorded the press as an event carrying it, and the brain
+  # wants those bytes rather than a normalized alert built around them.
+  - name: to-judge-feedback
+    type: generic
+    url: http://hookjudge:8200/feedback
+    secret: ${SHADOW_INGEST_SECRET}
+    options: {payload: raw}
+
+  # Rendered by the pipe's own feishu builder and handed to the bridge, which
+  # re-sends it as the application so its buttons can be pressed.
+  - name: to-me
+    type: feishu
+    url: http://lark-bridge:9100/
+    options: {payload: processed}
+
 routes:
   # Both brains, every event: the fan-out IS the experiment. Their ledgers
   # disagree with each other and with the platform independently.
+  # A verdict coming back goes to the card and STOPS. Without stop: true it
+  # would fall through to shadow-to-judges and be judged again — the pipe
+  # feeding a brain its own output, which is the loop the family's docs warn
+  # about and the reason returns take a higher-priority terminal route.
+  - name: verdict-to-me
+    source: judge-notify
+    send_to: [to-me]
+    priority: 100
+    stop: true
+
   - name: shadow-to-judges
     source: ww
     send_to: [to-judge, to-judge-b]
@@ -77,3 +116,22 @@ routes:
 # shadow), so the pipe's own dedup stays off — same posture as the family
 # stack, for the same reason: two counters and neither ledger true.
 pipeline: [silence, routes]
+
+# The buttons a card carries. hookjudge DECLARES which ones a verdict deserves
+# (silence plus the useful/useless pair); this decides which the deployment
+# actually offers and where a press goes.
+#
+# `useful`/`useless` are the whole reason the shadow exists: it can already say
+# the two brains agreed 84% of the time, and cannot say which one was RIGHT.
+# A press is that missing datum, and it lands in the judge's own ledger where
+# /labels/export can turn it into an eval row.
+#
+# `silence` is offered but points at nothing here on purpose — the pipe owns
+# silences and a press would quiet the SHADOW's copy of an alert, not the
+# platform's notification. Muting a shadow is muting the observer, and that is
+# not something to make one click away.
+card_actions:
+  useful:
+    forward_to: to-judge-feedback
+  useless:
+    forward_to: to-judge-feedback
