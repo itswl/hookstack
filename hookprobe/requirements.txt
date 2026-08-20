@@ -6,9 +6,9 @@ uvicorn[standard]>=0.34
 claude-agent-sdk>=0.1.0
 
 # Test + lint (tests never import the SDK; they inject fake engines)
-pytest>=8.0
-httpx>=0.27
+pytest>=9.1.1
+httpx>=0.28.1
 ruff==0.16.3
-bandit>=1.8
-pip-audit>=2.7
-mypy>=1.14
+bandit>=1.9.4
+pip-audit>=2.10.1
+mypy>=2.3.1
