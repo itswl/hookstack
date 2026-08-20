@@ -703,6 +703,20 @@ class RunService:
             result.cost_usd,
         )
 
+    def accept_suggestion(self, suggestion_id: str) -> dict[str, Any] | None:
+        """Accept one queued memory line. None if it is already resolved or gone.
+
+        A service method rather than the door reaching into settings, for the
+        same reason `approve_remediation` is one: the console and the card press
+        must take the identical path, or "approved from a card" and "approved
+        from the console" become two behaviours that can drift.
+
+        Everything still in this queue was refused by the shape check, so this is
+        the one way such a line reaches standing instruction, and it needs a
+        person. The card removes the login, not the person.
+        """
+        return suggestions.resolve(self._settings.workdir, suggestion_id, accept=True)
+
     def approve_remediation(self, proposal_id: str, note: str = "") -> dict[str, Any]:
         """The operator's click, and the only path that runs anything. The gate
         checks and the execution are hookprobe.remediation's; what belongs here
