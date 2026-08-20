@@ -73,12 +73,19 @@ def verify_signature(secret: str, body: bytes, provided: str | None, timestamp: 
     given = provided.strip().removeprefix("sha256=").lower()
     if timestamp:
         try:
-            sent_at = float(timestamp)
+            sent_at = float(timestamp.strip())
         except ValueError:
             return False
         if abs(now - sent_at) > 300:
             return False
-        expected = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+        # Stripped on both lines, matching hookrelay.security.verify_signature.
+        # It did not, and the pair are two doors of one family: a padded
+        # timestamp header verified at the pipe and failed here, because the
+        # relay signs the stripped value and this signed the padded one. No
+        # sender in the family pads, so it never fired — the kind of divergence
+        # that waits for a new client rather than announcing itself.
+        signed = timestamp.strip().encode() + b"." + body
+        expected = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
         return constant_time_eq(expected, given)
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return constant_time_eq(expected, given)
