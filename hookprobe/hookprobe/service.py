@@ -22,12 +22,12 @@ import asyncio
 import contextlib
 import logging
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Protocol
-
-import httpx
 
 from hookprobe import actions, distill_loop, remediation, rulings, suggestions
 from hookprobe.engine import EngineResult
@@ -777,20 +777,38 @@ class RunService:
             logger.info("rulings not configured; %s dropped for %s", len(filed), run.session_key)
             return
         sent = 0
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            for body, headers in rulings.payloads(filed, model=run.model, secret=settings.ruling_secret):
-                try:
-                    answer = await client.post(
-                        settings.ruling_url, content=body, headers={**headers, "content-type": "application/json"}
-                    )
-                    if answer.status_code >= 400:
-                        logger.warning("ruling refused status=%s body=%s", answer.status_code, answer.text[:200])
-                        continue
-                    sent += 1
-                except httpx.HTTPError as exc:
-                    logger.warning("ruling could not be delivered: %s", exc)
+        for body, headers in rulings.payloads(filed, model=run.model, secret=settings.ruling_secret):
+            try:
+                await asyncio.to_thread(self._post_ruling, body, headers)
+                sent += 1
+            except urllib.error.HTTPError as exc:
+                logger.warning("ruling refused status=%s body=%s", exc.code, exc.read(200))
+            except OSError as exc:
+                logger.warning("ruling could not be delivered: %s", exc)
         run.meta["ai_rulings"] = sent
         logger.info("rulings filed session=%s sent=%s of %s", run.session_key, sent, len(filed))
+
+    def _post_ruling(self, body: bytes, headers: dict[str, str]) -> None:
+        """One signed POST, on a thread, with urllib.
+
+        urllib and not httpx, and that distinction just cost a red CI. The image
+        installs pyproject's THREE runtime dependencies and nothing else, so an
+        `import httpx` in runtime code worked only while httpx happened to arrive
+        transitively under `mcp`. mcp 2.0 moved to httpx2, httpx stopped arriving,
+        and the container stopped booting — ModuleNotFoundError, on a dependency
+        bump that touched none of this code.
+
+        hookprobe.notify has always posted this way, for exactly this reason.
+        Runtime code here gets the stdlib or one of the declared three.
+        """
+        request = urllib.request.Request(  # noqa: S310 — operator URL  # nosec B310
+            self._settings.ruling_url,
+            data=body,
+            headers={"Content-Type": "application/json", **headers},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10):  # noqa: S310 — operator URL  # nosec B310
+            pass
 
     def _schedule_return(self, run: Run) -> None:
         """The family loop: relay-born runs report back to the pipe. Detached,

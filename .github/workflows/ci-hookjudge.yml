@@ -76,7 +76,17 @@ jobs:
             curl -sf http://127.0.0.1:8200/healthz > /dev/null && break
             sleep 1
           done
-          curl -sf http://127.0.0.1:8200/healthz
+          # The log BEFORE the failure, not after it. This assertion used to be a
+          # bare curl, so an image that never came up failed the step with
+          # `exit code 7` and printed the container log at the very end of the
+          # script — which never ran. One dependency bump later that cost a long
+          # look at a number, when the container had said
+          # `ModuleNotFoundError: No module named 'httpx'` on line one.
+          curl -sf http://127.0.0.1:8200/healthz || {
+            echo '--- it never became healthy; the container said: ---'
+            docker logs judge 2>&1 | tail -40
+            exit 1
+          }
           curl -sf -X POST http://127.0.0.1:8200/events -H 'content-type: application/json' \
             -d '{"meta":{"source":"ci"},"event":{"title":"ci smoke","body":"","level":"low"}}' | tee /tmp/o.json
           grep -q '"accepted": *true' /tmp/o.json
