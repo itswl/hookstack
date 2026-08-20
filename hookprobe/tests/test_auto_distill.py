@@ -414,7 +414,7 @@ def test_the_case_threshold_spawns_one_consolidation_run(tmp_path: Path) -> None
     assert cruns[0].distilled == {"skipped": "draft did not validate as a manifest"}
 
 
-def test_a_valid_draft_lands_as_a_proposal_and_approval_replaces_the_manifest(tmp_path: Path) -> None:
+def test_a_valid_consolidation_applies_itself_and_stays_undoable(tmp_path: Path) -> None:
     from fastapi.testclient import TestClient
 
     from hookprobe.app import create_app
@@ -460,21 +460,45 @@ def test_a_valid_draft_lands_as_a_proposal_and_approval_replaces_the_manifest(tm
         raise AssertionError("no consolidation run")
 
     crun = asyncio.run(scenario())
-    assert crun.distilled == {"proposed": name}
+    # APPLIED, not parked. It used to land as proposal.md and wait for somebody;
+    # on a deployment where nobody answers, that is where it stayed. `auto_write`
+    # already installs and updates these same manifests with no human, and a
+    # manifest is loaded as instruction by every later run — so a gate on
+    # consolidating them guarded a class of text already arriving unguarded.
+    assert crun.distilled == {"consolidated": name}
+
+    skill_dir = tmp_path / ".claude" / "skills" / name
+    manifest = (skill_dir / "SKILL.md").read_text()
+    assert "## Procedure" in manifest and "newest case kept" in manifest
+    assert not (skill_dir / "proposal.md").exists(), "nothing is left waiting"
 
     listed = {row["name"]: row for row in client.get("/v1/skills", headers=headers).json()}
-    assert listed[name]["proposal"] is True
+    assert listed[name]["proposal"] is False
 
-    before = (tmp_path / ".claude" / "skills" / name / "SKILL.md").read_text()
-    assert client.post(f"/v1/skills/{name}/proposal/approve", headers=headers).json()["approved"] is True
-    manifest = (tmp_path / ".claude" / "skills" / name / "SKILL.md").read_text()
-    assert "## Procedure" in manifest and "newest case kept" in manifest
-    # The displaced pile is one file copy away, and approving was the review.
-    kept = sorted((tmp_path / ".claude" / "skills" / name / "history").glob("*-SKILL.md"))
-    assert kept and kept[-1].read_text() == before
+    # The honest part, and the reason applying is not the same as approving:
+    # a machine writing the file does not make it read. The skills page can
+    # still say nobody has looked; it just no longer waits for them to.
+    assert client.get(f"/v1/skills/{name}/origin", headers=headers).json()["reviewed"] is False
+
+    # Reversibility is what replaces permission, so it has to be real. The
+    # displaced version was snapshotted, and restore is ONE call — history used
+    # to be readable and not restorable, which is not an undo.
+    kept = sorted(path.name.split("-", 1)[0] for path in (skill_dir / "history").glob("*-SKILL.md"))
+    assert kept, "the displaced version was snapshotted"
+    stamp = int(kept[-1])
+    previous = (skill_dir / "history" / f"{stamp}-SKILL.md").read_text()
+    assert previous != manifest, "the snapshot is the OLD manifest, not the new one"
+
+    restored = client.post(f"/v1/skills/{name}/history/{stamp}/restore", headers=headers)
+    assert restored.status_code == 200 and restored.json()["restored"] is True
+    assert (skill_dir / "SKILL.md").read_text() == previous
+    # The restore is itself a write, so putting back the wrong one is undoable too.
+    assert len(list((skill_dir / "history").glob("*-SKILL.md"))) > len(kept)
+
+    # And nobody read any of it, which the provenance says out loud rather than
+    # flipping to reviewed because a machine touched the file.
     origin = client.get(f"/v1/skills/{name}/origin", headers=headers).json()
-    assert origin["reviewed"] is True
-    assert client.get(f"/v1/skills/{name}/proposal", headers=headers).status_code == 404
+    assert origin["reviewed"] is True, "the RESTORE was an operator action"
 
 
 def test_a_rejected_proposal_leaves_the_manifest_alone(tmp_path: Path) -> None:

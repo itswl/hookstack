@@ -42,7 +42,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException
 
 from hookprobe import suggestions
-from hookprobe.distill import draft_skill, record_revision, snapshot
+from hookprobe.distill import apply_consolidation, draft_skill, record_revision, snapshot
 from hookprobe.engine import _load_agents_raw
 from hookprobe.files import atomic_write, system_prompt_path
 from hookprobe.service import RunService
@@ -264,6 +264,34 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             raise HTTPException(status_code=404, detail="no such version")
         return {"name": name, "stamp": stamp, "content": path.read_text(encoding="utf-8")}
 
+    @app.post("/v1/skills/{name}/history/{stamp}/restore", dependencies=[Depends(guard)])
+    async def skill_history_restore(name: str, stamp: int) -> dict[str, Any]:
+        """Put a displaced version back, in one call.
+
+        History was readable and not restorable: the only way back was to GET a
+        version, read it, and PUT it again. That was tolerable while every write
+        to a manifest went through a person. It stopped being tolerable when
+        consolidation started applying its own drafts — "the displaced version is
+        snapshotted" is only an undo if there is an undo.
+
+        The restore is itself a write, so it snapshots what it displaces. Putting
+        back the wrong version is therefore also reversible.
+        """
+        _require_name(name, kind="skill")
+        skill_dir = settings.workdir / ".claude" / "skills" / name
+        path = skill_dir / "history" / f"{stamp}-SKILL.md"
+        manifest = skill_dir / "SKILL.md"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="no such version")
+        if not manifest.is_file():
+            raise HTTPException(status_code=404, detail="no such runbook")
+        snapshot(skill_dir, manifest)
+        atomic_write(manifest, path.read_bytes())
+        record_revision(
+            skill_dir, by="operator", reviewed=True, at=time.time(), detail={"action": "restored", "from": stamp}
+        )
+        return {"restored": True, "name": name, "stamp": stamp}
+
     @app.post("/v1/skills/{name}/review", dependencies=[Depends(guard)])
     async def skill_review(name: str) -> dict[str, Any]:
         """Mark a runbook read without changing a character of it.
@@ -302,10 +330,10 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
         manifest = skill_dir / "SKILL.md"
         if not proposal.is_file() or not manifest.is_file():
             raise HTTPException(status_code=404, detail="no proposal")
-        snapshot(skill_dir, manifest)
-        atomic_write(manifest, proposal.read_text(encoding="utf-8").encode("utf-8"))
-        proposal.unlink(missing_ok=True)
-        record_revision(skill_dir, by="operator", reviewed=True, at=time.time(), detail={"action": "consolidated"})
+        # Still here, and still useful, even though the loop now applies its own
+        # drafts: a proposal parked by an older build is sitting on at least one
+        # deployment, and the operator path is what clears it.
+        apply_consolidation(skill_dir, proposal.read_text(encoding="utf-8"), by="operator", at=time.time())
         return {"approved": True, "name": name}
 
     @app.post("/v1/skills/{name}/proposal/reject", dependencies=[Depends(guard)])
