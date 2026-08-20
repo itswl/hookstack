@@ -539,10 +539,31 @@ class Store:
         await self.db.commit()
         return {"identity": identity, "verdict": verdict}
 
-    async def ai_rulings(self) -> dict[str, dict[str, Any]]:
-        """Every standing AI ruling, by identity. Not windowed: a ruling is a
-        standing read of a condition, not an event inside a window."""
-        cursor = await self.db.execute("SELECT identity, verdict, why, model, at FROM ai_rulings")
+    async def ai_rulings(self, since: float | None = None) -> dict[str, dict[str, Any]]:
+        """Standing AI rulings, by identity, for conditions seen since `since`.
+
+        A ruling itself is not an event in a window — it is a standing read of a
+        condition, and re-reading it every week to keep it inside the window
+        would be pointless. But the COUNT beside `ruled` has to answer the same
+        question `ruled` does, and it did not: `ruled` counted presses inside the
+        window while this counted every row in the table, including rulings on
+        conditions that never fired here at all. Nothing validates that an
+        identity exists in the ledger, so an orphan row inflated the total while
+        appearing in no row of `noisiest`.
+
+        Two numbers side by side with different denominators is the exact defect
+        this ledger spent a week removing from its own board. So the ruling is
+        kept standing and the count is joined to the window.
+        """
+        if since is None:
+            cursor = await self.db.execute("SELECT identity, verdict, why, model, at FROM ai_rulings")
+        else:
+            cursor = await self.db.execute(
+                "SELECT r.identity, r.verdict, r.why, r.model, r.at FROM ai_rulings r"
+                " WHERE EXISTS (SELECT 1 FROM judgements j"
+                " WHERE j.identity = r.identity AND j.received_at >= ?)",
+                (since,),
+            )
         return {
             str(row["identity"]): {
                 "verdict": str(row["verdict"]),
@@ -667,7 +688,7 @@ class Store:
             (since, max(1, min(50, limit or self.NOISIEST_LIMIT))),
         )
         healing = await self.self_healing(since)
-        ai = await self.ai_rulings()
+        ai = await self.ai_rulings(since)
         noisiest = [
             {
                 "identity": str(row["identity"]),
@@ -720,7 +741,8 @@ class Store:
             "likely_flapping": sum(1 for row in healing.values() if row["likely_flapping"]),
             # Counted apart from `ruled` for the same reason it is stored apart:
             # `ruled` answers "how many times did a person tell us", and an AI
-            # ruling folded into it would answer nothing at all.
+            # ruling folded into it would answer nothing at all. Same WINDOW as
+            # `ruled` though — see ai_rulings() for why that took a fix.
             "ai_ruled": len(ai),
             "ai_not_worth_it": sum(1 for row in ai.values() if row["verdict"] == "not_worth_it"),
             "noisiest": noisiest,
