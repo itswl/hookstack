@@ -91,6 +91,12 @@ channels:
   # re-sends it as the application so its buttons can be pressed.
   - name: to-me
     type: feishu
+    # Explicitly unsigned, and the empty string is the point: a missing key here
+    # is an oversight, a present-and-empty one is a decision. This hop is the
+    # pipe handing a rendered card to the bridge beside it on the compose
+    # network, and the bridge's own credential is what authenticates the leg
+    # that actually leaves the machine.
+    secret: ""
     url: http://lark-bridge:9100/
     options: {payload: processed}
 
