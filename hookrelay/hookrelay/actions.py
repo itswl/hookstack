@@ -49,7 +49,7 @@ DEFAULT_TTL_SECONDS = 24 * 3600
 
 # Every kind the pipe knows how to carry. A brain may declare any of them; the
 # deployment's config decides which are actually enabled.
-KINDS = ("silence", "followup", "approve", "useful", "useless")
+KINDS = ("silence", "followup", "approve", "useful", "useless", "remember")
 
 
 class ActionError(ValueError):

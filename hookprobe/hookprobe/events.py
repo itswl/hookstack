@@ -289,6 +289,8 @@ def _dispatch(
     """
     if kind == "approve":
         return _approve(service, params, actor=actor, correlation_id=correlation_id)
+    if kind == "remember":
+        return _remember(service, params, actor=actor)
     run = _resolve_run(service, correlation_id, event_id)
     if run is None:
         # 202-with-a-reason, not 404. A card in a chat outlives its run —
@@ -307,6 +309,28 @@ def _dispatch(
     if kind == "followup":
         return _followup(service, run, params)
     return _rule(service, run, kind, actor=actor)
+
+
+def _remember(service: RunService, params: dict[str, Any], *, actor: str) -> dict[str, Any]:
+    """Accept one queued memory line, from a card, with one tap.
+
+    Everything that reaches this button was REFUSED by the shape check — a line
+    that could act on a later run (hookprobe.suggestions). So this is the one
+    path by which such a line enters standing instruction, and it requires a
+    person; what the button removes is the login, not the person.
+
+    202-with-a-reason for a row that is already resolved or gone, like every
+    other answer on this door: a card outlives the queue it was minted from, and
+    a non-2xx here becomes a redelivery loop over something permanent.
+    """
+    ref = str(params.get("ref") or "").strip()[:_REF_MAX]
+    if not ref:
+        raise HTTPException(status_code=400, detail="remember needs params.ref naming the suggestion")
+    row = service.accept_suggestion(ref)
+    if row is None:
+        return {"status": "already_resolved_or_gone", "kind": "remember", "ref": ref}
+    logger.info("memory accepted from a card id=%s actor=%s", ref, actor or "-")
+    return {"status": "remembered", "kind": "remember", "ref": ref, "line": str(row.get("line") or "")[:200]}
 
 
 def register(app: FastAPI, settings: Settings, service: RunService) -> None:
