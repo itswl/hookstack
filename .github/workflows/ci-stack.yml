@@ -63,7 +63,11 @@ jobs:
       - name: the lark bridge parses and lints
         run: |
           python3 -m compileall -q deploy/lark-bridge
-          pip install ruff
+          # Pinned to the same version the services pin, or this step lints with
+          # whatever shipped today and goes red on a rule nobody in this repo
+          # has agreed to. The version is read from a service's requirements so
+          # there is still one source of truth.
+          pip install "$(grep -E '^ruff==' hookrelay/requirements.txt)"
           ruff check deploy/lark-bridge
           ruff format --check deploy/lark-bridge
 
