@@ -106,7 +106,17 @@ _UNSAFE = (
     # Prompt-shaped scaffolding: headings, roles, fenced blocks.
     (re.compile(r"^#|^\s*[-*]\s|```|\bsystem\s*:|\bassistant\s*:|\buser\s*:", re.I | re.M), "prompt scaffolding"),
 )
-_APPLY_MAX = 200
+# A crude backstop, and only that. The patterns above are what actually refuse a
+# line that could act; length exists to stop somebody packing a paragraph of
+# framing into one "fact". 200 was arbitrary and bit a legitimate line at 201
+# characters — one naming two Chinese condition names plus the reason they are
+# real. Refusing that taught nobody anything about instruction surface.
+#
+# 400 still refuses a paragraph and leaves room for a fact that has to name what
+# it is about. Raised on what the check is FOR, not to make one input pass: the
+# line that tripped it is still queued, because it packs two conditions into one
+# fact and the brief asks for one.
+_APPLY_MAX = 400
 
 
 def unsafe_reason(fact: str) -> str | None:
