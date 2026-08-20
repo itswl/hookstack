@@ -30,6 +30,15 @@ services:
       # without a model key. With `--profile probe`, set in .env:
       #   HOOKPROBE_EVENT_URL=http://hookprobe:8088/hooks/event
       HOOKPROBE_EVENT_URL: ${HOOKPROBE_EVENT_URL:-http://sink:9000/probe-standin}
+      # Card actions. A demo value on purpose: without a secret no card carries a
+      # button at all, so the whole return leg would be invisible here — and the
+      # escalation sweep would disarm itself, which is correct behaviour but not
+      # something you can see. Use a real secret anywhere the port is reachable.
+      HOOKRELAY_ACTION_SECRET: demo-card-secret
+      # Where an action LINK points, for the dialects that cannot call back
+      # (DingTalk, WeCom). Loopback is right for the demo; in a real deployment
+      # this is the address an operator's browser can actually reach.
+      HOOKRELAY_PUBLIC_URL: http://127.0.0.1:8100
     volumes:
       # Checked in and mounted read-only, so `up` needs no setup step. Point
       # HOOKRELAY_CONFIG at /data/config.yaml to use your own instead.

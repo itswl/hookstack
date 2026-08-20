@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Str
 from hookrelay import actions, metrics, registry
 from hookrelay.alarm import SelfAlarm
 from hookrelay.breaker import CircuitBreaker
-from hookrelay.config import CardAction, Config, ConfigError
+from hookrelay.config import CardAction, Config, ConfigError, _warn_posture_mix
 from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
 from hookrelay.live import Live
@@ -133,6 +133,12 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     if loaded_plugins:
         logger.info("plugins loaded: %s", ", ".join(loaded_plugins))
     app_config = cfg or Config.from_file(app_settings.config_path)
+    # The doctrine's own asterisk, said out loud once at boot. It had lived only
+    # in README prose, so a pipeline could run dedup in front of a brain forever
+    # and nothing would mention it.
+    posture_warning = _warn_posture_mix(app_config.pipeline, app_config.channels)
+    if posture_warning:
+        logger.warning("%s", posture_warning)
     store = Store(app_settings.db_path)
     live = Live()
     store.on_change = live.changed
