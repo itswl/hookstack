@@ -731,8 +731,22 @@ class RunService:
 
     def _schedule_return(self, run: Run) -> None:
         """The family loop: relay-born runs report back to the pipe. Detached,
-        because nobody is waiting on this side — see hookprobe.notify."""
-        if run.origin != "relay" or not self._settings.return_url:
+        because nobody is waiting on this side — see hookprobe.notify.
+
+        `_meta.notify` opts a run in that the relay did not send. The guard used
+        to be origin alone, which is right for the two callers that existed: a
+        relay-born run reports back, and a platform-born one is POLLED at
+        /final, so returning as well would deliver it twice.
+
+        A patrol is a third case and had neither. Nothing polls it — the crontab
+        that fired it is long gone — so its report reached a JSON file on the
+        volume and stopped there. Three verified patrol runs cost $2.20 and were
+        read by nobody but me, over SSH. A scheduled report with no delivery is
+        just a slower way of spending money.
+        """
+        if not self._settings.return_url:
+            return
+        if run.origin != "relay" and not run.meta.get("notify"):
             return
         task = asyncio.create_task(self._returns.deliver(run, self._return_delays))
         self._tasks.add(task)

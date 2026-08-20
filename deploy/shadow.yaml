@@ -65,6 +65,22 @@ sources:
     fields:
       origin: "{meta.source}"
 
+  # The investigator's report, coming back to be dressed as a card. Unsigned for
+  # the same reason as the door above: a loopback hop inside hookstack_net.
+  #
+  # HOOKPROBE_RETURN_URL has always pointed here and this door has never existed,
+  # so the POST 404'd — invisible, because the platform POLLS /final for the
+  # investigations it starts and never needed the return. A patrol has nobody
+  # polling it, so its report reached a JSON file on the volume and stopped.
+  - name: probe-notify
+    secret: ""
+    title: "{meta.alert_name}"
+    body: "{report.summary}"
+    level: "{meta.importance}"
+    fields:
+      origin: "{meta.source}"
+      session: "{meta.session_key}"
+
 channels:
   - name: to-judge
     type: generic
@@ -109,6 +125,14 @@ routes:
   # about and the reason returns take a higher-priority terminal route.
   - name: verdict-to-me
     source: judge-notify
+    send_to: [to-me]
+    priority: 100
+    stop: true
+
+  # Same shape and the same reason as verdict-to-me: a report that fell through
+  # to shadow-to-judges would be handed to a brain as though it were an alert.
+  - name: report-to-me
+    source: probe-notify
     send_to: [to-me]
     priority: 100
     stop: true

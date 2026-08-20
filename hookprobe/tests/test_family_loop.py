@@ -185,6 +185,59 @@ def test_relay_born_runs_report_back(tmp_path) -> None:
     )
 
 
+def test_a_patrol_asks_for_its_report_and_a_polled_run_does_not(tmp_path) -> None:
+    """Three patrol runs cost $2.20 on production and were delivered nowhere.
+
+    The guard was `origin != "relay"`, correct for the two callers that existed:
+    a relay-born run reports back, a platform-born one is POLLED at /final and
+    returning as well would deliver it twice. A patrol is a third case with
+    neither — the crontab that fired it is long gone — so its report reached a
+    JSON file on the volume and stopped there.
+
+    Both halves matter. Returning everything would double-deliver every
+    investigation the platform starts, which is the reason the guard exists.
+    """
+    _Capture.received = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Capture)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}/hook/probe-notify"
+
+    async def scenario() -> None:
+        settings = make_settings(tmp_path, return_url=url, return_secret="ret-secret")
+        service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+
+        # Posted straight to /hooks/agent, so origin is empty either way.
+        service.start(
+            {
+                "message": "Patrol: self review",
+                "sessionKey": "patrol:self-review:2026-08-20",
+                "_meta": {"patrol": "self-review", "title": "Patrol: self review", "notify": True},
+            }
+        )
+        service.start({"message": "investigate", "sessionKey": "platform:polled:1"})
+
+        for _ in range(300):
+            patrol = service.get("patrol:self-review:2026-08-20")
+            if patrol is not None and patrol.return_status:
+                break
+            await asyncio.sleep(0.01)
+
+        polled = service.get("platform:polled:1")
+        assert patrol is not None and patrol.return_status == "sent"
+        assert polled is not None and polled.finished, "the polled run still ran to completion"
+        assert not polled.return_status, "nothing polls a patrol; the platform polls this one"
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        server.shutdown()
+
+    assert len(_Capture.received) == 1, "one delivery, not two"
+    payload = json.loads(_Capture.received[0]["body"])
+    assert payload["meta"]["alert_name"] == "Patrol: self review · investigation"
+    assert payload["meta"]["session_key"] == "patrol:self-review:2026-08-20"
+
+
 # -- restart accounting ------------------------------------------------------
 
 
