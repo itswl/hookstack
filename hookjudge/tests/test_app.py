@@ -53,6 +53,10 @@ def _settings(tmp_path, **overrides: Any) -> Settings:
         Settings(
             db_path=str(tmp_path / "j.db"),
             ingest_secret="",
+            # Set, because the ruling door fails CLOSED when it is not — unlike
+            # every other door here, where an empty secret means an in-network
+            # hop. A test suite that left it empty would only ever see the 503.
+            ruling_secret="ruling-secret",
             read_token="read-t",
             max_body_bytes=262144,
             return_url="https://relay.example/hook/judge-notify",
@@ -1086,3 +1090,118 @@ async def test_a_condition_that_heals_itself_is_visible_without_anyone_pressing(
     assert row["interruptions"] == 4, "every card, recoveries included"
     assert row["fired"] == 2, "the denominator the verdict used, now visible"
     assert row["self_resolved"] * 2 >= row["fired"], "and the arithmetic checks out on the page"
+
+
+async def test_an_ai_ruling_never_lands_in_the_column_that_means_a_person_said_so(tmp_path):
+    """The LLM adjudicates the data gate. It does not get to be a human.
+
+    `mattered` is the only field in this ledger that means somebody spoke; `ruled`
+    counts it and `mattered_pct` divides by it. So the AI verdict gets its own
+    door, its own table and its own keys, and the test that matters is the
+    negative one: after a model rules on every condition, `ruled` is still 0.
+
+    The unit differs too. A person rules on the card that woke them at 3am; a
+    model reading twenty case files rules on the CONDITION behind them. One row
+    per condition, latest ruling wins — a standing read of evidence that keeps
+    arriving, unlike a press, which is a fact about a moment.
+    """
+    app = create_app(
+        settings=_settings(tmp_path, ingest_secret="s4", ruling_secret="r4", db_path=str(tmp_path / "ai.db"))
+    )
+
+    def sign(payload: dict, *, secret: bytes = b"r4") -> tuple[bytes, dict[str, str]]:
+        body = json.dumps(payload).encode()
+        ts = str(int(time.time()))
+        sig = hmac.new(secret, ts.encode() + b"." + body, hashlib.sha256).hexdigest()
+        return body, {"X-Hook-Signature": sig, "X-Hook-Timestamp": ts}
+
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        store = app.state.store
+        from hookjudge.contract import Incoming, Verdict
+
+        base = time.time() - 3600
+        for index in range(4):
+            await store.record(
+                Incoming(
+                    source="grafana",
+                    title="Topup over 500",
+                    body="b",
+                    level="high",
+                    fields={},
+                    correlation_id=f"c{index}",
+                    received_at=base + index * 60,
+                    recovery_flag=False,
+                ),
+                Verdict(summary="s", importance="high").normalized(),
+                1,
+            )
+
+        good = {
+            "identity": "grafana|Topup over 500",
+            "verdict": "not_worth_it",
+            "why": "47 firings, every investigation concluded the rule fired correctly on real business volume",
+            "model": "claude-opus-5",
+        }
+        body, headers = sign(good)
+        assert (await client.post("/rulings/ai", content=body)).status_code == 401, "the door is signed"
+
+        # The ingest secret must NOT open it. That secret also opens /events, so
+        # a component that can sign for it can forge judgements — and the caller
+        # here is the investigator, the one that reads attacker-influenced text.
+        # One door, one credential, and this is the assertion that keeps it true.
+        wrong_body, wrong_headers = sign(good, secret=b"s4")
+        refused = await client.post("/rulings/ai", content=wrong_body, headers=wrong_headers)
+        assert refused.status_code == 401, "the ingest credential is not a ruling credential"
+
+        assert (await client.post("/rulings/ai", content=body, headers=headers)).status_code == 202
+
+        # A verdict with no reasoning is an opinion, and `likely_flapping`
+        # already says something true without words.
+        body, headers = sign({**good, "why": "   "})
+        assert (await client.post("/rulings/ai", content=body, headers=headers)).status_code == 400
+        body, headers = sign({**good, "verdict": "meh"})
+        assert (await client.post("/rulings/ai", content=body, headers=headers)).status_code == 400
+        # An empty identity is a valid primary key, so this has to be refused
+        # BEFORE the write, not after it.
+        body, headers = sign({**good, "identity": "  "})
+        assert (await client.post("/rulings/ai", content=body, headers=headers)).status_code == 400
+
+        # Latest wins: the evidence keeps arriving, so a condition that stopped
+        # self-resolving must be re-rulable.
+        body, headers = sign({**good, "verdict": "worth_it", "why": "it stopped self-resolving on Aug 20"})
+        assert (await client.post("/rulings/ai", content=body, headers=headers)).status_code == 202
+
+        attention = (await client.get("/status", headers={"X-Read-Token": "read-t"})).json()["summary"]["attention"]
+
+    assert attention["ai_ruled"] == 1, "one condition ruled, not four cards"
+    assert attention["ruled"] == 0, "nobody pressed anything, and the human column says so"
+    assert attention["mattered"] == 0 and attention["mattered_pct"] is None
+    row = {r["title"]: r for r in attention["noisiest"]}["Topup over 500"]
+    assert row["ai_ruling"] == "worth_it", "the later ruling replaced the earlier one"
+    assert "stopped self-resolving" in row["ai_why"], "the reason travels with the verdict"
+    assert row["mattered"] == 0, "and it did not leak into the human column"
+
+
+async def test_the_ruling_door_is_shut_when_its_secret_is_unset(tmp_path):
+    """Fails CLOSED, which is the opposite of every other door here.
+
+    Elsewhere an empty secret means "an in-network hop between two containers of
+    one deployment" and verify_signature waves it through — the judge's own
+    return door is configured exactly that way. This door writes to the ledger on
+    behalf of the component that reads attacker-influenced text, so unconfigured
+    has to mean shut rather than open to anyone on the network.
+    """
+    app = create_app(settings=_settings(tmp_path, ruling_secret="", db_path=str(tmp_path / "shut.db")))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        answer = await client.post("/rulings/ai", json={"identity": "x", "verdict": "worth_it", "why": "y"})
+
+    assert answer.status_code == 503
+    assert "HOOKJUDGE_RULING_SECRET" in answer.json()["detail"], "say which knob opens it"

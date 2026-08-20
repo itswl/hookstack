@@ -486,6 +486,70 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return JSONResponse({"recorded": True, **ruling}, status_code=202)
 
+    @app.post("/rulings/ai")
+    async def ai_ruling(
+        request: Request,
+        x_hook_signature: str | None = Header(default=None),
+        x_hook_timestamp: str | None = Header(default=None),
+    ) -> JSONResponse:
+        """A model's retrospective ruling on a CONDITION, from the investigator.
+
+        A separate door from /feedback, not a flag on it, and that is the whole
+        design. `mattered` is the only field in this ledger that means a person
+        said so; `ruled` counts it and `mattered_pct` divides by it. A boolean on
+        the human door deciding which column a write lands in is one bug away
+        from making all three of those numbers untraceable. Two doors cannot be
+        confused by a typo.
+
+        What justifies automating this one and not the memory gate: the failure
+        mode. A wrong ruling here is a wrong number in a ledger — visible,
+        overwritable, and it compounds into nothing. A wrong memory acceptance is
+        a line in CLAUDE.md loaded as instruction by every later run, proposed by
+        a model that read attacker-influenced alert text. Same actor, different
+        blast radius, so different rules. See
+        .agents/notes/implemented/2026-08-20-the-signal-that-needs-no-human.md.
+
+        Signed with the ingest secret, like every other door here: the caller is
+        hookprobe, over the private network, and the judge still holds no
+        knowledge of channels or people.
+        """
+        body = await request.body()
+        if len(body) > app_settings.max_body_bytes:
+            raise HTTPException(status_code=413, detail="body too large")
+        # Closed, not open, when unconfigured. Everywhere else here an empty
+        # secret means "an in-network hop between two containers of one
+        # deployment" and verify_signature waves it through. Not on this door:
+        # its caller is the investigator, the one component that reads
+        # attacker-influenced text, and a ledger-write door that authenticates
+        # nobody is worse than a feature that is switched off.
+        if not app_settings.ruling_secret:
+            raise HTTPException(status_code=503, detail="set HOOKJUDGE_RULING_SECRET to open this door")
+        if not verify_signature(app_settings.ruling_secret, body, x_hook_signature, x_hook_timestamp, now_ts()):
+            raise HTTPException(status_code=401, detail="bad signature")
+        try:
+            parsed = json.loads(body or b"{}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="body is not JSON") from None
+        payload = parsed if isinstance(parsed, dict) else {}
+        identity = str(payload.get("identity") or "").strip()
+        if not identity:
+            # Checked BEFORE the write, which it was not: an empty identity is
+            # a valid primary key, so the row landed and was rejected afterwards.
+            raise HTTPException(status_code=400, detail="identity must not be empty")
+        try:
+            recorded = await store.record_ai_ruling(
+                identity,
+                verdict=str(payload.get("verdict") or "").strip(),
+                why=str(payload.get("why") or ""),
+                model=str(payload.get("model") or ""),
+                at=now_ts(),
+            )
+        except ValueError as exc:
+            # 400, not 202: an unknown verdict or a missing reason is a caller
+            # that has to be fixed, and a retry of the same body cannot help.
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return JSONResponse({"recorded": True, **recorded}, status_code=202)
+
     @app.get("/live")
     async def live_stream(
         x_read_token: str | None = Header(default=None),
@@ -642,6 +706,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # deployment nobody watches — this is the line that still moves.
             "# TYPE hookjudge_likely_flapping gauge",
             f"hookjudge_likely_flapping {attention.get('likely_flapping') or 0}",
+            "# HELP hookjudge_ai_rulings Conditions a model ruled on retrospectively. Not `attention_rulings`.",
+            "# TYPE hookjudge_ai_rulings gauge",
+            f"hookjudge_ai_rulings {attention.get('ai_ruled') or 0}",
+            f"hookjudge_ai_not_worth_it {attention.get('ai_not_worth_it') or 0}",
             "# TYPE hookjudge_repeat_interruptions gauge",
             f"hookjudge_repeat_interruptions {attention['repeats']}",
             "# HELP hookjudge_attention_rulings Human rulings on whether an interruption was worth it.",

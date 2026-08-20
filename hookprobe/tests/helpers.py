@@ -38,6 +38,11 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "coalesce_window_seconds": 1800,
         "event_secret": "",
         "return_url": "",
+        # Off by default: a test that wants rulings filed sets both, and every
+        # other one gets the markers stripped with nothing posted — which is also
+        # the production default until an operator wires the door.
+        "ruling_url": "",
+        "ruling_secret": "",
         "return_secret": "",
         "escalate_levels": frozenset({"critical", "high"}),
         "budget_usd": 0.0,

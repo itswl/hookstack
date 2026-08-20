@@ -26,6 +26,11 @@ class Settings:
     # Inbound: the pipe signs its deliveries. Empty = accept unsigned, which is
     # a decision for a private network, never a default to drift into.
     ingest_secret: str
+    # /rulings/ai only. Deliberately NOT ingest_secret: that one also opens
+    # /events, so a component able to sign for it can forge judgements, and the
+    # component that posts rulings is the investigator — the one that reads
+    # attacker-influenced text. One door, one credential.
+    ruling_secret: str
     read_token: str
     max_body_bytes: int
 
@@ -87,6 +92,7 @@ class Settings:
         return cls(
             db_path=os.environ.get("HOOKJUDGE_DB", "hookjudge.db"),
             ingest_secret=os.environ.get("HOOKJUDGE_INGEST_SECRET", ""),
+            ruling_secret=os.environ.get("HOOKJUDGE_RULING_SECRET", ""),
             read_token=os.environ.get("HOOKJUDGE_READ_TOKEN", ""),
             max_body_bytes=_int("HOOKJUDGE_MAX_BODY_BYTES", 256 * 1024),
             return_url=os.environ.get("HOOKJUDGE_RETURN_URL", ""),
