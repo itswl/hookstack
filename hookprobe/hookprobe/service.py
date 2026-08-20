@@ -657,6 +657,18 @@ class RunService:
             # waiting for review — and it must never itself be distilled, or
             # the loop would write runbooks about rewriting runbooks.
             distill_loop.accept_consolidation(run, result, self._settings)
+        elif run.meta.get("patrol"):
+            # Same rule, one category wider, and it took a real run to notice:
+            # the first self-review patrol installed a runbook called
+            # `patrol-self-review`. A runbook is loaded as instruction by every
+            # later run, so a review OF the loop had just become part of the
+            # loop — and the brief that sent it promises in its first paragraph
+            # that a run of it writes nothing.
+            #
+            # Recorded rather than silent, because "the loop did nothing again"
+            # is the failure the whole distil feature exists to end.
+            run.distilled = {"skipped": "a review of the investigator is not a runbook"}
+            logger.info("auto-distill skipped session=%s reason=patrol", run.session_key)
         else:
             # After the turn is recorded, because the runbook is assembled from it.
             distill_loop.auto_distill(run, result, self._settings)

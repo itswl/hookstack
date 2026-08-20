@@ -42,9 +42,16 @@ Review your own recent work. You have read-only access; write nothing.
 4. Propose AT MOST ONE durable fact for the environment memory, in the usual
    form — a line beginning `MEMORY-SUGGESTION:`. It must be about the
    ENVIRONMENT (topology, a known false alarm, a naming convention), never about
-   one incident, and never about how to behave. Omit it if nothing qualifies:
-   an empty proposal is a fine outcome and a wrong one is expensive, because it
-   would be loaded into every later run.
+   one incident, and never about how to behave. Nothing qualifying is a fine
+   outcome and a wrong line is expensive, because it would be loaded into every
+   later run.
+
+   If nothing qualifies, say so in one line and say why. Do not leave the
+   heading empty: the first run of this brief did, and an empty section reads
+   identically to a truncated answer or a forgotten instruction. The point of
+   this patrol is a legible record, and "nothing qualified, because the gap I
+   found is a missing runbook rather than a fact about the environment" is a
+   result. A blank space is not.
 
 5. Open the previous self-review's case file first, and compare. If your last
    review proposed something and nothing came of it, say that plainly — the
