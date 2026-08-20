@@ -299,6 +299,13 @@
         '<span class="n' + cold + '">' + esc(c.interruptions) + " interruptions</span>" +
         '<span class="n">' + esc(c.paid) + " paid</span>" + heal +
         (c.likely_flapping ? '<span class="badge burst">likely flapping</span>' : "") +
+        // Three states, three places, never merged: what a person said, what the
+        // behaviour shows, what a model concluded from the case files. The row
+        // where they disagree is the interesting one, so the badge carries the
+        // model's reasoning in its title rather than hiding it behind a click.
+        (c.ai_ruling ? '<span class="badge' + (c.ai_ruling === "not_worth_it" ? " burst" : "") +
+          '" title="' + esc(c.ai_why || "") + '">AI: ' +
+          (c.ai_ruling === "not_worth_it" ? "not worth it" : "worth it") + "</span>" : "") +
         '<span class="n">' + esc(c.mattered) + " useful · " + esc(c.did_not_matter) + " not</span></div>";
     }).join("") : '<div class="empty">no condition interrupted twice in this window</div>';
   }

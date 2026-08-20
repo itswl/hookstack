@@ -55,6 +55,28 @@ CREATE TABLE IF NOT EXISTS judgements (
 );
 CREATE INDEX IF NOT EXISTS ix_identity_time ON judgements (identity, received_at);
 CREATE INDEX IF NOT EXISTS ix_return ON judgements (return_status, id);
+
+-- A model's retrospective ruling on a CONDITION, and deliberately not a column
+-- on judgements. Three reasons, in order of how much they would cost to undo:
+--
+--   1. `mattered` means a person said so. It is the only field in this ledger
+--      that does, `ruled` counts it, and `mattered_pct` divides by it. An AI
+--      answer sharing that column would make every one of those numbers a lie
+--      that could not be untangled afterwards.
+--   2. The unit is different. A person rules on the card that woke them; a model
+--      reading twenty case files rules on the condition behind them. Writing the
+--      second onto one row would pick an arbitrary card to carry it.
+--   3. It is cheap. Fifteen conditions, not a hundred and sixty-five cards.
+--
+-- `why` is required by the writer, not by SQLite: a verdict with no evidence is
+-- an opinion, and this table exists to be argued with.
+CREATE TABLE IF NOT EXISTS ai_rulings (
+    identity TEXT PRIMARY KEY,
+    verdict TEXT NOT NULL,
+    why TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    at REAL NOT NULL
+);
 """
 
 # Indexes over a column _migrate ADDS, so they cannot live in _SCHEMA: that runs
@@ -488,6 +510,49 @@ class Store:
     # own number and never folded into `mattered`.
     SELF_HEAL_FAST_SECONDS = 10 * 60
 
+    AI_VERDICTS = ("worth_it", "not_worth_it")
+
+    async def record_ai_ruling(self, identity: str, *, verdict: str, why: str, model: str, at: float) -> dict[str, Any]:
+        """A model's retrospective ruling on one condition. Latest wins.
+
+        Latest wins rather than first, which is the opposite of `record_mattered`
+        — a person's ruling is a fact about a moment and must not be overwritten
+        by a later press, while this is a standing read of the evidence and the
+        evidence keeps arriving. A condition that stopped self-resolving should
+        be re-ruled, not defended by its own history.
+
+        Refuses an unknown verdict and an empty reason. The reason is the whole
+        point: `likely_flapping` already says something true with no words, so a
+        model that cannot say WHY it disagrees with a human's absence is adding
+        confidence rather than information.
+        """
+        if verdict not in self.AI_VERDICTS:
+            raise ValueError(f"verdict must be one of {self.AI_VERDICTS}, not {verdict!r}")
+        if not why.strip():
+            raise ValueError("an AI ruling without a reason is an opinion; say why")
+        await self.db.execute(
+            "INSERT INTO ai_rulings (identity, verdict, why, model, at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(identity) DO UPDATE SET verdict = excluded.verdict, why = excluded.why,"
+            " model = excluded.model, at = excluded.at",
+            (identity, verdict, why.strip()[:600], model[:80], at),
+        )
+        await self.db.commit()
+        return {"identity": identity, "verdict": verdict}
+
+    async def ai_rulings(self) -> dict[str, dict[str, Any]]:
+        """Every standing AI ruling, by identity. Not windowed: a ruling is a
+        standing read of a condition, not an event inside a window."""
+        cursor = await self.db.execute("SELECT identity, verdict, why, model, at FROM ai_rulings")
+        return {
+            str(row["identity"]): {
+                "verdict": str(row["verdict"]),
+                "why": str(row["why"]),
+                "model": str(row["model"]),
+                "at": float(row["at"]),
+            }
+            for row in await cursor.fetchall()
+        }
+
     async def self_healing(self, since: float) -> dict[str, dict[str, Any]]:
         """Per condition: how often it resolved itself, and how quickly.
 
@@ -602,6 +667,7 @@ class Store:
             (since, max(1, min(50, limit or self.NOISIEST_LIMIT))),
         )
         healing = await self.self_healing(since)
+        ai = await self.ai_rulings()
         noisiest = [
             {
                 "identity": str(row["identity"]),
@@ -626,6 +692,13 @@ class Store:
                     key: (healing.get(str(row["identity"])) or {}).get(key)
                     for key in ("fired", "self_resolved", "median_seconds", "likely_flapping")
                 },
+                # The third epistemic state on this row, and the reason all three
+                # are separate keys: `mattered` is what a person said,
+                # `likely_flapping` is what the behaviour shows, `ai_ruling` is
+                # what a model concluded from the case files. They can disagree,
+                # and a row where they do is the most interesting row here.
+                "ai_ruling": (ai.get(str(row["identity"])) or {}).get("verdict"),
+                "ai_why": (ai.get(str(row["identity"])) or {}).get("why"),
                 "last_seen": float(row["last_seen"]),
             }
             for row in await cursor.fetchall()
@@ -645,6 +718,11 @@ class Store:
             # is the number that stays useful when `ruled` never moves, which on
             # an unattended deployment is the normal case rather than a failure.
             "likely_flapping": sum(1 for row in healing.values() if row["likely_flapping"]),
+            # Counted apart from `ruled` for the same reason it is stored apart:
+            # `ruled` answers "how many times did a person tell us", and an AI
+            # ruling folded into it would answer nothing at all.
+            "ai_ruled": len(ai),
+            "ai_not_worth_it": sum(1 for row in ai.values() if row["verdict"] == "not_worth_it"),
             "noisiest": noisiest,
         }
 

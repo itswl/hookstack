@@ -99,3 +99,53 @@ def test_the_service_lifts_suggestions_and_the_agent_cannot_write_the_queue(tmp_
     assert suggestions.load(tmp_path)[0]["line"] == "the staging cluster is called demo-cn"
     # And the write path the agent would need is on the input guard's list.
     assert inputs.write_deny_reason("memory-suggestions.jsonl", workdir=tmp_path) is not None
+
+
+def test_rulings_are_lifted_from_the_report_and_the_bad_ones_dropped_here() -> None:
+    """The agent proposes a ruling; the SERVICE holds the credential.
+
+    Same division as memory suggestions, for the same reason: the agent is the
+    component that reads attacker-influenced alert text and runs tools over it,
+    so it does not get a reusable signing key for a sibling service's ledger. A
+    prompt-injected run can still file a wrong verdict — a wrong number in a
+    ledger, visible and overwritable — but it cannot take the key elsewhere.
+
+    Malformed rulings die here rather than at the far end: a 400 from the judge
+    lands in a log nobody reads on a Thursday, while a report claiming it filed
+    two and filing none is the failure worth preventing.
+    """
+    from hookprobe import rulings
+
+    report = (
+        "## Rulings\n"
+        'AI-RULING: {"identity": "grafana|Topup over 500", "verdict": "not_worth_it", "why": "3 cases, same route"}\n'
+        'AI-RULING: {"identity": "grafana|DatasourceNoData", "verdict": "worth_it", "why": "found a real misconfig"}\n'
+        'AI-RULING: {"identity": "grafana|Topup over 500", "verdict": "worth_it", "why": "duplicate condition"}\n'
+        'AI-RULING: {"identity": "x", "verdict": "meh", "why": "unknown verdict"}\n'
+        'AI-RULING: {"identity": "y", "verdict": "worth_it", "why": ""}\n'
+        'AI-RULING: {"identity": "", "verdict": "worth_it", "why": "no identity"}\n'
+        "AI-RULING: not json at all\n"
+        "Prose survives.\n"
+    )
+    stripped, filed = rulings.extract(report)
+
+    assert [row["identity"] for row in filed] == ["grafana|Topup over 500", "grafana|DatasourceNoData"]
+    assert filed[0]["verdict"] == "not_worth_it", "one standing verdict per condition; the first wins"
+    assert "Prose survives." in stripped and "AI-RULING" not in stripped
+    assert "2 condition rulings filed" in stripped, "a section that silently empties reads as a bug"
+
+    # A report that rules on nothing is returned untouched, or every one of them
+    # would claim a filing it never made.
+    untouched = "No condition had enough evidence this week.\n"
+    assert rulings.extract(untouched) == (untouched, [])
+
+    # The signature is over the exact bytes that get posted.
+    import json as _json
+
+    from hookprobe.wire import verify_timestamped
+
+    for body, headers in rulings.payloads(filed, model="claude-opus-5", secret="r4"):
+        assert verify_timestamped("r4", body, headers["X-Hook-Signature"], headers["X-Hook-Timestamp"])
+        # Parsed, not string-matched: the model id is a field, and asserting on
+        # json.dumps' spacing tests the formatter rather than the payload.
+        assert _json.loads(body)["model"] == "claude-opus-5"
