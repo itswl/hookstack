@@ -482,3 +482,42 @@ def test_metrics_speak_prometheus_and_need_no_token(tmp_path) -> None:
         assert "hookprobe_window_spend_usd 0.5" in body
         assert "hookprobe_budget_usd" not in body, "no budget configured, no budget series"
         assert "hookprobe_runbooks 0" in body
+        # Nothing timed out, so nothing is unpriced — the series is present and
+        # zero rather than absent, because a graph that only appears once things
+        # go wrong has no baseline to go wrong against.
+        assert "hookprobe_unpriced_turns 0" in body
+
+
+def test_a_timed_out_turn_shows_up_as_unpriced_on_metrics(tmp_path) -> None:
+    """The gauge exists to answer one question with a graph instead of a guess.
+
+    The engine reports dollars only on a ResultMessage, and a wall-clock timeout
+    cancels the query before one arrives — so that turn records None, meaning
+    "nobody counted", never 0.0 meaning "free". window_spend is a floor, and this
+    series is how far below the real figure it might be.
+
+    Whether to move the engine to ClaudeSDKClient + interrupt() — which would
+    recover those dollars exactly, at the cost of a rewrite at the one boundary
+    no test touches — depends entirely on what fraction of turns land here. That
+    is a ratio over time, so it has to be a series and not just a number on a
+    page somebody visits after they already suspect something.
+    """
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    settings = make_settings(tmp_path, token=TOKEN)
+    service = RunService(settings, FakeEngine(delay=5.0), RunStore(tmp_path / "results"))
+    with TestClient(create_app(settings, service)) as client:
+        client.post(
+            "/hooks/agent",
+            json={**TRIGGER_PAYLOAD, "sessionKey": "hook:slow", "timeoutSeconds": 1},
+            headers=AUTH,
+        )
+        poll_until_final(client, "hook:slow", deadline=6.0)
+
+        body = client.get("/metrics").text
+        assert "hookprobe_unpriced_turns 1" in body, f"the timed-out turn is not counted:\n{body}"
+        # And the spend it is missing from is beside it, so the pair reads as
+        # "this much counted, this many not counted".
+        assert "hookprobe_window_spend_usd" in body
