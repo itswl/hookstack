@@ -134,6 +134,52 @@ DEFAULT_PIPELINE: tuple[PipelineStage, ...] = (
 )
 
 
+# The judgment features, named by the doctrine in README.md as belonging to
+# STANDALONE posture — a small team with no brain behind the relay. That section
+# also says that in paired posture "they should all yield", and until now that
+# sentence had no way to make itself heard: a config could put dedup in front of
+# a brain forever and nothing would mention it.
+#
+# Measured on 2026-08-20 (see .agents/notes/proposed/
+# 2026-08-20-what-standalone-posture-actually-costs-the-pipe.md): these three
+# are 123 source lines, 2.9% of the pipe, and removing them would withdraw five
+# documented config keys and one of the service's two stated promises. So they
+# stay, and the doctrine gets a voice instead of a deletion.
+_STANDALONE_STAGES = ("dedup", "set", "filter")
+
+
+def _warn_posture_mix(pipeline: tuple[PipelineStage, ...], channels: dict[str, Channel]) -> str:
+    """The one combination the doctrine says should not exist, or "".
+
+    A brain is in play when the pipeline hands events to one (`http`) or when a
+    channel expects a brain's RESULT back (`payload: processed`). Either way its
+    noise accounting is the one that has to stay truthful, and a judgment stage
+    in front of it silently changes what the brain is counting.
+
+    A warning and not an error: a deployment mid-migration legitimately runs
+    both for a while, and refusing to boot over a posture preference would be
+    the pipe overruling its operator. Returned as a string rather than logged
+    here so from_dict stays free of side effects and a test can read it.
+    """
+    judging = [stage.name for stage in pipeline if stage.type in _STANDALONE_STAGES]
+    if not judging:
+        return ""
+    reasons = []
+    if any(stage.type == "http" for stage in pipeline):
+        reasons.append("an http stage hands events to a brain")
+    if any(str(ch.options.get("payload") or "") == "processed" for ch in channels.values()):
+        reasons.append("a channel renders a brain's result (payload: processed)")
+    if not reasons:
+        return ""
+    return (
+        f"posture mix: the pipeline runs {', '.join(judging)} while {' and '.join(reasons)}. "
+        "Those stages are standalone-posture features (see the doctrine in hookrelay/README.md) "
+        "and in a paired deployment they should yield — the brain owns noise accounting, and a "
+        "judgment stage in front of it changes what it is counting without telling it. "
+        "Intentional during a migration; worth removing once the brain is the one deciding."
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CardAction:
     """One kind of button this deployment is willing to put on a card.

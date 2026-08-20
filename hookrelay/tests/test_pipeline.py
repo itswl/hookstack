@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hookrelay.config import Config
 from hookrelay.pipeline import handle_hook
 
 PAYLOAD = {"title": "db down", "message": "primary unreachable", "state": "alerting"}
@@ -83,3 +84,79 @@ async def test_payload_is_stored_whole_for_raw_fidelity(store, cfg):
     import json as _json
 
     assert _json.loads(row["payload_json"])["blob"] == "x" * 40_000
+
+
+# ── the doctrine, with a voice ───────────────────────────────────────────────
+
+
+def test_a_judgment_stage_in_front_of_a_brain_says_so() -> None:
+    """README's doctrine says `filter`, `set` and dedup-as-noise-control belong
+    to standalone posture and "should all yield" in a paired deployment. That
+    sentence had no way to make itself heard: a config could run dedup in front
+    of a brain forever and nothing would mention it.
+
+    A warning, not a refusal — a deployment mid-migration legitimately runs both
+    for a while, and refusing to boot over a posture preference would be the
+    pipe overruling its operator.
+    """
+    from hookrelay.config import _warn_posture_mix
+
+    base = {
+        "sources": [{"name": "grafana", "secret": "", "title": "{title}", "body": "{message}"}],
+        "channels": [{"name": "ops", "type": "feishu", "url": "https://feishu.example/hook"}],
+        "routes": [{"name": "all", "source": "*", "send_to": ["ops"]}],
+    }
+
+    # Paired via the pipeline: an http stage hands the event to a brain.
+    paired_http = Config.from_dict(
+        {
+            **base,
+            "pipeline": [
+                "dedup",
+                "silence",
+                {"type": "http", "name": "triage", "url": "https://brain.example/score"},
+                "routes",
+            ],
+        }
+    )
+    warning = _warn_posture_mix(paired_http.pipeline, paired_http.channels)
+    assert "posture mix" in warning and "dedup" in warning
+    assert "http stage" in warning
+
+    # Paired via the channel: this deployment renders a brain's RESULT.
+    paired_return = Config.from_dict(
+        {
+            **base,
+            "channels": [
+                {
+                    "name": "ops",
+                    "type": "feishu",
+                    "url": "https://feishu.example/hook",
+                    "options": {"payload": "processed"},
+                }
+            ],
+            "pipeline": [{"type": "filter", "name": "mute-low", "when": {"level": ["low"]}}, "routes"],
+        }
+    )
+    assert "payload: processed" in _warn_posture_mix(paired_return.pipeline, paired_return.channels)
+
+    # Standalone: the judgment stages are exactly what this posture is for.
+    standalone = Config.from_dict({**base, "pipeline": ["dedup", "silence", "routes"]})
+    assert _warn_posture_mix(standalone.pipeline, standalone.channels) == ""
+
+    # Paired with no judgment stage — the shape the doctrine actually asks for.
+    clean_paired = Config.from_dict(
+        {
+            **base,
+            "channels": [
+                {
+                    "name": "ops",
+                    "type": "feishu",
+                    "url": "https://feishu.example/hook",
+                    "options": {"payload": "processed"},
+                }
+            ],
+            "pipeline": ["silence", "routes"],
+        }
+    )
+    assert _warn_posture_mix(clean_paired.pipeline, clean_paired.channels) == ""

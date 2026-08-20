@@ -68,6 +68,20 @@ channels:
   # /probe-standin (so the escalation SHAPE is visible without a model key),
   # and `--profile probe` points it at the real investigator. See the
   # hookprobe service in the root compose.
+  # Where a card press goes. `payload: raw` because the action envelope IS the
+  # content — the pipe recorded the press as an event carrying it, and the brain
+  # wants those bytes, not a normalized alert built around them. Unsigned like
+  # every other hop in this demo (the brain's ingest_secret is empty here); a
+  # real deployment signs both doors with the same secret.
+  - name: to-judge-feedback
+    type: generic
+    url: http://hookjudge:8200/feedback
+    options: {payload: raw}
+
+  # Resolved from the environment: the plain stack points this at the sink's
+  # /probe-standin (so the escalation SHAPE is visible without a model key),
+  # and `--profile probe` points it at the real investigator. See the
+  # hookprobe service in the root compose.
   - name: to-probe
     type: generic
     url: ${HOOKPROBE_EVENT_URL}
@@ -123,3 +137,19 @@ routes:
 # Paired posture: the brain does the noise accounting, so the pipe's dedup
 # stays OFF — otherwise both count and neither ledger describes reality.
 pipeline: [silence, routes]
+
+# The card's way back. A verdict DECLARES which buttons it deserves (that is
+# judgement, and hookjudge's); this decides which of those the demo actually
+# offers and where a press goes. `silence` is the pipe's own job, so it needs no
+# channel to reach. `approve` is absent on purpose: it runs commands, so it is
+# opt-in per deployment and the demo has nothing to approve.
+#
+# Only takes effect with HOOKRELAY_ACTION_SECRET set — the compose file sets a
+# demo value. Empty means no card carries a button at all, because an unsigned
+# button is a URL anyone in the group chat can press on your behalf.
+card_actions:
+  silence:
+  useful:
+    forward_to: to-judge-feedback
+  useless:
+    forward_to: to-judge-feedback
