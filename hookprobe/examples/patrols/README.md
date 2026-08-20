@@ -19,6 +19,38 @@ before, and neither needed a line of service code:
 [`patrol.sh`](patrol.sh) is the sender: it reads a brief, signs the request and
 posts it.
 
+## Two targets, and which one your deployment can use
+
+`PATROL_TARGET=relay` (the default) is the design above: the brief goes through
+the pipe's front door and reaches the investigator by the escalation route.
+
+That route is not universal. [`deploy/shadow.yaml`](../../../deploy/shadow.yaml)
+lists *probe escalation* under what is deliberately **absent** — a second door
+onto the same alert runs would double the model bill — so on that deployment a
+patrol posted to the relay has nowhere to go. Check before trusting a crontab:
+
+```bash
+# Is there any channel pointing at the investigator?
+docker exec hookrelay python -c "import yaml;c=yaml.safe_load(open('/etc/hookrelay/config.yaml'));print([ch['name'] for ch in c['channels']])"
+```
+
+If there is not, use `PATROL_TARGET=probe`, which posts to the investigator's own
+door — the same one the platform's deep-analysis leg already uses:
+
+```bash
+PATROL_TARGET=probe HOOKPROBE_TOKEN=... /opt/.../patrol.sh /opt/.../patrols/self-review.md "Patrol: self review"
+```
+
+The trade is worth knowing rather than discovering: that path skips the pipe's
+accounting, dedup and silence. For a patrol — scheduled, singular, wanted — all
+three are near no-ops, but the run will not appear in the pipe's ledger, so spend
+reconciled from there will be short by exactly the patrols.
+
+The `probe` target keys its run on `patrol:<brief>:<date>`, and the
+investigator's `start()` is idempotent per key, so a duplicate fire — a retry, a
+clock change, two hosts sharing one crontab — joins the run already in flight
+instead of paying twice.
+
 ## The briefs are files, and that is the point
 
 A brief is a **prompt**, so it belongs where a person can edit it and see the
