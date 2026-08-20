@@ -124,7 +124,10 @@ if os.environ.get("PATROL_TARGET", "relay") == "probe":
         # distil a runbook from it. The first self-review installed one called
         # patrol-self-review, and a runbook is loaded as instruction by every
         # later run: a review of the loop would have become part of the loop.
-        "_meta": {"patrol": brief.stem, "title": title},
+        # patrol: do not distil a runbook from a review of the investigator.
+        # notify: nothing polls a patrol, so ask for the report to be returned
+        # through the pipe and dressed as a card like any other.
+        "_meta": {"patrol": brief.stem, "title": title, "notify": True},
     }
 else:
     payload = {

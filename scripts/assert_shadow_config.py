@@ -80,7 +80,7 @@ def main(argv: list[str]) -> int:
     # and a MISSING secret key is still a failure everywhere — the difference
     # between `secret: ""` and no line at all is the difference between a
     # decision and an oversight.
-    internal_hops = {"judge-notify", "to-me"}
+    internal_hops = {"judge-notify", "probe-notify", "to-me"}
     for kind in ("sources", "channels"):
         for item in raw.get(kind) or []:
             name = item.get("name")
@@ -107,12 +107,12 @@ def main(argv: list[str]) -> int:
             print(f"  FAIL  {problem}")
         return 1
 
-    # The platform's door faces outward and must be signed. The return door does
-    # not: it is one container of this deployment handing a verdict to another on
-    # a private network, and requiring a secret there would only mean inventing
-    # one to satisfy this check. Named explicitly rather than inferred, so adding
-    # a THIRD unsigned door stays a decision somebody makes on purpose.
-    internal_doors = {"judge-notify"}
+    # The platform's door faces outward and must be signed. The two return doors
+    # do not: each is one container of this deployment handing its result to
+    # another on a private network, and requiring a secret there would only mean
+    # inventing one to satisfy this check. Named explicitly rather than inferred,
+    # so adding another unsigned door stays a decision somebody makes on purpose.
+    internal_doors = {"judge-notify", "probe-notify"}
     for name, src in cfg.sources.items():
         if name in internal_doors:
             continue
