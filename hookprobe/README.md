@@ -392,7 +392,21 @@ through the same loop, so the channels say *why* there is no investigation
 is never refused), operator paths — `/hooks/agent`, follow-ups, the UI — are
 never gated, and `GET /v1/budget` shows the window's arithmetic. The figure
 counts recorded turns only, so in-flight runs can overshoot by at most
-`max_concurrent` investigations: it is a brake, not an invoice. The pipe stays
+`max_concurrent` investigations: it is a brake, not an invoice.
+
+It is also a **floor**, and says so. The engine reports dollars only on the
+SDK's final result message, and a wall-clock timeout cancels the query before
+one arrives — so a turn cut off by the clock records `None`, meaning *nobody
+counted*, never `0.0`, meaning *free*. The money was really spent. Both
+`/v1/budget` and the `hookprobe_unpriced_turns` metric carry that count beside
+the spend, so the gap is visible rather than silent.
+
+Recovering those dollars exactly would mean driving the SDK through
+`ClaudeSDKClient` and `interrupt()`, which does yield a final result — a rewrite
+at the one boundary no test touches (the suite injects fake engines and never
+imports the SDK). Whether that is worth it depends entirely on what fraction of
+turns land there, which is why the count is a metric series and not just a number
+on a page: let the graph decide it after real traffic, not an argument before. The pipe stays
 content-blind; the judge is untouched; failure still completes the loop (a
 stopped, crashed, budget-refused — or restart-orphaned — investigation
 reports itself: runs are checkpointed at spawn, and the next boot sweeps

@@ -194,6 +194,21 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             f"hookprobe_queued_turns {queued}",
             "# TYPE hookprobe_window_spend_usd gauge",
             f"hookprobe_window_spend_usd {service.window_spend():.6f}",
+            # Turns whose cost nobody counted, beside the spend they are missing
+            # from. The engine reports dollars only on a ResultMessage, and a
+            # wall-clock timeout cancels the query before one arrives — so that
+            # turn records None, meaning "nobody counted", never 0.0 meaning
+            # "free". window_spend is therefore a floor, and this is how far
+            # below the real figure it might be.
+            #
+            # As a SERIES rather than only a number on /v1/budget, because the
+            # decision it feeds is a ratio over time: moving the engine to
+            # ClaudeSDKClient + interrupt() would recover these dollars exactly,
+            # and it is a rewrite at the one boundary no test touches. Worth it
+            # if this line is a real fraction of the turns; not worth it if it
+            # is flat at zero. Let the graph answer that instead of a guess.
+            "# TYPE hookprobe_unpriced_turns gauge",
+            f"hookprobe_unpriced_turns {service.window_unpriced()}",
         ]
         budget = service.budget_state()
         if budget is not None:
