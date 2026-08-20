@@ -273,12 +273,32 @@
   // Where to go turn something off. One line per condition that interrupted a
   // human more than once, with the contrast the cost cards cannot show: twelve
   // interruptions, one of them paid for, and how many anyone said were worth it.
+  // Two halves of one question, and only one of them needs a human. The ruling
+  // columns stay exactly what they were — a count of what somebody SAID — and
+  // stay empty on an unattended deployment, which is the normal case here. The
+  // self-heal columns are the inference that keeps the row readable anyway.
+  //
+  // `fired` is printed next to `self-healed` on purpose: `interruptions` counts
+  // every card including recoveries, the verdict divides episodes by FIRINGS,
+  // and a row showing only the first two invites the reader to do 30/77 and
+  // conclude the flag is broken when the comparison was 30 of 47.
   function renderAttention(list) {
     document.getElementById("atRows").innerHTML = list.length ? list.map(function (c) {
-      var cold = c.mattered ? "" : " cold";   // repeated wake-ups, none of them wanted
+      // Was `c.mattered ? "" : " cold"`, which tints every row on a box where
+      // nobody ever presses anything — the exact miscalibration these columns
+      // exist to remove. Cold now means the evidence says flapping, or a person
+      // said it did not matter; silence alone is not a finding.
+      var cold = (c.likely_flapping || c.did_not_matter) ? " cold" : "";
+      var heal = "";
+      if (c.fired) {
+        heal = '<span class="n' + cold + '">' + esc(c.self_resolved) + " of " + esc(c.fired) +
+          " self-healed" + (c.median_seconds ? " · median " + esc(Math.round(c.median_seconds / 60)) + "m" : "") +
+          "</span>";
+      }
       return '<div class="att"><span class="t" title="' + esc(c.identity) + '">' + esc(c.title) + "</span>" +
         '<span class="n' + cold + '">' + esc(c.interruptions) + " interruptions</span>" +
-        '<span class="n">' + esc(c.paid) + " paid</span>" +
+        '<span class="n">' + esc(c.paid) + " paid</span>" + heal +
+        (c.likely_flapping ? '<span class="badge burst">likely flapping</span>' : "") +
         '<span class="n">' + esc(c.mattered) + " useful · " + esc(c.did_not_matter) + " not</span></div>";
     }).join("") : '<div class="empty">no condition interrupted twice in this window</div>';
   }

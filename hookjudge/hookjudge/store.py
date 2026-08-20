@@ -613,9 +613,18 @@ class Store:
                 "did_not_matter": int(row["did_not_matter"]),
                 # The unattended half of the same question. Kept as its own keys
                 # so nothing here can be mistaken for something a human said.
+                #
+                # `fired` is here because without it this row cannot be checked.
+                # `interruptions` counts every card, recoveries included;
+                # `self_resolved` counts closed episodes; and `likely_flapping`
+                # divides episodes by FIRINGS. So a reader who divides the two
+                # visible numbers gets 30/77 and concludes the flag is broken,
+                # when the comparison it actually made was 30/47. Showing the
+                # denominator costs one integer and makes the verdict auditable
+                # by the person most likely to doubt it.
                 **{
                     key: (healing.get(str(row["identity"])) or {}).get(key)
-                    for key in ("self_resolved", "median_seconds", "likely_flapping")
+                    for key in ("fired", "self_resolved", "median_seconds", "likely_flapping")
                 },
                 "last_seen": float(row["last_seen"]),
             }
