@@ -43,6 +43,10 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         # the production default until an operator wires the door.
         "ruling_url": "",
         "ruling_secret": "",
+        # OFF in tests, ON in production. Most tests here assert the queue's
+        # behaviour, and a default that quietly applied half their fixtures to
+        # CLAUDE.md would make them pass for the wrong reason.
+        "memory_auto_apply": False,
         "return_secret": "",
         "escalate_levels": frozenset({"critical", "high"}),
         "budget_usd": 0.0,

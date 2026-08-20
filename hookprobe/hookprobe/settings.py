@@ -14,6 +14,21 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _flag(name: str, default: bool) -> bool:
+    """A boolean env var, with the off switches spelled the way people spell them.
+
+    Unset means `default`, so a knob that ships ON stays on without the operator
+    having to know it exists — and anything unrecognised also means `default`,
+    because a typo must not quietly flip a security-adjacent behaviour.
+    """
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return default
+
+
 def _float(name: str, default: float) -> float:
     try:
         return float(os.environ.get(name, "") or default)
@@ -122,6 +137,11 @@ class Settings:
     # for why the agent does not post this itself.
     ruling_url: str
     ruling_secret: str
+    # Apply a suggested environment fact without waiting for a person, when its
+    # SHAPE cannot act (hookprobe.suggestions._UNSAFE). On by default: the queue
+    # was a dead end on a deployment where nobody answers, and everything the
+    # check objects to still waits for a human.
+    memory_auto_apply: bool
     escalate_levels: frozenset[str]
 
     # The budget breaker, guarding the only path that spends money without a
@@ -180,6 +200,7 @@ class Settings:
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),
             ruling_url=os.environ.get("HOOKPROBE_RULING_URL", ""),
             ruling_secret=os.environ.get("HOOKPROBE_RULING_SECRET", ""),
+            memory_auto_apply=_flag("HOOKPROBE_MEMORY_AUTO_APPLY", True),
             escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
             budget_usd=max(0.0, _float("HOOKPROBE_BUDGET_USD", 0.0)),
             budget_window_hours=max(0.1, _float("HOOKPROBE_BUDGET_WINDOW_HOURS", 24.0)),

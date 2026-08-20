@@ -61,6 +61,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from hookprobe.files import atomic_write
+
 _SLUG = re.compile(r"[^a-z0-9]+")
 # Any character the ASCII slug cannot carry. Its presence means the name below
 # is not a rendering of the title but a remnant of it.
@@ -488,3 +490,22 @@ def write_proposal(skill_dir: Path, content: str) -> None:
     tmp = (skill_dir / "proposal.md").with_suffix(".tmp")
     tmp.write_text(content, encoding="utf-8")
     tmp.replace(skill_dir / "proposal.md")
+
+
+def apply_consolidation(skill_dir: Path, content: str, *, by: str, at: float) -> None:
+    """The consolidation BECOMES the manifest. Snapshot first, always.
+
+    One implementation for the two callers — the operator pressing approve and
+    the loop applying its own draft — because a manifest written two different
+    ways is a manifest with two different histories.
+
+    `reviewed` is False when `by` is not a person, and that is the whole
+    difference between the two paths: the runbook flips to reviewed only when
+    somebody actually looked. The skills page can still list what nobody has
+    read; it just no longer BLOCKS on it.
+    """
+    manifest = skill_dir / "SKILL.md"
+    snapshot(skill_dir, manifest)
+    atomic_write(manifest, content.encode("utf-8"))
+    (skill_dir / "proposal.md").unlink(missing_ok=True)
+    record_revision(skill_dir, by=by, reviewed=by == "operator", at=at, detail={"action": "consolidated"})
