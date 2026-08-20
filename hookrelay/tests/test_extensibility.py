@@ -432,3 +432,41 @@ def test_gate_matches_ci():
     for marker in ("status.html", "examples/plugins", "config.example.yaml"):
         assert marker in gate, f"gate.sh is missing {marker!r}"
         assert marker in ci, f"ci.yml is missing {marker!r}"
+
+
+def test_the_stack_gate_matches_its_workflow() -> None:
+    """The root gate and ci-stack.yml drift too, and nothing was watching.
+
+    Each service pins its own gate to its own workflow. The STACK gate — the
+    cross-service checks, the ones no component can run because they compare
+    services to each other — was pinned by nothing, and it had already drifted:
+    `assert_weight.py` ran in scripts/gate.sh and in no workflow at all, so every
+    ceiling it enforces was advisory on any machine but a maintainer's.
+
+    Lives in hookrelay's suite for the dull reason that the stack has no suite of
+    its own and the pipe is the first service. Nothing about it is hookrelay's.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent.parent
+    gate = (root / "scripts" / "gate.sh").read_text()
+    ci = (root / ".github" / "workflows" / "ci-stack.yml").read_text()
+
+    for script in (
+        "scripts/check-docs.py",
+        "scripts/assert_design.py",
+        "scripts/assert_agent_notes.py",
+        "scripts/assert_locks.py",
+        "scripts/assert_weight.py",
+        "scripts/assert_copies.py",
+    ):
+        assert script in gate, f"scripts/gate.sh no longer runs {script}"
+        assert script in ci, f"ci-stack.yml no longer runs {script}"
+
+    # And every assert_*.py in the tree is run by SOMETHING. Two runners, because
+    # two of these need a stack that is already up (they read a live ledger and a
+    # config loaded the way the pipe loads it) and so belong to the smoke rather
+    # than the gate. A check nobody invokes is the cheapest kind of green.
+    smoke = (root / "scripts" / "stack-smoke.sh").read_text()
+    for script in sorted(p.name for p in (root / "scripts").glob("assert_*.py")):
+        assert script in gate or script in smoke, f"scripts/{script} is run by neither gate.sh nor stack-smoke.sh"
