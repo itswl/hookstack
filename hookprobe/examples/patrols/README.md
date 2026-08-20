@@ -14,6 +14,7 @@ before, and neither needed a line of service code:
 | --- | --- | --- |
 | [`weekly-attention-review.md`](weekly-attention-review.md) | Mondays | Is the noise going up or down, and did the spend buy anything? |
 | [`nightly-silence-proposal.md`](nightly-silence-proposal.md) | nightly | Is one condition waking people for nothing — and what would quieting it actually cost? |
+| [`self-review.md`](self-review.md) | Fridays | What should the investigator itself remember — and what has it proposed that nobody accepted? |
 
 [`patrol.sh`](patrol.sh) is the sender: it reads a brief, signs the request and
 posts it.
@@ -58,6 +59,13 @@ HOOKRELAY_INBOUND_SECRET=the-inbound-source-secret-from-hookrelays-config
 
 # Every morning 07:10 — propose one silence, or report that nothing qualified.
 10 7 * * * /srv/hookstack/hookprobe/examples/patrols/patrol.sh /srv/hookstack/patrols/nightly-silence-proposal.md "Patrol: nightly silence proposal" >> /var/log/hookstack-patrol.log 2>&1
+
+# Fridays: the investigator reviews its own last twenty investigations and
+# proposes at most one durable fact. A nudge, in Hermes Agent's sense — a system
+# prompting itself to consolidate rather than waiting for the work to do it.
+# What it proposes still needs a person; what it REPORTS is useful either way,
+# which is why it is worth running on a deployment where nobody answers.
+25 9 * * 5 /srv/hookstack/hookprobe/examples/patrols/patrol.sh /srv/hookstack/patrols/self-review.md "Patrol: self review" >> /var/log/hookstack-patrol.log 2>&1
 ```
 
 Verify one by hand before trusting the schedule — `curl -sS -f` prints the
