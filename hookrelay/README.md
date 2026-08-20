@@ -8,10 +8,19 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A small, pluggable router (~1400 lines with tests, five dependencies) that takes JSON webhooks in at
-one door, walks each event through three named gates, and delivers to Feishu /
-DingTalk / WeCom / generic HTTP — with retries, per-channel rate limits, and a
-dead-letter queue you can see.
+A pluggable router (under 4,600 source lines, five dependencies) that takes JSON
+webhooks in at one door, walks each event through three named gates, and delivers
+to Feishu / DingTalk / WeCom / generic HTTP — with retries, per-channel rate
+limits, and a dead-letter queue you can see.
+
+Both numbers are **budgets, not descriptions**. 4,600 source lines is the
+ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
+the first alongside the other stack checks, and crossing it is meant to cost a
+conversation rather than a commit. Tests are counted and printed but never capped
+— a ceiling that punished tests would make deleting one the cheapest way to land
+a feature. The budget is stated rather than measured because the measurement was
+what failed: this sentence read "~1400 lines with tests" from 2026-08-05 until
+2026-08-20, by which point the source alone was 4,226.
 
 **What it deliberately is not**: an alerting system. No AI, no incidents, no
 SLA, no on-call. If an event needs *judgement*, put a brain (hookjudge, or any

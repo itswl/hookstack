@@ -256,6 +256,31 @@ opened the first patrol's case file, compared dimension by dimension and
 reported that the verdict agreed, flagging only that disk usage had doubled
 while staying inside its threshold.
 
+That comparing-against-last-time is what turns patrol mode from a scheduled
+health check into the family's answer to two questions no single alert can
+answer. Both ship as briefs and crontab lines in
+[`hookprobe/examples/patrols/`](hookprobe/examples/patrols/README.md), and
+both are prompts rather than code: **"is the noise going up or down"** reads
+the judge's attention block over seven days (`/status?window_hours=168` — the
+window was already a query parameter), opens last week's edition of itself and
+reports the direction of cards-per-condition against what it cost;
+**"propose a scheduled silence"** looks for the condition that fires in
+the same hour every night and that a human ruled not worth it, and proposes
+quieting it. Proposing, not doing — the family's established shape, the same
+one memory suggestions and remediation already take.
+
+The briefs are written to be honest about what they cannot see, which is the
+part that makes them worth trusting: `mattered_pct` is null until a human
+presses a button, and on a channel with no interactive callbacks nobody can,
+so the weekly brief forbids reading missing rulings as "nobody cared" and
+answers the volume question — which needs no rulings — instead. The silence
+brief has a harder limit to state: a silence in hookrelay matches a **source**,
+not a condition, and nothing anywhere takes a recurring schedule, so the
+proposal names which of three real options it means and never describes a
+fourth that does not exist. Why these are patrols and not a reporting layer in
+the smallest brain is on file in
+[`.agents/notes/implemented/`](.agents/notes/implemented/2026-08-20-a-trend-report-is-a-patrol-not-a-feature.md).
+
 ## Running it locally
 
 The pipe-plus-judge demo is self-contained (the stub model and the sink both

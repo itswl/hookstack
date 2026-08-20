@@ -194,6 +194,11 @@ async def _drain_channel(
         # in the renderer so the token's clock starts when the card is actually
         # sent, and so the renderer stays a pure function of the payload.
         _mint_card_actions(message, cfg, settings, now)
+        # Where an action LINK points, for the dialects that cannot call back.
+        # Carried on the message like the other two underscore keys, because a
+        # builder gets a message and never the settings.
+        if settings.public_url:
+            message["_action_base"] = settings.public_url
         ok, detail, body = await channels.send(client, channel, message)
         sent_body = channels.redact_for_ledger(body)
         processed += 1

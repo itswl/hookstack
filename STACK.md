@@ -162,13 +162,18 @@ docker compose down -v       # delete them too — the next `up` starts from not
 - **`reuse` saves money, not attention — decided 2026-08-12: keep it that
   way for now.** Step 2 reused the verdict and paid nothing, but the
   downstream still got an identical card. This posture turns the pipe's dedup
-  OFF on the grounds that the brain owns noise accounting, and the brain
-  currently accounts only for spend. The two ways to close it stay on record
-  for the day repeated cards actually hurt: the brain returns a suppression
-  signal on `reuse` and the pipe drops the delivery (one place decides what
-  is noise, but a suppressed card can hide a genuine escalation), or the pipe
-  deduplicates the return door (simpler, but two components decide what is
-  noise and the brain's ledger stops describing what was delivered).
+  OFF on the grounds that the brain owns noise accounting; the brain now does
+  account for it — `summary.attention` on `/status` counts interruptions,
+  repeats and the rulings humans gave them, and
+  `hookprobe/examples/patrols/weekly-attention-review.md` is a weekly patrol
+  that reads it over seven days and says whether the number is moving. That
+  makes the bill legible; it does not stop the duplicate card. The two ways to
+  close it stay on record for the day repeated cards actually hurt: the brain
+  returns a suppression signal on `reuse` and the pipe drops the delivery (one
+  place decides what is noise, but a suppressed card can hide a genuine
+  escalation), or the pipe deduplicates the return door (simpler, but two
+  components decide what is noise and the brain's ledger stops describing what
+  was delivered).
 - **AWS SNS cannot be templated — closed 2026-08-12** by
   `hookrelay/examples/plugins/aws_sns_source.py`: the adapter unwraps the
   JSON-string `Message` so templates address the inner alarm

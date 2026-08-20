@@ -20,6 +20,16 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 hookjudge has exactly one outbound address: the pipe. Fan-out is not its
 business, so it cannot grow a second downstream by accident.
 
+It is the smallest service in the stack, and that is a **budget, not an
+observation**: 2,900 source lines is the ceiling, four runtime dependencies is
+the count, and `scripts/assert_weight.py` holds the first to what this file says.
+The same reasoning as the dependency comment at the top of `requirements.txt`
+("chosen to stay four"): a brain that judges and does nothing else has a natural
+size, and growing past it is evidence that something arrived here which belongs
+in the pipe. Tests are counted and printed, never capped — run the check to see
+today's numbers rather than trusting a figure typed into a sentence, which is
+how the pipe's README came to be wrong by 3x for two weeks.
+
 ## The two shapes at the edges
 
 Everything that crosses the boundary is in `hookjudge/contract.py`, in one

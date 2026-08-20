@@ -377,6 +377,25 @@ kinds, a `forward_to` naming no channel, and any non-`silence` kind without a
 `forward_to` all fail **at boot** — a button that 404s when an operator finally
 presses it is worse than no button.
 
+### Buttons where a platform calls back, links where it cannot
+
+Only Feishu posts a callback. DingTalk and WeCom webhook robots cannot — their
+ActionCard buttons are URL jumps — so on those channels an action is rendered as
+a **link** instead, and that needs `HOOKRELAY_PUBLIC_URL` to point somewhere the
+operator's browser can reach. Empty means those channels carry no actions at all,
+which is the honest default: a link nobody can reach is worse than no link.
+
+The link lands on `GET /card-action`, which **performs nothing** — it shows a
+Confirm button whose POST is the real action. That indirection is not politeness:
+chat clients fetch links to build previews, so a GET that silenced an alert would
+fire when the card was rendered rather than when a person decided.
+
+This also matters for the `escalation` block below, which asks "did any human
+touch this?" and has a card action press as its only evidence. On a deployment
+where no press can ever happen — no secret, no enabled kind, or no channel that
+can carry one — the escalation sweep **disarms itself and says so in the log**,
+rather than reading every alert as ignored and escalating all of them.
+
 `HOOKRELAY_ACTION_SECRET` signs the buttons and verifies them on the way back.
 **Empty means no card carries an action at all**, which is the right default: an
 unsigned button is a URL anyone in the group chat can press on your behalf. A
