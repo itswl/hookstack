@@ -54,6 +54,7 @@ model call would cost money to restate that, and would be free to invent.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -61,13 +62,43 @@ from pathlib import Path
 from typing import Any
 
 _SLUG = re.compile(r"[^a-z0-9]+")
+# Any character the ASCII slug cannot carry. Its presence means the name below
+# is not a rendering of the title but a remnant of it.
+_UNSLUGGABLE = re.compile(r"[^\x00-\x7f]")
 # What a step did, minus the noise of reading its own instructions.
 _SKIP_TOOLS = ("TodoWrite",)
 
 
 def slug(text: str, fallback: str = "investigation") -> str:
+    """A runbook directory name. ASCII, and distinct per condition.
+
+    The second requirement is not free. `[^a-z0-9]+` deletes every non-ASCII
+    letter, so on this deployment — where most alert titles are Chinese — it
+    kept the digits and threw away the condition:
+
+        充值金额单次超500报警  ->  "500"      (deposit over 500)
+        提现金额单次超500报警  ->  "500"      (withdrawal over 500)
+
+    Two unrelated conditions, one name, and a runbook merges by design: the
+    second investigation adds its case to the first. So a deposit runbook would
+    have taught withdrawals its route, and a runbook is loaded as instruction by
+    every later run. A title with no digits at all collapses further, to the
+    `fallback` — every such condition sharing one runbook.
+
+    Not the reason production has no runbook for either (both predate
+    auto-distill); it is what the next one would have done.
+
+    So when the title carries characters ASCII cannot, the name keeps a short
+    digest of the whole title. Stable, because a second investigation of the
+    same condition has to land on the same runbook and go on learning. Names
+    that were already faithful are untouched, so nothing on disk moves.
+    """
     cleaned = _SLUG.sub("-", text.lower()).strip("-")
-    return (cleaned[:48].strip("-") or fallback).strip("-")
+    name = (cleaned[:48].strip("-") or fallback).strip("-")
+    if _UNSLUGGABLE.search(text):
+        digest = hashlib.sha256(" ".join(text.split()).lower().encode("utf-8")).hexdigest()[:8]
+        name = f"{name}-{digest}"
+    return name
 
 
 def _steps(turns: list[dict[str, Any]]) -> list[str]:

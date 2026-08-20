@@ -621,3 +621,38 @@ def test_a_patrol_reviewing_the_investigator_is_not_distilled(tmp_path: Path) ->
     assert not any("patrol" in name or "self-review" in name for name in skills), (
         f"the patrol left a runbook behind: {skills}"
     )
+
+
+def test_two_conditions_in_a_language_the_slug_cannot_spell_get_two_runbooks() -> None:
+    """`[^a-z0-9]+` kept the digits and deleted the condition.
+
+    On a deployment whose alert titles are mostly Chinese — which is the one this
+    runs on — the two noisiest conditions both came out as "500":
+
+        充值金额单次超500报警  deposit over 500
+        提现金额单次超500报警  withdrawal over 500
+
+    A runbook merges by design: the second investigation of a name adds its case
+    to the first. So the deposit runbook would have taught withdrawals its route,
+    and a runbook is loaded as instruction by every later run. A title with no
+    digits collapsed further, onto the shared `investigation` fallback.
+
+    Stability is the other half. A digest that moved between runs would give the
+    same condition a fresh runbook every time and nothing would ever accumulate.
+    """
+    from hookprobe.distill import slug
+
+    deposit = slug("充值金额单次超500报警")
+    withdrawal = slug("提现金额单次超500报警")
+
+    assert deposit != withdrawal, "two conditions, two runbooks"
+    assert deposit == slug("  充值金额单次超500报警  "), "same condition, same runbook, so it can go on learning"
+    assert deposit.isascii(), "a directory name, on whatever filesystem the volume is"
+    assert deposit.startswith("500-"), "keep what could be read; add only what distinguishes"
+
+    # No digits at all used to mean every such condition shared one runbook.
+    assert slug("磁盘空间不足") != slug("内存使用率过高")
+
+    # Titles ASCII can already spell are untouched — nothing on disk moves.
+    assert slug("DatasourceNoData") == "datasourcenodata"
+    assert slug("[SES] Bounce rate > 10%") == "ses-bounce-rate-10"
