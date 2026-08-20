@@ -496,3 +496,11 @@ def test_gate_matches_ci():
     # evidence in either file that the step is still there.
     assert "ui.html" in gate, "gate.sh no longer parses the sessions page"
     assert "ui.html" in ci, "ci-hookprobe.yml no longer parses the sessions page"
+
+    # Same shape for the shell. patrol.sh shipped unparseable — an apostrophe
+    # inside a $(...) heredoc, which stops bash reading the file at all — and
+    # every check here was green, because none of them was a shell parser.
+    # An operator puts these scripts in a crontab; a broken one fails at 09:25
+    # on a Friday into a log nobody reads.
+    for text, name in ((gate, "gate.sh"), (ci, "ci-hookprobe.yml")):
+        assert "bash -n" in text, f"{name} no longer syntax-checks the shipped shell"

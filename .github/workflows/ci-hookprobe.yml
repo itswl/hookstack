@@ -53,6 +53,8 @@ jobs:
           new Function(m[1]);
           console.log("ui.html inline JS: OK");
           '
+      - name: shell scripts parse
+        run: find examples scripts -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
       - run: pytest -q
       - run: python -m pip_audit --progress-spinner off
 
