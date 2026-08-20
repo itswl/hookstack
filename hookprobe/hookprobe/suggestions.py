@@ -40,13 +40,38 @@ def extract(text: str) -> tuple[str, list[str]]:
     Stripped because the report travels to notification channels, and a
     machine-to-service line rendered into a Feishu card is noise; the fact is
     preserved in the queue, which is its actual destination.
+
+    A note is left where the lines were, because removing them silently makes
+    the report lie by omission. The first self-review patrol wrote its report
+    under a heading "Proposed memory (one line)", the marker under it was
+    lifted, and what remained was a bare heading — which reads exactly like a
+    model that ignored the instruction or an answer that was truncated. It cost
+    a wrong diagnosis and a commit message that named the wrong cause. The note
+    is prose, so a Feishu card carrying it says something true to a person.
     """
     lines = [match.strip()[:300] for match in _MARKER.findall(text or "")]
     unique: list[str] = []
     for line in lines:
         if line and line not in unique:
             unique.append(line)
-    return _MARKER.sub("", text or "").rstrip() + ("\n" if text and text.endswith("\n") else ""), unique[:_PER_RUN]
+    kept = unique[:_PER_RUN]
+    if not kept:
+        return text or "", []
+
+    # One note for the whole report, at the position of the first marker, so it
+    # stays under whatever heading the run wrote it under.
+    note = f"_({len(kept)} memory suggestion{'' if len(kept) == 1 else 's'} queued for review.)_"
+    replaced = False
+
+    def _once(_match: re.Match[str]) -> str:
+        nonlocal replaced
+        if replaced:
+            return ""
+        replaced = True
+        return note
+
+    stripped = _MARKER.sub(_once, text or "")
+    return stripped.rstrip() + ("\n" if text and text.endswith("\n") else ""), kept
 
 
 def append(workdir: Path, session_key: str, facts: list[str]) -> int:
