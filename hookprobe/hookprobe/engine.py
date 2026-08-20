@@ -296,6 +296,27 @@ def _agent_names(root: Path, limit: int = 40) -> list[str]:
     return names[:limit]
 
 
+def engine_error(result: Any, text: str) -> str | None:
+    """Why a finished run failed, in words the operator can act on.
+
+    `subtype` is the SDK's own label and it can read "success" on a result
+    already flagged as an error. The first real patrol run hit exactly that: the
+    engine had said `API Error: 402 Insufficient Balance` and the operator was
+    told `engine reported success` — a sentence with no information in it and a
+    contradiction on its face, while the actual reason sat one field away.
+
+    So report what the engine SAID, and fall back to the subtype only when it
+    said nothing at all. Collapsed to one line and capped, because this lands in
+    a log line and in `reason=` on the board.
+    """
+    if getattr(result, "is_error", False):
+        detail = " ".join(text.split())[:200]
+        return detail or f"engine reported {getattr(result, 'subtype', 'error')}"
+    if not text:
+        return "engine returned an empty result"
+    return None
+
+
 class ClaudeAgentEngine:
     """Runs one unattended analysis per call. No sessions, no resume."""
 
@@ -597,11 +618,7 @@ class ClaudeAgentEngine:
             )
 
         text = str(getattr(result, "result", None) or last_text or "").strip()
-        error: str | None = None
-        if getattr(result, "is_error", False):
-            error = f"engine reported {getattr(result, 'subtype', 'error')}"
-        elif not text:
-            error = "engine returned an empty result"
+        error = engine_error(result, text)
         usage = getattr(result, "usage", None)
         model_usage = getattr(result, "model_usage", None)
         return EngineResult(

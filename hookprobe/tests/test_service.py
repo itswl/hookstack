@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from hookprobe.engine import engine_error
 from hookprobe.runs import COMPLETED, FAILED, RunStore
 from hookprobe.service import RunService
 from tests.helpers import FakeEngine, make_settings
@@ -467,3 +468,40 @@ def test_a_restart_asks_the_turns_in_flight_to_wind_down(tmp_path) -> None:
         assert engine.interrupts >= 1, "a deploy asks before it kills"
 
     asyncio.run(scenario())
+
+
+class _Result:
+    """The shape the SDK hands back — only the fields the decision reads."""
+
+    def __init__(self, *, is_error: bool, subtype: str) -> None:
+        self.is_error = is_error
+        self.subtype = subtype
+
+
+def test_a_failed_run_reports_what_the_engine_said_not_its_subtype() -> None:
+    """Production said `engine reported success` about a run that failed.
+
+    The first real patrol run died five seconds in. The engine had said `API
+    Error: 402 Insufficient Balance` — an unambiguous, immediately actionable
+    reason — and the operator was handed `engine reported success`, because the
+    message was built from `subtype`, which the SDK had set to "success" on a
+    result it had already flagged `is_error`.
+
+    A contradiction on its face, no information in it, and the real reason one
+    field away. What reaches the log line and `reason=` on the board has to be
+    the thing that happened.
+    """
+    failed = _Result(is_error=True, subtype="success")
+    assert engine_error(failed, "API Error: 402 Insufficient Balance") == "API Error: 402 Insufficient Balance"
+
+    # Collapsed to one line and capped: this is a log line, not a report.
+    long = engine_error(failed, "line one\n\n   line two" + " x" * 300)
+    assert long is not None and "\n" not in long and long.startswith("line one line two")
+    assert len(long) == 200
+
+    # The subtype is still the fallback, for an error that came with no words.
+    assert engine_error(_Result(is_error=True, subtype="error_max_turns"), "  ") == "engine reported error_max_turns"
+
+    # And a genuine success stays a success; an empty one is still a failure.
+    assert engine_error(_Result(is_error=False, subtype="success"), "the report") is None
+    assert engine_error(_Result(is_error=False, subtype="success"), "") == "engine returned an empty result"
