@@ -19,6 +19,7 @@ def settings(**overrides: Any) -> Settings:
         Settings(
             db_path=":memory:",
             ingest_secret="",
+            ruling_secret="",
             read_token="",
             max_body_bytes=262144,
             return_url="",

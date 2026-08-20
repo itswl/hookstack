@@ -116,6 +116,12 @@ class Settings:
     event_secret: str
     return_url: str
     return_secret: str
+    # Where a retrospective condition ruling goes, and the credential for that
+    # ONE door. Empty on either side means the feature is off and a patrol that
+    # rules gets its markers stripped with nothing sent — see hookprobe.rulings
+    # for why the agent does not post this itself.
+    ruling_url: str
+    ruling_secret: str
     escalate_levels: frozenset[str]
 
     # The budget breaker, guarding the only path that spends money without a
@@ -172,6 +178,8 @@ class Settings:
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),
+            ruling_url=os.environ.get("HOOKPROBE_RULING_URL", ""),
+            ruling_secret=os.environ.get("HOOKPROBE_RULING_SECRET", ""),
             escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
             budget_usd=max(0.0, _float("HOOKPROBE_BUDGET_USD", 0.0)),
             budget_window_hours=max(0.1, _float("HOOKPROBE_BUDGET_WINDOW_HOURS", 24.0)),

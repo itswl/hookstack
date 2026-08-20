@@ -27,7 +27,9 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Protocol
 
-from hookprobe import actions, distill_loop, remediation, suggestions
+import httpx
+
+from hookprobe import actions, distill_loop, remediation, rulings, suggestions
 from hookprobe.engine import EngineResult
 from hookprobe.notify import ReturnDelivery
 from hookprobe.reports import budget_report, failure_report
@@ -643,6 +645,14 @@ class RunService:
                     run.meta["memory_suggestions"] = queued
             except OSError:
                 logger.warning("could not queue memory suggestions", exc_info=True)
+        # Same shape as the suggestions above and for the same reason: the agent
+        # PROPOSES in its report and the service holds the credential, because
+        # the agent is the component that reads attacker-influenced text.
+        run.text, filed = rulings.extract(run.text)
+        if filed:
+            task = asyncio.create_task(self._file_rulings(run, filed))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
         steps = remediation.extract(run.text)
         if steps:
             try:
@@ -732,6 +742,34 @@ class RunService:
         self._settle(run)
         self._schedule_return(run)
         logger.warning("run failed session=%s reason=%s", run.session_key, reason)
+
+    async def _file_rulings(self, run: Run, filed: list[dict[str, Any]]) -> None:
+        """Post each ruling to the judge. Detached, and never costs the report.
+
+        No retry. A ruling is a standing read of evidence that the next patrol
+        will produce again next week, so a lost one costs a week rather than a
+        fact — and a retry queue for it would be more machinery than the thing is
+        worth. The failure is logged with the identity so it is greppable.
+        """
+        settings = self._settings
+        if not settings.ruling_url or not settings.ruling_secret:
+            logger.info("rulings not configured; %s dropped for %s", len(filed), run.session_key)
+            return
+        sent = 0
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for body, headers in rulings.payloads(filed, model=run.model, secret=settings.ruling_secret):
+                try:
+                    answer = await client.post(
+                        settings.ruling_url, content=body, headers={**headers, "content-type": "application/json"}
+                    )
+                    if answer.status_code >= 400:
+                        logger.warning("ruling refused status=%s body=%s", answer.status_code, answer.text[:200])
+                        continue
+                    sent += 1
+                except httpx.HTTPError as exc:
+                    logger.warning("ruling could not be delivered: %s", exc)
+        run.meta["ai_rulings"] = sent
+        logger.info("rulings filed session=%s sent=%s of %s", run.session_key, sent, len(filed))
 
     def _schedule_return(self, run: Run) -> None:
         """The family loop: relay-born runs report back to the pipe. Detached,

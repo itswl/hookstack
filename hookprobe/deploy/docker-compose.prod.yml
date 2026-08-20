@@ -186,6 +186,11 @@ services:
       # impersonate the investigator's reports. One line of .env each.
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
+      # Where a retrospective condition ruling goes, and the credential for
+      # that one door. Both empty means the feature is off: a patrol that
+      # rules gets its markers stripped and nothing is sent.
+      HOOKPROBE_RULING_URL: ${HOOKPROBE_RULING_URL:-}
+      HOOKPROBE_RULING_SECRET: ${HOOKPROBE_RULING_SECRET:-}
       # MCP servers config (three dialects accepted; env values are
       # secrets — keep the file mounted ro or on the volume):
       HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-}

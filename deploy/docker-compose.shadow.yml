@@ -48,6 +48,11 @@ services:
       HOOKJUDGE_PORT: 8200
       HOOKJUDGE_DB: /data/hookjudge.db
       HOOKJUDGE_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
+      # A DIFFERENT secret from the one above on purpose: that one also opens
+      # /events, so anything able to sign for it can forge judgements. This
+      # signs for /rulings/ai only, and its holder is the investigator.
+      # Unset means the ruling door stays shut, which is the safe default.
+      HOOKJUDGE_RULING_SECRET: ${SHADOW_RULING_SECRET:-}
       # Brain A returns; brain B stays ledger-only. The asymmetry is the point:
       # a verdict has to reach a human for anyone to rule on it, and two brains
       # both returning would put two cards in the chat for one alert. B's
@@ -88,6 +93,11 @@ services:
       HOOKJUDGE_PORT: 8200
       HOOKJUDGE_DB: /data/hookjudge.db
       HOOKJUDGE_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
+      # A DIFFERENT secret from the one above on purpose: that one also opens
+      # /events, so anything able to sign for it can forge judgements. This
+      # signs for /rulings/ai only, and its holder is the investigator.
+      # Unset means the ruling door stays shut, which is the safe default.
+      HOOKJUDGE_RULING_SECRET: ${SHADOW_RULING_SECRET:-}
       HOOKJUDGE_RETURN_URL: "none"
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
       HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
