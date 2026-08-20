@@ -1205,3 +1205,69 @@ async def test_the_ruling_door_is_shut_when_its_secret_is_unset(tmp_path):
 
     assert answer.status_code == 503
     assert "HOOKJUDGE_RULING_SECRET" in answer.json()["detail"], "say which knob opens it"
+
+
+async def test_an_ai_ruling_on_a_condition_outside_the_window_is_not_counted(tmp_path):
+    """`ruled` counts presses inside the window; `ai_ruled` counted every row.
+
+    Nothing validates that an identity exists in the ledger, so a ruling on a
+    condition this deployment has never seen inflated the total while appearing
+    in no row of `noisiest`. Two numbers side by side with different denominators
+    is the defect this board spent a week removing from itself.
+
+    The ruling itself stays standing — re-reading it weekly to keep it in the
+    window would be pointless. It is the COUNT that has to answer the same
+    question the number beside it answers.
+    """
+    app = create_app(
+        settings=_settings(tmp_path, ruling_secret="r5", db_path=str(tmp_path / "win.db"), retention_days=0)
+    )
+
+    def sign(payload: dict) -> tuple[bytes, dict[str, str]]:
+        body = json.dumps(payload).encode()
+        ts = str(int(time.time()))
+        return body, {
+            "X-Hook-Signature": hmac.new(b"r5", ts.encode() + b"." + body, hashlib.sha256).hexdigest(),
+            "X-Hook-Timestamp": ts,
+        }
+
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        store = app.state.store
+        from hookjudge.contract import Incoming, Verdict
+
+        # One condition, twice, inside the window.
+        for index in range(2):
+            await store.record(
+                Incoming(
+                    source="grafana",
+                    title="Inside the window",
+                    body="b",
+                    level="high",
+                    fields={},
+                    correlation_id=f"w{index}",
+                    received_at=time.time() - 600 + index,
+                    recovery_flag=False,
+                ),
+                Verdict(summary="s", importance="high").normalized(),
+                1,
+            )
+
+        for identity in ("grafana|Inside the window", "grafana|Never seen here"):
+            body, headers = sign(
+                {"identity": identity, "verdict": "not_worth_it", "why": "three cases, one route", "model": "m"}
+            )
+            assert (await client.post("/rulings/ai", content=body, headers=headers)).status_code == 202
+
+        body = (await client.get("/status?window_hours=1", headers={"X-Read-Token": "read-t"})).json()
+        # Inside the lifespan: the orphan is still ON RECORD, dropped from a
+        # count and not from the table.
+        assert len(await store.ai_rulings()) == 2
+
+    attention = body["summary"]["attention"]
+    assert attention["ai_ruled"] == 1, "the orphan ruling is not in this window's total"
+    titles = {row["title"] for row in attention["noisiest"]}
+    assert "Inside the window" in titles and "Never seen here" not in titles
