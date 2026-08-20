@@ -43,6 +43,15 @@ new Function(m[1]);
 console.log("ui.html inline JS: OK");
 '
 
+# The shipped shell. patrol.sh went out with an unbalanced quote inside a
+# $(...) heredoc, which stops bash parsing the entire file — and nothing here
+# ran a shell parser, so the only way to find out was to run the patrol. These
+# scripts are the ones an operator puts in a crontab; they get a syntax check
+# like every other file in the repo.
+step "shell scripts parse"
+find examples scripts -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+echo "shell: OK"
+
 step "pytest"
 $PY -m pytest -q
 

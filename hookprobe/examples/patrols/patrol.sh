@@ -47,6 +47,12 @@
 #   HOOKPROBE_TOKEN           the investigator's bearer token (probe target).
 #                             Empty is only right where the probe itself runs
 #                             unauthenticated on a private network.
+#   PATROL_SESSION_KEY        override the run key (probe target). The default,
+#                             patrol:<brief>:<date>, makes a duplicate fire free
+#                             — but the investigator is idempotent per key for
+#                             FINISHED runs too, so after a failure that key is
+#                             spent for the day. Fix the cause, then retry with
+#                             an explicit key.
 #   PATROL_ENV                default prod — lands in fields.env
 #   PATROL_STATE              default alerting — level_map turns it into `high`,
 #                             which is what gets the event past the probe's
@@ -93,16 +99,27 @@ brief = pathlib.Path(os.environ["BRIEF"])
 title = os.environ.get("TITLE") or brief.stem.replace("-", " ").capitalize()
 text = brief.read_text(encoding="utf-8").strip()
 if os.environ.get("PATROL_TARGET", "relay") == "probe":
-    # The investigator's own contract: {message, sessionKey}. The title is not a
+    # The contract on the far side: {message, sessionKey}. The title is not a
     # field here, so it goes in front of the brief rather than being dropped.
     #
     # sessionKey carries the date because `start()` is idempotent per key: a
     # duplicate cron fire — a retry, a clock adjustment, two hosts sharing a
     # crontab — returns the run already in flight instead of paying for a second
     # one. Same brief, same day, one bill.
+    #
+    # That idempotency covers runs which already FINISHED, so the key of a patrol
+    # that FAILED is spent until tomorrow — fix the cause and the retry is a
+    # no-op returning the same failure. PATROL_SESSION_KEY is how a deliberate
+    # retry says it means it.
+    #
+    # No apostrophes in this heredoc. Bash scans a $(...) for its closing paren
+    # while tracking quotes, and a lone apostrophe in here is one of them: an
+    # odd count swallows the paren and the whole script stops parsing. That is how
+    # this file shipped broken once. Nothing checked it; scripts/gate.sh now does.
+    default_key = f"patrol:{brief.stem}:{time.strftime('%Y-%m-%d')}"
     payload = {
         "message": f"{title}\n\n{text}",
-        "sessionKey": f"patrol:{brief.stem}:{time.strftime('%Y-%m-%d')}",
+        "sessionKey": os.environ.get("PATROL_SESSION_KEY") or default_key,
     }
 else:
     payload = {
@@ -115,7 +132,7 @@ body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 pathlib.Path(os.environ["BODY_OUT"]).write_bytes(body)
 
 stamp = str(int(time.time()))
-# The probe's door authenticates with a bearer token, not this HMAC, so there is
+# The probe door authenticates with a bearer token, not this HMAC, so there is
 # nothing for the relay secret to sign on that path.
 secret = "" if payload.get("sessionKey") else os.environ.get("HOOKRELAY_INBOUND_SECRET", "")
 # The door's preferred form: the signature covers "{timestamp}.{body}" and the
