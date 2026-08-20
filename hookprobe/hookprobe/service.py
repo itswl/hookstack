@@ -640,9 +640,16 @@ class RunService:
         run.text = stripped
         if facts:
             try:
-                queued = suggestions.append(self._settings.workdir, run.session_key, facts)
-                if queued:
-                    run.meta["memory_suggestions"] = queued
+                memory = suggestions.append(
+                    self._settings.workdir,
+                    run.session_key,
+                    facts,
+                    apply_safe=self._settings.memory_auto_apply,
+                )
+                if memory["queued"]:
+                    run.meta["memory_suggestions"] = memory["queued"]
+                if memory["applied"]:
+                    run.meta["memory_applied"] = memory["applied"]
             except OSError:
                 logger.warning("could not queue memory suggestions", exc_info=True)
         # Same shape as the suggestions above and for the same reason: the agent

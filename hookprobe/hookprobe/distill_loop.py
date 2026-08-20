@@ -169,12 +169,29 @@ def accept_consolidation(run: Run, result: EngineResult, settings: Settings) -> 
         _record_attempt(skill_dir, name, "draft did not validate as a manifest")
         return
     try:
-        distill.write_proposal(skill_dir, draft)
+        # APPLIED, not parked. It used to land as proposal.md and wait for a
+        # person, and on a deployment where nobody answers that is where it
+        # stayed: one draft sat unaccepted from 2026-08-19 onward while the
+        # threshold refused to re-arm behind it.
+        #
+        # The gate did not survive being looked at. `auto_write` installs and
+        # updates SKILL.md with no human at all, and SKILL.md is loaded as
+        # INSTRUCTION by every later run — model-authored conclusions included.
+        # So a gate on CONSOLIDATING those same files was guarding against a
+        # class of text already arriving unguarded through the front door. It
+        # bought no safety; it bought a stalled loop.
+        #
+        # What replaces it is reversibility, which is worth more here than
+        # permission: the displaced version is snapshotted first and
+        # POST /v1/skills/{name}/history/{stamp}/restore puts it back in one
+        # call. And `reviewed` stays False, so the skills page can still say
+        # nobody has read this — it just no longer waits for them.
+        distill.apply_consolidation(skill_dir, draft, by="service", at=time.time())
     except OSError as exc:
         run.distilled = {"skipped": f"write failed: {exc}"}
         _record_attempt(skill_dir, name, f"write failed: {exc}")
         return
     with contextlib.suppress(OSError):
         (skill_dir / ATTEMPT_FILE).unlink(missing_ok=True)
-    run.distilled = {"proposed": name}
-    logger.info("consolidation proposed session=%s runbook=%s", run.session_key, name)
+    run.distilled = {"consolidated": name}
+    logger.info("consolidation applied session=%s runbook=%s", run.session_key, name)
