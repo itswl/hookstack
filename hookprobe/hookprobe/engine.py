@@ -554,10 +554,17 @@ class ClaudeAgentEngine:
             await client.connect()
             await client.query(message)
             async for msg in client.receive_response():
-                message_count += 1
                 if isinstance(msg, StreamEvent):
-                    # Transient by design: deltas are for a human watching right now.
-                    # The finished blocks below are what gets recorded.
+                    # Transient by design: deltas are for a human watching right
+                    # now. The finished blocks below are what gets recorded — and
+                    # what gets COUNTED, which is why the counter sits after this
+                    # branch rather than at the top of the loop.
+                    #
+                    # `include_partial_messages=True` (above) makes the SDK emit
+                    # one of these per token-level delta, so counting them turned
+                    # `messageCount` on /final into a token counter: a production
+                    # investigation reported 32,294 for what the same record calls
+                    # one turn, and the service logged it as `turns=32294`.
                     if msg.event.get("type") == "content_block_delta":
                         delta = msg.event.get("delta") or {}
                         chunk = delta.get("text") or delta.get("thinking") or ""
@@ -570,6 +577,7 @@ class ClaudeAgentEngine:
                                 }
                             )
                     continue
+                message_count += 1
                 if isinstance(msg, AssistantMessage):
                     text_parts: list[str] = []
                     for block in msg.content:
