@@ -94,6 +94,25 @@ channels:
     secret: ${SHADOW_INGEST_SECRET}
     options: {payload: normalized}
 
+  # Where a card press bound for the investigator lands. `payload: raw` for the
+  # same reason as the judge's feedback channel below: the action envelope IS the
+  # content.
+  #
+  # This is a channel pointing AT the investigator, which the header of this file
+  # lists as deliberately absent. That exclusion is about escalation — feeding it
+  # alerts, which would double the model bill for no new information. A callback
+  # for a report the investigator itself sent is the opposite direction and buys
+  # something the exclusion was never protecting: the only path by which a line
+  # the shape check refused can ever be adopted.
+  - name: to-probe-action
+    type: generic
+    url: http://hookprobe:8088/hooks/action
+    # The investigator's OWN event secret by name, not a second variable that
+    # has to be kept equal to it. Two names for one value is a footgun that
+    # fails as a 401 nobody connects back to the .env line.
+    secret: ${HOOKPROBE_EVENT_SECRET}
+    options: {payload: raw}
+
   # Where a ruling lands. `payload: raw` because the action envelope IS the
   # content — the pipe recorded the press as an event carrying it, and the brain
   # wants those bytes rather than a normalized alert built around them.
@@ -165,3 +184,9 @@ card_actions:
     forward_to: to-judge-feedback
   useless:
     forward_to: to-judge-feedback
+  # One tap to adopt a memory line the investigator proposed. Every line that
+  # gets this far was REFUSED by the shape check in hookprobe.suggestions — the
+  # safe ones apply themselves — so this is the button for the residue, and the
+  # residue is precisely what deserves a person. What it removes is the login.
+  remember:
+    forward_to: to-probe-action

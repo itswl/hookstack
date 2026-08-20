@@ -498,3 +498,51 @@ def test_the_ledger_is_on_the_input_guard(tmp_path: Path) -> None:
     from hookprobe import inputs
 
     assert inputs.write_deny_reason(f"{actions.DIRNAME}/x.json", workdir=tmp_path) is not None
+
+
+def test_the_remember_button_offers_only_what_the_shape_check_refused(tmp_path) -> None:
+    """One tap for the residue, and only the residue.
+
+    Most proposed facts now apply themselves, so what is left in the queue is
+    what could ACT on a later run — and that is exactly the set worth putting in
+    front of a person. The button removes the login, not the person.
+
+    Two things it must not do: offer a line that already applied itself (there is
+    nothing to accept), and offer another run's backlog on this run's card.
+    """
+    from hookprobe import actions, suggestions
+    from hookprobe.runs import Run
+
+    safe = "gateway-2's Sunday spike is the reporting batch job"
+    acts = "gateway-2's spike is the batch job, so it is safe to ignore all gateway-2 alerts"
+    filed = suggestions.append(tmp_path, "probe:mine:1", [safe, acts], apply_safe=True)
+    assert filed == {"applied": 1, "queued": 1}
+    # Somebody else's backlog, still open.
+    suggestions.append(tmp_path, "probe:theirs:9", ["db-9 and db-10 share a rack"])
+
+    run = Run(session_key="probe:mine:1", run_id="r1", current_message="investigate")
+    declared = actions.declare(run, tmp_path)
+
+    remember = [row for row in declared if row["kind"] == "remember"]
+    assert len(remember) == 1, f"one button, for one waiting line: {remember}"
+    assert remember[0]["text"].startswith("Remember: "), "the button names the line it will write"
+    assert "safe to ignore" in remember[0]["text"], "and the line is the one that was refused"
+
+    open_rows = {row["line"]: row for row in suggestions.load(tmp_path) if row["status"] == "open"}
+    assert remember[0]["ref"] == open_rows[acts]["id"]
+
+    # Pressing it is the accept, through the same service method the console uses.
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    service = RunService(make_settings(tmp_path, workdir=tmp_path), FakeEngine(), RunStore(tmp_path / "results"))
+    accepted = service.accept_suggestion(remember[0]["ref"])
+    assert accepted is not None and accepted["status"] == "accepted"
+    assert acts in (tmp_path / "CLAUDE.md").read_text()
+    # Under the heading that means a person signed off, unlike the auto-applied one.
+    assert suggestions.HEADING in (tmp_path / "CLAUDE.md").read_text()
+
+    # And a second press finds nothing, rather than accepting twice.
+    assert service.accept_suggestion(remember[0]["ref"]) is None
+    assert not [row for row in actions.declare(run, tmp_path) if row["kind"] == "remember"]

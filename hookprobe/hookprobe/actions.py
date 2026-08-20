@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from hookprobe import remediation
+from hookprobe import remediation, suggestions
 from hookprobe.files import atomic_write
 from hookprobe.runs import Run
 
@@ -51,7 +51,7 @@ DIRNAME = "actions"
 # The whole vocabulary. `kind` is what the door dispatches on and what the pipe
 # filters by; everything else on a declared action rides along as an opaque
 # param, so adding a question needs no new kind.
-KINDS = ("followup", "approve", "useful", "useless")
+KINDS = ("followup", "approve", "useful", "useless", "remember")
 # The two that are a human's ruling on the report rather than a request of it.
 RULINGS = ("useful", "useless")
 
@@ -62,6 +62,9 @@ _TEXT_MAX = 72
 # again parks its own). More than a few approve buttons is not a card, it is a
 # form, and a form is what the console is for.
 _MAX_APPROVE = 3
+# Lower than the per-run suggestion cap on purpose: a card with four buttons
+# asking a person to adopt four permanent instructions is not a card.
+_MAX_REMEMBER = 2
 _KEY_MAX = 400
 
 _WHY_PROMPT = (
@@ -116,6 +119,26 @@ def declare(run: Run, workdir: Path) -> list[dict[str, Any]]:
         declared.append(
             {"kind": "approve", "text": _approve_text(row.get("steps") or []), "ref": str(row.get("id") or "")}
         )
+    # One per memory line this run proposed that is still waiting. Only this
+    # run's, and only while open — the same rule as `approve`, for the same
+    # reason: a button that cannot work is worse than an absent one.
+    #
+    # The queue used to be the ONLY path for these and nothing ever came down
+    # it. Most lines now apply themselves (hookprobe.suggestions), so what
+    # reaches this button is the residue the shape check refused — which is
+    # exactly the set worth one tap from a person rather than a login.
+    for row in _open_suggestions(run.session_key, workdir):
+        declared.append(
+            {
+                "kind": "remember",
+                # The LINE, not "accept a suggestion". It is about to become
+                # standing instruction for every later run; a button that does
+                # not say what it will write is the same trap as one that does
+                # not say what it will run.
+                "text": f"Remember: {str(row.get('line') or '')[:80]}",
+                "ref": str(row.get("id") or ""),
+            }
+        )
     declared.append({"kind": "useful", "text": "Found the cause"})
     declared.append({"kind": "useless", "text": "Missed it"})
     return declared
@@ -129,6 +152,16 @@ def _open_proposals(session_key: str, workdir: Path) -> list[dict[str, Any]]:
         if str(row.get("session_key") or "") == session_key and row.get("status") == "proposed"
     ]
     return rows[:_MAX_APPROVE]
+
+
+def _open_suggestions(session_key: str, workdir: Path) -> list[dict[str, Any]]:
+    """This run's proposed memory lines that are still waiting, newest first."""
+    rows = [
+        row
+        for row in suggestions.load(workdir)
+        if str(row.get("session_key") or "") == session_key and row.get("status") == "open"
+    ]
+    return rows[-_MAX_REMEMBER:]
 
 
 def _approve_text(steps: list[dict[str, Any]]) -> str:
