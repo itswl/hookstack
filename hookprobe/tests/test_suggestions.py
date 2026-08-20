@@ -22,6 +22,25 @@ def test_markers_are_lifted_out_of_the_report_and_capped() -> None:
     assert "Root cause: the batch job." in stripped and "More prose." in stripped
     assert facts[0].startswith("gateway-2") and len(facts) == 3, "deduped, capped at 3"
 
+    # And it says so where the lines were. Removing them silently left a bare
+    # heading in the first self-review patrol's report, which reads identically
+    # to a model that ignored the instruction — it cost a wrong diagnosis.
+    assert "3 memory suggestions queued" in stripped
+    assert stripped.count("queued for review") == 1, "one note per report, not one per marker"
+    # Placed where the first marker was, so it stays under the run's own heading.
+    assert stripped.index("queued for review") < stripped.index("More prose.")
+
+
+def test_a_report_that_proposes_nothing_is_left_exactly_as_written() -> None:
+    """The note must not appear when there was nothing to lift, or every report
+    would claim a queued suggestion it never made."""
+    report = "Root cause: the batch job.\n\nNothing qualifies for memory this week.\n"
+    stripped, facts = suggestions.extract(report)
+
+    assert facts == []
+    assert stripped == report, "untouched, trailing newline and all"
+    assert "queued" not in stripped
+
 
 def test_accept_appends_under_one_heading_and_closes_the_row(tmp_path: Path) -> None:
     (tmp_path / "CLAUDE.md").write_text("# env\n\nhand-written fact\n")
