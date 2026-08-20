@@ -127,8 +127,26 @@ def maybe_consolidate(run: Run, settings: Settings, store: RunStore, start: Call
         return
     skill_dir = settings.workdir / ".claude" / "skills" / str(name)
     manifest = skill_dir / "SKILL.md"
-    if (skill_dir / "proposal.md").exists():
-        return  # one open proposal at a time; approving or rejecting re-arms
+    leftover = skill_dir / "proposal.md"
+    if leftover.exists():
+        # This used to `return` — one open proposal at a time, and approving or
+        # rejecting re-armed the threshold. That was right while a proposal
+        # waited for a person. Now nothing parks one, so the check could only
+        # ever fire on a STALE file, and returning meant that runbook's
+        # consolidation was stalled permanently by a draft nobody was ever going
+        # to answer. Exactly what it was written to prevent, arriving from the
+        # other side.
+        #
+        # So adopt it. It is a draft that already validated once and was waiting
+        # on a permission this loop no longer asks for. Re-validated anyway,
+        # because the file has been sitting on a volume an operator can edit.
+        draft = distill.valid_consolidation(leftover.read_text(encoding="utf-8"), str(name))
+        if draft:
+            distill.apply_consolidation(skill_dir, draft, by="service", at=time.time())
+            logger.info("adopted a leftover consolidation proposal runbook=%s", name)
+        else:
+            leftover.unlink(missing_ok=True)
+            logger.warning("discarded a leftover proposal that no longer validates runbook=%s", name)
     try:
         count = distill.case_count(manifest.read_text(encoding="utf-8"))
     except OSError:

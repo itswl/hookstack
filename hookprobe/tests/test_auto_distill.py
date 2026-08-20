@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hookprobe import distill
+from hookprobe import distill, distill_loop
 
 
 def run_record(**overrides):
@@ -680,3 +680,77 @@ def test_two_conditions_in_a_language_the_slug_cannot_spell_get_two_runbooks() -
     # Titles ASCII can already spell are untouched — nothing on disk moves.
     assert slug("DatasourceNoData") == "datasourcenodata"
     assert slug("[SES] Bounce rate > 10%") == "ses-bounce-rate-10"
+
+
+def test_a_leftover_proposal_is_adopted_instead_of_stalling_the_runbook_forever(tmp_path: Path) -> None:
+    """The latch outlived the gate it was protecting.
+
+    `maybe_consolidate` used to return early when proposal.md existed — one open
+    proposal at a time, and approving or rejecting re-armed the threshold. Right
+    while a proposal waited for a person. Once consolidation began applying its
+    own drafts, nothing parked one, so the check could only ever fire on a STALE
+    file — and returning meant that runbook's consolidation was stalled
+    permanently by a draft nobody was going to answer. The exact outcome the
+    latch existed to prevent, arriving from the other side. There is one such
+    file on production, dated 2026-08-19.
+    """
+    from hookprobe import distill
+    from hookprobe.runs import Run, RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    name = "datasourcenodata"
+    skill_dir = tmp_path / ".claude" / "skills" / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: old.\n---\n\n# {name}\n\n## Investigations\n\n"
+        f"{distill.CASES_MARKER}\n\n<!-- case:start 1 -->\nfirst\n<!-- case:end -->\n",
+        encoding="utf-8",
+    )
+    adopted = (
+        f"---\nname: {name}\ndescription: consolidated.\n---\n\n# {name}\n\n## Procedure\n\n"
+        f"1. read valueString\n\n## Investigations\n\n{distill.CASES_MARKER}\n\n"
+        "<!-- case:start 2 -->\nkept\n<!-- case:end -->\n"
+    )
+    (skill_dir / "proposal.md").write_text(adopted, encoding="utf-8")
+
+    settings = make_settings(tmp_path, consolidate_at=99)  # threshold unreachable
+    service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+    run = Run(session_key="k", run_id="r", current_message="x")
+    run.distilled = {"updated": name}
+
+    distill_loop.maybe_consolidate(run, settings, service._store, service.start)
+
+    assert not (skill_dir / "proposal.md").exists(), "the leftover was adopted, not left waiting"
+    assert "## Procedure" in (skill_dir / "SKILL.md").read_text()
+    assert sorted((skill_dir / "history").glob("*-SKILL.md")), "and the displaced version is still recoverable"
+
+
+def test_a_leftover_proposal_that_no_longer_validates_is_discarded(tmp_path: Path) -> None:
+    """It has been sitting on a volume an operator can edit, so it is re-checked
+    rather than trusted for having validated once. A file that no longer parses
+    as a manifest is dropped — leaving it would re-create the permanent stall."""
+    from hookprobe import distill
+    from hookprobe.runs import Run, RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    name = "half-edited"
+    skill_dir = tmp_path / ".claude" / "skills" / name
+    skill_dir.mkdir(parents=True)
+    manifest = (
+        f"---\nname: {name}\ndescription: old.\n---\n\n# {name}\n\n## Investigations\n\n"
+        f"{distill.CASES_MARKER}\n\n<!-- case:start 1 -->\nfirst\n<!-- case:end -->\n"
+    )
+    (skill_dir / "SKILL.md").write_text(manifest, encoding="utf-8")
+    (skill_dir / "proposal.md").write_text("somebody opened this in an editor and saved half of it", encoding="utf-8")
+
+    settings = make_settings(tmp_path, consolidate_at=99)
+    service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+    run = Run(session_key="k", run_id="r", current_message="x")
+    run.distilled = {"updated": name}
+
+    distill_loop.maybe_consolidate(run, settings, service._store, service.start)
+
+    assert not (skill_dir / "proposal.md").exists()
+    assert (skill_dir / "SKILL.md").read_text() == manifest, "the manifest is untouched by a bad draft"
