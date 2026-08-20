@@ -569,3 +569,55 @@ def test_a_draft_that_never_validates_stops_costing_money(tmp_path: Path) -> Non
     skill_dir = tmp_path / ".claude" / "skills" / "disk-pressure-on-db-1"
     assert (skill_dir / ATTEMPT_FILE).is_file(), "the loop kept no memory of having paid and got nothing"
     assert not (skill_dir / "proposal.md").exists(), "nothing valid was produced, so nothing is awaiting review"
+
+
+def test_a_patrol_reviewing_the_investigator_is_not_distilled(tmp_path: Path) -> None:
+    """The first real self-review installed a runbook called `patrol-self-review`.
+
+    A runbook is loaded as instruction by every later run, so a review OF the
+    loop had just become part of the loop — and the brief that sent it promises,
+    in its first paragraph, that a run of it writes nothing. The service already
+    forbade this for consolidation runs ("or the loop would write runbooks about
+    rewriting runbooks"); a patrol is the same category and carried no marker.
+
+    Skipped and RECORDED, not silently dropped: "the loop did nothing again" is
+    the failure the whole distil feature exists to end.
+    """
+    from hookprobe.engine import EngineResult
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    async def scenario():
+        engine = FakeEngine(
+            result=EngineResult(text="## Self-review\n\nTwo conditions have no runbook.", message_count=2)
+        )
+        service = RunService(make_settings(tmp_path, auto_distill_max=10), engine, RunStore(tmp_path / "results"))
+
+        service.start(
+            {
+                "message": "Patrol: self review\n\nReview your own recent work.",
+                "sessionKey": "patrol:self-review:2026-08-20",
+                "_meta": {"patrol": "self-review"},
+            }
+        )
+        patrol = await wait_finished(service, "patrol:self-review:2026-08-20")
+
+        # An ordinary investigation through the same service still distils, or
+        # this test would pass just as well with the feature switched off.
+        service.start({"message": "Title: disk pressure on db-1\ncheck it", "sessionKey": "ordinary"})
+        alert = await wait_finished(service, "ordinary")
+        return patrol, alert, service
+
+    patrol, alert, service = asyncio.run(scenario())
+
+    assert patrol.distilled == {"skipped": "a review of the investigator is not a runbook"}
+    assert "installed" in alert.distilled, f"a real investigation must still distil, got {alert.distilled}"
+
+    skills = sorted(path.parent.name for path in (tmp_path / ".claude" / "skills").glob("*/SKILL.md"))
+    # Non-empty first: a glob over a path that moved returns nothing, and the
+    # assertion below would then pass by finding no runbooks at all.
+    assert skills, "no runbook was written anywhere, so this proves nothing"
+    assert not any("patrol" in name or "self-review" in name for name in skills), (
+        f"the patrol left a runbook behind: {skills}"
+    )

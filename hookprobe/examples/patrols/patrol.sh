@@ -120,6 +120,11 @@ if os.environ.get("PATROL_TARGET", "relay") == "probe":
     payload = {
         "message": f"{title}\n\n{text}",
         "sessionKey": os.environ.get("PATROL_SESSION_KEY") or default_key,
+        # Marks this as a run ABOUT the investigator, so the service does not
+        # distil a runbook from it. The first self-review installed one called
+        # patrol-self-review, and a runbook is loaded as instruction by every
+        # later run: a review of the loop would have become part of the loop.
+        "_meta": {"patrol": brief.stem, "title": title},
     }
 else:
     payload = {
