@@ -1000,3 +1000,78 @@ async def test_a_busy_ledger_does_not_hide_the_peers_of_a_burst(app_client, monk
     assert burst, "the second rule found its peer through 60 rows of unrelated traffic"
     assert rows["disk full on db-1"]["burst_id"] == burst, "and the first member joined it retroactively"
     assert rows["unrelated rule 7"]["burst_id"] == "", "a different origin is not this incident"
+
+
+async def test_a_condition_that_heals_itself_is_visible_without_anyone_pressing(app_client):
+    """The signal that needs no human.
+
+    `mattered` is empty until somebody presses a button, and on an unattended
+    deployment nobody does — which leaves the attention figures permanently
+    uncalibrated. Pairing each firing with the recovery that followed it is the
+    proxy available from data the ledger already keeps: measured on production,
+    two conditions accounted for over half the traffic and healed themselves in a
+    median of five minutes, while `DatasourceNoData` fired seventeen times and
+    never recovered once. Identical on the cost figures; opposite here.
+
+    It is a PROXY and stays in its own keys. A human saying "not worth waking me"
+    is evidence; a five-minute self-heal is a hint pointing at the same place, and
+    reporting the second as the first would be the ledger claiming somebody spoke.
+    """
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    def event(title: str, at: float, *, recovery: bool) -> Incoming:
+        return Incoming(
+            source="grafana",
+            title=title,
+            body="b",
+            level="high",
+            fields={},
+            correlation_id=f"hr-{at:.0f}",
+            received_at=at,
+            recovery_flag=recovery,
+        )
+
+    async def record(title: str, at: float, *, recovery: bool = False) -> None:
+        await store.record(event(title, at, recovery=recovery), Verdict(summary="s", importance="high").normalized(), 1)
+
+    base = time.time() - 3600
+    # Flapping: fires and heals in three minutes, twice.
+    await record("Topup over 500", base)
+    await record("Topup over 500", base + 180, recovery=True)
+    await record("Topup over 500", base + 600)
+    await record("Topup over 500", base + 780, recovery=True)
+    # A restatement BEFORE the recovery. The clock must not restart on it, or a
+    # storm would look like it healed in the gap between its last two cards.
+    await record("Disk will fill", base + 100)
+    await record("Disk will fill", base + 1900)  # same condition, still open
+    await record("Disk will fill", base + 2000, recovery=True)
+    # Never recovers — the shape of a real, unfixed problem.
+    await record("DatasourceNoData", base + 200)
+    await record("DatasourceNoData", base + 400)
+
+    healing = await store.self_healing(base - 60)
+
+    topup = healing["grafana|Topup over 500"]
+    assert topup["self_resolved"] == 2 and topup["fired"] == 2
+    assert topup["median_seconds"] == 180.0
+    assert topup["likely_flapping"] is True
+
+    disk = healing["grafana|Disk will fill"]
+    assert disk["self_resolved"] == 1
+    # 1900 seconds from the FIRST firing, not 100 from the restatement.
+    assert disk["median_seconds"] == 1900.0
+    assert disk["likely_flapping"] is False, "half an hour open is not a flap"
+
+    dead = healing["grafana|DatasourceNoData"]
+    assert dead["self_resolved"] == 0 and dead["median_seconds"] is None
+    assert dead["likely_flapping"] is False, "never recovering is the opposite of flapping"
+
+    # And it reaches the board without being confused for a ruling.
+    body = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()
+    attention = body["summary"]["attention"]
+    assert attention["likely_flapping"] == 1
+    assert attention["ruled"] == 0, "nobody pressed anything, and the rulings say so"
+    noisy = {row["title"]: row for row in attention["noisiest"]}
+    assert noisy["Topup over 500"]["likely_flapping"] is True
+    assert noisy["Topup over 500"]["mattered"] == 0, "a flap is not a human verdict"

@@ -482,6 +482,73 @@ class Store:
         )
         return [dict(row) for row in await cursor.fetchall()]
 
+    # A firing that resolves itself this fast, with nobody having touched it, is
+    # a threshold flapping rather than an event. Not a hard truth — a real
+    # incident can self-heal in four minutes — which is why it is reported as its
+    # own number and never folded into `mattered`.
+    SELF_HEAL_FAST_SECONDS = 10 * 60
+
+    async def self_healing(self, since: float) -> dict[str, dict[str, Any]]:
+        """Per condition: how often it resolved itself, and how quickly.
+
+        The signal that needs no human. The ruling columns answer "was this worth
+        an interruption" and they are empty until somebody presses a button — and
+        on an unattended deployment nobody does, which leaves the attention
+        figures permanently uncalibrated. This is the proxy available from data
+        the ledger already keeps: pair each firing with the recovery that
+        followed it and look at the gap.
+
+        It is a PROXY and is labelled as one everywhere it surfaces. A human
+        saying "not worth waking me" is evidence; a condition healing in five
+        minutes is a strong hint that points at the same place. Presenting the
+        second as the first would be the ledger claiming somebody spoke when
+        nobody did.
+
+        Pairing is done here rather than in SQL because it is inherently
+        sequential — a firing is closed by the NEXT recovery of the same
+        identity, and a second firing before that recovery is the same open
+        condition restated, not a new one to pair. Window functions can express
+        that; a readable loop over one window's rows can too, and this one has to
+        be read by whoever doubts the number.
+        """
+        cursor = await self.db.execute(
+            "SELECT identity, is_recovery, received_at FROM judgements WHERE received_at >= ? ORDER BY received_at, id",
+            (since,),
+        )
+        opened: dict[str, float] = {}
+        spans: dict[str, list[float]] = {}
+        fired: dict[str, int] = {}
+        for row in await cursor.fetchall():
+            identity = str(row["identity"])
+            spans.setdefault(identity, [])
+            if row["is_recovery"]:
+                start = opened.pop(identity, None)
+                if start is not None:
+                    spans[identity].append(max(0.0, float(row["received_at"]) - start))
+            else:
+                fired[identity] = fired.get(identity, 0) + 1
+                # setdefault, not assignment: a restatement while the condition
+                # is still open must not move the clock, or a storm would look
+                # like it healed in the gap between its last two cards.
+                opened.setdefault(identity, float(row["received_at"]))
+        out: dict[str, dict[str, Any]] = {}
+        for identity, gaps in spans.items():
+            ordered = sorted(gaps)
+            median = ordered[len(ordered) // 2] if ordered else None
+            out[identity] = {
+                "fired": fired.get(identity, 0),
+                "self_resolved": len(ordered),
+                "median_seconds": round(median, 1) if median is not None else None,
+                # The one-line read: it healed itself, fast, more often than not.
+                "likely_flapping": bool(
+                    ordered
+                    and median is not None
+                    and median <= self.SELF_HEAL_FAST_SECONDS
+                    and len(ordered) * 2 >= fired.get(identity, 0)
+                ),
+            }
+        return out
+
     # The noisiest conditions, capped. The cap is not cosmetic: this list is
     # also emitted as Prometheus labels, and an alert identity as a label value
     # is unbounded cardinality — the classic way to take a metrics store down.
@@ -534,6 +601,7 @@ class Store:
             " ORDER BY n DESC, last_id DESC LIMIT ?",
             (since, max(1, min(50, limit or self.NOISIEST_LIMIT))),
         )
+        healing = await self.self_healing(since)
         noisiest = [
             {
                 "identity": str(row["identity"]),
@@ -543,6 +611,12 @@ class Store:
                 "paid": int(row["paid"]),
                 "mattered": int(row["mattered"]),
                 "did_not_matter": int(row["did_not_matter"]),
+                # The unattended half of the same question. Kept as its own keys
+                # so nothing here can be mistaken for something a human said.
+                **{
+                    key: (healing.get(str(row["identity"])) or {}).get(key)
+                    for key in ("self_resolved", "median_seconds", "likely_flapping")
+                },
                 "last_seen": float(row["last_seen"]),
             }
             for row in await cursor.fetchall()
@@ -558,6 +632,10 @@ class Store:
             # not evidence that it did not matter, and a percentage that treats
             # silence as a verdict flatters itself.
             "mattered_pct": round(100.0 * mattered / ruled, 1) if ruled else None,
+            # How many conditions look like flapping on the evidence alone. This
+            # is the number that stays useful when `ruled` never moves, which on
+            # an unattended deployment is the normal case rather than a failure.
+            "likely_flapping": sum(1 for row in healing.values() if row["likely_flapping"]),
             "noisiest": noisiest,
         }
 

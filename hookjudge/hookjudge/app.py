@@ -630,6 +630,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "# TYPE hookjudge_conditions gauge",
             f"hookjudge_conditions {attention['conditions']}",
             "# HELP hookjudge_repeat_interruptions Interruptions restating a condition already reported.",
+            # The unattended signal, beside the one that needs a human. When
+            # `attention_rulings` stays flat at zero — the normal case on a
+            # deployment nobody watches — this is the line that still moves.
+            "# TYPE hookjudge_likely_flapping gauge",
+            f"hookjudge_likely_flapping {attention.get('likely_flapping') or 0}",
             "# TYPE hookjudge_repeat_interruptions gauge",
             f"hookjudge_repeat_interruptions {attention['repeats']}",
             "# HELP hookjudge_attention_rulings Human rulings on whether an interruption was worth it.",
