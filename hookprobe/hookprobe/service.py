@@ -676,9 +676,13 @@ class RunService:
         self._settle(run)
         self._schedule_return(run)
         logger.info(
-            "run completed session=%s turns=%s cost_usd=%s",
+            # `messages`, not `turns`: a turn is an entry in run.turns and there
+            # is normally one. This is the SDK message count, and calling it
+            # turns is how `turns=32294` got read as plausible for a while.
+            "run completed session=%s messages=%s turns=%s cost_usd=%s",
             run.session_key,
             result.message_count,
+            len(run.turns),
             result.cost_usd,
         )
 
