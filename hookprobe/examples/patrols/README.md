@@ -112,10 +112,30 @@ The nightly one runs at 07:10 rather than at 03:00 on purpose: it reports on
 the night that just ended, and its own card arrives when somebody is awake to
 read it.
 
-Prefer the secret out of the crontab? Put the two assignments in a file you can
-`chmod 600` on its own and prefix the command with `. /etc/hookstack-patrol.env;`.
+Prefer the secret out of the crontab? Put the assignments in a file you can
+`chmod 600` on its own and prefix the command with `. $HOME/.hookstack-patrol.env;`.
 A crontab is already only readable by its owner and root; a separate file is
 just easier to rotate.
+
+**Write them as `export`.** Sourcing `KEY=value` makes a shell variable, and
+`patrol.sh` is a separate process that sees only exported ones — so the file
+loads, every variable in it is silently absent, `PATROL_TARGET` falls back to
+`relay`, and the request goes to a door this deployment does not have:
+
+```
+curl: (22) The requested URL returned error: 404
+```
+
+Which is what happened here, on the first line installed. Test a crontab line
+the way cron will run it, not the way your shell will:
+
+```bash
+LINE=$(crontab -l | grep self-review.md | sed 's/^[0-9 *]*//')
+env -i HOME="$HOME" PATH=/usr/bin:/bin /bin/bash -c "$LINE"
+```
+
+`env -i` is the point: your interactive shell has a PATH, a HOME and an
+environment that cron does not.
 
 ## How the request is signed
 
