@@ -458,6 +458,25 @@ its own case file — and the case-file recall means patrol N cites what
 patrol N-1 found. The budget breaker applies as usual: a patrol is an
 autonomous spend like any other.
 
+That case-file recall is what makes a patrol able to answer a question one
+run cannot. Two worked briefs ship in
+[`examples/patrols/`](examples/patrols/README.md), with their crontab lines
+and the HMAC signing spelled out: **"is the noise going up or down"** reads
+the judge's `summary.attention` over seven days
+(`GET /status?window_hours=168`), opens last week's edition of itself and
+reports the direction of cards-per-condition against the spend; **"propose a
+scheduled silence"** looks for a condition that fires in the same hour every
+night and was ruled not worth it, and proposes quieting it — naming which of
+the three things hookrelay can actually do it is asking for, because a
+recurring condition-scoped silence is not one of them.
+
+The briefs are the product, so they live where a person edits them rather
+than in an image: `patrol.sh` reads one at send time, which gives a task the
+same property the environment memory and the methodology already have. Two
+caveats they are written to respect. A brief is capped at 4000 bytes by the
+event door's body cap, and a patrol that is not routed around the judge
+becomes a row in the very ledger it is reporting on.
+
 ## Parallel subagents
 
 The engine's Task tool is enabled: a cascading incident can fan out into

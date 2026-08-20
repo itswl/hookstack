@@ -45,7 +45,11 @@ The split is the point: a brain that renders Feishu cards has to know Feishu's
 card schema, then WeCom's, then DingTalk's. That work belongs to the pipe, and
 moving it there is what lets a brain be replaced — or compared against another
 one — without touching either edge. hookjudge is deliberately the smallest
-brain that can hold up its end of that bargain.
+brain that can hold up its end of that bargain, and "smallest" is a number
+under a ceiling rather than an adjective: the pipe and the brain each state a
+source-line budget in their README, and `scripts/assert_weight.py` fails the
+gate when either drifts past it. hookprobe is uncapped on purpose — it carries
+Node and the Claude CLI, and being the heavy one is its job.
 
 hookprobe answers a different question than the judge: not "does this deserve
 attention" but "what actually happened". One unattended read-only agent

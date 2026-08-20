@@ -52,6 +52,13 @@ class Settings:
     # can put a gateway in front of the IM platform's callback; the action token
     # is the control that applies either way.
     card_callback_secret: str = ""
+    # Where a card's action LINK should point. Feishu posts a callback and needs
+    # no address; DingTalk and WeCom webhook robots cannot call back at all, so
+    # for them an action has to be a URL the operator clicks — and only the
+    # deployment knows what its own public address is. Empty = those channels
+    # carry no actions, which is the same fail-closed default as an empty
+    # action_secret: a link nobody can reach is worse than no link.
+    public_url: str = ""
 
     @classmethod
     def load(cls) -> Settings:
@@ -72,4 +79,5 @@ class Settings:
             action_secret=os.environ.get("HOOKRELAY_ACTION_SECRET", ""),
             action_ttl_seconds=_int("HOOKRELAY_ACTION_TTL_SECONDS", 24 * 3600),
             card_callback_secret=os.environ.get("HOOKRELAY_CARD_CALLBACK_SECRET", ""),
+            public_url=os.environ.get("HOOKRELAY_PUBLIC_URL", "").rstrip("/"),
         )
