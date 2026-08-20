@@ -53,12 +53,16 @@ Two corrections to the obvious tally, both of which make the number smaller:
   `pipeline.py:143` computes a fingerprint at record time whether or not a dedup
   stage ran, and the column is `NOT NULL`. Those 17 lines plus the index are
   ledger identity, not dedup, and would stay.
-- **6 of `SetProcessor`'s 20 lines already exist twice.** `SetProcessor`'s
-  mutation loop over `title`/`body`/`level`/`fields` (`processors.py:144-149`)
-  appears again, byte for byte, inside `HttpProcessor` at
-  `processors.py:242-247`, where it applies a brain's `set` verdict. Delete
+- **5 of `SetProcessor`'s 20 lines already exist twice.** `SetProcessor`'s
+  mutation loop over `title`/`body`/`level`/`fields` (`processors.py:145-149`)
+  appears again inside `HttpProcessor` at `processors.py:243-247`, where it
+  applies a brain's `set` verdict. The five loop lines are identical; only the
+  line above them differs, because one reads the changes from the stage's
+  `options` and the other from the brain's response `data`. (An earlier draft of
+  this note said "byte for byte" for all six — checked, and it is not true of the
+  first line. The duplication is real; the overstatement was not.) Delete
   `SetProcessor` and that logic does not leave the codebase; it stays in the
-  paired-posture stage. Net return is nearer **117**.
+  paired-posture stage. Net return is nearer **118**.
 
 ### Paired-only: 612 lines, 14.5% — five times larger
 
@@ -189,9 +193,10 @@ becomes annoying.** C is a product decision about who hookrelay is for, and
 **What to watch.** Two things this measurement should be re-run against:
 
 - The `set` mutation block existing twice (`SetProcessor` and `HttpProcessor`)
-  is the same duplication class as the five-copy 500 fixed on 2026-08-19. Six
-  lines is small enough that extracting it may not be worth an indirection, but
-  it should be a decision rather than an accident. Out of scope here — this note
+  is the same duplication class as the five-copy 500 fixed on 2026-08-19. Five
+  identical lines under two different sources is small enough that extracting it
+  may not be worth an indirection, but it should be a decision rather than an
+  accident. Out of scope here — this note
   changed no source.
 - The paired/standalone ratio is the number to track, not the total. It is 5:1
   today. If paired-only surface keeps growing at the rate `processed.py` and
