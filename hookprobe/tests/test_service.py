@@ -152,10 +152,12 @@ def test_a_timed_out_follow_up_is_not_billed_the_previous_turn(tmp_path) -> None
     """Two accounting errors met on this path. The follow-up reset the text and
     the error but not the cost, so a turn that died before the engine reported
     anything re-recorded the first turn's bill — a $2 investigation plus a
-    failed follow-up read as $4 in the window and in the session total. What is
-    left is the opposite error, and it is not fixable by guessing: the engine
-    reports dollars only with its result, so a turn the wall clock cut off
-    records no cost at all. That has to read as unknown, never as free."""
+    failed follow-up read as $4 in the window and in the session total.
+
+    The opposite error used to survive here and no longer does: the engine
+    reports dollars only with its final message, so a turn the wall clock KILLED
+    recorded no cost at all. It is now interrupted instead of killed, which lets
+    that message arrive — so the timeout keeps its verdict and gains its bill."""
     from hookprobe.app import _summary  # the session total the console shows
     from hookprobe.engine import EngineResult
 
@@ -172,12 +174,20 @@ def test_a_timed_out_follow_up_is_not_billed_the_previous_turn(tmp_path) -> None
         service.continue_run("hook:bill", {"message": "more", "timeoutSeconds": 1})
         done = await _wait_finished(service, "hook:bill", deadline=4.0)
 
+        # Still a timeout — the clock ran out, and an interrupted turn reporting
+        # a clean finish must not read as an answer.
         assert done.status == FAILED and done.error is not None and "timed out" in done.error
-        assert done.turns[1]["cost_usd"] is None, "nobody counted this turn, and that is not $2"
-        assert service.window_spend() == 2.0
-        assert _summary(done)["cost_usd"] == 2.0
-        # The undercount that remains is at least no longer silent.
-        assert service.window_unpriced() == 1
+        # But it is no longer FREE. The engine is interrupted instead of killed,
+        # so the SDK's final message arrives and the turn carries what it spent.
+        # Before this, the priciest failures there are — a turn that ran the full
+        # clock — recorded None and the budget breaker undercounted exactly them.
+        assert done.turns[1]["cost_usd"] == engine.interrupted_cost
+        assert service.window_spend() == 2.0 + engine.interrupted_cost
+        assert _summary(done)["cost_usd"] == 2.0 + engine.interrupted_cost
+        # And nothing is unpriced any more, which is the whole point: the
+        # unpriced_turns figure now counts only what the interrupt could not save.
+        assert service.window_unpriced() == 0
+        assert engine.interrupts == 1, "the turn was asked to stop, not killed"
 
     asyncio.run(scenario())
 
@@ -383,5 +393,77 @@ def test_a_tool_done_becomes_a_duration_not_a_second_step(tmp_path) -> None:
         assert steps[1]["sub"] is True
         assert steps[1]["name"] == "Grep" and steps[1]["ms"] == 12
         assert steps[2]["sub"] is True and steps[2]["error"] is True
+
+    asyncio.run(scenario())
+
+
+# -- the interrupt: a stop that still knows what it cost ----------------------
+
+
+def test_an_operator_stop_records_what_the_turn_spent(tmp_path) -> None:
+    """The Stop button was the most frequent way a bill went missing.
+
+    It cancelled the coroutine, which discarded the SDK's final message and with
+    it the cost — so every stop recorded None, "nobody counted", for a run the
+    provider had already billed in full. Timeouts were the rare case; this is the
+    one an operator presses on purpose.
+    """
+
+    async def scenario() -> None:
+        engine = FakeEngine(delay=30.0)
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.start({"message": "analyze", "sessionKey": "hook:stop"})
+        await asyncio.sleep(0.05)
+
+        service.stop("hook:stop")
+        done = await _wait_finished(service, "hook:stop", deadline=5.0)
+
+        assert engine.interrupts == 1, "the turn was asked to stop, not killed"
+        assert done.finished
+        assert done.turns[-1]["cost_usd"] == engine.interrupted_cost, "a stop must still know its bill"
+        assert service.window_unpriced() == 0
+
+    asyncio.run(scenario())
+
+
+def test_an_sdk_that_ignores_the_interrupt_is_still_stopped(tmp_path) -> None:
+    """The fallback, and why it cannot be dropped: an interrupt is a request. A
+    turn that has not reached the SDK yet has nothing to interrupt, and one the
+    SDK ignores must not run forever because we asked politely."""
+
+    async def scenario() -> None:
+        engine = FakeEngine(delay=30.0)
+        engine.stoppable = False  # the SDK declines
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.start({"message": "analyze", "sessionKey": "hook:stubborn"})
+        await asyncio.sleep(0.05)
+
+        service.stop("hook:stubborn")
+        done = await _wait_finished(service, "hook:stubborn", deadline=5.0)
+
+        assert engine.interrupts == 1, "it was asked first"
+        assert done.finished, "and cancelled when the ask was declined"
+        assert done.error is not None and "stopped by operator" in done.error
+        # Nobody counted this one, and the ledger says so rather than saying zero.
+        assert done.turns[-1]["cost_usd"] is None
+        assert service.window_unpriced() == 1
+
+    asyncio.run(scenario())
+
+
+def test_a_restart_asks_the_turns_in_flight_to_wind_down(tmp_path) -> None:
+    """This path runs on every deploy, so it was the most frequent of the three
+    that threw a bill away — a restart during three investigations lost three
+    costs, every time."""
+
+    async def scenario() -> None:
+        engine = FakeEngine(delay=30.0)
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.start({"message": "analyze", "sessionKey": "hook:deploying"})
+        await asyncio.sleep(0.05)
+
+        await service.shutdown(grace_seconds=5.0)
+
+        assert engine.interrupts >= 1, "a deploy asks before it kills"
 
     asyncio.run(scenario())

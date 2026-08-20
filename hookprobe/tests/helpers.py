@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import replace
 from pathlib import Path
 
 from hookprobe.engine import EngineResult
@@ -82,10 +83,31 @@ class FakeEngine:
         self.messages: list[str] = []
         self.resumes: list[str | None] = []
         self.described: list[str | None] = []
+        # The interrupt protocol. `stoppable` False plays an SDK that ignores the
+        # ask, which is what the caller's cancel fallback is for.
+        self.stoppable = True
+        self.interrupts = 0
+        self.interrupted_cost = 0.25
+        self._interrupted = asyncio.Event()
 
     def describe_inputs(self, *, resume: str | None = None) -> dict:
         self.described.append(resume)
         return {"model": "claude-opus-5", "resumed": bool(resume)}
+
+    async def stop(self) -> bool:
+        """Model the SDK's interrupt: the turn winds down and still reports.
+
+        A fake that only returned True would prove nothing — the whole point of
+        the interrupt is that the turn ENDS AND STILL BILLS, so this has to
+        actually end it. `interrupts` counts the asks, and `stoppable` lets a
+        test play the case where the SDK ignores one, which is the branch the
+        cancel fallback exists for.
+        """
+        self.interrupts += 1
+        if not self.stoppable:
+            return False
+        self._interrupted.set()
+        return True
 
     async def run(self, *, message: str, session_key: str, resume: str | None = None, on_event=None) -> EngineResult:
         self.calls += 1
@@ -93,9 +115,19 @@ class FakeEngine:
         self.resumes.append(resume)
         self.running += 1
         self.max_running = max(self.max_running, self.running)
+        self._interrupted = asyncio.Event()
         try:
             if self.delay:
-                await asyncio.sleep(self.delay)
+                # Interruptible sleep: a real turn stops early when asked, and a
+                # fake that slept through it would make the interrupt untestable.
+                try:
+                    await asyncio.wait_for(self._interrupted.wait(), timeout=self.delay)
+                except TimeoutError:
+                    pass
+                else:
+                    # Asked to stop: report the bill for what was spent, which is
+                    # exactly what cancelling used to throw away.
+                    return replace(self.result, text="(interrupted)", cost_usd=self.interrupted_cost)
             if on_event is not None:
                 for event in self.events:
                     on_event(dict(event))
