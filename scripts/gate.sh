@@ -41,5 +41,10 @@ python3 scripts/assert_locks.py
 # hold its own number, but not the fact that all three are measured the same way
 # and that only two of them are capped.
 python3 scripts/assert_weight.py
+# Cross-service for the same reason again: it compares one helper's body against
+# the copy of it living in another service. `Live.watcher_count` had already gone
+# missing from one of three copies, and verify_signature had stripped its
+# timestamp in the pipe but not in the brain — neither noticed by anything.
+python3 scripts/assert_copies.py
 
 printf '\033[1;32mSTACK GATE GREEN\033[0m — every component gate + the stack checks.\n'

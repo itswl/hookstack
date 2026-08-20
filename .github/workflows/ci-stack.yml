@@ -47,6 +47,16 @@ jobs:
       # what "somebody bumped a floor and forgot scripts/relock.sh" looks like.
       - name: every requirements.lock still answers its requirements.txt
         run: python3 scripts/assert_locks.py
+      # Three self-contained deployables copy a handful of helpers rather than
+      # share a package, which is the right trade and the one that drifts. This
+      # compares the copies by parsed body, so each may keep its own comments.
+      - name: copied helpers have not drifted apart
+        run: python3 scripts/assert_copies.py
+      # Was in scripts/gate.sh and nowhere else, so every ceiling it enforces was
+      # advisory on any machine but a maintainer's. A cap nobody checks on the way
+      # in is a comment.
+      - name: the pipe and the brain are inside their stated ceilings
+        run: python3 scripts/assert_weight.py
 
   stack:
     runs-on: ubuntu-latest
