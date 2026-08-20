@@ -48,9 +48,14 @@ services:
       HOOKJUDGE_PORT: 8200
       HOOKJUDGE_DB: /data/hookjudge.db
       HOOKJUDGE_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
-      # Ledger-only, by declaration: "none" marks returns skipped instead of
-      # dead — an empty URL is treated as a misconfiguration and alarms.
-      HOOKJUDGE_RETURN_URL: "none"
+      # Brain A returns; brain B stays ledger-only. The asymmetry is the point:
+      # a verdict has to reach a human for anyone to rule on it, and two brains
+      # both returning would put two cards in the chat for one alert. B's
+      # opinion is read from the ledger, where the agreement comparison lives.
+      #
+      # Empty is still a misconfiguration that alarms; "none" is the deliberate
+      # opt-out that brain B keeps.
+      HOOKJUDGE_RETURN_URL: ${SHADOW_RETURN_URL:-none}
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
       HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
       # The investigator's DeepSeek key, on the OpenAI dialect this time. The
@@ -103,6 +108,41 @@ services:
       - ../shadow-data/hookjudge-b:/data
     ports:
       - "127.0.0.1:8201:8200"
+
+
+  # The Lark adapter, deliberately outside the pipe. Two directions:
+  #   out  the pipe's `feishu` channel POSTs a rendered card here, and this
+  #        sends it through the Lark API as the APPLICATION. A custom-bot
+  #        webhook can only send, so buttons on its cards have nowhere to call
+  #        back to — and every feedback number the family grew this week needs
+  #        a press to be receivable.
+  #   in   card.action.trigger arrives over a LONG CONNECTION (the bridge dials
+  #        out), so a press needs no public route in. hookrelay's public front
+  #        door was rolled back on 2026-08-07 and this does not reopen it.
+  lark-bridge:
+    build: ./lark-bridge
+    image: lark-bridge:shadow
+    container_name: lark-bridge
+    restart: unless-stopped
+    environment:
+      LARK_APP_ID: ${LARK_APP_ID:?set LARK_APP_ID in .env}
+      LARK_APP_SECRET: ${LARK_APP_SECRET:?set LARK_APP_SECRET in .env}
+      LARK_BRAND: ${LARK_BRAND:-lark}
+      # The private chat the cards land in. One member, so this is a push to a
+      # person and not a group notification.
+      LARK_CHAT_ID: ${LARK_CHAT_ID:?set LARK_CHAT_ID in .env}
+      RELAY_ACTION_URL: http://hookrelay:8100/card-action
+    volumes:
+      # lark-cli's credential file and event cursor. A named volume rather than
+      # a bind: nothing in here is worth reading from the host, and the
+      # credential is written from the environment at every start.
+      - lark-bridge-config:/config
+    # No published port. Only the pipe beside it on hookstack_net can reach it.
+    depends_on:
+      - hookrelay
+
+volumes:
+  lark-bridge-config:
 
 networks:
   default:
