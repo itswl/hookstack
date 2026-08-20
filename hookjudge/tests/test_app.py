@@ -1075,3 +1075,14 @@ async def test_a_condition_that_heals_itself_is_visible_without_anyone_pressing(
     noisy = {row["title"]: row for row in attention["noisiest"]}
     assert noisy["Topup over 500"]["likely_flapping"] is True
     assert noisy["Topup over 500"]["mattered"] == 0, "a flap is not a human verdict"
+
+    # The row has to be checkable by whoever doubts it, and it was not. Four
+    # firings and four recoveries make `interruptions` eight, while the verdict
+    # divided episodes by FIRINGS — so the two visible numbers said 2/8 next to
+    # `likely_flapping: true` and the flag read as broken. It was right; the
+    # denominator was simply missing. Production made this loud: 77 beside 30,
+    # on a comparison that was actually 30 of 47.
+    row = noisy["Topup over 500"]
+    assert row["interruptions"] == 4, "every card, recoveries included"
+    assert row["fired"] == 2, "the denominator the verdict used, now visible"
+    assert row["self_resolved"] * 2 >= row["fired"], "and the arithmetic checks out on the page"
