@@ -57,6 +57,15 @@ jobs:
       # in is a comment.
       - name: the pipe and the brain are inside their stated ceilings
         run: python3 scripts/assert_weight.py
+      # A live production component on the card-callback path, outside every
+      # service package and therefore outside every component gate. It was
+      # covered by nothing at all until it was edited and the question was asked.
+      - name: the lark bridge parses and lints
+        run: |
+          python3 -m compileall -q deploy/lark-bridge
+          pip install ruff
+          ruff check deploy/lark-bridge
+          ruff format --check deploy/lark-bridge
 
   stack:
     runs-on: ubuntu-latest

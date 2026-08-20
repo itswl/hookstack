@@ -46,5 +46,20 @@ python3 scripts/assert_weight.py
 # missing from one of three copies, and verify_signature had stripped its
 # timestamp in the pipe but not in the brain — neither noticed by anything.
 python3 scripts/assert_copies.py
+# The bridge was checked by NOTHING — not compiled, not linted, not typed, not
+# tested — while being a live production component on the card-callback path. It
+# is not inside a service package, so no component gate reaches it, and the stack
+# checks had never been told to look. Same shape as the shell scripts, found the
+# same way: by editing it and asking what would have caught a typo.
+#
+# hookrelay's venv supplies ruff because the pipe owns the other half of this
+# protocol. Not guarded by an `if` — a check that skips when a tool is missing is
+# a check that passes by finding nothing.
+step_bridge() { printf '\n\033[1;34m── %s\033[0m\n' "$1"; }
+step_bridge "the lark bridge parses and lints"
+python3 -m compileall -q deploy/lark-bridge
+hookrelay/.venv/bin/python -m ruff check deploy/lark-bridge
+hookrelay/.venv/bin/python -m ruff format --check deploy/lark-bridge
+echo "lark-bridge: OK"
 
 printf '\033[1;32mSTACK GATE GREEN\033[0m — every component gate + the stack checks.\n'

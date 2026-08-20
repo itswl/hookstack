@@ -29,21 +29,28 @@ import os
 import subprocess  # nosec B404 — the Lark CLI is the transport; see _lark()
 import sys
 import threading
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+)
 logger = logging.getLogger("lark-bridge")
 
 CHAT_ID = os.environ["LARK_CHAT_ID"]
-RELAY_ACTION_URL = os.environ.get("RELAY_ACTION_URL", "http://hookrelay:8100/card-action")
+RELAY_ACTION_URL = os.environ.get(
+    "RELAY_ACTION_URL", "http://hookrelay:8100/card-action"
+)
 LISTEN_PORT = int(os.environ.get("BRIDGE_PORT", "9100"))
 # Max bytes accepted from the pipe. A card is a few KB; anything near this is a
 # misconfiguration, not a notification.
 MAX_BODY = 256 * 1024
 
 
-def _lark(args: list[str], stdin: str | None = None, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+def _lark(
+    args: list[str], stdin: str | None = None, timeout: int = 60
+) -> subprocess.CompletedProcess[str]:
     """One place that shells out, so there is one place to read for what it runs.
 
     argv, never a shell string: the card JSON contains operator-authored alert
@@ -78,13 +85,17 @@ def send_card(card: dict) -> tuple[bool, str]:
         ]
     )
     if result.returncode != 0:
-        return False, (result.stderr or result.stdout or "lark-cli failed").strip()[:300]
+        return False, (result.stderr or result.stdout or "lark-cli failed").strip()[
+            :300
+        ]
     try:
         answer = json.loads(result.stdout or "{}")
     except ValueError:
         return False, "lark-cli returned no JSON"
     if not answer.get("ok", False):
-        return False, json.dumps(answer.get("error") or answer, ensure_ascii=False)[:300]
+        return False, json.dumps(answer.get("error") or answer, ensure_ascii=False)[
+            :300
+        ]
     return True, str((answer.get("data") or {}).get("message_id") or "")
 
 
@@ -96,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
         logger.info("http %s", fmt % args)
 
-    def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's contract
+    def do_POST(self) -> None:
         length = int(self.headers.get("content-length") or 0)
         if length > MAX_BODY:
             self._reply(413, {"ok": False, "error": "body too large"})
@@ -110,7 +121,9 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(card, dict):
             # The pipe sends {msg_type: interactive, card: {...}}. Anything else
             # is a channel pointed here by mistake, and saying so beats a 200.
-            self._reply(400, {"ok": False, "error": "expected an interactive card payload"})
+            self._reply(
+                400, {"ok": False, "error": "expected an interactive card payload"}
+            )
             return
         ok, detail = send_card(card)
         if ok:
@@ -132,6 +145,69 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
 
+def acknowledge(event: dict, note: str) -> None:
+    """Rewrite the pressed card so a person can see the press landed.
+
+    Without this a press did exactly what an INERT button did: nothing visible.
+    That is the state this deployment was in for a day, and being right about the
+    plumbing while looking identical to being broken is not much of an
+    improvement — the operator cannot tell, and presses again.
+
+    Two things change. The action block is removed, which is honest rather than
+    cosmetic: the token in those buttons is single-use and genuinely spent. And a
+    note records what the PIPE did, not what the far end concluded — the relay
+    answers as soon as it has enqueued the delivery, so it does not yet know
+    whether the investigator accepted anything, and a card claiming "remembered"
+    would be claiming an outcome nobody has observed.
+
+    Never fatal. The press has already been forwarded by the time this runs, so a
+    failed repaint must not be reported as a failed press.
+    """
+    token = str(event.get("token") or "")
+    content = str(event.get("card_content") or "")
+    if not token or not content:
+        # Documented behaviour: with no card_content there is no way to know what
+        # the card currently says, and guessing would overwrite it.
+        logger.info("no token or card_content on this press; leaving the card alone")
+        return
+    try:
+        card = json.loads(content)
+        if not isinstance(card, dict):
+            raise TypeError("card_content is not an object")
+        elements = [
+            el for el in (card.get("elements") or []) if el.get("tag") != "action"
+        ]
+        elements.append(
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": note}]}
+        )
+        card["elements"] = elements
+        # Card 1.0 needs open_ids or the API answers 300090 "openid empty". Ours
+        # are 1.0 — hookrelay builds {header, elements} with no schema key.
+        if str(card.get("schema") or "") != "2.0":
+            card["open_ids"] = [str(event.get("operator_id") or "")]
+        result = _lark(
+            [
+                "api",
+                "POST",
+                "/open-apis/interactive/v1/card/update",
+                "--as",
+                "bot",
+                "--data",
+                json.dumps({"token": token, "card": card}, ensure_ascii=False),
+            ]
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "card repaint failed rc=%s %s",
+                result.returncode,
+                (result.stderr or result.stdout)[:200],
+            )
+        else:
+            logger.info("card repainted after the press")
+    except Exception as exc:  # noqa: BLE001 — cosmetic; the press already landed
+        logger.warning("could not repaint the pressed card: %s", exc)
+
+
 def forward_press(event: dict) -> None:
     """One button press, handed to the pipe that minted the token."""
     raw = event.get("action_value") or "{}"
@@ -146,18 +222,43 @@ def forward_press(event: dict) -> None:
         return
     # The token IS the authorisation: signed by the pipe, single-use, expiring.
     # The bridge never inspects it and could not forge one.
-    body = json.dumps({"action": {"value": {"hookrelay_action": token}}, "actor": event.get("operator_id") or ""})
+    body = json.dumps(
+        {
+            "action": {"value": {"hookrelay_action": token}},
+            "actor": event.get("operator_id") or "",
+        }
+    )
     request = urllib.request.Request(  # nosec B310 — a fixed http:// URL from env, not user input
         RELAY_ACTION_URL,
         data=body.encode(),
         headers={"content-type": "application/json"},
         method="POST",
     )
+    stamp = time.strftime("%H:%M")
     try:
         with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310
-            logger.info("press forwarded: %s %s", response.status, response.read(200).decode("utf-8", "replace"))
-    except Exception as exc:  # noqa: BLE001 — a lost press must not kill the consumer
-        logger.exception("forwarding the press failed: %s", exc)
+            answer = response.read(400).decode("utf-8", "replace")
+            logger.info("press forwarded: %s %s", response.status, answer[:200])
+        outcome = ""
+        try:
+            outcome = str((json.loads(answer) or {}).get("outcome") or "")
+        except ValueError:
+            pass
+        acknowledge(
+            event,
+            f"✓ pressed {stamp} — {outcome or 'accepted by the pipe'}. These buttons are spent.",
+        )
+    except Exception:  # a lost press must not kill the consumer
+        # logger.exception already carries the traceback; naming the exception
+        # again put the same message on the line twice.
+        logger.exception("forwarding the press failed")
+        # Say so on the card. A press that failed and looks unpressed is the
+        # worst of the three outcomes: the operator will press it again, and the
+        # token is single-use, so the retry cannot work either.
+        acknowledge(
+            event,
+            f"✗ pressed {stamp} — the pipe did not accept it. Nothing was recorded.",
+        )
 
 
 def consume_presses() -> None:
@@ -200,13 +301,19 @@ def consume_presses() -> None:
                 forward_press(event)
                 backoff = 2  # a working stream resets the penalty
         process.wait()
-        logger.warning("event stream ended (rc=%s); reconnecting in %ss", process.returncode, backoff)
+        logger.warning(
+            "event stream ended (rc=%s); reconnecting in %ss",
+            process.returncode,
+            backoff,
+        )
         threading.Event().wait(backoff)
         backoff = min(backoff * 2, 60)
 
 
 def main() -> None:
-    logger.info("bridge up: chat=%s relay=%s port=%s", CHAT_ID, RELAY_ACTION_URL, LISTEN_PORT)
+    logger.info(
+        "bridge up: chat=%s relay=%s port=%s", CHAT_ID, RELAY_ACTION_URL, LISTEN_PORT
+    )
     threading.Thread(target=consume_presses, daemon=True).start()
     # 0.0.0.0 inside a container network with no published port: only the pipe
     # beside it can reach this.
