@@ -45,17 +45,29 @@ _BACKOFF_CAP_SECONDS = 600
 def _mint_card_actions(message: dict[str, Any], cfg: Config, settings: Settings, now: float) -> None:
     """Replace a brain's action DECLARATIONS with signed buttons, in place.
 
-    Silently leaves the payload alone when there is nothing to do — no secret,
-    no configured kinds, or a payload that is not a brain's result. A verdict
-    must reach its channel whether or not this deployment offers buttons.
+    A verdict must reach its channel whether or not this deployment offers
+    buttons — but "leave the payload alone" was the wrong way to do nothing.
+    Returning early left the DECLARATIONS in place, and the card renderer turns a
+    declaration into a button with `value: a.get("value") or {}` — so every card
+    shipped a button that rendered correctly, was labelled correctly, and carried
+    nothing at all back when pressed.
+
+    `test_without_a_secret_no_card_carries_a_button` has asserted the right thing
+    about `actions.offered` since the feature landed. The early return meant the
+    delivery path never reached it. On production that was the state for a day
+    while `ruled: 0` was being read as evidence that nobody answers.
+
+    So doing nothing means offering NOTHING: the declarations are dropped. An
+    absent button is honest; an inert one is a lie the operator cannot see.
     """
-    if not settings.action_secret or not cfg.card_actions:
-        return
     payload = message.get("payload")
     if not isinstance(payload, dict):
         return
     declared = payload.get("actions")
     if not isinstance(declared, list) or not declared:
+        return
+    if not settings.action_secret or not cfg.card_actions:
+        payload.pop("actions", None)
         return
     raw_meta = payload.get("meta")
     meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}

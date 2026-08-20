@@ -139,6 +139,22 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     posture_warning = _warn_posture_mix(app_config.pipeline, app_config.channels)
     if posture_warning:
         logger.warning("%s", posture_warning)
+    # Buttons that cannot be signed are buttons that do nothing, and until now
+    # that was silent. `_mint_card_actions` returns early without a secret, so
+    # every card shipped with `value: {}` — it RENDERED, the label was right, and
+    # a press carried nothing back. On this deployment that had been true since
+    # the feature landed, which is most of the reason `ruled` sat at 0 while I
+    # was reading it as "nobody answers".
+    #
+    # Not fatal: a verdict must still reach its channel. But an operator who
+    # wrote `card_actions` into their config asked for working buttons, and the
+    # gap between that and what ships has to be said out loud.
+    if app_config.card_actions and not app_settings.action_secret:
+        logger.error(
+            "card_actions configures %s but HOOKRELAY_ACTION_SECRET is empty: "
+            "every button will render and do nothing, because there is no key to sign the token in it",
+            ", ".join(sorted(app_config.card_actions)),
+        )
     store = Store(app_settings.db_path)
     live = Live()
     store.on_change = live.changed
