@@ -166,6 +166,30 @@ those took the free `reuse` route the spend figure says nothing at all about it.
 | `mattered_pct`            | of the **ruled** ones — an unruled card is not evidence |
 | `noisiest`                | conditions that interrupted more than once, with how many were paid for and how many anyone ruled useful |
 
+Three of those keys need a person, and stayed empty for a week. So three more
+answer the same question without one. They are separate keys on purpose: a board
+that averaged them could not say which of them spoke.
+
+| key | who says it | what it means |
+| --- | --- | --- |
+| `mattered` / `did_not_matter` | a **person**, via `POST /feedback` | the only fields here that mean somebody spoke |
+| `self_resolved` / `median_seconds` / `likely_flapping` | **behaviour**, free | the condition healed itself, fast, more often than not — paired from the ledger's own firings and recoveries, no model call |
+| `wake_yes` / `wake_no` | the **judge**, same call | a second axis: `importance` is how serious the subject is, this is whether a person has to act. It exists because `importance` came back `high` for 210 of 216 alerts, which is a classifier agreeing with itself |
+| `ai_ruling` / `ai_ruled` | a **model reading case files**, weekly | a retrospective verdict per CONDITION, filed by hookprobe through `POST /rulings/ai`. Its own table, keyed by identity; latest wins, because evidence keeps arriving |
+
+Any row can disagree with the ones above it, and a condition where they do is the
+most interesting line on the board. Measured: the two noisiest conditions are
+`likely_flapping` and the model called them real; `DatasourceNoData` never
+self-heals and the model called it a misconfigured test alarm; a person then said
+the opposite of the model on both. If these ever stop disagreeing, two of them
+should be deleted.
+
+`noisiest` carries `fired` beside `self_resolved` for a reason worth knowing:
+`interruptions` counts every card including recoveries, while `likely_flapping`
+divides episodes by FIRINGS. Without that denominator a reader divides the two
+visible numbers, gets 39%, and concludes the flag is broken when the comparison
+it made was 64%.
+
 `noisiest` is the view to act on: several interruptions and nothing ruled useful
 is where to go turn something off. It is capped, and the cap is load-bearing —
 the top of that list is also emitted as Prometheus labels, and an alert identity
@@ -213,6 +237,7 @@ queue of rows nobody reviewed.
 | GET    | `/live`    | the board's wake-up line: NDJSON, `changed` per burst of writes, `ping` through the quiet |
 | GET    | `/metrics` | Prometheus text                                   |
 | GET    | `/disagreements` | the review queue: platform vs judge, unlabeled     |
+| POST   | `/rulings/ai` | a model's retrospective ruling on a CONDITION, from hookprobe. Its OWN secret (`HOOKJUDGE_RULING_SECRET`), because the ingest one also opens `/events` and anything able to sign for that can forge judgements. Fails **closed** when unset, unlike every other door here |
 | POST   | `/judgements/{id}/label` | the operator's ruling. **Disabled** without a read token |
 | GET    | `/labels/export` | every ruling as eval-harness JSONL. **Disabled** without a read token |
 | GET    | `/healthz` | liveness                                          |
@@ -258,6 +283,7 @@ All environment, one flat object (`hookjudge/settings.py`), no layers.
 | -------- | ------- | ------------ |
 | `HOOKJUDGE_DB` | `hookjudge.db` | ledger path |
 | `HOOKJUDGE_INGEST_SECRET` | *(empty)* | inbound HMAC secret |
+| `HOOKJUDGE_RULING_SECRET` | *(empty = door shut)* | signs `/rulings/ai` and nothing else |
 | `HOOKJUDGE_READ_TOKEN` | *(empty)* | guards the reads; empty leaves them open and **disables** the label write and `/labels/export` |
 | `HOOKJUDGE_MAX_BODY_BYTES` | `262144` | inbound body cap |
 | `HOOKJUDGE_RETURN_URL` | *(empty)* | the one pipe door results go back to |
