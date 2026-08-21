@@ -338,6 +338,19 @@ def auto_write(
         return {"skipped": "run produced no report"}
 
     turns = list(getattr(run, "turns", []) or [])
+    # A runbook IS the tool sequence plus what it concluded — see _steps and
+    # _conclusion. A run that called no tools looked at nothing, so there is no
+    # procedure to record and the "runbook" would be a title over a sentence.
+    #
+    # Measured before it was added: across every run on this deployment, exactly
+    # one distilled with zero tool calls, and it was a throwaway check of mine
+    # that had been told not to use any. It left `reply-with-exactly-the-word-ok`
+    # in the library permanently, because a manual poke is indistinguishable from
+    # an investigation once it finishes. Every real investigation used at least
+    # one tool, so this line costs nothing and closes the whole class — no new
+    # marker for a caller to remember, which is how the last one got past.
+    if not _steps(turns):
+        return {"skipped": "run called no tools; nothing to write a procedure from"}
     headline = _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
     name = slug(headline)
     target = skills_dir / name
