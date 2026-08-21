@@ -370,9 +370,12 @@ card_actions:
     forward_to: judge-feedback
   useless:
     forward_to: judge-feedback
+  remember:
+    forward_to: probe-action        # adopt one queued memory line, in one tap
 ```
 
-Five kinds exist: `silence`, `followup`, `approve`, `useful`, `useless`. Unknown
+Six kinds exist: `silence`, `followup`, `approve`, `useful`, `useless`,
+`remember`. Unknown
 kinds, a `forward_to` naming no channel, and any non-`silence` kind without a
 `forward_to` all fail **at boot** — a button that 404s when an operator finally
 presses it is worse than no button.
