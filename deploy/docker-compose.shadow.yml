@@ -40,6 +40,12 @@ services:
       # ships with an empty value. That was the state of this deployment for
       # a day while `ruled: 0` was being read as "nobody answers".
       HOOKRELAY_ACTION_SECRET: ${SHADOW_ACTION_SECRET:-}
+      # Guards /status and /live. Empty means the guard passes and the whole
+      # ledger — every alert title this deployment has seen — answers anyone
+      # who can reach the port. That was survivable while the port was bound
+      # to 127.0.0.1 and nothing else; it stops being survivable the moment a
+      # reverse proxy is put in front, which is why it is set now.
+      HOOKRELAY_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
     volumes:
       - ./shadow.yaml:/etc/hookrelay/config.yaml:ro
       # Bind mounts at the deployment root, like the investigator's: state in
@@ -83,7 +89,7 @@ services:
       # ledger prices verdicts with these, so re-check on a model change.
       HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:-0.00028}
       HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:-0.00042}
-      HOOKJUDGE_READ_TOKEN: ${HOOKJUDGE_READ_TOKEN:-}
+      HOOKJUDGE_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
     volumes:
       - ../shadow-data/hookjudge:/data
     ports:
@@ -123,7 +129,7 @@ services:
       # Reasoner list price (USD per 1k) as of the v3.2 cut; re-check on change.
       HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_B_AI_PRICE_IN_PER_1K:-0.00028}
       HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_B_AI_PRICE_OUT_PER_1K:-0.00042}
-      HOOKJUDGE_READ_TOKEN: ${HOOKJUDGE_READ_TOKEN:-}
+      HOOKJUDGE_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
     volumes:
       - ../shadow-data/hookjudge-b:/data
     ports:

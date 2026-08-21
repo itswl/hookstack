@@ -198,7 +198,7 @@ def test_the_shape_check_refuses_the_things_that_could_act() -> None:
 
     for fact in (
         "db-1 /data and / are one filesystem",
-        "the demo-alarm rule 示例充值超限告警 fires on genuine deposits over 500 USD",
+        "the demo-alarm rule 示例充值超500告警 fires on genuine deposits over 500 USD",
         "gateway-2 sits behind the shared ALB with gateway-1",
     ):
         assert unsafe_reason(fact) is None, f"a plain fact about topology: {fact}"

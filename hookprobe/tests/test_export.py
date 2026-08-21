@@ -199,7 +199,7 @@ def test_an_empty_review_is_never_reported_as_clean(tmp_path: Path) -> None:
     real = CONSOLIDATED.replace(
         "1. Read the payload's `valueString`.",
         "1. Confirm `grafana_folder=demo-demo-alarm-test`, rules `示例转化率告警` "
-        "(ruleUID `abc123def456gh`) and 示例充值超限告警B (数据源 `ds45uv67ij89kl`).",
+        "(ruleUID `abc123def456gh`) and 示例充值超1000告警 (数据源 `ds45uv67ij89kl`).",
     )
     bundle = export.bundle(_skills(tmp_path, datasourcenodata=real))
     kinds = {row["kind"] for row in bundle["review"]}

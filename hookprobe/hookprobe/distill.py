@@ -79,8 +79,8 @@ def slug(text: str, fallback: str = "investigation") -> str:
     letter, so on this deployment — where most alert titles are Chinese — it
     kept the digits and threw away the condition:
 
-        示例充值超限告警  ->  "500"      (deposit over 500)
-        示例提现超限告警  ->  "500"      (withdrawal over 500)
+        示例充值超500告警  ->  "500"      (deposit over 500)
+        示例提现超500告警  ->  "500"      (withdrawal over 500)
 
     Two unrelated conditions, one name, and a runbook merges by design: the
     second investigation adds its case to the first. So a deposit runbook would

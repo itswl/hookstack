@@ -185,7 +185,7 @@ async def test_an_unusable_importance_is_normalized_not_trusted():
         ("Disk usage 78%", "medium"),
         # Inbound alerts arrive in whatever language the monitoring stack
         # speaks, so the matchers are bilingual and so is this coverage.
-        ("示例充值超限告警", "high"),
+        ("示例充值超500告警", "high"),
         ("[测试] 请忽略这条", "low"),
     ],
 )
