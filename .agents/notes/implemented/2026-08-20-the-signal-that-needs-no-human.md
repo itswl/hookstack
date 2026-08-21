@@ -42,8 +42,8 @@ inference.
 
 **The signal was measured before it was built.** On 41 hours of production
 traffic, two conditions accounted for over half of all judgements —
-`示例充值超限告警` fired 47 times and healed itself 29 times with a median of
-5.0 minutes, `示例提现超限告警` 27 and 13 at the same 5.0 — while
+`示例充值超500告警` fired 47 times and healed itself 29 times with a median of
+5.0 minutes, `示例提现超500告警` 27 and 13 at the same 5.0 — while
 `DatasourceNoData` fired 17 times and never recovered once. Identical on the cost
 figures. Opposite here. A median that lands exactly on the alert's own evaluation
 window is what a threshold flapping looks like, and it is visible with nobody

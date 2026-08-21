@@ -661,8 +661,8 @@ def test_two_conditions_in_a_language_the_slug_cannot_spell_get_two_runbooks() -
     On a deployment whose alert titles are mostly Chinese — which is the one this
     runs on — the two noisiest conditions both came out as "500":
 
-        示例甲类单次超500告警  one threshold
-        示例乙类单次超500告警  another
+        示例充值超500告警  one threshold
+        示例提现超500告警  another
 
     A runbook merges by design: the second investigation of a name adds its case
     to the first. So the deposit runbook would have taught withdrawals its route,
@@ -674,11 +674,11 @@ def test_two_conditions_in_a_language_the_slug_cannot_spell_get_two_runbooks() -
     """
     from hookprobe.distill import slug
 
-    deposit = slug("示例甲类单次超500告警")
-    withdrawal = slug("示例乙类单次超500告警")
+    deposit = slug("示例充值超500告警")
+    withdrawal = slug("示例提现超500告警")
 
     assert deposit != withdrawal, "two conditions, two runbooks"
-    assert deposit == slug("  示例甲类单次超500告警  "), "same condition, same runbook, so it can go on learning"
+    assert deposit == slug("  示例充值超500告警  "), "same condition, same runbook, so it can go on learning"
     assert deposit.isascii(), "a directory name, on whatever filesystem the volume is"
     assert deposit.startswith("500-"), "keep what could be read; add only what distinguishes"
 
