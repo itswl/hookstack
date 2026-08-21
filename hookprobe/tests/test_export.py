@@ -180,3 +180,45 @@ def test_the_export_route_is_matched_before_the_name_route(tmp_path: Path) -> No
 
     # And it is still guarded, like every other route on this service.
     assert client.get("/v1/skills/export").status_code == 401
+
+
+def test_an_empty_review_is_never_reported_as_clean(tmp_path: Path) -> None:
+    """The first real export returned `review: []` over this content.
+
+    Grafana rule uids, the customer's own alert-rule names and an internal folder
+    label — none of them a session key, a uuid, a hostname, an ip, an email or a
+    url, so nothing matched, so the list was empty. An empty list reads as
+    "nothing to worry about" and meant "none of my shapes matched", one hour
+    before somebody could have published it.
+
+    Two answers. The obvious shapes are added, because they were cheap and real.
+    The important one is that `must_read` is emitted for every exported runbook
+    whether or not anything matched, so the output can never be skimmed as
+    clearance.
+    """
+    real = CONSOLIDATED.replace(
+        "1. Read the payload's `valueString`.",
+        "1. Confirm `grafana_folder=demo-alarm-test`, rules `示例转化率告警` "
+        "(ruleUID `abc123def456gh`) and 示例充值超限告警B (数据源 `ds45uv67ij89kl`).",
+    )
+    bundle = export.bundle(_skills(tmp_path, datasourcenodata=real))
+    kinds = {row["kind"] for row in bundle["review"]}
+
+    assert "opaque id" in kinds, "a Grafana uid is not a uuid and used to match nothing"
+    assert "internal label" in kinds, "grafana_folder=demo-alarm-test used to match nothing"
+
+    # And the part that does not depend on a pattern matching anything.
+    assert len(bundle["must_read"]) == 1
+    assert "datasourcenodata" in bundle["must_read"][0]
+    assert "cannot recognise a rule name" in bundle["must_read"][0]
+
+    # A clean procedure still gets the same instruction — that is the whole point.
+    plain = export.bundle(_skills(tmp_path / "b", datasourcenodata=CONSOLIDATED))
+    assert plain["review"] == [] and len(plain["must_read"]) == 1
+    assert "never that this is safe to publish" in plain["note"]
+
+
+def test_nothing_exported_means_nothing_to_read(tmp_path: Path) -> None:
+    """must_read tracks the exports, so an empty bundle does not manufacture a
+    warning about files that are not in it."""
+    assert export.bundle(_skills(tmp_path, sesbouncespike=AUTO_WRITTEN))["must_read"] == []

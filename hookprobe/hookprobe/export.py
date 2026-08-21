@@ -58,6 +58,26 @@ _IDENTIFYING = (
     ("ip address", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
     ("email", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")),
     ("url", re.compile(r"https?://[^\s)\"'>]+")),
+    # Added after the first real export came back `review: []` over a procedure
+    # containing `ruleUID abc123def456gh`, `数据源 ds45uv67ij89kl` and
+    # `grafana_folder=demo-alarm-test`. Opaque ids are not UUIDs and do not match any
+    # pattern above; a Grafana uid is fourteen characters of alphanumeric soup.
+    ("opaque id", re.compile(r"\b(?=[a-z0-9]*[0-9])(?=[a-z0-9]*[a-z])[a-z0-9]{12,24}\b")),
+    # `grafana_folder=demo-alarm-test`, `env=prod-cn`, `namespace=...` — internal names
+    # arrive as the right-hand side of a label far more often than as prose.
+    #
+    # A NAMED key list, not `\w+=`, which matched `value=null` — the single most
+    # important fact in the one runbook this repository has. A scanner that flags
+    # the subject matter it is protecting gets ignored, which is the same failure
+    # as the tint that was always on.
+    (
+        "internal label",
+        re.compile(
+            r"\b\w*(?:folder|namespace|cluster|datasource|tenant|org|team|project|region|env|account)"
+            r"\w*=[A-Za-z0-9][\w.:/-]{2,}",
+            re.I,
+        ),
+    ),
 )
 _FINDING_MAX = 6  # per kind per skill; a list nobody reads is not a warning
 
@@ -140,9 +160,23 @@ def bundle(skills_dir: Path) -> dict[str, Any]:
         # Named `review` rather than `warnings`: nothing here is necessarily
         # wrong, and this module is not entitled to call anything safe.
         "review": spotted,
+        # Always present, never empty while anything is exported, and that is the
+        # point. The first real export returned `review: []` over a procedure
+        # naming two of the customer's alert rules, three Grafana uids and an
+        # internal folder — none of which match a pattern, all of which a person
+        # spots instantly. An empty list read as "nothing to worry about" when it
+        # meant "none of my shapes matched", which is the same false all-clear
+        # this codebase keeps finding in its own numbers.
+        "must_read": [
+            f"{row['name']}: read the procedure itself. The scanner below matches known shapes "
+            f"(session keys, uuids, hostnames, ips, emails, urls, opaque ids, labels) and cannot "
+            f"recognise a rule name, a team name or a threshold that means something to you."
+            for row in exported
+        ],
         "note": (
             "Procedures only — every case was dropped, because that is where the session keys, "
-            "hostnames and figures live. Credentials are redacted; anything else identifying is "
-            "listed under `review` for you to read before this leaves the building."
+            "hostnames and figures live. Credentials are redacted. Everything else is REPORTED, "
+            "not removed, and `review: []` means no known shape matched — never that this is safe "
+            "to publish. That judgement is yours and it needs the text in front of you."
         ),
     }
