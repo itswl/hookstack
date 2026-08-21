@@ -1291,7 +1291,7 @@ async function openAudit(filter) {
     try {
       const q = encodeURIComponent($("#auditQ").value || "");
       const d = await (await api("/v1/audit?limit=300" + (q ? "&session=" + q : ""))).json();
-      $("#auditCount").textContent = `${d.count} calls (newest last)`;
+      $("#auditCount").textContent = `${d.count} calls (newest first)`;
       $("#auditRows").innerHTML = d.entries.map((e) => `
         <div class="audit-row ${e.error ? "err" : ""}">
           <span class="ts">${fmtTime(e.ts)}</span>

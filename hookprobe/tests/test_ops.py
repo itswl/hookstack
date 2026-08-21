@@ -361,10 +361,22 @@ def test_audit_tail_filters_by_session(tmp_path, monkeypatch) -> None:
     with client:
         everything = client.get("/v1/audit", headers=AUTH).json()
         assert everything["count"] == 3
+        # Newest FIRST, like every other list in this family. It used to be
+        # newest-last because that is how a JSONL file is appended, and the append
+        # order reached the page — where 196 rows meant scrolling to the bottom to
+        # see what had just happened.
+        assert [e["ts"] for e in everything["entries"]] == [3.0, 2.0, 1.0]
+
         filtered = client.get("/v1/audit?session=inbound:1", headers=AUTH).json()
-        assert [e["tool"] for e in filtered["entries"]] == ["Bash", "Grep"]
+        assert [e["tool"] for e in filtered["entries"]] == ["Grep", "Bash"]
+
+        # And `limit` keeps the NEWEST rows: it slices the tail, then reverses.
+        # `entries[:limit]` reads identically and serves the OLDEST under a label
+        # promising the newest — verified by making that substitution and watching
+        # this assertion fail. (Reversing first and slicing the head is merely
+        # equivalent, not a bug; I claimed otherwise before checking.)
         capped = client.get("/v1/audit?limit=1", headers=AUTH).json()
-        assert capped["count"] == 1 and capped["entries"][0]["ts"] == 3.0, "newest last, oldest dropped"
+        assert capped["count"] == 1 and capped["entries"][0]["ts"] == 3.0, "the newest, not the first written"
 
 
 def test_default_agents_seed_once_and_respect_choices(tmp_path) -> None:

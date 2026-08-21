@@ -60,8 +60,21 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.get("/v1/audit", dependencies=[Depends(guard)])
     async def audit_tail(limit: int = 200, session: str = "") -> dict[str, Any]:
-        """The flight recorder, newest last. Reads the most recent day files
-        only — the full history stays on disk for grep."""
+        """The flight recorder, newest FIRST. Reads the most recent day files
+        only — the full history stays on disk for grep.
+
+        Newest first because every other list in this family is: run list, skill
+        history, the review queue, open proposals, waiting memory lines. This one
+        was newest-last because that is the order a JSONL file is appended in, and
+        the append order leaked all the way to the page — where it was labelled
+        rather than fixed, so 196 rows meant scrolling to the bottom to see what
+        just happened.
+
+        `limit` slices the TAIL and then reverses. Slicing the head instead —
+        `entries[:limit]` — reads identically and serves the oldest rows under a
+        label promising the newest, which is the version of this bug that would
+        survive review.
+        """
         limit = max(1, min(1000, limit))
         audit_dir = settings.workdir / "audit"
         entries: list[dict[str, Any]] = []
@@ -75,7 +88,9 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
                     if session and session not in str(entry.get("session") or ""):
                         continue
                     entries.append(entry)
-        return {"entries": entries[-limit:], "count": len(entries[-limit:])}
+        newest = entries[-limit:]
+        newest.reverse()
+        return {"entries": newest, "count": len(newest)}
 
     @app.get("/v1/config", dependencies=[Depends(guard)])
     async def config_view() -> dict[str, Any]:
