@@ -28,7 +28,7 @@ description: What previous investigations of "DatasourceNoData" checked.
 
 ## 常见结论与处置
 
-Alarm-test threshold rules with no data behind them.
+Demo threshold rules with no data behind them.
 
 ## Investigations
 
@@ -198,14 +198,14 @@ def test_an_empty_review_is_never_reported_as_clean(tmp_path: Path) -> None:
     """
     real = CONSOLIDATED.replace(
         "1. Read the payload's `valueString`.",
-        "1. Confirm `grafana_folder=demo-alarm-test`, rules `示例转化率告警` "
+        "1. Confirm `grafana_folder=demo-demo-alarm-test`, rules `示例转化率告警` "
         "(ruleUID `abc123def456gh`) and 示例充值超限告警B (数据源 `ds45uv67ij89kl`).",
     )
     bundle = export.bundle(_skills(tmp_path, datasourcenodata=real))
     kinds = {row["kind"] for row in bundle["review"]}
 
     assert "opaque id" in kinds, "a Grafana uid is not a uuid and used to match nothing"
-    assert "internal label" in kinds, "grafana_folder=demo-alarm-test used to match nothing"
+    assert "internal label" in kinds, "grafana_folder=demo-demo-alarm-test used to match nothing"
 
     # And the part that does not depend on a pattern matching anything.
     assert len(bundle["must_read"]) == 1
