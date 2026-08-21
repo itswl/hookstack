@@ -46,6 +46,12 @@ services:
       # to 127.0.0.1 and nothing else; it stops being survivable the moment a
       # reverse proxy is put in front, which is why it is set now.
       HOOKRELAY_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
+      # Guards PUT /config, the silence valve and the dead-letter retry.
+      # Unlike the read token, an empty value here FAILS CLOSED — token_ok
+      # returns False when nothing is configured, so the endpoints refuse
+      # everyone rather than admitting anyone. That is why this was missing for
+      # weeks without being a hole: the admin surface simply did not work.
+      HOOKRELAY_ADMIN_TOKEN: ${SHADOW_ADMIN_TOKEN:-}
     volumes:
       - ./shadow.yaml:/etc/hookrelay/config.yaml:ro
       # Bind mounts at the deployment root, like the investigator's: state in
