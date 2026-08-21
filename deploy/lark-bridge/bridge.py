@@ -166,9 +166,20 @@ def acknowledge(event: dict, note: str) -> None:
     token = str(event.get("token") or "")
     content = str(event.get("card_content") or "")
     if not token or not content:
-        # Documented behaviour: with no card_content there is no way to know what
-        # the card currently says, and guessing would overwrite it.
-        logger.info("no token or card_content on this press; leaving the card alone")
+        # Say WHICH is missing. "no token or card_content" was true and useless:
+        # a press came back forwarded-but-unrepainted and the log could not tell
+        # an expired update token from a card body the platform declined to hand
+        # over, which are different problems with different fixes.
+        missing = ", ".join(
+            name
+            for name, value in (("token", token), ("card_content", content))
+            if not value
+        )
+        logger.info(
+            "press not repainted — missing %s (event carried: %s)",
+            missing,
+            ",".join(sorted(k for k, v in event.items() if v not in (None, "", {}))),
+        )
         return
     try:
         card = json.loads(content)
