@@ -54,6 +54,7 @@ model call would cost money to restate that, and would be free to invent.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -353,6 +354,7 @@ def auto_write(
         return {"skipped": "run called no tools; nothing to write a procedure from"}
     headline = _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
     name = slug(headline)
+    adopt_legacy(skills_dir, headline, name)
     target = skills_dir / name
     manifest = target / "SKILL.md"
     existed = manifest.is_file()
@@ -503,6 +505,42 @@ def write_proposal(skill_dir: Path, content: str) -> None:
     tmp = (skill_dir / "proposal.md").with_suffix(".tmp")
     tmp.write_text(content, encoding="utf-8")
     tmp.replace(skill_dir / "proposal.md")
+
+
+def legacy_slug(text: str, fallback: str = "investigation") -> str:
+    """What `slug` returned before it learned to keep a digest for non-ASCII.
+
+    Exists only so `adopt_legacy` can find a runbook written under the old name.
+    """
+    cleaned = _SLUG.sub("-", text.lower()).strip("-")
+    return (cleaned[:48].strip("-") or fallback).strip("-")
+
+
+def adopt_legacy(skills_dir: Path, headline: str, name: str) -> None:
+    """Rename a runbook written under the pre-digest name, once, in place.
+
+    I claimed the digest change moved nothing on disk, because titles ASCII can
+    already spell were untouched. `[SES] Bounce rate > 5% — AWS review threshold`
+    is not one of those: the em dash is non-ASCII, the old slug dropped it
+    silently and produced a clean ASCII name, and the new one appends a digest.
+    So the same condition started resolving to a new directory, and production
+    grew two runbooks with identical descriptions — one still accumulating, one
+    abandoned mid-history. Three more were queued to split the same way, on their
+    next case each.
+
+    A rename rather than a fresh start: SKILL.md, history/ and origin.json all
+    come along, so the runbook keeps learning instead of restarting at one case.
+    Nothing happens when the current name already exists — including when BOTH
+    do, which is the split that already occurred and is not this function's to
+    merge. The export names the stray in `omitted`.
+    """
+    if not headline or (skills_dir / name).exists():
+        return
+    legacy = legacy_slug(headline)
+    if legacy == name or not (skills_dir / legacy / "SKILL.md").is_file():
+        return
+    with contextlib.suppress(OSError):
+        (skills_dir / legacy).rename(skills_dir / name)
 
 
 def apply_consolidation(skill_dir: Path, content: str, *, by: str, at: float) -> None:

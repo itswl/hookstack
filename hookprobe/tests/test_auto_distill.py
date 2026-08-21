@@ -796,3 +796,86 @@ def test_a_run_that_looked_at_nothing_does_not_become_a_runbook(tmp_path: Path) 
     # And a real investigation is untouched — otherwise this rule would be a way
     # of switching the feature off by accident.
     assert "installed" in distill.auto_write(run_record(), skills_dir=skills, limit=10)
+
+
+def test_a_runbook_written_under_the_old_slug_is_adopted_not_abandoned(tmp_path: Path) -> None:
+    """The digest change split a live runbook, and I said it would not.
+
+    "Titles ASCII can already spell are untouched, so nothing on disk moves" —
+    except `[SES] Bounce rate > 5% — AWS review threshold` contains an em dash.
+    The old slug dropped it silently and produced a clean ASCII name; the new one
+    sees non-ASCII and appends a digest. Production ended up with two runbooks
+    carrying identical descriptions, one still learning and one abandoned, with
+    three more queued to split on their next case.
+
+    The old directory is renamed, so SKILL.md, history/ and origin.json come
+    along and the runbook keeps its cases instead of restarting at one.
+    """
+    title = "[SES] Bounce rate > 5% — AWS review threshold"
+    old_name = distill.legacy_slug(title)
+    new_name = distill.slug(title)
+    assert old_name != new_name and old_name.isascii()
+
+    skills = tmp_path / "skills"
+    (skills / old_name / "history").mkdir(parents=True)
+    (skills / old_name / "SKILL.md").write_text(
+        f"---\nname: {old_name}\ndescription: d.\n---\n\n# {title}\n\n## Investigations\n\n"
+        f"{distill.CASES_MARKER}\n\n<!-- case:start 1 -->\nthe first case\n<!-- case:end -->\n",
+        encoding="utf-8",
+    )
+    (skills / old_name / "history" / "1-SKILL.md").write_text("older", encoding="utf-8")
+
+    outcome = distill.auto_write(
+        run_record(
+            current_message=f"Title: {title}\ninvestigate",
+            text="conclusion",
+            turns=[
+                {
+                    "message": f"Title: {title}\ninvestigate",
+                    "text": "conclusion",
+                    "events": [{"type": "tool_use", "name": "Bash", "detail": "aws ses get-account"}],
+                }
+            ],
+        ),
+        skills_dir=skills,
+        limit=10,
+    )
+
+    assert outcome == {"updated": new_name}, "the same condition, still one runbook"
+    assert not (skills / old_name).exists(), "the old directory was renamed, not left behind"
+    manifest = (skills / new_name / "SKILL.md").read_text()
+    assert "the first case" in manifest, "it kept what it had already learned"
+    assert (skills / new_name / "history" / "1-SKILL.md").is_file(), "and its history came along"
+
+
+def test_adoption_does_not_touch_a_split_that_already_happened(tmp_path: Path) -> None:
+    """Where both names exist the damage is done, and merging two histories is
+    not a rename's job. It leaves them alone; the export lists the stray."""
+    title = "[SES] Bounce rate > 5% — AWS review threshold"
+    old_name, new_name = distill.legacy_slug(title), distill.slug(title)
+    skills = tmp_path / "skills"
+    for name, body in ((old_name, "stranded"), (new_name, "current")):
+        (skills / name).mkdir(parents=True)
+        (skills / name / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: d.\n---\n\n# {title}\n\n## Investigations\n\n"
+            f"{distill.CASES_MARKER}\n\n<!-- case:start 1 -->\n{body}\n<!-- case:end -->\n",
+            encoding="utf-8",
+        )
+
+    distill.auto_write(
+        run_record(
+            current_message=f"Title: {title}\ninvestigate",
+            turns=[
+                {
+                    "message": f"Title: {title}\ninvestigate",
+                    "text": "conclusion",
+                    "events": [{"type": "tool_use", "name": "Bash", "detail": "aws ses get-account"}],
+                }
+            ],
+        ),
+        skills_dir=skills,
+        limit=10,
+    )
+
+    assert (skills / old_name / "SKILL.md").read_text().count("stranded") == 1
+    assert "current" in (skills / new_name / "SKILL.md").read_text()
