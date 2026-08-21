@@ -363,6 +363,17 @@ class Verdict:
     importance: str
     event_type: str = ""
     impact_scope: str = ""
+    # The second axis. `importance` says how serious the subject is; this says
+    # whether a person has anything to do about it now. Measured on production,
+    # the judge answered `high` for 210 of 216 alerts — an importance classifier
+    # that agrees with itself 97% of the time carries almost no information, and
+    # its own prompt is why: 74% of this traffic is payments, and payments
+    # default to high. The question the product needs was never being asked.
+    #
+    # Kept out of `importance` and out of `mattered`: the first is a different
+    # question, the second means a HUMAN said so and is the one field here that
+    # does. Its own field, its own column, its own count.
+    wake_someone: str = ""
     route: str = ROUTE_RULE
     tokens_in: int = 0
     tokens_out: int = 0
@@ -372,11 +383,16 @@ class Verdict:
 
     def normalized(self) -> Verdict:
         importance = self.importance.strip().lower()
+        wake = self.wake_someone.strip().lower()
         return Verdict(
             summary=self.summary.strip(),
             importance=importance if importance in IMPORTANCE else "medium",
             event_type=self.event_type.strip(),
             impact_scope=self.impact_scope.strip(),
+            # Blank when the model did not answer, never guessed: an unanswered
+            # axis has to be distinguishable from a "no", or the count below it
+            # silently treats every parse failure as a quiet night.
+            wake_someone=wake if wake in ("yes", "no") else "",
             route=self.route,
             tokens_in=self.tokens_in,
             tokens_out=self.tokens_out,

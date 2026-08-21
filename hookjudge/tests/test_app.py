@@ -1271,3 +1271,70 @@ async def test_an_ai_ruling_on_a_condition_outside_the_window_is_not_counted(tmp
     assert attention["ai_ruled"] == 1, "the orphan ruling is not in this window's total"
     titles = {row["title"] for row in attention["noisiest"]}
     assert "Inside the window" in titles and "Never seen here" not in titles
+
+
+async def test_the_second_axis_is_counted_apart_from_importance_and_from_a_person(tmp_path):
+    """`importance` came back 'high' for 210 of 216 alerts on production.
+
+    A classifier that answers the same word 97% of the time carries almost no
+    information, and its own prompt explains it: 74% of that traffic is payments,
+    and payments default to high. The question the product needs — does anyone
+    have to act — was never being asked.
+
+    So `wake_someone` is asked, and kept apart from both neighbours: `importance`
+    is a different question, `mattered` means a HUMAN said so. Three fields, three
+    counts, no averaging — because the point of the number is to be able to say
+    "this one also answers yes every time, stop paying for it", and an average
+    would hide exactly that.
+    """
+    app = create_app(settings=_settings(tmp_path, db_path=str(tmp_path / "wake.db")))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        store = app.state.store
+        from hookjudge.contract import Incoming, Verdict
+
+        base = time.time() - 600
+        # Same importance on all three; the second axis disagrees with it twice.
+        for index, wake in enumerate(("yes", "no", "")):
+            await store.record(
+                Incoming(
+                    source="grafana",
+                    title=f"示例条件 {index}",
+                    body="b",
+                    level="high",
+                    fields={},
+                    correlation_id=f"w{index}",
+                    received_at=base + index,
+                    recovery_flag=False,
+                ),
+                Verdict(summary="s", importance="high", wake_someone=wake).normalized(),
+                1,
+            )
+
+        body = (await client.get("/status", headers={"X-Read-Token": "read-t"})).json()
+        metrics = (await client.get("/metrics", headers={"X-Read-Token": "read-t"})).text
+
+    a = body["summary"]["attention"]
+    assert (a["wake_yes"], a["wake_no"], a["wake_answered"]) == (1, 1, 2)
+    # The unanswered one is neither, and must not be read as a quiet night.
+    assert a["interruptions"] == 3 and a["wake_answered"] == 2
+
+    # And it has not leaked into either neighbour.
+    assert a["ruled"] == 0 and a["mattered"] == 0, "a model answering is not a person answering"
+    assert a["mattered_pct"] is None
+
+    assert 'hookjudge_wake_someone{answer="yes"} 1' in metrics
+    assert 'hookjudge_wake_someone{answer="no"} 1' in metrics
+
+
+def test_an_unanswered_second_axis_is_blank_not_a_no() -> None:
+    """A parse failure must not become a vote for a quiet night."""
+    from hookjudge.contract import Verdict
+
+    assert Verdict(summary="s", importance="high", wake_someone="YES ").normalized().wake_someone == "yes"
+    assert Verdict(summary="s", importance="high", wake_someone="No").normalized().wake_someone == "no"
+    for junk in ("", "maybe", "true", "1"):
+        assert Verdict(summary="s", importance="high", wake_someone=junk).normalized().wake_someone == ""
