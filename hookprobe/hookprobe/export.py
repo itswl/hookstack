@@ -60,10 +60,10 @@ _IDENTIFYING = (
     ("url", re.compile(r"https?://[^\s)\"'>]+")),
     # Added after the first real export came back `review: []` over a procedure
     # containing `ruleUID abc123def456gh`, `数据源 ds45uv67ij89kl` and
-    # `grafana_folder=demo-alarm-test`. Opaque ids are not UUIDs and do not match any
+    # `grafana_folder=demo-demo-alarm-test`. Opaque ids are not UUIDs and do not match any
     # pattern above; a Grafana uid is fourteen characters of alphanumeric soup.
     ("opaque id", re.compile(r"\b(?=[a-z0-9]*[0-9])(?=[a-z0-9]*[a-z])[a-z0-9]{12,24}\b")),
-    # `grafana_folder=demo-alarm-test`, `env=prod-cn`, `namespace=...` — internal names
+    # `grafana_folder=demo-demo-alarm-test`, `env=prod-cn`, `namespace=...` — internal names
     # arrive as the right-hand side of a label far more often than as prose.
     #
     # A NAMED key list, not `\w+=`, which matched `value=null` — the single most
