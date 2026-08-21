@@ -682,6 +682,11 @@ Three more surfaces shape a run, all optional:
   `{workdir}/system-prompt.md` (or point `HOOKPROBE_SYSTEM_PROMPT_APPEND`
   at a file). It is appended to the engine's own system prompt and read
   fresh at every run, so edits apply without a restart.
+  `examples/system-prompt.md` is a starting point, and exists because of a
+  measurement: three subagent roles shipped, loaded into every run, and were
+  invoked **zero** times across 260 recorded tool calls. The capability was
+  provided and never instructed, so nothing used it. That file says when to
+  delegate and — at more length — when not to.
 - **Named subagent roles** — `.claude/agents/*.md` files load like skills
   (project and user layers both), or pin roles in deployment config with
   `HOOKPROBE_AGENTS_CONFIG` (JSON: name → {description, prompt, tools?,
