@@ -51,6 +51,11 @@ python3 scripts/assert_copies.py
 # newest LAST and said so in a UI label, which made an inherited JSONL append order
 # look like a decision.
 python3 scripts/assert_ordering.py
+# The enumerable half of doc drift. A doc audit found four statements that had
+# become false and five features written down nowhere; three of the four were
+# prose about behaviour, which nothing can check — the fourth was "Five kinds
+# exist" over a tuple of six, and that class is this check.
+python3 scripts/assert_docs.py
 # The bridge was checked by NOTHING — not compiled, not linted, not typed, not
 # tested — while being a live production component on the card-callback path. It
 # is not inside a service package, so no component gate reaches it, and the stack

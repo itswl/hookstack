@@ -56,6 +56,10 @@ jobs:
       # with a reason rather than inherited from a file's append order.
       - name: one ordering convention, deviations on the record
         run: python3 scripts/assert_ordering.py
+      # Routes, env vars and enumerated sets are either documented or named as
+      # deliberately not. Cannot check whether a paragraph is still true.
+      - name: every door and knob is written up or named as not
+        run: python3 scripts/assert_docs.py
       # Was in scripts/gate.sh and nowhere else, so every ceiling it enforces was
       # advisory on any machine but a maintainer's. A cap nobody checks on the way
       # in is a comment.

@@ -204,6 +204,18 @@ path, admin/read tokens, body-size cap, max attempts.
 | DELETE | `/silences/{id}` | `X-Admin-Token` |
 | GET | `/healthz` | none |
 
+The two header names above come from two environment variables with opposite
+behaviour when unset, and the difference is deliberate:
+
+| variable | unset means |
+| --- | --- |
+| `HOOKRELAY_READ_TOKEN` | the read guard is **off** — dev mode, the board answers anyone who reaches the port. Set it before anything proxies this service, or the whole ledger is public |
+| `HOOKRELAY_ADMIN_TOKEN` | the admin endpoints **refuse everyone**. `token_ok` returns False on an empty configured value, so an unconfigured instance cannot be muted or reconfigured by whoever finds the port |
+
+Same helper, opposite semantics, chosen by the caller. Read is convenient when
+empty; admin is inert when empty, because `PUT /config` can rewrite where every
+alert goes.
+
 ## Operating it
 
 | surface | what it answers |
