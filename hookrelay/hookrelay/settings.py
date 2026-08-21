@@ -21,8 +21,11 @@ def _int(name: str, default: int) -> int:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    # Routing config: sources, sinks and rules. Re-read on demand, not only at boot.
     config_path: str
+    # The ledger — every delivery, each attempt and the dead letters.
     db_path: str
+    # Extra source and sink plugins, loaded at startup.
     plugins_dir: str
     # Required for silence management; empty disables those endpoints entirely
     # (403), so an unconfigured instance cannot be muted by a stranger.
@@ -30,22 +33,29 @@ class Settings:
     # Empty leaves /status open — single-operator dev mode. Set it anywhere
     # the port is reachable by others.
     read_token: str
+    # Inbound body cap. A larger delivery is refused rather than truncated.
     max_body_bytes: int
+    # Attempts per delivery before the row is dead-lettered.
     max_attempts: int
+    # How long delivered rows are kept; 0 disables purging entirely.
     retention_days: int  # 0 = keep forever
     # Self-alarm for dead letters (who watches the watchman). Empty = off.
     alarm_url: str
+    # Floor between two alarm sends, so a storm cannot page repeatedly.
     alarm_min_interval_seconds: int
     # Per-channel circuit breaker: consecutive failures before the channel is
     # given a rest, and how long that rest lasts.
     breaker_threshold: int
+    # How long a tripped sink stays open before one probe attempt.
     breaker_cooldown_seconds: int
+    # Delivery-loop tick, in seconds.
     worker_interval_seconds: float
     # Signs the buttons on a notification card and verifies them on the way
     # back. Empty = no card carries an action and /card-action refuses
     # everything, which is the right default: an unsigned button is a URL
     # anyone in the group chat can press on your behalf.
     action_secret: str = ""
+    # How long a card's buttons stay pressable.
     action_ttl_seconds: int = 24 * 3600
     # Optional second layer on /card-action: when set, the callback must ALSO
     # carry the family's timestamped signature. Defence in depth for anyone who

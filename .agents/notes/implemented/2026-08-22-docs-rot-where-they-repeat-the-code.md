@@ -86,3 +86,55 @@ A drift that matters landing in prose the rule was supposed to protect — an
 intent-level sentence going stale, rather than a mechanism-level one. That would
 mean the split is in the wrong place, and the answer would be to move mechanism
 descriptions out of the READMEs entirely and let them link.
+
+## Follow-up, same day: the enumerable half is now generated, not checked
+
+The section above says what would change the answer — "an intent-level sentence
+going stale ... the answer would be to move mechanism descriptions out of the
+READMEs entirely and let them link." That happened faster than expected, from the
+other direction: writing `scripts/gen_reference.py` showed that the *check* was
+the weaker tool. `assert_docs.py` could only ask whether a knob's name appeared
+somewhere; it could not ask whether the sentence beside it was still true.
+
+So the env half moved from checked to generated. `settings.py` holds a `#` comment
+per field, `docs/reference.md` is produced from it, and `--check` fails on a
+committed file that no longer matches OR a field with no comment. The second half
+of that is strictly stronger than the rule it replaced: "appears in some README"
+was satisfiable by a stale line, "has a comment beside the field" is not.
+
+`ENV_UNWRITTEN` is gone. It existed to excuse thirteen infrastructure knobs from
+being written up; all thirteen now have a one-line comment, which was less work
+than maintaining the excuse.
+
+### The trap this walked into first
+
+Generating a table that lists every route and every knob makes
+`assert_docs.py` VACUOUS, because its corpus is every `*.md` in the tree. Verified
+by adding an endpoint nothing mentions: the check failed, the reference was
+regenerated, and the check passed. A generated file now has to declare itself with
+a banner, and `_corpus()` skips anything carrying it.
+
+That is the same failure this file was written about — a green light over a fact
+nobody had checked — arriving inside the commit meant to prevent it.
+
+### What stayed hand-written, and why that is not a compromise
+
+hookprobe's configuration table survived. It is not a reference: rows run to five
+sentences explaining why `HOOKPROBE_EVENT_SECRET` is the one mutating route the
+bearer token does not cover, and what the agent-proposes/service-signs division
+buys. Generation would have replaced that with one clause per row, so the
+generated table links from above it and the prose stays.
+
+hookjudge's table did not survive, and should not have: nineteen rows of "ledger
+path", "inbound body cap". That is a reference, and a reference is worth more
+generated.
+
+The line between the two is register, not subject matter — the same distinction
+the parent decision drew between INTENT and MECHANISM, found again one level down.
+
+### Cost
+
+43 comment lines is 43 lines of source. hookjudge is now 2947 against a stated
+ceiling of 3000. The next few knobs are affordable; a fortieth is not, and the
+answer then is to raise the ceiling deliberately rather than to stop describing
+things.

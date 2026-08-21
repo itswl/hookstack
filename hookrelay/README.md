@@ -191,8 +191,9 @@ rate limit), `routes` (match on source + extracted fields → channels).
 Secrets are written as `${ENV_NAME}` and resolve at startup; the file itself
 stays commit-safe.
 
-Operational knobs are environment variables (`HOOKRELAY_*`): DB path, config
-path, admin/read tokens, body-size cap, max attempts.
+Operational knobs are environment variables (`HOOKRELAY_*`). Every one of them,
+with defaults: **[docs/reference.md](docs/reference.md)**, generated from
+`hookrelay/settings.py`.
 
 ## API
 

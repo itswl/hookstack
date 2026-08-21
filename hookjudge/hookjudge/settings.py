@@ -22,6 +22,7 @@ def _float(name: str, default: float) -> float:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    # The ledger — every verdict, its cost, and what it was reused for.
     db_path: str
     # Inbound: the pipe signs its deliveries. Empty = accept unsigned, which is
     # a decision for a private network, never a default to drift into.
@@ -31,31 +32,45 @@ class Settings:
     # component that posts rulings is the investigator — the one that reads
     # attacker-influenced text. One door, one credential.
     ruling_secret: str
+    # Guards the reads. Empty leaves them open and disables the label write and /labels/export.
     read_token: str
+    # Inbound body cap. A larger delivery is refused rather than truncated.
     max_body_bytes: int
 
     # Outbound: where the judgement goes back to. This service delivers to
     # exactly ONE place — the pipe — because fan-out is the pipe's job.
     return_url: str
+    # Outbound HMAC secret; signs the judgement on its way back.
     return_secret: str
+    # Attempts on the return leg before the row is dead-lettered.
     return_max_attempts: int
+    # Return-leg tick, in seconds.
     worker_interval_seconds: float
 
     # Direct self-alarm for returns that go DEAD: the pipe is the broken
     # link at that moment, so this posts straight to a bot/collector URL.
     alarm_url: str
+    # Floor between two alarm sends, so a storm cannot page repeatedly.
     alarm_min_interval_seconds: int
 
     # Reuse window: how long one identity's verdict answers for restatements.
     reuse_window_seconds: int
+    # How long judged rows are kept; 0 disables purging entirely.
     retention_days: int
 
+    # OpenAI-compatible base. Empty leaves the judge on its rules alone.
     ai_base_url: str
+    # Credential for the base above.
     ai_api_key: str
+    # Model name sent to that base.
     ai_model: str
+    # How long one judgement may take before it falls back to the rules.
     ai_timeout_seconds: float
+    # Characters of the alert body sent to the model.
     ai_body_limit: int
+    # Input price per 1k tokens, so the ledger can cost a verdict.
     ai_price_in_per_1k: float
+    # Output price per 1k tokens, the other half of that sum.
     ai_price_out_per_1k: float
     # schema | tools | object to pin one, anything else (default "auto") to
     # negotiate downwards from the strongest the provider will accept.
@@ -72,6 +87,7 @@ class Settings:
     # ai_title_limit caps every one-line string (title, source, level, a single
     # field value); ai_fields_limit caps the field block as a whole.
     ai_title_limit: int = 300
+    # How many payload fields are offered to the model.
     ai_fields_limit: int = 2000
 
     # A burst is different rules from one origin inside one window. It was the
@@ -85,6 +101,7 @@ class Settings:
     # process configured to do" is one object and not one object plus two
     # os.environ calls at the entrypoint — hookprobe's shape, and the better one.
     host: str = "127.0.0.1"
+    # Port the service listens on.
     port: int = 8200
 
     @classmethod
