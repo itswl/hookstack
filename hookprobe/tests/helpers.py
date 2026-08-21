@@ -69,7 +69,13 @@ class FakeEngine:
         delay: float = 0.0,
         events: list[dict] | None = None,
     ) -> None:
-        self.events = events or []
+        # One tool call by default, because an investigation that looked at
+        # nothing is not an investigation and no longer distils a runbook
+        # (distill.auto_write). A fake that emits no steps was standing in for
+        # something that cannot happen in production: every real run on the
+        # deployment used at least one tool. Pass `events=[]` explicitly for the
+        # tests that DO want a run which looked at nothing.
+        self.events = [{"type": "tool_use", "name": "Bash", "detail": "df -h"}] if events is None else events
         self.result = result or EngineResult(
             text='{"summary": "ok"}',
             message_count=3,

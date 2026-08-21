@@ -151,7 +151,15 @@ def test_the_case_list_is_trimmed_but_the_rest_of_the_file_is_not(skills: Path) 
             run=run_record(
                 session_key=f"hookprobe:{index}",
                 text=f"conclusion number {index}",
-                turns=[{"message": "Investigate: disk pressure on db-1", "text": f"conclusion number {index}"}],
+                # Carries a tool call because this test is about trimming the case
+                # LIST, and a run that looked at nothing no longer distils at all.
+                turns=[
+                    {
+                        "message": "Investigate: disk pressure on db-1",
+                        "text": f"conclusion number {index}",
+                        "events": [{"type": "tool_use", "name": "Bash", "detail": "df -h"}],
+                    }
+                ],
             ),
         )
 
@@ -754,3 +762,37 @@ def test_a_leftover_proposal_that_no_longer_validates_is_discarded(tmp_path: Pat
 
     assert not (skill_dir / "proposal.md").exists()
     assert (skill_dir / "SKILL.md").read_text() == manifest, "the manifest is untouched by a bad draft"
+
+
+def test_a_run_that_looked_at_nothing_does_not_become_a_runbook(tmp_path: Path) -> None:
+    """`reply-with-exactly-the-word-ok` is a real runbook on production.
+
+    It came from a throwaway check of mine that had been told not to use any
+    tools, and once it finished it was indistinguishable from an investigation —
+    so auto_write gave it a permanent place in a library whose contents are
+    loaded as instruction.
+
+    A runbook IS the tool sequence plus what it concluded. No steps, no
+    procedure. Measured across every run on that deployment before this was
+    added: exactly one distilled with zero tool calls, and every real
+    investigation used at least one, so the rule costs nothing real.
+
+    A rule rather than another `_meta` marker, deliberately: the last opt-out
+    only worked when the caller remembered it, and I did not.
+    """
+    skills = tmp_path / "skills"
+    looked_at_nothing = run_record(
+        session_key="probe:count-check",
+        current_message="Reply with exactly the word: ok",
+        text="ok",
+        turns=[{"message": "Reply with exactly the word: ok", "text": "ok", "events": []}],
+    )
+
+    outcome = distill.auto_write(looked_at_nothing, skills_dir=skills, limit=10)
+
+    assert outcome == {"skipped": "run called no tools; nothing to write a procedure from"}
+    assert not list(skills.glob("*/SKILL.md")), "nothing was written"
+
+    # And a real investigation is untouched — otherwise this rule would be a way
+    # of switching the feature off by accident.
+    assert "installed" in distill.auto_write(run_record(), skills_dir=skills, limit=10)
