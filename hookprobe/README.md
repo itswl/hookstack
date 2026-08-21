@@ -73,6 +73,10 @@ what runs.
 
 ## Configuration
 
+The terse version — every variable and its default, generated from
+`hookprobe/settings.py`: **[docs/reference.md](docs/reference.md)**. The table below
+is the long version, and says why each one exists.
+
 | env | default | meaning |
 |---|---|---|
 | `HOOKPROBE_TOKEN` | *(empty = unauthenticated)* | Bearer token callers must present |

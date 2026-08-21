@@ -279,27 +279,9 @@ inbound when no timestamp header is present.
 
 All environment, one flat object (`hookjudge/settings.py`), no layers.
 
-| variable | default | what it does |
-| -------- | ------- | ------------ |
-| `HOOKJUDGE_DB` | `hookjudge.db` | ledger path |
-| `HOOKJUDGE_INGEST_SECRET` | *(empty)* | inbound HMAC secret |
-| `HOOKJUDGE_RULING_SECRET` | *(empty = door shut)* | signs `/rulings/ai` and nothing else |
-| `HOOKJUDGE_READ_TOKEN` | *(empty)* | guards the reads; empty leaves them open and **disables** the label write and `/labels/export` |
-| `HOOKJUDGE_MAX_BODY_BYTES` | `262144` | inbound body cap |
-| `HOOKJUDGE_RETURN_URL` | *(empty)* | the one pipe door results go back to |
-| `HOOKJUDGE_RETURN_SECRET` | *(empty)* | outbound HMAC secret |
-| `HOOKJUDGE_RETURN_MAX_ATTEMPTS` | `6` | then the row is dead-lettered |
-| `HOOKJUDGE_WORKER_INTERVAL` | `1.0` | return-leg tick, seconds |
-| `HOOKJUDGE_REUSE_WINDOW_SECONDS` | `3600` | how long one verdict answers restatements |
-| `HOOKJUDGE_RULE_REUSE_WINDOW_SECONDS` | `0` (off) | widen reuse from one identity to a whole alert rule — see below |
-| `HOOKJUDGE_RETENTION_DAYS` | `30` | `0` disables purging |
-| `HOOKJUDGE_AI_BASE_URL` | *(empty)* | OpenAI-compatible base; empty = rules only |
-| `HOOKJUDGE_AI_API_KEY` | *(empty)* | |
-| `HOOKJUDGE_AI_MODEL` | `gpt-4o-mini` | |
-| `HOOKJUDGE_AI_TIMEOUT_SECONDS` | `60.0` | |
-| `HOOKJUDGE_AI_BODY_LIMIT` | `4000` | chars of body sent to the model |
-| `HOOKJUDGE_AI_PRICE_IN_PER_1K` / `_OUT_PER_1K` | `0.0` | so the ledger can price tokens |
-| `HOOKJUDGE_AI_STRUCTURED_OUTPUT` | `auto` | `schema` \| `tools` \| `object` to pin one; `auto` negotiates |
+Every variable, its default and what it is: **[docs/reference.md](docs/reference.md)**.
+That table is generated from `hookjudge/settings.py` — correct it by editing the comment
+beside the field, not the document.
 
 Leave the AI variables empty and the service still works: every event lands on
 the rule floor and says `AI not configured`.

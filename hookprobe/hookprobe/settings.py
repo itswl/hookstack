@@ -53,14 +53,19 @@ class Settings:
     # runtime caps it. max_turns is the hard loop budget backing the prompt's
     # soft "≤ 10 tool calls" discipline.
     model: str
+    # Ceiling on engine turns in one investigation.
     max_turns: int
+    # How many investigations may run at once.
     max_concurrent: int
+    # Wall-clock budget for an investigation that does not ask for one.
     default_timeout_seconds: int
+    # Ceiling on what a caller may ask for.
     max_timeout_seconds: int
 
     # Workspace: one persistent volume. Skills the agent distills live in
     # {workdir}/.claude/skills and survive across runs — that is the point.
     workdir: Path
+    # MCP server config handed to the engine; empty means none.
     mcp_config: Path | None
 
     # Skill layers. setting_sources picks which filesystem layers the engine
@@ -70,6 +75,7 @@ class Settings:
     # enter the session ("" = engine default, "all", or comma-separated
     # names) — a mounted library of dozens would flood the context otherwise.
     setting_sources: tuple[str, ...]
+    # Directory of skills the engine may load.
     skills: str
 
     # Operator methodology appended to the engine's own system prompt, read
@@ -91,7 +97,9 @@ class Settings:
     #                       a lever to tighten, not a behaviour change; 0 leaves
     #                       the CLI's default in place.
     repeat_reminder_at: int
+    # Default timeout for one shell command the engine runs.
     bash_timeout_ms: int
+    # Ceiling on what a single command may ask for.
     bash_max_timeout_ms: int
 
     # Auto-distill: how many runbooks a finished run may leave behind for the
@@ -129,19 +137,23 @@ class Settings:
     # makes about whether an event deserves a paid investigation — the pipe
     # stays content-blind on purpose.
     event_secret: str
+    # The one door findings go back to.
     return_url: str
+    # Outbound HMAC secret; signs the finding on its way back.
     return_secret: str
     # Where a retrospective condition ruling goes, and the credential for that
     # ONE door. Empty on either side means the feature is off and a patrol that
     # rules gets its markers stripped with nothing sent — see hookprobe.rulings
     # for why the agent does not post this itself.
     ruling_url: str
+    # Signs the rulings this service posts to the judge.
     ruling_secret: str
     # Apply a suggested environment fact without waiting for a person, when its
     # SHAPE cannot act (hookprobe.suggestions._UNSAFE). On by default: the queue
     # was a dead end on a deployment where nobody answers, and everything the
     # check objects to still waits for a human.
     memory_auto_apply: bool
+    # Severities that may wake a person, as a comma-separated list.
     escalate_levels: frozenset[str]
 
     # The budget breaker, guarding the only path that spends money without a
@@ -150,6 +162,7 @@ class Settings:
     # itself through the family loop). 0 disables. Operator-driven doors
     # (/hooks/agent, continue, the UI) are never gated.
     budget_usd: float
+    # Window the spend ceiling is measured over.
     budget_window_hours: float
 
     # Volume retention (days): case files and engine transcripts older than
@@ -161,9 +174,12 @@ class Settings:
     # pipe is the broken link at that moment, so this posts straight to a
     # bot/collector URL, touching nothing on the path that failed.
     alarm_url: str
+    # Floor between two alarm sends, so a storm cannot page repeatedly.
     alarm_min_interval_seconds: int
 
+    # Address the service binds to.
     host: str
+    # Port the service listens on.
     port: int
 
     @classmethod

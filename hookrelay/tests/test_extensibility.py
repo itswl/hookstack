@@ -461,6 +461,10 @@ def test_the_stack_gate_matches_its_workflow() -> None:
         "scripts/assert_copies.py",
         "scripts/assert_ordering.py",
         "scripts/assert_docs.py",
+        # With --check, deliberately. Without it the generator WRITES, so a
+        # runner that dropped the flag would rewrite the files it was meant to be
+        # verifying and pass every time.
+        "scripts/gen_reference.py --check",
     ):
         assert script in gate, f"scripts/gate.sh no longer runs {script}"
         assert script in ci, f"ci-stack.yml no longer runs {script}"

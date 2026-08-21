@@ -56,6 +56,10 @@ python3 scripts/assert_ordering.py
 # prose about behaviour, which nothing can check — the fourth was "Five kinds
 # exist" over a tuple of six, and that class is this check.
 python3 scripts/assert_docs.py
+# The reference tables are GENERATED from settings.py and the route handlers, so a
+# description cannot drift from the code that defines it. This asserts the
+# committed output still matches — the same contract requirements.lock has.
+python3 scripts/gen_reference.py --check
 # The bridge was checked by NOTHING — not compiled, not linted, not typed, not
 # tested — while being a live production component on the card-callback path. It
 # is not inside a service package, so no component gate reaches it, and the stack
