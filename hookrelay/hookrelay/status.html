@@ -116,12 +116,17 @@
   .msg.err { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
   .hint { color: var(--muted); font-size: 12px; }
 
+  /* ── hookstack token bar · keep this block identical in all three pages ── */
+  /* One field per credential the BROWSER sends. Service-to-service secrets
+     (the ingest, ruling and action secrets) never appear here: nothing types
+     them, so a field for them would only be somewhere to leak one. */
   .tokenbar { display: none; gap: 8px; margin-bottom: 16px; }
   .tokenbar.show { display: flex; }
   .tokenbar input { flex: 1; background: var(--surface); border: 1px solid var(--border);
                     border-radius: 8px; color: var(--text); padding: 8px 12px; font-family: var(--mono); }
   .tokenbar button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
                      padding: 8px 16px; cursor: pointer; }
+  /* ── end token bar ──────────────────────────────────────────────────────── */
 </style>
 </head>
 <body>
@@ -348,11 +353,11 @@
     if (token) headers["X-Read-Token"] = token;
     fetch(statusQuery(), { headers: headers }).then(function (res) {
       if (res.status === 401) {
-        document.getElementById("tokenbar").classList.add("show");
+        tokenReveal(true);
         document.getElementById("stamp").textContent = "read token required";
         return null;
       }
-      document.getElementById("tokenbar").classList.remove("show");
+      tokenReveal(false);
       return res.json();
     }).then(function (data) {
       if (!data) return;
@@ -363,10 +368,29 @@
     });
   }
 
-  document.getElementById("tokenSave").addEventListener("click", function () {
-    localStorage.setItem(TOKEN_KEY, document.getElementById("tokenInput").value.trim());
-    refresh();
-  });
+  /* ── hookstack token wiring · keep this block identical in all three pages ── */
+  /* Three services had three ways to type the same kind of secret: an input box
+     here, a window.prompt there, and a third key-naming convention. The visual
+     unification pass caught the palette and missed the interaction, so this is
+     pinned by scripts/assert_design.py like the palette is.
+     A `prompt` is the one shape deliberately not used: it can only be answered
+     when the page decides to ask, so replacing a token means clearing
+     localStorage by hand. */
+  function tokenWire(inputId, buttonId, key, onSaved) {
+    var input = document.getElementById(inputId);
+    var save = document.getElementById(buttonId);
+    if (input) input.value = localStorage.getItem(key) || "";
+    if (save) save.addEventListener("click", function () {
+      localStorage.setItem(key, (input.value || "").trim());
+      onSaved();
+    });
+  }
+  function tokenReveal(needed) {
+    var bar = document.getElementById("tokenbar");
+    if (bar) bar.classList[needed ? "add" : "remove"]("show");
+  }
+  /* ── end token wiring ───────────────────────────────────────────────────── */
+  tokenWire("tokenInput", "tokenSave", TOKEN_KEY, refresh);
 
   // ── tabs ──
   var ADMIN_KEY = "hookrelay-admin-token";

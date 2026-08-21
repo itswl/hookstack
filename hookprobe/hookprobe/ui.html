@@ -244,10 +244,45 @@ let sel = null;
 let composeMode = false; // "+ new session" pressed: keep the pane free until they send
 let viewMode = "sessions"; // or "skills"
 
+  /* ── hookstack token wiring · keep this block identical in all three pages ── */
+  /* Three services had three ways to type the same kind of secret: an input box
+     here, a window.prompt there, and a third key-naming convention. The visual
+     unification pass caught the palette and missed the interaction, so this is
+     pinned by scripts/assert_design.py like the palette is.
+     A `prompt` is the one shape deliberately not used: it can only be answered
+     when the page decides to ask, so replacing a token means clearing
+     localStorage by hand. */
+  function tokenWire(inputId, buttonId, key, onSaved) {
+    var input = document.getElementById(inputId);
+    var save = document.getElementById(buttonId);
+    if (input) input.value = localStorage.getItem(key) || "";
+    if (save) save.addEventListener("click", function () {
+      localStorage.setItem(key, (input.value || "").trim());
+      onSaved();
+    });
+  }
+  function tokenReveal(needed) {
+    var bar = document.getElementById("tokenbar");
+    if (bar) bar.classList[needed ? "add" : "remove"]("show");
+  }
+  /* ── end token wiring ───────────────────────────────────────────────────── */
+// Hyphens, like the other two keys. The underscore was a third naming convention
+// across three services for one idea. The old key is read once, so a browser that
+// already holds a token is not asked to retype it.
+const TOKEN_KEY = "hookprobe-token";
 const tokenEl = $("#token");
-tokenEl.value = localStorage.getItem("hookprobe_token") || "";
+const legacyToken = localStorage.getItem(TOKEN_KEY);
+if (legacyToken && !localStorage.getItem(TOKEN_KEY)) {
+  localStorage.setItem(TOKEN_KEY, legacyToken);
+  localStorage.removeItem("hookprobe_token");
+}
+// Always visible rather than revealed on 401, and that difference is deliberate:
+// this token opens every route on this service, so there is no useful page to
+// show without it. The pipe and the brain reveal theirs because their boards
+// read fine the moment one is supplied.
+tokenEl.value = localStorage.getItem(TOKEN_KEY) || "";
 tokenEl.addEventListener("change", () => {
-  localStorage.setItem("hookprobe_token", tokenEl.value.trim());
+  localStorage.setItem(TOKEN_KEY, tokenEl.value.trim());
   tokenEl.classList.remove("bad");
   refreshList();
 });

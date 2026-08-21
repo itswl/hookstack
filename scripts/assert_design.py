@@ -48,6 +48,16 @@ BLOCKS = (
         "// ── live control · keep this block identical in all three pages ────────────",
         "// ── end live control ──────────────────────────────────────────────────────",
     ),
+    # Added 2026-08-21. Three services had three ways to type the same kind of
+    # secret — an input box, a window.prompt, and a third localStorage naming
+    # convention — because the earlier unification pass matched the palette and
+    # never looked at the interaction. Pinning the palette and not this is why it
+    # came apart a second time.
+    (
+        "token wiring",
+        "/* ── hookstack token wiring · keep this block identical in all three pages ── */",
+        "/* ── end token wiring ───────────────────────────────────────────────────── */",
+    ),
 )
 
 
