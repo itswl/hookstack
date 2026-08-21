@@ -71,9 +71,16 @@ aside{width:330px;border-right:1px solid var(--line);background:var(--panel);fle
 .subhead{color:var(--text);font-size:13px;font-weight:600;margin:14px 0 6px}
 .audit-bar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
 .audit-bar input{background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--text);padding:5px 9px;font-size:12px;width:280px}
-.audit-row{display:flex;gap:10px;font-family:var(--mono);font-size:11.5px;padding:3px 0;border-bottom:1px solid #161b22;align-items:baseline}
+.audit-row{display:flex;gap:10px;font-family:var(--mono);font-size:11.5px;padding:3px 0;border-bottom:1px solid #161b22;align-items:flex-start}
 .audit-row .ts{color:var(--dim);flex-shrink:0}
-.audit-row .a-session{color:var(--accent);flex-shrink:0;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Wraps rather than truncates. A session key is the handle for everything else
+   here — it is what the filter box takes, what /v1/runs/{key} wants and what a
+   grep of audit/*.jsonl needs — and `hook:deep-analysis:grafana:` eats 27 of the
+   210px before the part that identifies anything. An ellipsis on the ONE field
+   whose whole purpose is to be copied is the wrong economy.
+   Fixed width in `ch` so columns still line up in a mono font; a long key takes
+   two lines and a short one does not pad. */
+.audit-row .a-session{color:var(--accent);flex-shrink:0;width:32ch;word-break:break-all}
 .audit-row .a-tool{color:var(--amber);flex-shrink:0;min-width:70px}
 .audit-row .a-detail{color:var(--text);word-break:break-all}
 .audit-row.err .a-tool{color:var(--red)}
@@ -1295,7 +1302,7 @@ async function openAudit(filter) {
       $("#auditRows").innerHTML = d.entries.map((e) => `
         <div class="audit-row ${e.error ? "err" : ""}">
           <span class="ts">${fmtTime(e.ts)}</span>
-          <span class="a-session">${esc(e.session)}</span>
+          <span class="a-session" title="${esc(e.session)}">${esc(e.session)}</span>
           <span class="a-tool">${esc(e.tool)}</span>
           <span class="a-detail">${esc(e.detail || "")}</span>
         </div>`).join("") || '<div class="empty">no tool calls recorded yet — the recorder writes when tools actually run</div>';
