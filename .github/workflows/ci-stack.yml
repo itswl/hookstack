@@ -52,6 +52,10 @@ jobs:
       # compares the copies by parsed body, so each may keep its own comments.
       - name: copied helpers have not drifted apart
         run: python3 scripts/assert_copies.py
+      # Every list a person reads is newest first, and a deviation has to be named
+      # with a reason rather than inherited from a file's append order.
+      - name: one ordering convention, deviations on the record
+        run: python3 scripts/assert_ordering.py
       # Was in scripts/gate.sh and nowhere else, so every ceiling it enforces was
       # advisory on any machine but a maintainer's. A cap nobody checks on the way
       # in is a comment.

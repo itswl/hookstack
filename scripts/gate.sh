@@ -46,6 +46,11 @@ python3 scripts/assert_weight.py
 # missing from one of three copies, and verify_signature had stripped its
 # timestamp in the pipe but not in the brain — neither noticed by anything.
 python3 scripts/assert_copies.py
+# Cross-service for the third time in two days: three separate places quietly held
+# three opinions about which end of a list the newest row goes. /v1/audit served
+# newest LAST and said so in a UI label, which made an inherited JSONL append order
+# look like a decision.
+python3 scripts/assert_ordering.py
 # The bridge was checked by NOTHING — not compiled, not linted, not typed, not
 # tested — while being a live production component on the card-callback path. It
 # is not inside a service package, so no component gate reaches it, and the stack
