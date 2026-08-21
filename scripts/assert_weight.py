@@ -99,7 +99,15 @@ ROOT = Path(__file__).resolve().parent.parent
 # enough that nobody is tempted to route around it.
 CEILINGS: dict[str, tuple[int, Path]] = {
     "hookrelay": (4600, Path("hookrelay/README.md")),
-    "hookjudge": (2900, Path("hookjudge/README.md")),
+    # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
+    # Raised rather than trimmed because the thing that pushed it over is the one
+    # measurement that says whether this service earns its model calls at all:
+    # `importance` came back 'high' for 210 of 216 alerts on production, which is
+    # a classifier agreeing with itself. Asking the question the product actually
+    # needs costs a field, a column and a count, and it is falsifiable — if the
+    # new axis also answers 'yes' almost always, the honest response is to delete
+    # both it and the paid route, and the ceiling comes back down with them.
+    "hookjudge": (3000, Path("hookjudge/README.md")),
 }
 UNCAPPED = ("hookprobe",)
 

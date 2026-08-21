@@ -177,6 +177,11 @@ class Store:
             # have had — an alert correctly rated `high` can still not be worth
             # waking anyone at 3am. Both live on the row and neither overwrites
             # the other, because both answers are true at once.
+            # The judge's own second axis: 'yes' | 'no' | '' when it did not
+            # answer. Beside `mattered` and never merged with it — that one means
+            # a person spoke, this one means the model did. A board that showed
+            # them as one number would be unable to say which.
+            "wake_someone": "TEXT NOT NULL DEFAULT ''",
             "mattered": "TEXT NOT NULL DEFAULT ''",
             "mattered_at": "REAL",
             # The opaque IM user id the pipe passed through, when it had one.
@@ -277,9 +282,10 @@ class Store:
             burst = await self._burst_id_for(event, origin)
             cursor = await self.db.execute(
                 "INSERT INTO judgements (received_at, source, origin, identity, rule_key, level, correlation_id,"
-                " title, body, fields_json, is_recovery, summary, importance, event_type, impact_scope, route,"
+                " title, body, fields_json, is_recovery, summary, importance, event_type, impact_scope,"
+                " wake_someone, route,"
                 " degraded_reason, model, tokens_in, tokens_out, cost, latency_ms, burst_id)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     event.received_at,
                     event.source,
@@ -296,6 +302,7 @@ class Store:
                     verdict.importance,
                     verdict.event_type,
                     verdict.impact_scope,
+                    verdict.wake_someone,
                     verdict.route,
                     verdict.degraded_reason,
                     verdict.model,
@@ -663,7 +670,9 @@ class Store:
         cursor = await self.db.execute(
             "SELECT count(*) AS n, count(DISTINCT identity) AS conditions,"
             " coalesce(sum(mattered = 'yes'), 0) AS mattered,"
-            " coalesce(sum(mattered = 'no'), 0) AS did_not_matter"
+            " coalesce(sum(mattered = 'no'), 0) AS did_not_matter,"
+            " coalesce(sum(wake_someone = 'yes'), 0) AS wake_yes,"
+            " coalesce(sum(wake_someone = 'no'), 0) AS wake_no"
             " FROM judgements WHERE received_at >= ?",
             (since,),
         )
@@ -673,6 +682,8 @@ class Store:
         mattered = int(totals["mattered"]) if totals else 0
         did_not_matter = int(totals["did_not_matter"]) if totals else 0
         ruled = mattered + did_not_matter
+        wake_yes = int(totals["wake_yes"]) if totals else 0
+        wake_no = int(totals["wake_no"]) if totals else 0
         # A condition that interrupted once is not noise, so the view that is
         # meant to say "go turn something off" refuses to pad itself with
         # one-offs. `title` is a bare column beside max(id): SQLite documents it
@@ -743,6 +754,15 @@ class Store:
             # `ruled` answers "how many times did a person tell us", and an AI
             # ruling folded into it would answer nothing at all. Same WINDOW as
             # `ruled` though — see ai_rulings() for why that took a fix.
+            # The judge's own second axis, and the number that decides whether
+            # asking it was worth anything. `importance` came back 'high' for 210
+            # of 216, which is a classifier agreeing with itself. If this one also
+            # answers 'yes' almost always, it is the same non-answer wearing a
+            # different field name, and the honest response is to stop paying for
+            # it — so it is counted where that is obvious, not averaged away.
+            "wake_yes": wake_yes,
+            "wake_no": wake_no,
+            "wake_answered": wake_yes + wake_no,
             "ai_ruled": len(ai),
             "ai_not_worth_it": sum(1 for row in ai.values() if row["verdict"] == "not_worth_it"),
             "noisiest": noisiest,

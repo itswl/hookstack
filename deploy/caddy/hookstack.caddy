@@ -1,0 +1,91 @@
+# Caddy site blocks for the three boards — reference copy.
+#
+# The live file is /srv/caddy/Caddyfile on the deployment host,
+# which also serves unrelated sites, so this is not imported from anywhere: it is
+# the version-controlled record of what those three blocks say and why. It lived
+# on exactly one machine until 2026-08-21, where nothing versioned it and nothing
+# would have noticed it being edited.
+#
+# Append to that host's Caddyfile, then:
+#   docker exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#   docker exec caddy caddy reload   --config /etc/caddy/Caddyfile --adapter caddyfile
+#
+# `:80` is deliberate and NOT a missing TLS config. That deployment sits behind a
+# proxied Cloudflare record, so the browser gets HTTPS and Caddy is the origin.
+# Removing `:80` makes Caddy try ACME for a hostname it does not control the
+# resolution of. Read the note on the /live header before changing anything.
+
+# ── hookstack boards ──────────────────────────────────────────────────────────
+# Three read-only dashboards. Each service already guards its data endpoints with
+# a token the page prompts for and keeps in localStorage, so Caddy is a plain
+# proxy here and deliberately does NOT inject that token: injecting it would make
+# the gate open for everyone who reaches the hostname, and then a second secret
+# would be needed to replace the one just neutered.
+#
+# The rule below each site is an ALLOWLIST. A denylist over 72 endpoints across
+# three services is one forgotten path away from publishing an ingest door.
+#
+# What is deliberately NOT exposed, on any of them:
+#   * the ingest doors (/hook/*, /events, /hooks/*). Their callers — the
+#     platform, the lark bridge, the judges — all live on this host and reach
+#     each other on 127.0.0.1. `judge-notify` in particular is UNSIGNED, being an
+#     in-network hop, so publishing it would let anyone post a forged verdict
+#     straight to a private Feishu chat.
+#   * every write on hookprobe. It approves remediations and writes skills and
+#     memory, which are the things the whole design withholds from its own agent.
+
+relay.internal.example:80 {
+	@live path /live
+	header @live {
+		X-Accel-Buffering no
+		Cache-Control no-cache
+	}
+	@board path / /status /live /healthz
+	handle @board {
+		reverse_proxy 127.0.0.1:8100 {
+			flush_interval -1
+		}
+	}
+	respond 403
+}
+
+judge.internal.example:80 {
+	# /judgements/*/label is a write, and it is here on purpose: it is the review
+	# queue, where one click is one eval label. Making that cheap is the point.
+	# Cloudflare buffers a streamed response unless it is told not to. Direct to
+	# the origin, /live yields {"type":"hello"} immediately; through the proxy,
+	# nothing arrived in ten seconds, so both boards would have loaded once and
+	# then sat frozen — the wake-up line is how they stop polling.
+	@live path /live
+	header @live {
+		X-Accel-Buffering no
+		Cache-Control no-cache
+	}
+	@board path / /status /live /healthz /disagreements /labels/export
+	@label path_regexp ^/judgements/[^/]+/label$
+	handle @board {
+		reverse_proxy 127.0.0.1:8200 {
+			flush_interval -1
+		}
+	}
+	handle @label {
+		reverse_proxy 127.0.0.1:8200
+	}
+	respond 403
+}
+
+probe.internal.example:80 {
+	# GET only. Every route on this service is bearer-guarded, but the same /v1
+	# prefix carries `PUT /v1/skills/{name}`, `PUT /v1/memory` and
+	# `POST /v1/remediations/{id}/approve`. Read the console; approve nothing.
+	@readonly {
+		method GET
+		not path /hooks/*
+	}
+	handle @readonly {
+		reverse_proxy 127.0.0.1:8088 {
+			flush_interval -1
+		}
+	}
+	respond 403
+}
