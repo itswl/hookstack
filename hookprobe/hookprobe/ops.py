@@ -44,15 +44,33 @@ from hookprobe.service import RunService
 from hookprobe.settings import Settings
 
 
-def _worth_line(investigations: int, spent: float, useful: int) -> str:
+def _worth_line(investigations: int, spent: float, useful: int, useless: int) -> str:
     """The one sentence the adoption question actually asks for.
 
     Assembled here rather than on the board, which prints the string as it
     arrives: the same reason the bearer dependency is defined once and handed
     around. A sentence written in two places is a sentence that will eventually
     say two things, and this one is quoted at people deciding whether to pay.
+
+    Which is why it now distinguishes an absence from a verdict. It read
+
+        3 investigations, $6.29, 0 found the cause
+
+    on a deployment where 108 investigations were unruled and none had ever been
+    ruled useless — so the figure quoted at somebody deciding whether to pay was
+    "we spent this and got nothing", and it meant "nobody has said". The API
+    beside it has always had this right: `ruled_useful` and `ruled_useless` are
+    separate, and the comment there says an unruled investigation is unrated,
+    never not-useful. Only the rendered sentence collapsed them.
+
+    Same defect as `mattered: 0` beside `likely_flapping` on the judge's board,
+    and the same fix: say how many were RULED, and when none were, say that.
     """
-    return f"{investigations} investigation{'' if investigations == 1 else 's'}, ${spent:.2f}, {useful} found the cause"
+    head = f"{investigations} investigation{'' if investigations == 1 else 's'}, ${spent:.2f}"
+    ruled = useful + useless
+    if not ruled:
+        return f"{head} — none ruled yet"
+    return f"{head}, {useful} of {ruled} ruled found the cause"
 
 
 def register(app: FastAPI, settings: Settings, service: RunService, guard: Callable[..., None]) -> None:
@@ -171,7 +189,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             "investigations": investigations,
             "ruled_useful": useful,
             "ruled_useless": useless,
-            "worth": _worth_line(investigations, spend, useful),
+            "worth": _worth_line(investigations, spend, useful, useless),
         }
         state = service.budget_state()
         if state is None:

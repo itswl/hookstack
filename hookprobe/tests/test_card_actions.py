@@ -427,7 +427,7 @@ def test_a_ruling_lands_on_the_run_and_on_the_budget_line(tmp_path: Path) -> Non
     client, _ = _investigated(tmp_path)
     with client:
         before = client.get("/v1/budget", headers=AUTH).json()
-        assert before["worth"] == "1 investigation, $0.50, 0 found the cause"
+        assert before["worth"] == "1 investigation, $0.50 — none ruled yet", "an absence, not a verdict"
 
         answer = _press(client, "useful", actor="ou_sre").json()
         assert answer == {
@@ -438,7 +438,7 @@ def test_a_ruling_lands_on_the_run_and_on_the_budget_line(tmp_path: Path) -> Non
         }
 
         budget = client.get("/v1/budget", headers=AUTH).json()
-        assert budget["worth"] == "1 investigation, $0.50, 1 found the cause"
+        assert budget["worth"] == "1 investigation, $0.50, 1 of 1 ruled found the cause"
         assert (budget["investigations"], budget["ruled_useful"], budget["ruled_useless"]) == (1, 1, 0)
         # Visible per run too: an aggregate nobody can trace back is unreadable.
         assert client.get("/v1/runs", headers=AUTH).json()[0]["ruling"] == "useful"
@@ -454,7 +454,9 @@ def test_a_miss_is_recorded_as_a_miss(tmp_path: Path) -> None:
 
     # An unruled investigation is unrated, never a miss — so the two counts are
     # reported apart and the sentence only ever claims what somebody said.
-    assert budget["worth"] == "1 investigation, $0.50, 0 found the cause"
+    assert budget["worth"] == "1 investigation, $0.50, 0 of 1 ruled found the cause", (
+        "ruled useless reads differently from unruled"
+    )
     assert (budget["ruled_useful"], budget["ruled_useless"]) == (0, 1)
 
 

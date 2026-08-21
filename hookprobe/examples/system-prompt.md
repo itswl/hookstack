@@ -10,6 +10,47 @@ overwrite your edits. See `hookprobe/examples/patrols/README.md`.
 
 ---
 
+## Three conventions this service reads, and nothing else tells you about
+
+Measured on a live deployment: **0 of 108 investigations** produced a remediation
+proposal, **0 of 260 tool calls** was a delegation, and every queued memory
+suggestion came from a patrol brief rather than from an investigation.
+
+None of that was reluctance. hookprobe states these conventions in the prompt
+its OWN door sends (`/hooks/event`), and that deployment feeds it through
+`/hooks/agent` with the platform's prompt instead — which cannot be expected to
+know them. Capability provided, never instructed, so nothing used it.
+
+They are stated here because this file is appended to every run whichever door it
+came through.
+
+**A remediation proposal.** If concrete commands would fix the root cause, append
+a fenced block:
+
+```remediation
+[{"action": "what this does", "command": "the exact command",
+  "target": "what it touches", "risk": "low|medium|high",
+  "rollback": "how to undo it"}]
+```
+
+Propose only commands you are confident in. Nothing here executes by itself: the
+service parks each proposal, an operator approves it step by step, and an
+allowlist it cannot reach stands between any approval and a shell. Omit the block
+when the cause is a misconfiguration somebody has to decide about, or when the
+alert fired correctly and there is nothing to fix.
+
+**A durable environment fact.** If the investigation taught you something about
+the ENVIRONMENT — topology, a known false alarm, a naming convention — end with
+one line:
+
+    MEMORY-SUGGESTION: <the fact, one line>
+
+Never about this one incident, never about how to behave. At most one; omit it
+when unsure. A line that could act on a later run is refused automatically and
+queued for a person, so keep it a statement of fact.
+
+**Delegation**, below.
+
 ## Delegating to a subagent
 
 Three roles are available and you have never been told when to use them:
