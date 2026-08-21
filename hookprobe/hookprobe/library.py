@@ -41,7 +41,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 
-from hookprobe import suggestions
+from hookprobe import export, suggestions
 from hookprobe.distill import apply_consolidation, draft_skill, record_revision, snapshot
 from hookprobe.engine import _load_agents_raw
 from hookprobe.files import atomic_write, system_prompt_path
@@ -218,6 +218,16 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
                     }
                 )
         return out
+
+    @app.get("/v1/skills/export", dependencies=[Depends(guard)])
+    async def skills_export() -> dict[str, Any]:
+        """Runbooks packaged to LEAVE this deployment — see hookprobe.export.
+
+        Registered above /v1/skills/{name} because FastAPI matches in order and
+        `export` would otherwise be read as a runbook named "export" — a 404 that
+        looks like a missing feature.
+        """
+        return export.bundle(settings.workdir / ".claude" / "skills")
 
     @app.get("/v1/skills/{name}", dependencies=[Depends(guard)])
     async def skill_detail(name: str) -> dict[str, Any]:
