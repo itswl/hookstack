@@ -75,9 +75,29 @@ judge.internal.example:80 {
 }
 
 probe.internal.example:80 {
-	# GET only. Every route on this service is bearer-guarded, but the same /v1
-	# prefix carries `PUT /v1/skills/{name}`, `PUT /v1/memory` and
-	# `POST /v1/remediations/{id}/approve`. Read the console; approve nothing.
+	# Read the console; adopt nothing. Every route here is bearer-guarded, but the
+	# same /v1 prefix carries `PUT /v1/skills/{name}`, `PUT /v1/memory` and
+	# `POST /v1/remediations/{id}/approve` — the writes this whole design withholds
+	# from its own agent — so the proxy sorts them by what they DO, not by method.
+	#
+	# GET-only was the first rule and it was too blunt: it 403'd
+	# `POST /v1/runs/{key}/distill`, which is a POST that writes nothing. Its own
+	# docstring says "returned, never saved" — it assembles a draft from the run
+	# record for a person to read, and the save is a separate PUT. A console button
+	# that silently does nothing is worse than one that is absent.
+	#
+	# Allowed below: reads, drafts, and DECLINES. The asymmetry is the point — the
+	# gates exist to stop something being adopted, not to stop it being turned
+	# down, so rejecting a draft or dismissing a suggestion is safe in a way that
+	# accepting one is not.
+	@safe_post {
+		method POST
+		path_regexp ^/v1/(runs/[^/]+/distill|skills/[^/]+/(review|proposal/reject)|memory/suggestions/[^/]+/dismiss|remediations/[^/]+/reject)$
+	}
+	@stop {
+		method POST
+		path_regexp ^/sessions/[^/]+/stop$
+	}
 	@readonly {
 		method GET
 		not path /hooks/*
@@ -87,5 +107,16 @@ probe.internal.example:80 {
 			flush_interval -1
 		}
 	}
+	handle @safe_post {
+		reverse_proxy 127.0.0.1:8088
+	}
+	handle @stop {
+		reverse_proxy 127.0.0.1:8088
+	}
+	# Everything else, named so the list is readable rather than inferred:
+	# /hooks/* (signed ingress, callers are on this host), accepting a memory
+	# suggestion, approving a remediation or a consolidation, and every PUT or
+	# DELETE under /v1. Accepting is done from the Feishu card, which is verified
+	# and which you must have been sent.
 	respond 403
 }
