@@ -259,16 +259,26 @@ def forward_press(event: dict) -> None:
         # button said it would do. The rest says what is true at this moment and
         # no more — the pipe took it and passed it on, which is all any component
         # has observed yet.
-        kind = ""
+        kind = outcome = ""
         try:
-            kind = str((json.loads(answer) or {}).get("kind") or "")
+            parsed = json.loads(answer) or {}
+            kind = str(parsed.get("kind") or "")
+            outcome = str(parsed.get("outcome") or "")
         except ValueError:
             pass
         did = f"{kind} — " if kind else ""
-        acknowledge(
-            event,
-            f"✓ pressed {stamp} · {did}accepted and passed on. These buttons are spent.",
-        )
+        # `already_done` is a 200, and every 200 used to be reported as an
+        # acceptance. So a second press on a spent token repainted the card
+        # saying "accepted and passed on" — which is a duplicate being described
+        # as a fresh acceptance, on the one surface whose whole job is to tell a
+        # person what happened. The token is single-use by design; saying so is
+        # the honest answer, and it also explains why nothing appeared to change
+        # the first time.
+        if outcome == "already_done":
+            note = f"↺ pressed {stamp} · {did}already recorded. The first press took it; a button is single-use."
+        else:
+            note = f"✓ pressed {stamp} · {did}accepted and passed on. These buttons are spent."
+        acknowledge(event, note)
     except Exception:  # a lost press must not kill the consumer
         # logger.exception already carries the traceback; naming the exception
         # again put the same message on the line twice.
