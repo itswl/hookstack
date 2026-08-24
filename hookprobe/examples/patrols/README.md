@@ -48,6 +48,15 @@ accounting, dedup and silence. For a patrol — scheduled, singular, wanted — 
 three are near no-ops, but the run will not appear in the pipe's ledger, so spend
 reconciled from there will be short by exactly the patrols.
 
+On the `probe` target the script sends `X-Operator: true`, which exempts the
+patrol from the budget breaker if `HOOKPROBE_BUDGET_GATES_AGENT_DOOR` is armed. A
+patrol runs only because a person installed its cron and wrote its brief — a
+standing human instruction on a schedule, not a rule reacting to traffic — and an
+undeclared caller is treated as automated, so without this a busy week silently
+costs the consolidation, the rulings and the memory suggestions that are the only
+things improving this service. `PATROL_OPERATOR=0` puts them back under the
+meter, on a deployment where the budget matters more than the loop.
+
 The `probe` target keys its run on `patrol:<brief>:<date>`, and the
 investigator's `start()` is idempotent per key, so a duplicate fire — a retry, a
 clock change, two hosts sharing one crontab — joins the run already in flight
