@@ -54,16 +54,21 @@ docker compose -p hookprobe-prod  --env-file .env -f hookprobe/deploy/docker-com
 # things it started say they are healthy. lark-bridge has no healthcheck, so
 # "running" is the most it can promise.
 deadline=$(( $(date +%s) + 90 ))
+# Exact names, anchored. `grep 'hook'` also matched a NEIGHBOUR project's
+# containers (webhookwise-* contains "hook"), and the first read-back after
+# that declared this deploy unhealthy over a one-off run container that was
+# never ours to wait for.
+OURS='^(hookrelay|hookjudge|hookjudge-b|hookprobe|lark-bridge)$'
 while :; do
-  unhealthy=$(docker ps --filter "health=unhealthy" --format '{{.Names}}' | grep -E 'hook|lark' || true)
-  starting=$(docker ps --filter "health=starting" --format '{{.Names}}' | grep -E 'hook|lark' || true)
+  unhealthy=$(docker ps --filter "health=unhealthy" --format '{{.Names}}' | grep -E "$OURS" || true)
+  starting=$(docker ps --filter "health=starting" --format '{{.Names}}' | grep -E "$OURS" || true)
   [ -z "$unhealthy" ] && [ -z "$starting" ] && break
   if [ "$(date +%s)" -ge "$deadline" ]; then
     echo "NOT HEALTHY after 90s:" >&2
-    docker ps --format '  {{.Names}} {{.Status}}' | grep -E 'hook|lark' >&2
+    docker ps --format '  {{.Names}} {{.Status}}' | grep -E "$OURS" >&2
     exit 1
   fi
   sleep 3
 done
-docker ps --format '  {{.Names}} {{.Status}}' | grep -E 'hook|lark'
+docker ps --format '  {{.Names}} {{.Status}}' | awk '$1 ~ /^(hookrelay|hookjudge|hookjudge-b|hookprobe|lark-bridge)$/'
 echo "deployed and healthy."
