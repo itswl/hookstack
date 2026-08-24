@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Protocol
 
-from hookprobe import actions, distill_loop, remediation, rulings, suggestions
+from hookprobe import actions, distill_loop, remediation, rulings, run_rulings, suggestions
 from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult
 from hookprobe.notify import ReturnDelivery
@@ -472,34 +472,47 @@ class RunService:
         cutoff = time.time() - self._settings.budget_window_hours * 3600
         return self._store.cache_since(cutoff)
 
-    def window_rulings(self) -> tuple[int, int, int]:
-        """(investigations, ruled useful, ruled useless) over the budget window."""
+    def window_rulings(self) -> tuple[int, int, int, int]:
+        """(investigations, useful, useless, of those inferred) over the window.
+
+        The fourth number is not decoration: a patrol can infer verdicts, and a
+        worth figure quoted at somebody deciding whether to pay must not be the
+        model's own opinion of itself presented as a person's.
+        """
         cutoff = time.time() - self._settings.budget_window_hours * 3600
         return self._store.rulings_since(cutoff)
 
-    def record_ruling(self, session_key: str, ruling: str, *, actor: str = "") -> Run:
-        """Write down whether a human found this investigation worth its bill.
+    def record_ruling(self, session_key: str, ruling: str, *, actor: str = "", why: str = "") -> Run:
+        """Write down whether this investigation was worth its bill.
 
         The cost of an investigation has always been countable and its worth was
         countable nowhere, which left the adoption question — "you want me to pay
         a model per alert?" — with a dollar figure and no answer. This is the
-        other half of that figure, and it can only come from a person: no
-        property of a report says whether it found the cause.
+        other half of that figure. No property of a report says whether it found
+        the cause, so the verdict comes from outside it: a person pressing a card
+        button, a person clearing a backlog through the bulk door, or a patrol
+        inferring it from the run's own evidence — `actor` says which, and a
+        `patrol:` prefix is what keeps an inference out of the human count.
+
+        An empty `ruling` CLEARS one, which the bulk door needs and the card path
+        never asks for: undoing a mistaken verdict has to be possible, or the
+        column becomes append-only and stops being worth trusting.
 
         Persisted through annotate() rather than finish(), so a ruling on an old
         investigation does not restamp it as having just finished.
         """
-        if ruling not in actions.RULINGS:
-            raise ValueError(f"ruling must be one of {', '.join(actions.RULINGS)}")
+        if ruling and ruling not in actions.RULINGS:
+            raise ValueError(f"ruling must be one of {', '.join(actions.RULINGS)}, or empty to clear it")
         run = self._store.get(session_key)
         if run is None:
             raise LookupError("session not found")
         run.ruling = ruling
-        run.ruled_at = time.time()
-        run.ruled_by = actor[:120]
+        run.ruled_at = time.time() if ruling else None
+        run.ruled_by = actor[:120] if ruling else ""
+        run.ruled_why = why[:400] if ruling else ""
         self._store.annotate(run)
         self._board_changed()
-        logger.info("ruling recorded session=%s ruling=%s", run.session_key, ruling)
+        logger.info("ruling recorded session=%s ruling=%s by=%s", run.session_key, ruling or "(cleared)", actor or "-")
         return run
 
     def window_unpriced(self) -> int:
@@ -629,28 +642,6 @@ class RunService:
             if claimable and (best is None or (run.finished_at or 0) > (best.finished_at or 0)):
                 best = run
         return best
-
-    def rule(self, session_key: str, ruling: str, ruled_by: str = "") -> Run | None:
-        """File a person's verdict on whether an investigation earned its bill.
-
-        The field, the arithmetic and the /v1/budget line have existed since the
-        ledger did; what never existed was a way to WRITE it, so `ruled_useful`
-        read 0 for every deployment and looked like apathy. It was not reachable.
-
-        `annotate` rather than `checkpoint`: a ruling is something recorded ABOUT
-        a run, arriving long after it finished, and must not move its clock — the
-        window arithmetic files a late ruling against the run's own window.
-        """
-        if ruling not in ("useful", "useless", ""):
-            raise ValueError("ruling must be 'useful', 'useless', or '' to clear it")
-        run = self.get(session_key)
-        if run is None:
-            return None
-        run.ruling = ruling
-        run.ruled_at = time.time() if ruling else None
-        run.ruled_by = ruled_by if ruling else ""
-        self._store.annotate(run)
-        return run
 
     def list_runs(self, limit: int = 100) -> list[Run]:
         return self._store.list_runs(limit=limit)
@@ -799,6 +790,23 @@ class RunService:
             task = asyncio.create_task(self._file_rulings(run, filed))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
+        # The other direction of ruling: what this service concludes about its own
+        # finished RUNS, not about a condition. Filed locally and marked inferred;
+        # it gates nothing, so there is no credential to hold and no far end to
+        # reach — see hookprobe.run_rulings for why the two stay apart.
+        run.text, run_verdicts = run_rulings.extract(run.text)
+        for verdict in run_verdicts:
+            try:
+                self.record_ruling(
+                    str(verdict["sessionKey"]),
+                    str(verdict["ruling"]),
+                    actor=f"patrol:{run.session_key}",
+                    why=str(verdict["why"]),
+                )
+            except ValueError:
+                logger.warning("refusing an inferred run ruling with an unknown verdict")
+            except LookupError:
+                logger.info("inferred run ruling names a run this service does not have: %s", verdict["sessionKey"])
         steps = remediation.extract(run.text)
         if steps:
             try:

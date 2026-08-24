@@ -86,10 +86,19 @@ def extract(text: str) -> tuple[str, list[dict[str, Any]]]:
             continue  # one standing verdict per condition; the first wins
         found.append({"identity": identity, "verdict": verdict, "why": why[:_WHY_MAX]})
 
-    kept = found[:_PER_RUN]
-    if not kept:
+    if not _MARKER.search(text or ""):
         return text or "", []
-    note = f"_({len(kept)} condition ruling{'' if len(kept) == 1 else 's'} filed with the judge.)_"
+    kept = found[:_PER_RUN]
+    if kept:
+        note = f"_({len(kept)} condition ruling{'' if len(kept) == 1 else 's'} filed with the judge.)_"
+    else:
+        # The comment above promises the line is stripped either way, and it was
+        # not: this early-returned when NOTHING parsed, so a report whose every
+        # marker was malformed kept them — the exact `AI-RULING: not json at all`
+        # riding out to a chat card that the marker-not-JSON pattern was written
+        # to prevent. Naming the failure also beats silence, which reads like a
+        # model that ignored the instruction.
+        note = "_(a condition ruling was proposed in a shape this service could not file.)_"
     replaced = False
 
     def _once(_match: re.Match[str]) -> str:

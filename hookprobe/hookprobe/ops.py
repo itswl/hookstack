@@ -44,7 +44,7 @@ from hookprobe.service import RunService
 from hookprobe.settings import Settings
 
 
-def _worth_line(investigations: int, spent: float, useful: int, useless: int) -> str:
+def _worth_line(investigations: int, spent: float, useful: int, useless: int, inferred: int = 0) -> str:
     """The one sentence the adoption question actually asks for.
 
     Assembled here rather than on the board, which prints the string as it
@@ -70,7 +70,14 @@ def _worth_line(investigations: int, spent: float, useful: int, useless: int) ->
     ruled = useful + useless
     if not ruled:
         return f"{head} — none ruled yet"
-    return f"{head}, {useful} of {ruled} ruled found the cause"
+    # And say when the verdicts are a patrol's inference rather than a person's.
+    # Leaving that out repeats this function's own founding mistake one level up:
+    # the sentence read as somebody's judgement while meaning the model's, which
+    # is worse than reading as an absence, because it looks like an answer.
+    tail = f", {useful} of {ruled} ruled found the cause"
+    if inferred:
+        tail += f" ({inferred} inferred, not a person's)" if inferred < ruled else " (all inferred, not a person's)"
+    return head + tail
 
 
 def register(app: FastAPI, settings: Settings, service: RunService, guard: Callable[..., None]) -> None:
@@ -168,7 +175,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
         # worth answering even for an operator who declined to set a ceiling.
         fresh, cached = service.window_cache()
         spend = service.window_spend()
-        investigations, useful, useless = service.window_rulings()
+        investigations, useful, useless, inferred = service.window_rulings()
         window = {
             "window_hours": settings.budget_window_hours,
             "spent_usd": round(spend, 6),
@@ -190,7 +197,11 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             "investigations": investigations,
             "ruled_useful": useful,
             "ruled_useless": useless,
-            "worth": _worth_line(investigations, spend, useful, useless),
+            # Of the ruled ones, how many a patrol inferred rather than a person
+            # filed. Separated because this figure is quoted at somebody deciding
+            # whether to pay, and a model's opinion of itself is not an answer.
+            "ruled_inferred": inferred,
+            "worth": _worth_line(investigations, spend, useful, useless, inferred),
         }
         state = service.budget_state()
         if state is None:

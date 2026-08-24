@@ -298,13 +298,21 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                 continue
             for key in keys:
                 try:
-                    run = service.rule(str(key), "" if ruling == "clear" else ruling, ruled_by=by)
+                    service.record_ruling(str(key), "" if ruling == "clear" else ruling, actor=by)
                 except ValueError as exc:
                     results["rejected"].append({"sessionKey": key, "reason": str(exc)})
                     continue
-                (results["filed"] if run is not None else results["unknown"]).append(str(key))
-        investigations, useful, useless = service.window_rulings()
-        results["window"] = {"investigations": investigations, "useful": useful, "useless": useless}
+                except LookupError:
+                    results["unknown"].append(str(key))
+                    continue
+                results["filed"].append(str(key))
+        investigations, useful, useless, inferred = service.window_rulings()
+        results["window"] = {
+            "investigations": investigations,
+            "useful": useful,
+            "useless": useless,
+            "inferred": inferred,
+        }
         return results
 
     @app.get("/v1/runs/{session_key}", dependencies=[Depends(require_token)])

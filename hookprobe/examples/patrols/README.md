@@ -16,6 +16,7 @@ before, and neither needed a line of service code:
 | [`nightly-silence-proposal.md`](nightly-silence-proposal.md) | nightly | Is one condition waking people for nothing — and what would quieting it actually cost? |
 | [`self-review.md`](self-review.md) | Fridays | What should the investigator itself remember — and what has it proposed that nobody accepted? |
 | [`ai-rulings.md`](ai-rulings.md) | Thursdays | Which conditions can be ruled on from the case files, now that `ruled` is never going to move? |
+| [`run-rulings.md`](run-rulings.md) | Wednesdays | Which finished investigations earned their bill — the worth column, filed as an inference and labelled as one? |
 
 [`patrol.sh`](patrol.sh) is the sender: it reads a brief, signs the request and
 posts it.
@@ -96,6 +97,9 @@ HOOKRELAY_INBOUND_SECRET=the-inbound-source-secret-from-hookrelays-config
 # Thursdays: rule on the conditions the case files can defend a verdict on. The
 # human ruling column stays empty and separate; this fills a different one.
 15 1 * * 4 /srv/hookstack/hookprobe/examples/patrols/patrol.sh /srv/hookstack/patrols/ai-rulings.md "Patrol: AI rulings" >> /var/log/hookstack-patrol.log 2>&1
+# Run rulings the day BEFORE the condition rulings, not after: a cluster of
+# `useless` runs on one condition is evidence the Thursday patrol can then read.
+30 1 * * 3 /srv/hookstack/hookprobe/examples/patrols/patrol.sh /srv/hookstack/patrols/run-rulings.md "Patrol: run rulings" >> /var/log/hookstack-patrol.log 2>&1
 
 # Fridays: the investigator reviews its own last twenty investigations and
 # proposes at most one durable fact. A nudge, in Hermes Agent's sense — a system

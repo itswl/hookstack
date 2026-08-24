@@ -20,6 +20,11 @@ from pathlib import Path
 
 from hookprobe.files import atomic_write
 
+# A ruled_by that starts with this marks a verdict a PATROL inferred from a run's
+# own evidence rather than one a person filed. Prefix rather than an exact value
+# so a future patrol can say which one it was without breaking the count.
+INFERRED_BY_PREFIX = "patrol:"
+
 RUNNING = "running"
 COMPLETED = "completed"
 FAILED = "failed"
@@ -84,9 +89,18 @@ class Run:
     # question anyone asks about adopting this ("you want me to pay a model per
     # alert?") had no number on this side to answer with. ruled_by is the opaque
     # IM user id the channel gave the pipe, when it gave one.
+    #
+    # ruled_by also says WHAT KIND of ruling this is, and that distinction is
+    # load-bearing: a patrol can infer a verdict from a run's own evidence, and
+    # a column that mixed a model's inference with a person's judgement would
+    # answer the adoption question with the model's own opinion of itself. The
+    # judge side settled this the same way — infer, and say it is an inference.
+    # An inferred ruling therefore carries a reason; a person clicking a list
+    # does not have to.
     ruling: str = ""
     ruled_at: float | None = None
     ruled_by: str = ""
+    ruled_why: str = ""
     # The message of the turn currently in flight (or the last one asked).
     current_message: str = ""
     # Finished turns, oldest first: {"message", "text", "error", "run_id",
@@ -188,8 +202,8 @@ class RunStore:
                     count += 1
         return count
 
-    def rulings_since(self, cutoff: float) -> tuple[int, int, int]:
-        """(investigations, ruled useful, ruled useless) over the spend window.
+    def rulings_since(self, cutoff: float) -> tuple[int, int, int, int]:
+        """(investigations, ruled useful, ruled useless, of those inferred).
 
         Counted off the same turn timestamps spend_since reads, so "N
         investigations, $X, M found the cause" is one sentence about one set of
@@ -198,7 +212,7 @@ class RunStore:
         puts a run in the count, the turn it billed for is.
         """
         self._scan_disk_once()
-        investigations = useful = useless = 0
+        investigations = useful = useless = inferred = 0
         for run in self._runs.values():
             if not any((turn.get("finished_at") or 0) >= cutoff for turn in run.turns):
                 continue
@@ -207,7 +221,11 @@ class RunStore:
                 useful += 1
             elif run.ruling == "useless":
                 useless += 1
-        return investigations, useful, useless
+            else:
+                continue
+            if run.ruled_by.startswith(INFERRED_BY_PREFIX):
+                inferred += 1
+        return investigations, useful, useless, inferred
 
     def cache_since(self, cutoff: float) -> tuple[int, int]:
         """(fresh_input_tokens, cache_read_tokens) across turns after `cutoff`.
