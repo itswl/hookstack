@@ -268,12 +268,14 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
+        """The operator board — every page this service serves hangs off it."""
         return status_page
 
     # ── inbound ───────────────────────────────────────────────────────────
 
     @app.post("/hook/{source_name}")
     async def hook(source_name: str, request: Request) -> JSONResponse:
+        """The front door: one source's webhook, walked through the gate pipeline and routed."""
         source = app.state.config.sources.get(source_name)
         if source is None:
             raise HTTPException(status_code=404, detail="unknown source")
@@ -571,6 +573,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         before_id: int | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
+        """The board's data: recent events, deliveries, breaker and silence state as JSON."""
         _read_guard(x_read_token, authorization)
         now = now_ts()
         return {
@@ -608,6 +611,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         x_read_token: str | None = Header(default=None),
         authorization: str | None = Header(default=None),
     ) -> str:
+        """Prometheus text: events by door and outcome, deliveries, outbox, breaker state."""
         # Same guard as /status: the numbers describe the estate's alert flow.
         _read_guard(x_read_token, authorization)
         now = now_ts()
@@ -621,6 +625,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
+        """Liveness only — no dependencies consulted, so an unhealthy ledger cannot hide a live process."""
         return {"status": "ok"}
 
     # ── admin: silences ───────────────────────────────────────────────────
@@ -633,6 +638,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.post("/silences")
     async def create_silence(request: Request, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+        """Admin: quiet one source for a window; every silenced event still lands in the ledger."""
         _admin_guard(x_admin_token)
         data = await request.json()
         source = str(data.get("source", "*"))
@@ -661,6 +667,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.get("/config")
     async def get_config(x_admin_token: str | None = Header(default=None)) -> JSONResponse:
+        """Admin: the running config with secrets redacted."""
         _admin_guard(x_admin_token)
         path = Path(app.state.settings.config_path)
         if not path.is_file():
@@ -669,6 +676,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.put("/config")
     async def put_config(request: Request, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+        """Admin: replace the config after a dry parse — a config that cannot load never becomes the config."""
         _admin_guard(x_admin_token)
         text = (await request.body()).decode("utf-8")
         try:
@@ -688,6 +696,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.post("/config/reload")
     async def reload_config(x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+        """Admin: re-read the config file from disk, same dry-parse rule as PUT."""
         _admin_guard(x_admin_token)
         try:
             candidate = Config.from_file(app.state.settings.config_path)
@@ -700,6 +709,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.post("/deliveries/{delivery_id}/retry")
     async def retry_delivery(delivery_id: int, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+        """Admin: put one dead delivery back in the queue with a fresh attempt budget."""
         _admin_guard(x_admin_token)
         if not await app.state.store.retry_delivery(delivery_id, now_ts()):
             raise HTTPException(status_code=404, detail="no dead delivery with that id")
@@ -707,6 +717,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.delete("/silences/{silence_id}")
     async def remove_silence(silence_id: int, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+        """Admin: lift a silence before its window ends."""
         _admin_guard(x_admin_token)
         if not await app.state.store.delete_silence(silence_id):
             raise HTTPException(status_code=404, detail="no such silence")

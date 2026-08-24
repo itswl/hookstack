@@ -390,6 +390,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         x_hook_correlation_id: str | None = Header(default=None),
         x_request_id: str | None = Header(default=None),
     ) -> JSONResponse:
+        """The front door: one signed alert in, one verdict recorded — 202 means judged, not queued."""
         body = await request.body()
         if len(body) > app_settings.max_body_bytes:
             raise HTTPException(status_code=413, detail="body too large")
@@ -577,6 +578,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = 50,
         window_hours: int = 24,
     ) -> dict[str, Any]:
+        """The board's data: attention, self-healing, cost and the recent verdicts as JSON."""
         _read_guard(x_read_token, authorization)
         return {
             "summary": await store.summary(now_ts() - max(1, window_hours) * 3600),
@@ -671,6 +673,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def metrics(
         x_read_token: str | None = Header(default=None), authorization: str | None = Header(default=None)
     ) -> str:
+        """Prometheus text: judgements by route, cost, interruptions, the wake axis, condition rulings."""
         _read_guard(x_read_token, authorization)
         data = await store.summary(now_ts() - 86400)
         lines = [
@@ -735,12 +738,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
+        """Liveness only — no dependencies consulted, so a broken ledger cannot hide a live process."""
         return {"status": "ok"}
 
     page = (Path(__file__).parent / "status.html").read_text(encoding="utf-8")
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
+        """The operator board."""
         return page
 
     return app

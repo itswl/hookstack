@@ -130,6 +130,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.post("/v1/memory/suggestions/{suggestion_id}/accept", dependencies=[Depends(guard)])
     async def memory_suggestion_accept(suggestion_id: str) -> dict[str, Any]:
+        """Adopt one queued line into CLAUDE.md under its own heading."""
         row = suggestions.resolve(settings.workdir, suggestion_id, accept=True)
         if row is None:
             raise HTTPException(status_code=404, detail="no such open suggestion")
@@ -137,6 +138,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.post("/v1/memory/suggestions/{suggestion_id}/dismiss", dependencies=[Depends(guard)])
     async def memory_suggestion_dismiss(suggestion_id: str) -> dict[str, Any]:
+        """Drop one queued line; nothing is written to memory."""
         row = suggestions.resolve(settings.workdir, suggestion_id, accept=False)
         if row is None:
             raise HTTPException(status_code=404, detail="no such open suggestion")
@@ -148,6 +150,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
     # investigation from its first turn.
     @app.get("/v1/memory", dependencies=[Depends(guard)])
     async def memory_read() -> dict[str, Any]:
+        """CLAUDE.md as the engine will read it, plus its path."""
         path = settings.workdir / "CLAUDE.md"
         content = ""
         if path.is_file():
@@ -159,6 +162,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.put("/v1/memory", dependencies=[Depends(guard)])
     async def memory_write(payload: dict[str, Any]) -> dict[str, Any]:
+        """Replace CLAUDE.md whole, size-checked and atomic — the memory page's save button."""
         raw = _checked_bytes(payload.get("content"), kind="memory")
         atomic_write(settings.workdir / "CLAUDE.md", raw)
         return {"saved": True, "bytes": len(raw)}
@@ -183,6 +187,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.get("/v1/skills", dependencies=[Depends(guard)])
     async def skills_list() -> list[dict[str, Any]]:
+        """Every runbook with its review state and case count, newest first."""
         out: list[dict[str, Any]] = []
         seen: set[str] = set()
         for layer, skills_dir in _layers(settings, "skills"):
@@ -231,6 +236,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.get("/v1/skills/{name}", dependencies=[Depends(guard)])
     async def skill_detail(name: str) -> dict[str, Any]:
+        """One runbook's manifest, whole."""
         _require_name(name, kind="skill")
         for layer, skills_dir in _layers(settings, "skills"):
             manifest = skills_dir / name / "SKILL.md"
@@ -268,6 +274,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.get("/v1/skills/{name}/history/{stamp}", dependencies=[Depends(guard)])
     async def skill_history_version(name: str, stamp: int) -> dict[str, Any]:
+        """One archived version of a runbook, as it was."""
         _require_name(name, kind="skill")
         path = settings.workdir / ".claude" / "skills" / name / "history" / f"{stamp}-SKILL.md"
         if not path.is_file():
@@ -404,6 +411,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
     # layer and the config are never touched from the web.
     @app.get("/v1/agents", dependencies=[Depends(guard)])
     async def agents_list() -> list[dict[str, Any]]:
+        """The subagent roles the engine is offered."""
         out: list[dict[str, Any]] = []
         seen: set[str] = set()
         for name, spec in _load_agents_raw(settings.agents_config).items():
@@ -440,6 +448,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.get("/v1/agents/{name}", dependencies=[Depends(guard)])
     async def agent_detail(name: str) -> dict[str, Any]:
+        """One role's definition, whole."""
         _require_name(name, kind="agent")
         config_agents = _load_agents_raw(settings.agents_config)
         if name in config_agents:
@@ -453,6 +462,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.put("/v1/agents/{name}", dependencies=[Depends(guard)])
     async def agent_write(name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create or replace a role definition, size-checked and atomic."""
         _require_writable_name(name, kind="agent")
         if name in _load_agents_raw(settings.agents_config):
             raise HTTPException(status_code=403, detail="config-pinned agents are edited in HOOKPROBE_AGENTS_CONFIG")
@@ -464,6 +474,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.delete("/v1/agents/{name}", dependencies=[Depends(guard)])
     async def agent_delete(name: str) -> dict[str, Any]:
+        """Remove a role; the engine stops being offered it on the next run."""
         _require_name(name, kind="agent")
         path = settings.workdir / ".claude" / "agents" / f"{name}.md"
         if not path.is_file():
@@ -480,6 +491,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
     # memory — a file on the volume, hot-read by every run.
     @app.get("/v1/system-prompt", dependencies=[Depends(guard)])
     async def system_prompt_read() -> dict[str, Any]:
+        """The appended methodology file as the engine will read it."""
         path = system_prompt_path(settings)
         content = ""
         if path.is_file():
@@ -491,6 +503,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.put("/v1/system-prompt", dependencies=[Depends(guard)])
     async def system_prompt_write(payload: dict[str, Any]) -> dict[str, Any]:
+        """Replace the appended methodology, size-checked and atomic — read fresh at the next run."""
         raw = _checked_bytes(payload.get("content"), kind="system prompt")
         path = system_prompt_path(settings)
         path.parent.mkdir(parents=True, exist_ok=True)

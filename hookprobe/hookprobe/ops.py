@@ -163,6 +163,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.get("/v1/budget", dependencies=[Depends(guard)])
     async def budget() -> dict[str, Any]:
+        """The breaker's arithmetic: window spend, ceiling, cache ratio and the worth line."""
         # The spend is reported either way: "what has this cost" is a question
         # worth answering even for an operator who declined to set a ceiling.
         fresh, cached = service.window_cache()
@@ -260,6 +261,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
+        """Liveness only — the engine is not consulted, so a stuck run cannot hide a live process."""
         running, queued = service.turn_counts()
         return {
             "status": "ok",

@@ -341,6 +341,9 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
     # the budget breaker is the backstop).
     @app.post("/hooks/event")
     async def event_door(request: Request) -> dict[str, Any]:
+        """The pipe's door: a signed alert either starts a paid investigation,
+        coalesces into one already running, or is declined by level, budget or
+        a standing ruling — every decline says why."""
         event = await _signed_object(request, settings.event_secret, _EVENT_MAX_BYTES)
 
         level = str(event.get("level") or "").lower()[:_LEVEL_MAX]
@@ -454,6 +457,8 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
     # disagree, 400 the shape is wrong, 404 a proposal id that never existed.
     @app.post("/hooks/action")
     async def action_door(request: Request) -> JSONResponse:
+        """A card press forwarded by the pipe: accept a memory line, rule a run
+        useful or useless — signed, idempotent, and answered with what changed."""
         body = await _signed_object(request, settings.event_secret, _ACTION_MAX_BYTES)
         action = body.get("action")
         if not isinstance(action, dict):

@@ -35,19 +35,19 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 
 | method | path | what it does |
 | --- | --- | --- |
-| GET | `/` | — |
+| GET | `/` | The operator board — every page this service serves hangs off it |
 | GET | `/card-action` | Ask before doing |
 | POST | `/card-action` | A human pressed a button on a notification card |
-| GET | `/config` | — |
-| PUT | `/config` | — |
-| POST | `/config/reload` | — |
-| POST | `/deliveries/{delivery_id}/retry` | — |
+| GET | `/config` | Admin: the running config with secrets redacted |
+| PUT | `/config` | Admin: replace the config after a dry parse — a config that cannot load never becomes the config |
+| POST | `/config/reload` | Admin: re-read the config file from disk, same dry-parse rule as PUT |
+| POST | `/deliveries/{delivery_id}/retry` | Admin: put one dead delivery back in the queue with a fresh attempt budget |
 | POST | `/explain/{source_name}` | Dry run: what WOULD this payload do? Admin-gated because it reveals routing, and because the config page is its consumer |
-| GET | `/healthz` | — |
-| POST | `/hook/{source_name}` | — |
+| GET | `/healthz` | Liveness only — no dependencies consulted, so an unhealthy ledger cannot hide a live process |
+| POST | `/hook/{source_name}` | The front door: one source's webhook, walked through the gate pipeline and routed |
 | GET | `/live` | The ledger's wake-up line: one changed per write, a ping through the quiet |
-| GET | `/metrics` | — |
-| POST | `/silences` | — |
-| DELETE | `/silences/{silence_id}` | — |
-| GET | `/status` | — |
+| GET | `/metrics` | Prometheus text: events by door and outcome, deliveries, outbox, breaker state |
+| POST | `/silences` | Admin: quiet one source for a window; every silenced event still lands in the ledger |
+| DELETE | `/silences/{silence_id}` | Admin: lift a silence before its window ends |
+| GET | `/status` | The board's data: recent events, deliveries, breaker and silence state as JSON |
 | GET | `/trace/{event_id}` | One alert's whole journey: the original, where it fanned out to, and what each processing system sent back |

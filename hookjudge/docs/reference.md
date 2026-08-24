@@ -43,14 +43,14 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 
 | method | path | what it does |
 | --- | --- | --- |
-| GET | `/` | — |
+| GET | `/` | The operator board |
 | GET | `/disagreements` | The review queue: rows where the platform and the judge disagreed |
-| POST | `/events` | — |
+| POST | `/events` | The front door: one signed alert in, one verdict recorded — 202 means judged, not queued |
 | POST | `/feedback` | A human pressed a button on a card, and the pipe brought the press here |
-| GET | `/healthz` | — |
+| GET | `/healthz` | Liveness only — no dependencies consulted, so a broken ledger cannot hide a live process |
 | POST | `/judgements/{judgement_id}/label` | Record the operator's ruling |
 | GET | `/labels/export` | Every ruling as eval-harness JSONL (see eval/README.md) — pipe it straight into eval/data |
 | GET | `/live` | The board's wake-up line: one changed per write, a ping through the quiet |
-| GET | `/metrics` | — |
+| GET | `/metrics` | Prometheus text: judgements by route, cost, interruptions, the wake axis, condition rulings |
 | POST | `/rulings/ai` | A model's retrospective ruling on a CONDITION, from the investigator |
-| GET | `/status` | — |
+| GET | `/status` | The board's data: attention, self-healing, cost and the recent verdicts as JSON |
