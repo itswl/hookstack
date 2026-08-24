@@ -89,6 +89,11 @@ def test_engine_records_the_prompt_inputs_it_resolved(tmp_path: Path) -> None:
     assert inputs["model"] == "claude-opus-5"
     assert inputs["resumed"] is True
     assert inputs["skills"]["project"] == ["gateway-5xx"]
+    # gateway-5xx was written straight to disk by this test — exactly the shape
+    # of a skill that arrived around the service — so the inventory must name
+    # it as unrecorded. The key is present even when the list would be empty:
+    # an absent key reads as "nobody checked", which is the review:[] lesson.
+    assert inputs["skills"]["unrecorded"] == ["gateway-5xx"]
     assert "user" not in inputs["skills"]  # setting_sources is project-only here
     assert inputs["agents"]["files"] == ["log-analyst"]
     assert inputs["mcp_servers"] == ["prometheus"]
@@ -96,6 +101,27 @@ def test_engine_records_the_prompt_inputs_it_resolved(tmp_path: Path) -> None:
     assert len(inputs["memory"]["sha256"]) == 12
     assert inputs["system_prompt_append"]["bytes"] == len("Prefer logs before metrics.")
     assert inputs["hygiene"]["repeat_reminder_at"] == 3
+
+
+def test_a_skill_with_a_provenance_record_is_not_flagged(tmp_path) -> None:
+    """origin.json beside the manifest is what every service write path leaves;
+    its presence is the difference between 'ours' and 'appeared'."""
+    import json as _json
+
+    from hookprobe.engine import ClaudeAgentEngine
+    from tests.helpers import make_settings
+
+    skill = tmp_path / ".claude" / "skills" / "vouched"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: vouched\n---\n", encoding="utf-8")
+    (skill / "origin.json").write_text(_json.dumps({"revisions": [{"by": "distill"}]}), encoding="utf-8")
+    dropped = tmp_path / ".claude" / "skills" / "dropped-in"
+    dropped.mkdir(parents=True)
+    (dropped / "SKILL.md").write_text("---\nname: dropped-in\n---\n", encoding="utf-8")
+
+    inputs = ClaudeAgentEngine(make_settings(tmp_path)).describe_inputs()
+    assert inputs["skills"]["project"] == ["dropped-in", "vouched"]
+    assert inputs["skills"]["unrecorded"] == ["dropped-in"]
 
 
 def test_inputs_record_reports_absent_files_as_absent(tmp_path: Path) -> None:

@@ -683,6 +683,11 @@ class RunService:
         # is exactly when the loaded memory and skills are worth knowing.
         try:
             run.inputs = self._engine.describe_inputs(resume=resume)
+            foreign = (run.inputs.get("skills") or {}).get("unrecorded") or []
+            if foreign:
+                # Loud on purpose: this run is about to load standing
+                # instruction that no service write path vouches for.
+                logger.warning("skills with no provenance record loaded session=%s: %s", run.session_key, foreign)
         except Exception:  # noqa: BLE001 — a record of the inputs is not worth a failed run
             logger.debug("describe_inputs failed", exc_info=True)
             run.inputs = {}

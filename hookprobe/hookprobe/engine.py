@@ -288,6 +288,24 @@ def _skill_names(root: Path, limit: int = 40) -> list[str]:
     return names[:limit]
 
 
+def _unrecorded_skills(root: Path, limit: int = 40) -> list[str]:
+    """Project-layer skills with no provenance record.
+
+    Every write path the service owns — distill, PUT, restore — leaves an
+    origin.json beside the manifest, and on 2026-08-24 all fifteen live
+    runbooks had one. So a SKILL.md without one arrived some other way: a file
+    dropped onto the volume, a third-party skill copied in, a write that went
+    around the service. A skill is standing instruction to an agent that reads
+    attacker-influenced text and holds tools — supply-chain shaped, so at
+    minimum the inventory says which entries nothing vouches for.
+    """
+    try:
+        names = sorted(p.parent.name for p in root.glob("*/SKILL.md") if not (p.parent / "origin.json").is_file())
+    except OSError:
+        return []
+    return names[:limit]
+
+
 def _agent_names(root: Path, limit: int = 40) -> list[str]:
     try:
         names = sorted(p.stem for p in root.glob("*.md"))
@@ -385,6 +403,10 @@ class ClaudeAgentEngine:
         skills: dict[str, Any] = {"filter": self._settings.skills or "(engine default)"}
         if "project" in self._settings.setting_sources:
             skills["project"] = _skill_names(self._workdir / ".claude" / "skills")
+            # Always present, usually []: an empty list is the healthy claim,
+            # and an absent key is indistinguishable from "nobody checked" —
+            # the `review: []` false all-clear, not repeated.
+            skills["unrecorded"] = _unrecorded_skills(self._workdir / ".claude" / "skills")
         if "user" in self._settings.setting_sources:
             skills["user"] = _skill_names(self._home / ".claude" / "skills")
         return {
