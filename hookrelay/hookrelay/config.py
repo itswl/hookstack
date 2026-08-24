@@ -161,6 +161,7 @@ def _warn_posture_mix(pipeline: tuple[PipelineStage, ...], channels: dict[str, C
     the pipe overruling its operator. Returned as a string rather than logged
     here so from_dict stays free of side effects and a test can read it.
     """
+
     def _downstream_of_the_brain(stage: PipelineStage) -> bool:
         """A filter that only ever matches a brain's RETURN is the brain deciding.
 
