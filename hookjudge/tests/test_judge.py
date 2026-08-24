@@ -1052,3 +1052,77 @@ async def test_a_ruling_on_the_interruption_never_touches_the_eval_label(tmp_pat
     assert row["label_importance"] == "high" and row["mattered"] == "no"
     assert row["mattered_actor"] == "ou_abc", "provenance, the way label_source is — never resolved to a person"
     await store.close()
+
+
+def test_eval_scoring_counts_the_two_errors_with_teeth():
+    """The eval runner's verdict arithmetic, scored without a provider.
+
+    missed and false_quiet are the two directions that stop a deploy: judged
+    below every accepted severity, and quieted against a label that says a
+    person must act. Multi-value expectations exist so legitimate judgement
+    ("high or medium") is never flagged as error — and '' on the wake axis is
+    never false_quiet, because unanswered fails open into a card.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "eval_runner", Path(__file__).resolve().parent.parent / "scripts" / "eval.py"
+    )
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+
+    assert runner._accepted("High") == ["high"] and runner._accepted(["a", "B"]) == ["a", "b"]
+    assert runner._accepted(None) == []
+
+    rows = [
+        # judged medium against high-or-medium: accepted, distance 0
+        {
+            "id": "a",
+            "importance_ok": True,
+            "event_type_ok": True,
+            "severity_distance": 0,
+            "wake_scored": True,
+            "wake_ok": True,
+            "false_quiet": False,
+            "over_delivered_wake": False,
+            "degraded": "",
+            "cost": 0.0,
+            "tokens": 0,
+            "latency_ms": 1,
+        },
+        # judged low against high: missed
+        {
+            "id": "b",
+            "importance_ok": False,
+            "event_type_ok": True,
+            "severity_distance": -2,
+            "wake_scored": False,
+            "wake_ok": True,
+            "false_quiet": False,
+            "over_delivered_wake": False,
+            "degraded": "",
+            "cost": 0.0,
+            "tokens": 0,
+            "latency_ms": 1,
+        },
+        # wake no against a yes label: the regret direction
+        {
+            "id": "c",
+            "importance_ok": True,
+            "event_type_ok": True,
+            "severity_distance": 0,
+            "wake_scored": True,
+            "wake_ok": False,
+            "false_quiet": True,
+            "over_delivered_wake": False,
+            "degraded": "",
+            "cost": 0.0,
+            "tokens": 0,
+            "latency_ms": 1,
+        },
+    ]
+    report = runner.summarize(rows, unreviewed=0, route="rule")
+    assert report["missed"] == 1 and report["missed_ids"] == ["b"]
+    assert report["false_quiet"] == 1 and report["false_quiet_ids"] == ["c"]
+    assert report["wake_scored"] == 2 and report["wake_accuracy"] == 0.5

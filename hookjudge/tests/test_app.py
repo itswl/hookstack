@@ -1328,6 +1328,45 @@ async def test_the_second_axis_is_counted_apart_from_importance_and_from_a_perso
 
     assert 'hookjudge_wake_someone{answer="yes"} 1' in metrics
     assert 'hookjudge_wake_someone{answer="no"} 1' in metrics
+    assert "hookjudge_quiet_regrets 0" in metrics, "no person has contradicted a quiet yet"
+
+
+async def test_a_quiet_the_person_contradicts_is_counted_as_a_regret(tmp_path):
+    """The quiet stage drops cards on wake=no. The one failure that counts is a
+    person later ruling that interruption mattered — and a delivery policy that
+    cannot see its own regrets is a policy nobody can argue with. One row,
+    wake=no then mattered=yes, must surface in attention and in /metrics."""
+    app = create_app(settings=_settings(tmp_path, db_path=str(tmp_path / "regret.db")))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        store = app.state.store
+        from hookjudge.contract import Incoming, Verdict
+
+        await store.record(
+            Incoming(
+                source="grafana",
+                title="示例条件",
+                body="b",
+                level="high",
+                fields={},
+                correlation_id="regret-1",
+                received_at=time.time(),
+                recovery_flag=False,
+            ),
+            Verdict(summary="s", importance="high", wake_someone="no").normalized(),
+            1,
+        )
+        await store.record_mattered("regret-1", mattered="yes", at=time.time(), actor="ou_test")
+        body = (await client.get("/status", headers={"X-Read-Token": "read-t"})).json()
+        metrics = (await client.get("/metrics", headers={"X-Read-Token": "read-t"})).text
+
+    a = body["summary"]["attention"]
+    assert a["quiet_regrets"] == 1
+    assert a["wake_no"] == 1 and a["mattered"] == 1
+    assert "hookjudge_quiet_regrets 1" in metrics
 
 
 def test_an_unanswered_second_axis_is_blank_not_a_no() -> None:

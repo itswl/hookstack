@@ -25,7 +25,29 @@ echo "deploying $(git log --oneline -1)"
 
 # Both projects, exactly as first created (docker inspect the containers if in
 # doubt — the compose labels are the authority these names were read from).
-docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml up -d --build
+docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml build
+
+# The judgment gate: replay the golden incidents through the judge image that
+# is ABOUT to ship, before it does. The code gates (tests, lint) cannot see a
+# prompt regression — only running the same alerts through the new prompt can,
+# which is why this sits between build and up rather than in CI: the dataset
+# holds real alert text (git-ignored by class) and the provider key lives in
+# .env, so this host is the one place all three ingredients meet.
+#
+# It trips on exactly two errors: an alert judged below every accepted severity
+# (missed) and a wake=no where the label says a person must act (false_quiet —
+# the pipe drops cards on that answer). SKIP_EVAL=1 is the recorded way past a
+# red gate in an emergency; a missing dataset skips with a notice, never fakes
+# a pass. Cost per run: under a cent.
+if [ "${SKIP_EVAL:-}" = "1" ]; then
+  echo "eval gate SKIPPED by SKIP_EVAL=1 — the prompt ships unreplayed"
+elif [ -f hookjudge/eval/dataset.jsonl ]; then
+  docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml     run --rm --no-deps     -v "$ROOT/hookjudge/scripts:/eval-scripts:ro"     -v "$ROOT/hookjudge/eval:/eval-data:ro"     -e PYTHONPATH=/app     hookjudge python3 /eval-scripts/eval.py --dataset /eval-data/dataset.jsonl --route ai --gate
+else
+  echo "eval gate skipped: no hookjudge/eval/dataset.jsonl on this host (see hookjudge/eval/README.md)"
+fi
+
+docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml up -d
 docker compose -p hookprobe-prod  --env-file .env -f hookprobe/deploy/docker-compose.prod.yml up -d --build
 
 # Read it back: a deploy is not done when compose returns, it is done when the

@@ -37,6 +37,15 @@ from hookjudge.settings import Settings
 SEVERITY = ["low", "medium", "high", "critical"]
 
 
+def _accepted(value: Any) -> list[str]:
+    """An expectation as a lowercase list, however the row spelt it."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value.lower()]
+    return [str(v).lower() for v in value]
+
+
 def load_cases(path: Path) -> tuple[list[dict[str, Any]], int]:
     """Labelled cases, plus how many are still waiting for a human.
 
@@ -76,14 +85,36 @@ async def judge_one(client: httpx.AsyncClient, settings: Settings, row: dict[str
         verdict = await ai_verdict(client, settings, event)
     expect = row.get("expect", {})
     got_importance = (verdict.importance or "").lower()
-    want_importance = (expect.get("importance") or "").lower()
+    # An expectation may be one value or a set: some conditions have two
+    # defensible answers ("high or medium" for a large-but-routine payment),
+    # and forcing one would make the eval flag legitimate judgement as error.
+    # `severity_distance` is measured against the CLOSEST accepted value, so
+    # `missed` still only counts answers below everything the label allows.
+    want_importances = _accepted(expect.get("importance"))
     distance = 0
-    if got_importance in SEVERITY and want_importance in SEVERITY:
-        distance = SEVERITY.index(got_importance) - SEVERITY.index(want_importance)
+    in_scale = [w for w in want_importances if w in SEVERITY]
+    if got_importance in SEVERITY and in_scale:
+        distance = min(
+            (SEVERITY.index(got_importance) - SEVERITY.index(w) for w in in_scale),
+            key=abs,
+        )
+    # The second axis, scored only when the row states an expectation. The one
+    # error with teeth is `false_quiet`: the label says a person must act, the
+    # verdict says no — and since 2026-08-24 the pipe DROPS the card on that
+    # answer. '' (unanswered) is never false_quiet: it fails open into a card.
+    got_wake = (verdict.wake_someone or "").lower()
+    want_wake = _accepted(expect.get("wake"))
+    wake_scored = bool(want_wake)
+    false_quiet = wake_scored and got_wake == "no" and "no" not in want_wake
+    over_delivered = wake_scored and want_wake == ["no"] and got_wake != "no"
     return {
         "id": row.get("id", ""),
-        "importance_ok": got_importance == want_importance,
+        "importance_ok": got_importance in want_importances,
         "event_type_ok": (verdict.event_type or "").lower() == (expect.get("event_type") or "").lower(),
+        "wake_scored": wake_scored,
+        "wake_ok": (not wake_scored) or (got_wake in want_wake),
+        "false_quiet": false_quiet,
+        "over_delivered_wake": over_delivered,
         # Negative means the judge under-called it: the alert that should have
         # woken someone did not.
         "severity_distance": distance,
@@ -111,6 +142,15 @@ def summarize(rows: list[dict[str, Any]], unreviewed: int, route: str) -> dict[s
         "missed": len(missed),
         "missed_ids": [r["id"] for r in missed],
         "over_escalated": len(over),
+        # The wake axis, where scored. false_quiet is the regret direction —
+        # the pipe would have dropped a card the label says a person needed.
+        "wake_scored": sum(1 for r in rows if r["wake_scored"]),
+        "wake_accuracy": round(
+            sum(r["wake_ok"] for r in rows if r["wake_scored"]) / max(1, sum(1 for r in rows if r["wake_scored"])), 4
+        ),
+        "false_quiet": sum(1 for r in rows if r["false_quiet"]),
+        "false_quiet_ids": [r["id"] for r in rows if r["false_quiet"]],
+        "over_delivered_wake": sum(1 for r in rows if r["over_delivered_wake"]),
         "degraded": sum(1 for r in rows if r["degraded"]),
         "cost_total": round(sum(costs), 4),
         "cost_per_verdict": round(sum(costs) / total, 6),
@@ -152,6 +192,12 @@ async def main() -> int:
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--out", type=Path)
+    # Exit nonzero on the two errors that make a judge WORSE while looking
+    # cheaper: an alert judged below every accepted severity (missed), and a
+    # wake=no where the label says a person must act (false_quiet — since
+    # 2026-08-24 the pipe drops the card on that answer). Everything else is
+    # reported, argued about, and allowed through; these two stop a deploy.
+    parser.add_argument("--gate", action="store_true")
     args = parser.parse_args()
 
     if not args.dataset.is_file():
@@ -195,6 +241,18 @@ async def main() -> int:
         # Ids and aggregates only — no alert text, so a result file is safe to share.
         args.out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"\nwrote {args.out}")
+    if args.gate and (report["missed"] or report["false_quiet"]):
+        print(
+            f"\nGATE RED: missed={report['missed']} {report['missed_ids']}"
+            f" false_quiet={report['false_quiet']} {report['false_quiet_ids']}\n"
+            "The current prompt under-calls a golden incident. Fix the prompt, or —\n"
+            "if the expectation itself is wrong — change the row and say why in its\n"
+            "note. SKIP_EVAL=1 on deploy is the recorded way past this in an emergency.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.gate:
+        print(f"\ngate: {report['cases']} golden incidents, 0 missed, 0 false quiets")
     return 0
 
 

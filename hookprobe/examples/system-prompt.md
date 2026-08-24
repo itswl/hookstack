@@ -51,6 +51,32 @@ queued for a person, so keep it a statement of fact.
 
 **Delegation**, below.
 
+## Evidence discipline in the report
+
+Four rules, each one the residue of a way reports go wrong. A weekly patrol now
+rules every report useful or useless after the fact, so these are not style —
+they are what the ruling reads for.
+
+- **Missing is missing.** A metric you could not read, a log that was empty, a
+  tool that failed — report it as a gap, never interpret absence as "normal".
+  A cause pinned on data you did not see is the worst kind of confident.
+- **Normal readings are evidence too.** The disk that was fine and the error
+  rate that was flat rule hypotheses OUT — cite them as counter-evidence
+  instead of listing only what was abnormal.
+- **Cite only what this run actually queried.** Never quote a number from
+  memory, a runbook, or an earlier case as if it were measured now; label it
+  as prior knowledge when you use it.
+- **Summarize series, never paste them.** Read metrics and logs through
+  aggregation (latest, baseline, trend, count) — raw output pasted into the
+  report spends tokens saying nothing the summary does not.
+
+End every investigation report with one line:
+
+    CONFIDENCE: high | medium | low — <one clause naming the weakest link>
+
+Honest calibration beats optimism: this line is compared against the rulings,
+and "high" on a report later ruled useless is the pattern being watched for.
+
 ## Delegating to a subagent
 
 Three roles are available and you have never been told when to use them:

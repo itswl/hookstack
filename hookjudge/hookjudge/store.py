@@ -672,7 +672,8 @@ class Store:
             " coalesce(sum(mattered = 'yes'), 0) AS mattered,"
             " coalesce(sum(mattered = 'no'), 0) AS did_not_matter,"
             " coalesce(sum(wake_someone = 'yes'), 0) AS wake_yes,"
-            " coalesce(sum(wake_someone = 'no'), 0) AS wake_no"
+            " coalesce(sum(wake_someone = 'no'), 0) AS wake_no,"
+            " coalesce(sum(wake_someone = 'no' AND mattered = 'yes'), 0) AS quiet_regrets"
             " FROM judgements WHERE received_at >= ?",
             (since,),
         )
@@ -684,6 +685,13 @@ class Store:
         ruled = mattered + did_not_matter
         wake_yes = int(totals["wake_yes"]) if totals else 0
         wake_no = int(totals["wake_no"]) if totals else 0
+        # The quiet stage's ONLY failure that counts: the model said nobody
+        # needs to act, the pipe dropped the card on that answer, and a person
+        # later ruled the interruption would have mattered. One of these is a
+        # signal to narrow the quiet; a pattern of them deletes it. Kept beside
+        # the wake counts because a delivery policy that cannot see its own
+        # regrets is a policy nobody can argue with.
+        quiet_regrets = int(totals["quiet_regrets"]) if totals else 0
         # A condition that interrupted once is not noise, so the view that is
         # meant to say "go turn something off" refuses to pad itself with
         # one-offs. `title` is a bare column beside max(id): SQLite documents it
@@ -763,6 +771,7 @@ class Store:
             "wake_yes": wake_yes,
             "wake_no": wake_no,
             "wake_answered": wake_yes + wake_no,
+            "quiet_regrets": quiet_regrets,
             "ai_ruled": len(ai),
             "ai_not_worth_it": sum(1 for row in ai.values() if row["verdict"] == "not_worth_it"),
             "noisiest": noisiest,
