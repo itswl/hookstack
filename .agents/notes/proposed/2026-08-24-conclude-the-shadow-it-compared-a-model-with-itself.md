@@ -117,3 +117,9 @@ second is a measurement problem and belongs in a different queue.
 So the retirement is defensible and the cost is real: it trades a diversity axis
 for a stability axis. If it goes ahead, the labelling queue should say in its own
 output that it is down to two sources, rather than quietly ranking on less.
+
+**Read the addendum below before weighing this paragraph.** It was written from
+the one-sample picture, where five rows looked contested and a third opinion was
+doing visible work. Re-sampling narrowed that the same afternoon, and the
+argument above — that losing B would leave an ordering unable to discriminate —
+assumes an ordering that discriminates today. On current evidence it does not.
