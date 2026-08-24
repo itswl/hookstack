@@ -27,6 +27,21 @@ QUESTION: is the noise going up or down?
    `interruptions` is the line worth quoting: twelve interruptions with one
    paid means eleven free cards that still spent somebody's attention.
 
+5. Then what never reached anyone. Since 2026-08-24 the pipe drops a card
+   whose verdict answered wake_someone=no — judged "nobody needs to act on
+   this now", still on every board, just not an interruption. Two numbers,
+   two different clocks, name both:
+   - summary.attention.wake_no from step 1 is the WEEK's count of quietable
+     verdicts (windowed like everything else there);
+   - curl -sS http://hookrelay:8100/metrics -H "Authorization: Bearer $HOOKRELAY_READ_TOKEN"
+     (or $SHADOW_READ_TOKEN if that is the name this deployment set), the
+     hookrelay_events_total{...outcome="wake_no"} line, is the pipe's count
+     of cards actually dropped — SINCE ITS LAST RESTART, not this week. Do
+     not subtract one from the other; quote each with its clock. If the
+     relay number is unreachable, the judge's still answers the question.
+   A quieted card is attention the operator did not spend; this is the line
+   that says whether the quiet stage is earning.
+
 WHAT YOU MUST NOT DO WITH MISSING DATA
 
 `mattered_pct` is null whenever `ruled` is 0, and `ruled` counts human button
