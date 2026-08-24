@@ -20,7 +20,14 @@ docker-compose.override.yml
 # Eval data is captured production alerts — service names, hosts, thresholds.
 # This repository is public: the labelled set stays local, only eval/sample.jsonl
 # (synthetic) and the scripts are shared.
-hookjudge/eval/dataset.jsonl
+# The real eval set is 32 rules distilled from real production alerts, so it
+# carries real alert rule names and the real Grafana folder. Ignore the CLASS,
+# not one filename: an exact-name rule is what let a .bak of the pattern list
+# get staged into a public repo once, and a `dataset.v2.jsonl` would slip the
+# same way. sample.jsonl is the sanctioned fictional one and stays tracked.
+hookjudge/eval/*.jsonl
+hookjudge/eval/dataset*
+!hookjudge/eval/sample.jsonl
 hookjudge/eval/*.local.jsonl
 hookjudge/eval/results/
 
