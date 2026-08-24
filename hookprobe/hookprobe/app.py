@@ -102,6 +102,7 @@ def _summary(run: Run) -> dict[str, Any]:
         # The session's whole bill, not the last turn's.
         "cost_usd": sum(turn_costs) if turn_costs else run.cost_usd,
         "model": run.model,
+        "model_endpoint": run.model_endpoint,
         "engine_session_id": run.engine_session_id,
         "title": title[:120],
         "origin": run.origin,

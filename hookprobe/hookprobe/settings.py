@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def _int(name: str, default: int) -> int:
@@ -39,6 +40,16 @@ def _float(name: str, default: float) -> float:
 def _path_env(name: str) -> Path | None:
     raw = os.environ.get(name, "").strip()
     return Path(raw) if raw else None
+
+
+def _endpoint_host(base_url: str) -> str:
+    """Host of ANTHROPIC_BASE_URL, or Anthropic's own when it is unset.
+
+    Host only, never the path and never a query: a base URL is not supposed to
+    carry a credential, and "not supposed to" is not a reason to render one.
+    """
+    host = urlsplit(base_url.strip()).hostname if base_url.strip() else ""
+    return host or "api.anthropic.com"
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +222,7 @@ class Settings:
         return cls(
             token=os.environ.get("HOOKPROBE_TOKEN", ""),
             model=os.environ.get("HOOKPROBE_MODEL", "claude-opus-5"),
+            model_endpoint=_endpoint_host(os.environ.get("ANTHROPIC_BASE_URL", "")),
             max_turns=max(1, _int("HOOKPROBE_MAX_TURNS", 32)),
             max_concurrent=max(1, _int("HOOKPROBE_MAX_CONCURRENT", 2)),
             default_timeout_seconds=max(1, _int("HOOKPROBE_DEFAULT_TIMEOUT_SECONDS", 900)),
@@ -248,3 +260,16 @@ class Settings:
             host=os.environ.get("HOOKPROBE_HOST", "0.0.0.0"),  # nosec B104
             port=_int("HOOKPROBE_PORT", 8088),
         )
+
+    # WHERE that model name is sent. Host only, derived from ANTHROPIC_BASE_URL.
+    #
+    # `model` is the name REQUESTED, not the one served, and the SDK cannot tell
+    # us the difference: an Anthropic-compatible gateway accepts `claude-opus-5`
+    # and maps it to its own model server-side, so `model_usage` keys and their
+    # `canonicalModel` both just echo what was sent. Measured on this deployment
+    # — 30k input tokens billed under `claude-opus-5` against open.bigmodel.cn.
+    #
+    # So the honest thing to show beside a model name is its destination, which
+    # needs no guessing. Without it a board reading `opus-5` means Anthropic to
+    # every reader, and has meant DeepSeek and then BigModel here.
+    model_endpoint: str = "api.anthropic.com"

@@ -65,8 +65,13 @@ class Run:
     cost_usd: float | None = None
     created_at: float = field(default_factory=time.time)
     finished_at: float | None = None
-    # Which model this session's turns are requested on.
+    # Which model this session's turns are requested on — REQUESTED, not served.
     model: str = ""
+    # And where that name was sent. Recorded per run, not read from config at
+    # display time, because the destination moves: every run on this deployment
+    # says `claude-opus-5`, and they were served by Anthropic, then DeepSeek,
+    # then BigModel. A board that resolved it live would relabel history.
+    model_endpoint: str = ""
     # Where the run came from: "" (API/UI) or "relay" (the pipe's event door —
     # these report back to the pipe when they finish).
     origin: str = ""

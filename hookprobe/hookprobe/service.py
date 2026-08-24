@@ -263,6 +263,7 @@ class RunService:
         timeout_s = self._clamp_timeout(payload.get("timeoutSeconds"))
         run.status = RUNNING
         run.model = run.model or self._settings.model  # backfill for pre-model records
+        run.model_endpoint = run.model_endpoint or self._settings.model_endpoint
         run.run_id = uuid.uuid4().hex[:12]
         run.text = ""
         run.error = None
