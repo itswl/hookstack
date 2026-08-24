@@ -48,7 +48,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_ALARM_URL` | *(empty)* | Direct self-alarm for report returns that exhaust their retries: the pipe is the broken link at that moment, so this posts straight to a bot/collector URL, touching nothing on the… |
 | `HOOKPROBE_SETTING_SOURCES` | `project` | Skill layers |
 
-## Routes (46)
+## Routes (47)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -79,7 +79,8 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/v1/remediations` | Open remediation proposals, newest first |
 | POST | `/v1/remediations/{proposal_id}/approve` | The one click that makes anything run |
 | POST | `/v1/remediations/{proposal_id}/reject` | Refuse a parked proposal; it keeps its file, marked rejected |
-| GET | `/v1/runs` | The board's run list, newest first |
+| GET | `/v1/runs` | Finished runs, newest first |
+| POST | `/v1/runs/rulings` | File verdicts on several investigations at once — was this RUN worth it |
 | GET | `/v1/runs/{session_key}` | One run whole: turns, meta, ruling, cost |
 | POST | `/v1/runs/{session_key}/distill` | A skill draft for what this run learned — returned, never saved |
 | GET | `/v1/runs/{session_key}/stream` | The open session's steps, pushed as they happen (NDJSON, one per line) |

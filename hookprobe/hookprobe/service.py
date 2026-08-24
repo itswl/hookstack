@@ -630,6 +630,28 @@ class RunService:
                 best = run
         return best
 
+    def rule(self, session_key: str, ruling: str, ruled_by: str = "") -> Run | None:
+        """File a person's verdict on whether an investigation earned its bill.
+
+        The field, the arithmetic and the /v1/budget line have existed since the
+        ledger did; what never existed was a way to WRITE it, so `ruled_useful`
+        read 0 for every deployment and looked like apathy. It was not reachable.
+
+        `annotate` rather than `checkpoint`: a ruling is something recorded ABOUT
+        a run, arriving long after it finished, and must not move its clock — the
+        window arithmetic files a late ruling against the run's own window.
+        """
+        if ruling not in ("useful", "useless", ""):
+            raise ValueError("ruling must be 'useful', 'useless', or '' to clear it")
+        run = self.get(session_key)
+        if run is None:
+            return None
+        run.ruling = ruling
+        run.ruled_at = time.time() if ruling else None
+        run.ruled_by = ruled_by if ruling else ""
+        self._store.annotate(run)
+        return run
+
     def list_runs(self, limit: int = 100) -> list[Run]:
         return self._store.list_runs(limit=limit)
 

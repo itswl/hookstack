@@ -35,7 +35,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from hookprobe import __version__, events, library, ops, remediation
@@ -43,7 +43,7 @@ from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
 from hookprobe.retention import prune
-from hookprobe.runs import Run
+from hookprobe.runs import RUNNING, Run
 from hookprobe.seeds import seed_default_agents
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
@@ -117,6 +117,20 @@ def _summary(run: Run) -> dict[str, Any]:
     }
 
 
+def _is_operator_request(request: Request, payload: dict[str, Any]) -> bool:
+    """Whether a PERSON asked for this investigation rather than a rule.
+
+    Two ways to say so, because the header survives a proxy that rewrites bodies
+    and the body field survives a client that cannot set headers. Absence means
+    automated — the conservative direction, since a refused person can retry
+    with the header and an overspent budget cannot be un-spent.
+    """
+    header = str(request.headers.get("x-operator") or "").strip().lower()
+    if header in {"1", "true", "yes"}:
+        return True
+    return bool(payload.get("operator") is True)
+
+
 def create_app(settings: Settings, service: RunService) -> FastAPI:
     # The board's change signal. The service already knows when a run's state
     # moves; this is where that becomes something a browser can wait on.
@@ -167,15 +181,29 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
     @app.post("/hooks/agent", dependencies=[Depends(require_token)])
-    async def trigger(payload: dict[str, Any]) -> dict[str, Any]:
+    async def trigger(payload: dict[str, Any], request: Request) -> dict[str, Any]:
         """Start an investigation from a finished prompt (idempotent per sessionKey).
 
         A condition under a standing not_worth_it ruling is answered from its
         runbook at no cost; `{"force": true}` insists on a real engine run.
-        When HOOKPROBE_BUDGET_GATES_AGENT_DOOR is on, an exhausted budget
-        refuses new sessions here the same way the event door refuses them.
+
+        The budget breaker guards spending nobody asked for, and until recently it
+        inferred that from the DOOR: this one was "operator-driven" so it was
+        never gated. That stopped being true when a platform upstream began
+        forwarding matching alerts here automatically, so the door now carries
+        both a person's question and a rule's decision — and refusing the whole
+        door would refuse the person, which is the failure the original design
+        existed to avoid.
+
+        So HOOKPROBE_BUDGET_GATES_AGENT_DOOR arms the meter — and a caller that
+        is a PERSON can say so (`X-Operator` header, or `operator` in the body)
+        and be answered anyway. The default direction is deliberate: silence is
+        treated as automated, so an unmarked caller is refused rather than
+        spending freely. Arming the meter and then discovering a forgotten header
+        had uncapped it is the worse failure, and a person who is refused can
+        retry with the header, which a budget cannot do in reverse.
         """
-        if settings.budget_gates_agent_door:
+        if settings.budget_gates_agent_door and not _is_operator_request(request, payload):
             state = service.budget_state()
             if state is not None:
                 spent, limit = state
@@ -228,9 +256,56 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         )
 
     @app.get("/v1/runs", dependencies=[Depends(require_token)])
-    async def run_list(limit: int = 100) -> list[dict[str, Any]]:
-        """The board's run list, newest first."""
-        return [_summary(run) for run in service.list_runs(limit=limit)]
+    async def run_list(limit: int = 100, unruled: bool = False) -> list[dict[str, Any]]:
+        """Finished runs, newest first. `unruled=1` narrows to the ones awaiting a verdict.
+
+        The filter exists so "what do I still owe an opinion on" is one request
+        rather than a scan: the cost side of every investigation is measured to
+        the cent and the worth side is measured only where somebody rules.
+        """
+        runs = service.list_runs(limit=limit)
+        if unruled:
+            # A run still in flight has not earned a verdict yet.
+            runs = [run for run in runs if not run.ruling and run.status != RUNNING]
+        return [_summary(run) for run in runs]
+
+    @app.post("/v1/runs/rulings", dependencies=[Depends(require_token)])
+    async def file_run_rulings(payload: dict[str, Any]) -> dict[str, Any]:
+        """File verdicts on several investigations at once — was this RUN worth it.
+
+            {"useless": ["<sessionKey>", ...], "useful": [...], "by": "<optional id>"}
+
+        Nested under /v1/runs on purpose, because this service now has two kinds
+        of ruling pointing opposite ways: `hookprobe.rulings` is what the
+        investigator concludes about a CONDITION and files with the judge, and it
+        has teeth — a standing not_worth_it answers repeats from the runbook. A
+        run ruling is what a PERSON concludes about one investigation, and it
+        spends nothing and gates nothing; it only feeds the worth column of the
+        budget report. Sharing the bare word would have invited a future change
+        to give one the other's consequences.
+
+        Bulk because the friction was never the opinion, it was having to express
+        it eighteen times. This service's own notes record the outcome of the
+        per-item path — "nobody presses the buttons on the cards" — so the door
+        that finally exists takes a list.
+        """
+        by = str(payload.get("by") or "")
+        results: dict[str, Any] = {"filed": [], "unknown": [], "rejected": []}
+        for ruling in ("useful", "useless", "clear"):
+            keys = payload.get(ruling) or []
+            if not isinstance(keys, list):
+                results["rejected"].append({"ruling": ruling, "reason": "expected a list of session keys"})
+                continue
+            for key in keys:
+                try:
+                    run = service.rule(str(key), "" if ruling == "clear" else ruling, ruled_by=by)
+                except ValueError as exc:
+                    results["rejected"].append({"sessionKey": key, "reason": str(exc)})
+                    continue
+                (results["filed"] if run is not None else results["unknown"]).append(str(key))
+        investigations, useful, useless = service.window_rulings()
+        results["window"] = {"investigations": investigations, "useful": useful, "useless": useless}
+        return results
 
     @app.get("/v1/runs/{session_key}", dependencies=[Depends(require_token)])
     async def run_detail(session_key: str) -> dict[str, Any]:

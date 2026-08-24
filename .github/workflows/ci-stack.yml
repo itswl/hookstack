@@ -41,6 +41,15 @@ jobs:
         run: python3 scripts/assert_design.py
       - name: agent notes keep their shape
         run: python3 scripts/assert_agent_notes.py
+      # ESTATE_GUARD_REQUIRED makes a missing list a failure: an unset secret
+      # writes a zero-byte file, which would otherwise read as "clean".
+      - name: estate identifiers
+        env:
+          ESTATE_IDENTIFIERS: ${{ secrets.ESTATE_IDENTIFIERS }}
+          ESTATE_GUARD_REQUIRED: "1"
+        run: |
+          printf '%s' "$ESTATE_IDENTIFIERS" > .estate-identifiers
+          python3 scripts/assert_no_estate_identifiers.py
       # Not a dependency resolve — that would need a network round trip per
       # service and minutes per run, so it would end up scheduled and skipped.
       # This reads the two files and asks whether they still agree, which is

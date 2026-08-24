@@ -23,3 +23,9 @@ docker-compose.override.yml
 hookjudge/eval/dataset.jsonl
 hookjudge/eval/*.local.jsonl
 hookjudge/eval/results/
+
+# The estate identifier list is deliberately NOT in this public repo; CI reads it
+# from a secret. A .bak of it is the same leak with a different name, and
+# `git add -A` will stage one.
+.estate-identifiers
+.estate-identifiers.bak*

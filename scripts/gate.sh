@@ -30,6 +30,12 @@ printf '\033[1m════ stack ════\033[0m\n'
 python3 scripts/check-docs.py
 python3 scripts/assert_design.py
 python3 scripts/assert_agent_notes.py
+
+# This repository is public. Without .estate-identifiers this SKIPs; copy
+# .estate-identifiers.example and fill it in, or set ESTATE_PATTERNS_FILE. CI
+# writes the file from a repository secret with ESTATE_GUARD_REQUIRED=1, so a
+# missing list fails there instead of passing quietly.
+python3 scripts/assert_no_estate_identifiers.py
 # Runs here and not inside a component gate on purpose: it compares three
 # services' requirements.txt against their locks, and the component that forgot
 # to relock is often not the component being tested. Cheap and offline — it
