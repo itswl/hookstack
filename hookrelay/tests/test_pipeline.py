@@ -140,6 +140,29 @@ def test_a_judgment_stage_in_front_of_a_brain_says_so() -> None:
     )
     assert "payload: processed" in _warn_posture_mix(paired_return.pipeline, paired_return.channels)
 
+    # But a filter that only matches the brain's own RETURN — pinned to one
+    # source and keyed on the verdict's wake answer — is the brain deciding,
+    # not the pipe second-guessing it. Warning on that every boot would teach
+    # operators that this warning cries wolf.
+    enforcing_return = Config.from_dict(
+        {
+            **base,
+            "channels": [
+                {
+                    "name": "ops",
+                    "type": "feishu",
+                    "url": "https://feishu.example/hook",
+                    "options": {"payload": "processed"},
+                }
+            ],
+            "pipeline": [
+                {"type": "filter", "name": "quiet", "when": {"source": "grafana", "wake": "no"}},
+                "routes",
+            ],
+        }
+    )
+    assert _warn_posture_mix(enforcing_return.pipeline, enforcing_return.channels) == ""
+
     # Standalone: the judgment stages are exactly what this posture is for.
     standalone = Config.from_dict({**base, "pipeline": ["dedup", "silence", "routes"]})
     assert _warn_posture_mix(standalone.pipeline, standalone.channels) == ""

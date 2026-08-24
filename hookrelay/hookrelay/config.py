@@ -161,7 +161,25 @@ def _warn_posture_mix(pipeline: tuple[PipelineStage, ...], channels: dict[str, C
     the pipe overruling its operator. Returned as a string rather than logged
     here so from_dict stays free of side effects and a test can read it.
     """
-    judging = [stage.name for stage in pipeline if stage.type in _STANDALONE_STAGES]
+    def _downstream_of_the_brain(stage: PipelineStage) -> bool:
+        """A filter that only ever matches a brain's RETURN is the brain deciding.
+
+        The doctrine's objection is to a stage that changes what the brain is
+        counting — one that stands BETWEEN the alert and the brain. A filter
+        pinned to one source and matching on a field of the verdict (`wake`,
+        the judge's own answer) drops nothing the brain will ever see; it
+        enforces the brain's answer on the delivery leg. That is the paired
+        shape working, not a posture mix, and warning about it every boot
+        would teach operators to ignore this warning.
+        """
+        if stage.type != "filter":
+            return False
+        when = stage.options.get("when") or {}
+        return bool(when.get("source")) and "wake" in when
+
+    judging = [
+        stage.name for stage in pipeline if stage.type in _STANDALONE_STAGES and not _downstream_of_the_brain(stage)
+    ]
     if not judging:
         return ""
     reasons = []
