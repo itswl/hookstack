@@ -155,6 +155,7 @@ class RunService:
             run_id=uuid.uuid4().hex[:12],
             current_message=message,
             model=self._settings.model,
+            model_endpoint=self._settings.model_endpoint,
             origin=origin,
         )
         run.meta = dict(payload.get("_meta") or {})
@@ -558,6 +559,7 @@ class RunService:
             run_id=uuid.uuid4().hex[:12],
             current_message=str(payload.get("message") or ""),
             model=self._settings.model,
+            model_endpoint=self._settings.model_endpoint,
             origin=origin,
         )
         run.meta = dict(payload.get("_meta") or {})

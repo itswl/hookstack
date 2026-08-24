@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from hookprobe.settings import _endpoint_host
 
 
@@ -44,3 +46,40 @@ def test_the_endpoint_is_stamped_on_the_run_not_resolved_at_display_time(tmp_pat
     assert read_old is not None and read_new is not None
     assert read_old.model == read_new.model, "the requested name is the same, which is the whole problem"
     assert (read_old.model_endpoint, read_new.model_endpoint) == ("api.deepseek.com", "open.bigmodel.cn")
+
+
+def test_a_started_run_carries_the_endpoint_from_settings(tmp_path) -> None:
+    """Through the real start path, not by setting the field by hand.
+
+    The first version of this file tested persistence only — build a Run, assign
+    the field, read it back — and passed while the wiring was broken. Production
+    then wrote `model_endpoint: ""` on a run whose `model` was set by the line
+    directly above the one I had added: the backfill I patched runs on RESUME,
+    and a new run gets its model from the `Run(...)` constructor, which I had not
+    touched. A test that constructs the object cannot see that.
+    """
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    async def settle(service, key, deadline=3.0):
+        """Local rather than imported: wait_finished lives in another test module,
+        and a test importing a sibling test is a dependency nobody expects."""
+        loop_end = asyncio.get_running_loop().time() + deadline
+        while asyncio.get_running_loop().time() < loop_end:
+            run = service.get(key)
+            if run is not None and run.finished_at:
+                return run
+            await asyncio.sleep(0.01)
+        raise AssertionError(f"run {key} never finished")
+
+    async def scenario():
+        settings = make_settings(tmp_path, model_endpoint="open.bigmodel.cn")
+        service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+        service.start({"sessionKey": "s1", "message": "hello"})
+        return await settle(service, "s1")
+
+    run = asyncio.run(scenario())
+
+    assert run.model == "claude-opus-5", "the name asked for"
+    assert run.model_endpoint == "open.bigmodel.cn", "and where it was asked"
