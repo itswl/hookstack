@@ -42,7 +42,7 @@ docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shad
 if [ "${SKIP_EVAL:-}" = "1" ]; then
   echo "eval gate SKIPPED by SKIP_EVAL=1 — the prompt ships unreplayed"
 elif [ -f hookjudge/eval/dataset.jsonl ]; then
-  docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml     run --rm --no-deps     -v "$ROOT/hookjudge/scripts:/eval-scripts:ro"     -v "$ROOT/hookjudge/eval:/eval-data:ro"     -e PYTHONPATH=/app     hookjudge python3 /eval-scripts/eval.py --dataset /eval-data/dataset.jsonl --route ai --gate
+  docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml     run --rm --no-deps     -v "$ROOT/hookjudge/scripts:/eval-scripts:ro"     -v "$ROOT/hookjudge/eval:/eval-data:ro"     -e PYTHONPATH=/app     hookjudge python3 /eval-scripts/eval.py --dataset /eval-data/dataset.jsonl --route ai --gate --votes 3
 else
   echo "eval gate skipped: no hookjudge/eval/dataset.jsonl on this host (see hookjudge/eval/README.md)"
 fi

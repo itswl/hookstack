@@ -109,6 +109,7 @@ async def judge_one(client: httpx.AsyncClient, settings: Settings, row: dict[str
     over_delivered = wake_scored and want_wake == ["no"] and got_wake != "no"
     return {
         "id": row.get("id", ""),
+        "got": f"{got_importance}/{got_wake or '-'}",
         "importance_ok": got_importance in want_importances,
         "event_type_ok": (verdict.event_type or "").lower() == (expect.get("event_type") or "").lower(),
         "wake_scored": wake_scored,
@@ -198,6 +199,12 @@ async def main() -> int:
     # 2026-08-24 the pipe drops the card on that answer). Everything else is
     # reported, argued about, and allowed through; these two stop a deploy.
     parser.add_argument("--gate", action="store_true")
+    # Replays per case. Judgement on borderline instances is stochastic: the
+    # first live gate flipped red/green on identical input, and a flaky gate
+    # teaches the SKIP_EVAL reflex faster than any real regression would. With
+    # N votes a case only fails on the MAJORITY failing — variance is absorbed,
+    # a real regression still trips every vote.
+    parser.add_argument("--votes", type=int, default=1)
     args = parser.parse_args()
 
     if not args.dataset.is_file():
@@ -219,8 +226,26 @@ async def main() -> int:
     async with httpx.AsyncClient() as client:
 
         async def run(row: dict[str, Any]) -> dict[str, Any]:
-            async with gate:
-                return await judge_one(client, settings, row, args.route)
+            votes = []
+            for _ in range(max(1, args.votes)):
+                async with gate:
+                    votes.append(await judge_one(client, settings, row, args.route))
+            if len(votes) == 1:
+                return votes[0]
+            # Majority per axis; ties fail toward reporting the error, so an
+            # even split still surfaces rather than hiding behind the coin.
+            need = len(votes) // 2 + 1
+            merged = dict(votes[0])
+            for key in ("importance_ok", "event_type_ok", "wake_ok"):
+                merged[key] = sum(v[key] for v in votes) >= need
+            for key in ("false_quiet", "over_delivered_wake"):
+                merged[key] = sum(v[key] for v in votes) >= need
+            distances = sorted(v["severity_distance"] for v in votes)
+            merged["severity_distance"] = distances[len(distances) // 2]
+            merged["got"] = [v.get("got", "") for v in votes]
+            merged["cost"] = sum(v["cost"] for v in votes)
+            merged["tokens"] = sum(v["tokens"] for v in votes)
+            return merged
 
         rows = await asyncio.gather(*(run(row) for row in cases))
 
@@ -242,6 +267,10 @@ async def main() -> int:
         args.out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"\nwrote {args.out}")
     if args.gate and (report["missed"] or report["false_quiet"]):
+        bad = set(report["missed_ids"]) | set(report["false_quiet_ids"])
+        for r in rows:
+            if r["id"] in bad:
+                print(f"  {r['id']}: answered {r['got']}", file=sys.stderr)
         print(
             f"\nGATE RED: missed={report['missed']} {report['missed_ids']}"
             f" false_quiet={report['false_quiet']} {report['false_quiet_ids']}\n"
