@@ -10,6 +10,10 @@
 #   docker exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 #   docker exec caddy caddy reload   --config /etc/caddy/Caddyfile --adapter caddyfile
 #
+# The `*.internal.example` hostnames and the /srv path are PLACEHOLDERS — this is
+# a public repository. Substitute the real ones when appending to the live file;
+# scripts/assert_no_estate_identifiers.py fails the gate if they are committed.
+#
 # `:80` is deliberate and NOT a missing TLS config. That deployment sits behind a
 # proxied Cloudflare record, so the browser gets HTTPS and Caddy is the origin.
 # Removing `:80` makes Caddy try ACME for a hostname it does not control the
