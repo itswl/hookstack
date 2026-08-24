@@ -164,6 +164,13 @@ class Settings:
     budget_usd: float
     # Window the spend ceiling is measured over.
     budget_window_hours: float
+    # Whether the breaker above also refuses NEW sessions on /hooks/agent. The
+    # door was declared operator-driven and left ungated — true when a person
+    # types the trigger, false on the deployment where a platform fires it from
+    # webhooks: that door was the one actually spending, unguarded. Off by
+    # default because a human's explicit request should not bounce off a meter;
+    # turn it on where the caller is a machine.
+    budget_gates_agent_door: bool
 
     # How long a standing not_worth_it ruling may keep answering a condition
     # from its runbook instead of starting a paid engine run. The weekly patrol
@@ -232,6 +239,7 @@ class Settings:
             escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
             budget_usd=max(0.0, _float("HOOKPROBE_BUDGET_USD", 0.0)),
             budget_window_hours=max(0.1, _float("HOOKPROBE_BUDGET_WINDOW_HOURS", 24.0)),
+            budget_gates_agent_door=_flag("HOOKPROBE_BUDGET_GATES_AGENT_DOOR", False),
             retention_days=max(0, _int("HOOKPROBE_RETENTION_DAYS", 0)),
             alarm_url=os.environ.get("HOOKPROBE_ALARM_URL", "").strip(),
             alarm_min_interval_seconds=_int("HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS", 600),

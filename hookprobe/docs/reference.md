@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (35)
+## Environment (36)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_RULING_URL` | *(empty)* | Where a retrospective condition ruling goes, and the credential for that ONE door |
 | `HOOKPROBE_RULING_SECRET` | *(empty)* | Signs the rulings this service posts to the judge |
 | `HOOKPROBE_MEMORY_AUTO_APPLY` | `True` | Apply a suggested environment fact without waiting for a person, when its SHAPE cannot act (hookprobe.suggestions._UNSAFE) |
+| `HOOKPROBE_BUDGET_GATES_AGENT_DOOR` | `False` | Whether the breaker above also refuses NEW sessions on /hooks/agent |
 | `HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS` | `600` | Floor between two alarm sends, so a storm cannot page repeatedly |
 | `HOOKPROBE_HOST` | `0.0.0.0` | Address the service binds to |
 | `HOOKPROBE_PORT` | `8088` | Port the service listens on |
@@ -51,49 +52,49 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 
 | method | path | what it does |
 | --- | --- | --- |
-| GET | `/` | — |
-| GET | `/healthz` | — |
-| POST | `/hooks/action` | — |
+| GET | `/` | Redirects to the board |
+| GET | `/healthz` | Liveness only — the engine is not consulted, so a stuck run cannot hide a live process |
+| POST | `/hooks/action` | A card press forwarded by the pipe: accept a memory line, rule a run useful or useless — signed, idempotent, and answered with what changed |
 | POST | `/hooks/agent` | Start an investigation from a finished prompt (idempotent per sessionKey) |
-| POST | `/hooks/event` | — |
+| POST | `/hooks/event` | The pipe's door: a signed alert either starts a paid investigation, coalesces into one already running, or is declined by level, budget or a standing ruling — every decline says wh… |
 | GET | `/metrics` | Prometheus text format, rendered by hand — three gauges are not a client-library dependency |
 | POST | `/sessions/{session_key}/continue` | Follow-up turn in a finished investigation; poll /final for the answer |
-| GET | `/sessions/{session_key}/final` | — |
+| GET | `/sessions/{session_key}/final` | Poll for the finished report: 202 while running, then the full text once |
 | POST | `/sessions/{session_key}/stop` | Cancel the in-flight turn; it settles as a failed turn within a poll |
-| GET | `/ui` | — |
-| GET | `/v1/agents` | — |
-| DELETE | `/v1/agents/{name}` | — |
-| GET | `/v1/agents/{name}` | — |
-| PUT | `/v1/agents/{name}` | — |
+| GET | `/ui` | The operator board |
+| GET | `/v1/agents` | The subagent roles the engine is offered |
+| DELETE | `/v1/agents/{name}` | Remove a role; the engine stops being offered it on the next run |
+| GET | `/v1/agents/{name}` | One role's definition, whole |
+| PUT | `/v1/agents/{name}` | Create or replace a role definition, size-checked and atomic |
 | GET | `/v1/audit` | The flight recorder, newest FIRST |
-| GET | `/v1/budget` | — |
+| GET | `/v1/budget` | The breaker's arithmetic: window spend, ceiling, cache ratio and the worth line |
 | GET | `/v1/config` | The operational knobs, redacted: secret VALUES never appear — booleans say whether they are set |
 | GET | `/v1/live` | The session list's wake-up line, the same shape the other two boards use |
 | GET | `/v1/mcp` | What the next run would load — read fresh from the config file |
-| GET | `/v1/memory` | — |
-| PUT | `/v1/memory` | — |
+| GET | `/v1/memory` | CLAUDE.md as the engine will read it, plus its path |
+| PUT | `/v1/memory` | Replace CLAUDE.md whole, size-checked and atomic — the memory page's save button |
 | GET | `/v1/memory/suggestions` | Facts investigations proposed for the environment memory |
-| POST | `/v1/memory/suggestions/{suggestion_id}/accept` | — |
-| POST | `/v1/memory/suggestions/{suggestion_id}/dismiss` | — |
-| GET | `/v1/remediations` | — |
+| POST | `/v1/memory/suggestions/{suggestion_id}/accept` | Adopt one queued line into CLAUDE.md under its own heading |
+| POST | `/v1/memory/suggestions/{suggestion_id}/dismiss` | Drop one queued line; nothing is written to memory |
+| GET | `/v1/remediations` | Open remediation proposals, newest first |
 | POST | `/v1/remediations/{proposal_id}/approve` | The one click that makes anything run |
-| POST | `/v1/remediations/{proposal_id}/reject` | — |
-| GET | `/v1/runs` | — |
-| GET | `/v1/runs/{session_key}` | — |
+| POST | `/v1/remediations/{proposal_id}/reject` | Refuse a parked proposal; it keeps its file, marked rejected |
+| GET | `/v1/runs` | The board's run list, newest first |
+| GET | `/v1/runs/{session_key}` | One run whole: turns, meta, ruling, cost |
 | POST | `/v1/runs/{session_key}/distill` | A skill draft for what this run learned — returned, never saved |
 | GET | `/v1/runs/{session_key}/stream` | The open session's steps, pushed as they happen (NDJSON, one per line) |
-| GET | `/v1/skills` | — |
+| GET | `/v1/skills` | Every runbook with its review state and case count, newest first |
 | GET | `/v1/skills/export` | Runbooks packaged to LEAVE this deployment — see hookprobe.export |
 | DELETE | `/v1/skills/{name}` | Only the project layer is deletable |
-| GET | `/v1/skills/{name}` | — |
+| GET | `/v1/skills/{name}` | One runbook's manifest, whole |
 | PUT | `/v1/skills/{name}` | Writes always land in the project layer: editing a read-only user-layer skill saves a project copy that shadows it from then on |
 | GET | `/v1/skills/{name}/history` | Every version a write displaced, newest first — the undo the review page stands on |
-| GET | `/v1/skills/{name}/history/{stamp}` | — |
+| GET | `/v1/skills/{name}/history/{stamp}` | One archived version of a runbook, as it was |
 | POST | `/v1/skills/{name}/history/{stamp}/restore` | Put a displaced version back, in one call |
 | GET | `/v1/skills/{name}/origin` | The full provenance record — every revision, not just the last one |
 | GET | `/v1/skills/{name}/proposal` | The consolidation draft awaiting review, beside the manifest it would replace |
 | POST | `/v1/skills/{name}/proposal/approve` | The consolidation becomes the manifest — through the same door every write uses: the displaced version is snapshotted first, and approving IS the review, so the runbook flips to re… |
 | POST | `/v1/skills/{name}/proposal/reject` | Drop the draft, note that somebody did — the manifest is untouched and the threshold will re-arm as cases keep arriving |
 | POST | `/v1/skills/{name}/review` | Mark a runbook read without changing a character of it |
-| GET | `/v1/system-prompt` | — |
-| PUT | `/v1/system-prompt` | — |
+| GET | `/v1/system-prompt` | The appended methodology file as the engine will read it |
+| PUT | `/v1/system-prompt` | Replace the appended methodology, size-checked and atomic — read fresh at the next run |

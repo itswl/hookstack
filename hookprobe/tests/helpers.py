@@ -26,6 +26,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "system_prompt_append": None,
         "agents_config": None,
         "repeat_reminder_at": 3,
+        "budget_gates_agent_door": False,
         "ruling_ttl_days": 14,
         "ruling_reverify_days": 7,
         "bash_timeout_ms": 120000,

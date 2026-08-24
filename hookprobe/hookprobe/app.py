@@ -172,7 +172,18 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
         A condition under a standing not_worth_it ruling is answered from its
         runbook at no cost; `{"force": true}` insists on a real engine run.
+        When HOOKPROBE_BUDGET_GATES_AGENT_DOOR is on, an exhausted budget
+        refuses new sessions here the same way the event door refuses them.
         """
+        if settings.budget_gates_agent_door:
+            state = service.budget_state()
+            if state is not None:
+                spent, limit = state
+                # Existing sessions stay reachable: a redelivery or a poll of an
+                # already-funded run must never bounce off the meter.
+                if spent >= limit and service.get(str(payload.get("sessionKey") or "")) is None:
+                    run = service.refuse_for_budget(payload, origin="", spent=spent)
+                    return {"runId": run.run_id, "sessionKey": run.session_key, "status": "refused"}
         try:
             run = service.start(payload)
         except ValueError as exc:
@@ -181,6 +192,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
     @app.get("/sessions/{session_key}/final", dependencies=[Depends(require_token)])
     async def final(session_key: str) -> JSONResponse:
+        """Poll for the finished report: 202 while running, then the full text once."""
         run = service.get(session_key)
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -217,10 +229,12 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
     @app.get("/v1/runs", dependencies=[Depends(require_token)])
     async def run_list(limit: int = 100) -> list[dict[str, Any]]:
+        """The board's run list, newest first."""
         return [_summary(run) for run in service.list_runs(limit=limit)]
 
     @app.get("/v1/runs/{session_key}", dependencies=[Depends(require_token)])
     async def run_detail(session_key: str) -> dict[str, Any]:
+        """One run whole: turns, meta, ruling, cost."""
         run = service.get(session_key)
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -308,6 +322,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
     @app.get("/v1/remediations", dependencies=[Depends(require_token)])
     async def remediations_list() -> dict[str, Any]:
+        """Open remediation proposals, newest first."""
         return {"proposals": remediation.list_all(settings.workdir)}
 
     @app.post("/v1/remediations/{proposal_id}/approve", dependencies=[Depends(require_token)])
@@ -327,6 +342,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
     @app.post("/v1/remediations/{proposal_id}/reject", dependencies=[Depends(require_token)])
     async def remediation_reject(proposal_id: str) -> dict[str, Any]:
+        """Refuse a parked proposal; it keeps its file, marked rejected."""
         try:
             row = service.reject_remediation(proposal_id)
         except LookupError as exc:
@@ -339,10 +355,12 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     # bearer token, so serving the markup unauthenticated is safe.
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
+        """Redirects to the board."""
         return RedirectResponse("/ui")
 
     @app.get("/ui", include_in_schema=False)
     async def ui() -> HTMLResponse:
+        """The operator board."""
         return HTMLResponse(_UI_PAGE.read_text(encoding="utf-8"))
 
     # The rest of the surface, grouped by what it is about. The event door takes

@@ -653,3 +653,43 @@ def test_a_refire_with_the_budget_gone_stands_on_the_delivered_report(tmp_path) 
         assert "previous report stands" in refire["reason"]
         assert refire["sessionKey"] == first["sessionKey"]
         assert engine.calls == 1
+
+
+def test_agent_door_refuses_over_budget_only_when_told_to(tmp_path) -> None:
+    """The breaker's docstring says it guards 'the only path that spends money
+    without a human asking' — and on the deployment this flag was written for,
+    /hooks/agent IS such a path: a platform fires it from webhooks, $7 a day,
+    ungated. Off by default (a person's explicit trigger should not bounce off
+    a meter); the flag says which kind of caller a deployment has."""
+    trigger = {"message": "investigate", "sessionKey": "hook:x:1"}
+
+    # Flag off: exhausted budget, the door still starts the run.
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "off" / "results")
+    _seed_spend(store, 1.5, time.time(), "old:funded")
+    with _budget_client(tmp_path / "off", engine, store, budget_usd=1.0) as client:
+        assert "runId" in client.post("/hooks/agent", json=trigger, headers=AUTH).json()
+        deadline = time.monotonic() + 3.0
+        while engine.calls == 0 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert engine.calls == 1
+
+    # Flag on: refused as a report-shaped run, engine never called.
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "on" / "results")
+    _seed_spend(store, 1.5, time.time(), "old:funded")
+    with _budget_client(tmp_path / "on", engine, store, budget_usd=1.0, budget_gates_agent_door=True) as client:
+        refused = client.post("/hooks/agent", json=trigger, headers=AUTH).json()
+        assert refused["status"] == "refused"
+        assert engine.calls == 0
+        detail = client.get(f"/v1/runs/{refused['sessionKey']}", headers=AUTH).json()
+        assert "Budget breaker open" in detail["text"] and detail["cost_usd"] == 0.0
+
+        # An already-funded session stays reachable through the same door.
+        assert (
+            client.post("/hooks/agent", json={"message": "m", "sessionKey": "old:funded"}, headers=AUTH).json()[
+                "sessionKey"
+            ]
+            == "old:funded"
+        )
+        assert engine.calls == 0, "idempotent return of an existing run, not a new spend"
