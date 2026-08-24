@@ -80,10 +80,20 @@ HOOKJUDGE_AI_MODEL=glm-5-turbo .venv/bin/python scripts/eval.py --route ai --col
 .venv/bin/python scripts/eval_queue.py --opinions /tmp/op-*.json --ww-evidence /tmp/ww-evidence.json
 ```
 
-Measured on the real corpus: **5 rules genuinely contested** (two severity levels
-apart), carrying 12% of the volume; 16 unanimous across all three cheap judges; 11
-split only between neighbouring levels. So the afternoon is five careful
-judgements and a batch of confirmations, not thirty-two cold reads.
+### What happened when this was actually measured
+
+At one sample per judge the queue read: **5 rules contested, 12% of the volume**.
+At three samples per judge it read **1 contested rule, carrying 0%** — and four of
+the five had been one judge disagreeing with itself.
+
+Same model, same input, three draws: **11 of 32 rows flipped for each judge, and
+19 of 32 (59%) flipped for at least one.** So the disagreement axis, once
+denoised, located nothing on this corpus. It is measuring the instrument.
+
+That is a real result, not a broken tool, and the tool now says it: above 20%
+instability it refuses to stand behind its own ordering and points at `--by
+volume` instead. What survives as a prioritiser is what does not move — how much
+traffic a rule carries, and whether an investigator looked at it.
 
 **And a warning the numbers earned.** The two largest rules — 76% of the corpus
 between them — are unanimous `high` across all three cheap judges, while the
@@ -92,6 +102,20 @@ cheap judgements is agreement, not truth, and agreement between things that shar
 a training distribution is weaker than it looks. That is why the investigator's
 column is reported and never voted: folding it into a majority would have thrown
 away the one opinion that disagreed for a reason.
+
+Three measurements from one afternoon, and together they are the reason an
+agreement rate cannot be a quality metric:
+
+| measurement | number |
+| --- | --- |
+| same model, same input, three draws | 11 of 32 rows flip per judge; 59% flip for at least one |
+| the two largest rules (76% of volume) | three cheap judges unanimously `high`; the investigator says mostly `medium`/`low` |
+| WebhookWise's own ai eval, 17 labelled cases | 13/17 exact, high recall 0.75 — the keyword rules get 17/17 |
+
+The first says cheap judgements are unsteady. The second says that where they are
+steadiest they can still be wrong together. The third says the model loses to
+keywords on the cases kept because they had bitten before. A number built out of
+judges agreeing with each other is measuring none of that.
 
 If this corpus is ever published, every row needs its label's provenance
 (`outcome` / `investigator` / `adjudicated` / `unreviewed`) beside it. A benchmark

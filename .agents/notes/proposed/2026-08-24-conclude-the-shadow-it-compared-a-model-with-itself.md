@@ -83,3 +83,24 @@ add the config assertion the first era lacked (the two sides MUST differ, or
 the run refuses), and let it accumulate — the fan-out is already wired and
 the marginal cost is cents. Proposed against because the eval gate already
 guards the quality axis with labels, which agreement never had.
+
+A cost the retirement carries, added from the labelling side (2026-08-24): the
+B judge is currently the THIRD independent opinion in
+`hookjudge/scripts/eval_queue.py`, which orders the unlabelled corpus by where
+independent judgements disagree. Retire it and the queue keeps two sources — the
+free rule route and one model — and loses the signal it was built on. Rule route
+versus model is not two opinions about the same question; those two disagree
+almost by construction, so nearly every row would read "contested" and the
+ordering would stop discriminating.
+
+The available substitute is raising `--votes` and using same-model
+self-consistency as the second axis. It is not equivalent, and the difference is
+exactly the one this note is about: self-consistency measures whether the
+INSTRUMENT is steady, not whether two different judgements about the alert
+diverge. Measured this afternoon, that instrument is 77-83% steady, which is why
+the queue now separates "judges stably disagree" from "one judge flipped" — the
+second is a measurement problem and belongs in a different queue.
+
+So the retirement is defensible and the cost is real: it trades a diversity axis
+for a stability axis. If it goes ahead, the labelling queue should say in its own
+output that it is down to two sources, rather than quietly ranking on less.

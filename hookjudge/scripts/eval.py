@@ -266,6 +266,18 @@ async def main() -> int:
                 merged[key] = sum(v[key] for v in votes) >= need
             distances = sorted(v["severity_distance"] for v in votes)
             merged["severity_distance"] = distances[len(distances) // 2]
+            # The raw verdict needs the MODE, not vote[0] — keeping the first
+            # sample here would have let --collect report one draw while claiming
+            # to be a majority of three.
+            seen = [v.get("importance", "") for v in votes]
+            merged["importance"] = max(set(seen), key=seen.count)
+            # And whether the judge agreed with ITSELF. Measured on the shadow
+            # deployment, same model on the same input: 83% and 77%. So a row
+            # where two judges "disagree" may be one judge's coin flip, and a
+            # queue that cannot tell those apart sends a person to adjudicate
+            # noise. Stability is reported so the queue can separate them.
+            merged["stable"] = len(set(seen)) == 1
+            merged["samples"] = seen
             merged["got"] = [v.get("got", "") for v in votes]
             merged["cost"] = sum(v["cost"] for v in votes)
             merged["tokens"] = sum(v["tokens"] for v in votes)
@@ -279,6 +291,7 @@ async def main() -> int:
         # missed/over_escalated, because there is no label to compare against.
         opinions = {
             "collected": True,
+            "votes": max(1, args.votes),
             "route": args.route,
             "model": settings.ai_model if args.route == "ai" else "",
             "rows": {
@@ -286,6 +299,9 @@ async def main() -> int:
                     "importance": row.get("importance") or "",
                     "wake": row.get("wake") or "",
                     "degraded": row.get("degraded") or "",
+                    # True when one sample, or when every sample agreed.
+                    "stable": bool(row.get("stable", True)),
+                    "samples": row.get("samples") or [row.get("importance") or ""],
                 }
                 for n, row in enumerate(rows)
             },

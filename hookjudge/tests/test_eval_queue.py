@@ -99,3 +99,52 @@ def test_the_contested_share_is_of_volume_not_of_rules() -> None:
 
     assert summary["contested"] == 1
     assert summary["contested_volume_share"] == 0.1
+
+
+def test_a_judge_flipping_is_not_a_contested_row() -> None:
+    """The distinction the shadow numbers forced.
+
+    Same model, same input, measured on 386 shadow samples: 83% and 77%
+    self-agreement. So roughly one opinion in five is a coin flip, and a row that
+    looks two levels apart may be ONE judge flipping rather than two judges
+    differing. Sending a person to adjudicate that is sending them to adjudicate
+    noise, and they will come back distrusting the queue.
+    """
+    dataset = [{"id": "flippy", "seen": 100}, {"id": "steady", "seen": 100}]
+    a = {
+        "collected": True,
+        "model": "a",
+        "rows": {
+            "flippy": {"importance": "low", "stable": False},
+            "steady": {"importance": "low", "stable": True},
+        },
+    }
+    b = {
+        "collected": True,
+        "model": "b",
+        "rows": {
+            "flippy": {"importance": "critical", "stable": True},
+            "steady": {"importance": "critical", "stable": True},
+        },
+    }
+
+    queue = build(dataset, {"a": a, "b": b}, {})
+    rows = {r["id"]: r for r in queue["rows"]}
+
+    assert rows["flippy"]["spread"] == 3 and rows["flippy"]["unstable"] == ["a"]
+    assert rows["steady"]["spread"] == 3 and rows["steady"]["unstable"] == []
+    assert queue["summary"]["contested"] == 1, "only the steady disagreement is worth an afternoon"
+    assert queue["summary"]["wide_but_unstable"] == 1
+
+
+def test_stability_defaults_to_true_for_a_single_sample() -> None:
+    """One vote cannot be inconsistent with itself, and treating a missing flag as
+    unstable would empty the queue for anyone who ran --collect without --votes."""
+    dataset = [{"id": "one-shot", "seen": 9}]
+    a = {"collected": True, "model": "a", "rows": {"one-shot": {"importance": "low"}}}
+    b = {"collected": True, "model": "b", "rows": {"one-shot": {"importance": "critical"}}}
+
+    queue = build(dataset, {"a": a, "b": b}, {})
+
+    assert queue["rows"][0]["unstable"] == []
+    assert queue["summary"]["contested"] == 1
