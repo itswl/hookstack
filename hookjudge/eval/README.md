@@ -62,6 +62,42 @@ For each row: read the alert, fix `expect`, write down in `note` why that
 severity is right, and set `"reviewed": true`. The note is the part worth doing
 carefully — it is what makes a disagreement six months from now resolvable.
 
+### Do not read all 32 cold
+
+Several independent processes already have an opinion. Collect them, then work the
+rows where they disagree:
+
+```bash
+# One opinion per row, INCLUDING unreviewed ones. Not a score: there is no label
+# to score against yet, and the output shape is deliberately different.
+.venv/bin/python scripts/eval.py --route rule --collect --out /tmp/op-rule.json
+HOOKJUDGE_AI_MODEL=glm-5.3     .venv/bin/python scripts/eval.py --route ai --collect --concurrency 2 --out /tmp/op-a.json
+HOOKJUDGE_AI_MODEL=glm-5-turbo .venv/bin/python scripts/eval.py --route ai --collect --concurrency 2 --out /tmp/op-b.json
+
+# WebhookWise's side: outcome facts, and the investigator's verdict where one exists
+#   (in the WW checkout) python -m scripts.ops.label_evidence --json > /tmp/ww-evidence.json
+
+.venv/bin/python scripts/eval_queue.py --opinions /tmp/op-*.json --ww-evidence /tmp/ww-evidence.json
+```
+
+Measured on the real corpus: **5 rules genuinely contested** (two severity levels
+apart), carrying 12% of the volume; 16 unanimous across all three cheap judges; 11
+split only between neighbouring levels. So the afternoon is five careful
+judgements and a batch of confirmations, not thirty-two cold reads.
+
+**And a warning the numbers earned.** The two largest rules — 76% of the corpus
+between them — are unanimous `high` across all three cheap judges, while the
+investigator's reports on them say mostly `medium` and `low`. Unanimity among
+cheap judgements is agreement, not truth, and agreement between things that share
+a training distribution is weaker than it looks. That is why the investigator's
+column is reported and never voted: folding it into a majority would have thrown
+away the one opinion that disagreed for a reason.
+
+If this corpus is ever published, every row needs its label's provenance
+(`outcome` / `investigator` / `adjudicated` / `unreviewed`) beside it. A benchmark
+that honestly says where its labels came from can be checked; one that claims
+uniform gold labels can only be believed.
+
 ## Running
 
 ```bash

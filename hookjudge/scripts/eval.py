@@ -51,12 +51,17 @@ def _accepted(value: Any) -> list[str]:
     return [str(v).lower() for v in value]
 
 
-def load_cases(path: Path) -> tuple[list[dict[str, Any]], int]:
+def load_cases(path: Path, *, include_unreviewed: bool = False) -> tuple[list[dict[str, Any]], int]:
     """Labelled cases, plus how many are still waiting for a human.
 
     Rows imported from a live ledger arrive with the current model's own verdict
     pre-filled as a suggestion. Scoring against those would be the model grading
     its own homework, so they only count once someone has set reviewed: true.
+
+    `include_unreviewed` is for COLLECTING opinions rather than scoring against
+    labels — the only way to find out where independent judges disagree on a row
+    nobody has labelled yet, which is what decides where a human should spend the
+    afternoon. It must never be reachable from the scoring path; see --collect.
     """
     cases, unreviewed = [], 0
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -66,7 +71,8 @@ def load_cases(path: Path) -> tuple[list[dict[str, Any]], int]:
         row = json.loads(line)
         if not row.get("reviewed"):
             unreviewed += 1
-            continue
+            if not include_unreviewed:
+                continue
         cases.append(row)
     return cases, unreviewed
 
@@ -115,6 +121,11 @@ async def judge_one(client: httpx.AsyncClient, settings: Settings, row: dict[str
     return {
         "id": row.get("id", ""),
         "got": f"{got_importance}/{got_wake or '-'}",
+        # The raw verdict too, not only whether it matched. --collect needs the
+        # opinion itself, and parsing it back out of "got" would be a second
+        # encoding of the same fact.
+        "importance": got_importance,
+        "wake": got_wake,
         "importance_ok": got_importance in want_importances,
         "event_type_ok": (verdict.event_type or "").lower() == (expect.get("event_type") or "").lower(),
         "wake_scored": wake_scored,
@@ -210,12 +221,20 @@ async def main() -> int:
     # N votes a case only fails on the MAJORITY failing — variance is absorbed,
     # a real regression still trips every vote.
     parser.add_argument("--votes", type=int, default=1)
+    # Opinions instead of a score, for rows nobody has labelled yet: the only way
+    # to find where independent judges disagree, which is what decides where an
+    # afternoon of labelling goes. Never reachable from the scoring path.
+    parser.add_argument(
+        "--collect",
+        action="store_true",
+        help="collect one opinion per row (including unreviewed) instead of scoring against labels",
+    )
     args = parser.parse_args()
 
     if not args.dataset.is_file():
         print(f"no dataset at {args.dataset} — see eval/README.md", file=sys.stderr)
         return 2
-    cases, unreviewed = load_cases(args.dataset)
+    cases, unreviewed = load_cases(args.dataset, include_unreviewed=args.collect)
     if args.limit:
         cases = cases[: args.limit]
     if not cases:
@@ -253,6 +272,29 @@ async def main() -> int:
             return merged
 
         rows = await asyncio.gather(*(run(row) for row in cases))
+
+    if args.collect:
+        # Opinions, not a score. Deliberately a different shape from a report, so
+        # nothing downstream can mistake one for the other: no accuracy, no
+        # missed/over_escalated, because there is no label to compare against.
+        opinions = {
+            "collected": True,
+            "route": args.route,
+            "model": settings.ai_model if args.route == "ai" else "",
+            "rows": {
+                str(row.get("id") or n): {
+                    "importance": row.get("importance") or "",
+                    "wake": row.get("wake") or "",
+                    "degraded": row.get("degraded") or "",
+                }
+                for n, row in enumerate(rows)
+            },
+        }
+        print(json.dumps(opinions, indent=2, ensure_ascii=False))
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(json.dumps(opinions, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return 0
 
     report = summarize(list(rows), unreviewed, args.route)
     print(json.dumps(report, indent=2, ensure_ascii=False))
