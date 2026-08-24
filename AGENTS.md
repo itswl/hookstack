@@ -9,6 +9,11 @@ law — where the two disagree, the checks are right.
 Run `bash scripts/gate.sh` as its own step and READ the verdict before any
 commit or push. A chained `gate.sh; git commit && git push` once shipped a red
 gate to CI and production in one line: `&&` reads exit codes, not reports.
+The pipeline variant claimed its own incident the same week:
+`gate.sh | tail -2 && git push` pushed a red gate because a pipeline's exit
+code is the LAST command's — `tail` succeeded, the estate guard's catch never
+reached the `&&`, and a real rule name briefly hit the public repo. If an exit
+code is going to decide anything, nothing may sit between it and the decision.
 Related trap, same day: `git checkout <file>` restores the COMMITTED version
 and silently destroys uncommitted edits — twice.
 
