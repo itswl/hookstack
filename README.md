@@ -8,6 +8,29 @@ Two services that split one job in half, and an investigator for the alerts
 where a verdict is not enough. Narrative overview with screenshots of all three:
 [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 
+## What it optimizes
+
+Not response time, and not breadth of integrations — the two scarce resources
+an alert stream actually spends: **a person's attention** and **the model
+bill**. Every card and every paid call lands in a ledger, and the system's job
+is to spend both only where they change an outcome, then prove it:
+
+- a verdict answers *does a person need to act now* — and delivery routes on
+  the answer, so a "no" never interrupts anyone (while staying on every board);
+- a paid verdict is reused across restatements instead of bought again;
+- a condition ruled *not worth investigating* answers its re-fires from the
+  runbook earlier investigations wrote, at no cost, and still re-verifies
+  itself on a schedule;
+- what a person never confirmed is inferred — and permanently labelled as
+  inference, never blended with a human's ruling.
+
+Each loop turns yesterday's spend into tomorrow's savings, so the curve to
+watch is the bend: cards per condition falling, dollars per answered incident
+falling, with a regret counter standing guard over everything the quiet
+swallowed. The unattended posture has one hard edge: anything irreversible —
+memory, remediation, a runbook a human relies on — keeps a write gate,
+proposes rather than acts, and stays reversible in one call.
+
 ## Ten minutes, no keys, no bill
 
 ```bash

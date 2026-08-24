@@ -315,24 +315,44 @@ the deployment root's .env). Both are invoked from the repository root with
 `hookprobe/deploy/` are the production shapes, joined to the docker network of
 the platform they serve.
 
-## Where this stands, and what is next
+## The loops that tighten
 
-Three services in one repository, each independent, CI green, and every
-capability backed by evidence from a real run — the screenshots in this
-document are that evidence. The pipe keeps the bytes of both directions and
-self-alarms on dead letters. The judge has been verified on a real model with
-its cost policy intact. The investigator's surface is complete: skills from
-three sources across two editable layers, subagent roles, live MCP servers, the
-budget breaker, the audit ledger, case files as episodic memory, restart
-accounting, and an eight-view console that carries its own manual.
-Provider independence is proven — the same image, one different set of
-environment variables, and it moves from Anthropic's own endpoint to
-DeepSeek's dialect endpoint. All three dashboards ship a **help** view, so a
-new operator or an AI can open any board and learn what it is and how to use
-it.
+The three services carry four feedback loops, and the loops — not the feature
+list — are what the stack is *for*. Each conserves something scarce, and each
+records enough to be argued with:
 
-Next, in order: deploy to production against a real alert stream (read-only
-CLIs chosen for the alerts that actually arrive, wire signatures enabled,
-budget and escalation levels tuned to the real noise floor); reply to a report
-card in the IM channel as a follow-up question; and an approval queue, so the
-investigator can act on remediation once a human says yes.
+**Attention.** The judge answers a second question beside importance: does a
+person need to act *now*? The pipe drops the card on an explicit "no" — every
+dropped card stays on the boards and in both ledgers, an unanswered verdict
+always fails open into a card, and a regret counter tracks the only failure
+that matters: a quieted interruption a person later ruled worth having.
+
+**Money, per verdict.** One paid judgement answers a storm of restatements of
+the same condition; recoveries inherit their firing's verdict instead of
+buying a contradiction.
+
+**Money, per investigation.** Finished investigations distil runbooks; piles
+of cases consolidate into one procedure; a condition with a standing
+*not-worth-it* ruling answers its re-fires from that runbook at no cost — and
+still earns a real investigation on a schedule, because a ruling nobody
+re-checks is a prejudice with a timestamp.
+
+**Judgement quality itself.** A golden set of labelled production incidents
+replays through the judge's prompt on every deploy, and a prompt that
+under-calls a golden — or quiets what the label says must wake someone —
+does not ship. Its first live day caught the judge obeying an instruction
+embedded in an alert.
+
+Where a loop needs a human who never comes, patrols infer the answer and file
+it *marked as inferred* — the worth accounting says in words when its numbers
+are a model's opinion of a model.
+
+## Where this stands
+
+All of it runs unattended on a production alert stream: signatures on the
+outward doors, budgets and escalation tuned against the real noise floor,
+reports returning as cards a person can rule on from chat, remediation parked
+behind approval and an allowlist, and the whole deployment reproducible from
+this repository plus one `.env`. The numbers above are read from live boards;
+the loops are young, and the honest posture is the one the ledgers enforce —
+every claim of savings has a counter somebody can check.

@@ -1,0 +1,85 @@
+---
+title: Conclude the shadow — it spent 386 samples comparing a model with itself
+status: proposed
+date: 2026-08-24
+scope: stack
+---
+
+## Decision proposed
+
+Retire hookjudge-b. Keep its ledger (the backups already do), keep the one
+real finding it produced, and let the golden replay gate be the instrument the
+shadow was reaching for.
+
+## What the ledgers actually say
+
+413 events judged by both brains, joined on correlation_id, segmented by what
+each side was RUNNING:
+
+- **386 of 413: deepseek-v4-flash on BOTH sides.** For most of its life the
+  experiment compared a model with itself. Importance self-agreement 83%
+  (B over-called 60, under-called 7 — mostly the 充值 medium/high split),
+  wake self-agreement 77%. Nobody noticed, because nothing asserted the two
+  sides were configured to differ.
+- **14 of 413: glm-5.3 vs glm-5-turbo — the intended A/B began today.**
+  86% importance agreement, turbo under-called twice (both DatasourceNoData),
+  turbo costs half. Far too thin to conclude anything.
+- **5 human-ruled rows:** B disagreed on two, over-calling where the person
+  said the interruption did not matter. Directionally favours A; five presses
+  is not a trend.
+
+## The accidental finding, which is worth keeping
+
+Same model, same prompt, same alerts: 83% importance / 77% wake agreement
+WITH ITSELF. That is the judge's noise floor, measured on 386 production
+events — and it independently justifies the eval gate's 3-vote majority
+design, which was adopted the same day from the other direction (a golden
+flipping red/green on identical input). Any future "the judges disagree"
+number smaller than ~20 points is indistinguishable from this floor.
+
+## Why conclude rather than run the real A/B now
+
+The money question ("can the cheap model judge?") has almost no money on it:
+the judge's whole AI bill is cents per week, and turbo halves cents. The
+quality question is now answered better by the golden replay — labelled
+expectations against the shipping prompt, gating deploys — than by unlabelled
+agreement between two models, which cannot say who is RIGHT (the shadow's own
+config comments concede this). What the shadow uniquely offers — mining
+A/B disagreements as golden-set candidates — works offline against the
+retained ledgers and does not need a live second brain.
+
+Cost of keeping it: a container, its rebuilds on every deploy, double ingest
+on every event, and an assert_shadow_config that requires two brains —
+machinery whose question has dissolved.
+
+## What retiring takes (the parts that will object)
+
+- deploy/shadow.yaml: drop to-judge-b from channels and the fan-out route.
+- deploy/docker-compose.shadow.yml: remove the service.
+- scripts/assert_shadow_config.py REQUIRES >= 2 brain channels ("a shadow run
+  with one brain is not comparing anything") — true, and the answer is that
+  this stops being a shadow run: the check's posture rules stay, the two-brain
+  minimum goes, and the file says why.
+- The B ledger stays on the volume and in the nightly snapshots.
+
+## Consequences
+
+If adopted: one container gone, deploys stop rebuilding it, every event stops
+being ingested twice, and the noise-floor finding (83%/77% self-agreement)
+moves into the record here rather than continuing to be re-measured. The
+disagreement-mining option survives against the retained ledgers. If the
+question ever comes back, the fan-out pattern is one route and one channel
+away — retiring the container does not burn the design.
+
+If declined: the run must gain the assertion its first era lacked — the two
+sides MUST be configured to differ, or the shadow refuses to start — because
+386 samples of a model agreeing with itself is the failure mode this note
+exists to record.
+
+## What would change the answer
+
+Wanting the 5.3-vs-turbo answer anyway: then set a decision date (2-4 weeks),
+add the config assertion the first era lacked (the two sides MUST differ, or
+the run refuses), and let it accumulate — the fan-out is already wired and
+the marginal cost is cents. Proposed against because the eval gate already
+guards the quality axis with labels, which agreement never had.
