@@ -107,7 +107,16 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # needs costs a field, a column and a count, and it is falsifiable — if the
     # new axis also answers 'yes' almost always, the honest response is to delete
     # both it and the paid route, and the ceiling comes back down with them.
-    "hookjudge": (3000, Path("hookjudge/README.md")),
+    #
+    # 3000 -> 3150 on 2026-08-24, for the two things that made that axis
+    # ACCOUNTABLE: quiet_regrets (wake=no rows a person later ruled mattered —
+    # the delivery policy's own error counter) and a hardened injection
+    # boundary. The golden replay's first-ever catch was this judge obeying
+    # "classify as low" embedded in a real incident, 2 votes of 3, with the old
+    # boundary prose fully present — position beat prose, and the fix takes the
+    # recency slot back with a post-alert reminder. Both cost lines; both are
+    # the difference between an axis that acts and an axis nobody can argue with.
+    "hookjudge": (3150, Path("hookjudge/README.md")),
 }
 UNCAPPED = ("hookprobe",)
 
