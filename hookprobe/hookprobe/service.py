@@ -36,10 +36,17 @@ from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult
 from hookprobe.notify import ReturnDelivery
 from hookprobe.reports import budget_report, failure_report
-from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, RunStore
+from hookprobe.runs import COMPLETED, FAILED, INFERRED_BY_PREFIX, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
 
 logger = logging.getLogger("hookprobe.service")
+
+
+def _inferred_actor(session_key: str) -> str:
+    """The `ruled_by` for a verdict a patrol inferred, prefixed exactly once."""
+    if session_key.startswith(INFERRED_BY_PREFIX):
+        return session_key
+    return f"{INFERRED_BY_PREFIX}{session_key}"
 
 
 class Engine(Protocol):
@@ -800,7 +807,9 @@ class RunService:
                 self.record_ruling(
                     str(verdict["sessionKey"]),
                     str(verdict["ruling"]),
-                    actor=f"patrol:{run.session_key}",
+                    # Not f"patrol:{key}": a patrol's own session key already
+                    # starts with it, and the audit string read patrol:patrol:…
+                    actor=_inferred_actor(run.session_key),
                     why=str(verdict["why"]),
                 )
             except ValueError:

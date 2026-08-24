@@ -138,3 +138,19 @@ def test_a_report_whose_every_marker_is_broken_still_loses_them() -> None:
     assert "could not file" in ai_stripped, "silence reads like a model that ignored the instruction"
     assert "RUN-RULING" not in run_stripped
     assert "could not file" in run_stripped
+
+
+def test_the_inferred_actor_is_prefixed_exactly_once() -> None:
+    """Verified in production and it read `patrol:patrol:run-rulings:2026-08-24`.
+
+    Cosmetic until somebody greps the audit trail for who filed a verdict, at
+    which point a doubled prefix is a string that matches nothing they typed.
+    """
+    from hookprobe.runs import INFERRED_BY_PREFIX
+    from hookprobe.service import _inferred_actor
+
+    assert _inferred_actor("patrol:run-rulings:2026-08-24") == "patrol:run-rulings:2026-08-24"
+    assert _inferred_actor("hook:deep-analysis:x") == f"{INFERRED_BY_PREFIX}hook:deep-analysis:x"
+    # Either way it is still recognised as an inference, which is what counts.
+    assert _inferred_actor("patrol:a").startswith(INFERRED_BY_PREFIX)
+    assert _inferred_actor("hook:b").startswith(INFERRED_BY_PREFIX)
