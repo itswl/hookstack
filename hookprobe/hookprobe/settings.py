@@ -165,6 +165,16 @@ class Settings:
     # Window the spend ceiling is measured over.
     budget_window_hours: float
 
+    # How long a standing not_worth_it ruling may keep answering a condition
+    # from its runbook instead of starting a paid engine run. The weekly patrol
+    # refiles rulings it can still defend, so 14 tolerates one missed patrol;
+    # 0 turns the gate off entirely.
+    ruling_ttl_days: int
+    # A ruled-useless condition still gets a REAL investigation this often —
+    # the evidence behind a ruling goes stale, and a gate that never re-checks
+    # would keep citing last month's case files at this month's incident.
+    ruling_reverify_days: int
+
     # Volume retention (days): case files and engine transcripts older than
     # this are pruned daily. 0 keeps everything — the case files are the
     # agent's episodic memory, so deletion is a choice, never a surprise.
@@ -208,6 +218,8 @@ class Settings:
             bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
             bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),
             auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),
+            ruling_ttl_days=max(0, _int("HOOKPROBE_RULING_TTL_DAYS", 14)),
+            ruling_reverify_days=max(1, _int("HOOKPROBE_RULING_REVERIFY_DAYS", 7)),
             coalesce_window_seconds=max(0, _int("HOOKPROBE_COALESCE_WINDOW_SECONDS", 1800)),
             consolidate_at=max(0, _int("HOOKPROBE_CONSOLIDATE_AT", 5)),
             remediation_allowlist=_path_env("HOOKPROBE_REMEDIATION_ALLOWLIST"),

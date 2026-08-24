@@ -83,7 +83,11 @@ def _prompt_digests_now(settings: Settings) -> dict[str, str | None]:
 
 
 def _summary(run: Run) -> dict[str, Any]:
-    title = (run.turns[0]["message"] if run.turns else run.current_message) or ""
+    # The alert's name when the run knows it — stated by the event door or read
+    # back out of a platform prompt — and only then the raw message, which for
+    # agent-door runs is a page of instruction boilerplate that made the board
+    # unreadable: thirty rows, one string.
+    title = str(run.meta.get("title") or "") or (run.turns[0]["message"] if run.turns else run.current_message) or ""
     # `is not None`, not truthiness: a turn that genuinely cost 0.0 (a budget
     # refusal) is a counted turn, and dropping it fell back to run.cost_usd —
     # erasing the very distinction the ledger keeps between "nobody counted
@@ -164,6 +168,11 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
     @app.post("/hooks/agent", dependencies=[Depends(require_token)])
     async def trigger(payload: dict[str, Any]) -> dict[str, Any]:
+        """Start an investigation from a finished prompt (idempotent per sessionKey).
+
+        A condition under a standing not_worth_it ruling is answered from its
+        runbook at no cost; `{"force": true}` insists on a real engine run.
+        """
         try:
             run = service.start(payload)
         except ValueError as exc:

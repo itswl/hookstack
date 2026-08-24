@@ -33,6 +33,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+from pathlib import Path
 from typing import Any
 
 from hookprobe.wire import sign_timestamped
@@ -109,3 +111,69 @@ def payloads(rulings: list[dict[str, Any]], *, model: str, secret: str) -> list[
         body = json.dumps({**row, "model": model}, ensure_ascii=False, sort_keys=True).encode()
         out.append((body, sign_timestamped(secret, body)))
     return out
+
+
+# ── the local ledger, and the gate that reads it ─────────────────────────────
+#
+# The judge holds the authoritative copy of every filed ruling; this service
+# keeps its own append-only line per ruling it FILED, because acting on a
+# standing verdict must not require read access to a sibling's ledger — the
+# probe consulting the judge for permission to skip work would be a new
+# credential and a new failure mode, for a fact this process produced itself.
+
+_LOCAL = "rulings.jsonl"
+
+
+def condition_of(identity: str) -> str:
+    """The condition title inside a ruling identity.
+
+    Identities arrive as `source|title|k=v` or `source|title` — built by the
+    patrol from the judge's board. The middle segment is the alert title, which
+    is the one key both doors of this service also know.
+    """
+    parts = identity.split("|")
+    return (parts[1] if len(parts) >= 2 else parts[0]).strip()
+
+
+def record_local(workdir: Path, filed: list[dict[str, Any]], *, model: str) -> None:
+    """Append what was filed, before it is sent. Local first, so a judge outage
+    (or an unconfigured one) does not also cost this service its own memory of
+    the verdicts it produced."""
+    path = Path(workdir) / _LOCAL
+    with path.open("a", encoding="utf-8") as handle:
+        for row in filed:
+            handle.write(json.dumps({**row, "model": model, "at": time.time()}, ensure_ascii=False) + "\n")
+
+
+def standing(workdir: Path, title: str, *, ttl_days: int) -> dict[str, Any] | None:
+    """The freshest ruling for this condition, if it is still current.
+
+    Latest wins across the whole file — a condition ruled not_worth_it in June
+    and worth_it in July is worth_it. Older than the TTL returns None: the
+    weekly patrol refiles every ruling it can still defend, so a verdict
+    nothing has refiled is a verdict whose evidence nobody has looked at
+    lately, and the gate must not keep citing it.
+    """
+    if ttl_days <= 0 or not title.strip():
+        return None
+    path = Path(workdir) / _LOCAL
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    wanted = title.strip()
+    newest: dict[str, Any] | None = None
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or condition_of(str(row.get("identity") or "")) != wanted:
+            continue
+        if str(row.get("verdict") or "") not in VERDICTS:
+            continue
+        if newest is None or float(row.get("at") or 0) >= float(newest.get("at") or 0):
+            newest = row
+    if newest is None or (time.time() - float(newest.get("at") or 0)) > ttl_days * 86400:
+        return None
+    return newest

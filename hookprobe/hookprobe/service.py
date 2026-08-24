@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -30,6 +32,7 @@ from dataclasses import replace
 from typing import Any, Protocol
 
 from hookprobe import actions, distill_loop, remediation, rulings, suggestions
+from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult
 from hookprobe.notify import ReturnDelivery
 from hookprobe.reports import budget_report, failure_report
@@ -75,6 +78,36 @@ class NotResumableError(ValueError):
     """The run left no engine session behind to resume."""
 
 
+# What a platform-authored prompt knows about its alert. The agent door takes a
+# finished prompt, not an event, so runs born there had no meta at all: the
+# board showed thirty rows of the same instruction boilerplate, and nothing —
+# not the ruling gate, not the case-file recall — could say which CONDITION a
+# run was about. The prompts themselves embed the alert as JSON, so read it
+# back out. First match that is not a template placeholder wins: the same
+# prompts also embed an OUTPUT template whose every value is "unknown".
+_PROMPT_ALERT = {
+    "title": re.compile(r'"(?:rule_name|alertname|alert_name)"\s*:\s*"([^"]{1,200})"'),
+    # Charset-constrained on purpose: the same prompts also DESCRIBE these
+    # fields in prose ("critical | high | medium | ..."), and prose has spaces.
+    "source": re.compile(r'"source"\s*:\s*"([A-Za-z0-9_.-]{1,40})"'),
+    "level": re.compile(r'"(?:level|severity)"\s*:\s*"([A-Za-z]{1,20})"'),
+}
+_TEMPLATE_VALUES = ("", "unknown", "null")
+
+
+def alert_meta_from_prompt(message: str) -> dict[str, str]:
+    """{"title": ..., "source": ..., "level": ...} — whatever the prompt states."""
+    head = message[:30000]
+    out: dict[str, str] = {}
+    for key, pattern in _PROMPT_ALERT.items():
+        for match in pattern.finditer(head):
+            value = match.group(1).strip()
+            if value.lower() not in _TEMPLATE_VALUES:
+                out[key] = value
+                break
+    return out
+
+
 class RunService:
     def __init__(self, settings: Settings, engine: Engine, store: RunStore) -> None:
         self._settings = settings
@@ -118,10 +151,88 @@ class RunService:
             origin=origin,
         )
         run.meta = dict(payload.get("_meta") or {})
+        if not run.meta.get("title"):
+            derived = alert_meta_from_prompt(message)
+            if derived.get("title"):
+                for key, value in derived.items():
+                    run.meta.setdefault(key, value)
+                # Marked, because a derived fact and a stated one must stay
+                # distinguishable when one of them turns out wrong.
+                run.meta["meta_derived"] = "prompt"
         self._store.create(run)
         self._board_changed()
+        answer = None if payload.get("force") else self._runbook_answer(run)
+        if answer is not None:
+            self._finish_without_engine(run, answer)
+            return run
         self._spawn(run, message, timeout_s, resume=None)
         return run
+
+    def _runbook_answer(self, run: Run) -> str | None:
+        """The report for a condition a standing ruling says is not worth a run.
+
+        Every clause here is a reason to investigate ANYWAY, and the order is
+        cheapest-first. The gate never applies to patrols or consolidations
+        (they are about the loop, not an alert), needs a fresh not_worth_it
+        ruling (the weekly patrol refiles what it can still defend), needs the
+        consolidated runbook it would answer from — and still lets a REAL run
+        through every ruling_reverify_days, because a ruling whose evidence
+        nobody re-checks is a prejudice with a timestamp.
+        """
+        title = str(run.meta.get("title") or "").strip()
+        if not title or run.meta.get("patrol") or run.meta.get("consolidates"):
+            return None
+        ruling = rulings.standing(self._settings.workdir, title, ttl_days=self._settings.ruling_ttl_days)
+        if ruling is None or ruling.get("verdict") != "not_worth_it":
+            return None
+        manifest = self._settings.workdir / ".claude" / "skills" / slug(title) / "SKILL.md"
+        try:
+            procedure = manifest.read_text(encoding="utf-8").split(CASES_MARKER, 1)[0].strip()
+        except OSError:
+            return None
+        cutoff = time.time() - self._settings.ruling_reverify_days * 86400
+        recently_verified = any(
+            str(other.meta.get("title") or "") == title
+            and not other.meta.get("answered_from_runbook")
+            and (other.finished_at or 0) >= cutoff
+            for other in self._store.list_runs(limit=200)
+            if other.session_key != run.session_key
+        )
+        if not recently_verified:
+            return None
+        # Report-shaped JSON, the same dialect as failure_report: report_summary
+        # lifts `summary` for the card, and a machine caller polling /final gets
+        # a parseable object instead of prose it did not ask for.
+        age_days = int((time.time() - float(ruling.get("at") or 0)) / 86400)
+        return json.dumps(
+            {
+                "summary": (
+                    f"已按 runbook 直接作答，未启动引擎（$0）。该条件 {age_days} 天前被裁定 not_worth_it："
+                    f"{ruling.get('why', '')}"
+                ),
+                "verdict": "not_worth_it",
+                "ruled_at_days_ago": age_days,
+                "runbook": procedure[:2500],
+                "answered_from_runbook": True,
+                "how_to_reinvestigate": 'POST /hooks/agent with {"force": true}; full runs also recur',
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def _finish_without_engine(self, run: Run, text: str) -> None:
+        """Complete a run the gate answered: same ledger, same return leg, no
+        engine and no bill. The distill column says why nothing was learned."""
+        run.text = text
+        run.status = COMPLETED
+        run.finished_at = time.time()
+        run.cost_usd = 0.0
+        run.meta["answered_from_runbook"] = True
+        run.distilled = {"skipped": "answered from the runbook, nothing new to learn"}
+        self._record_turn(run, None)
+        self._settle(run)
+        self._schedule_return(run)
+        logger.info("run answered from runbook session=%s title=%r", run.session_key, run.meta.get("title"))
 
     def continue_run(self, session_key: str, payload: dict[str, Any]) -> Run:
         """Reopen a finished investigation with a follow-up message.
@@ -657,6 +768,12 @@ class RunService:
         # the agent is the component that reads attacker-influenced text.
         run.text, filed = rulings.extract(run.text)
         if filed:
+            try:
+                # Local first: the gate reads this file, and a judge outage must
+                # not also cost the service its own memory of what it ruled.
+                rulings.record_local(self._settings.workdir, filed, model=run.model)
+            except OSError:
+                logger.warning("could not record rulings locally", exc_info=True)
             task = asyncio.create_task(self._file_rulings(run, filed))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
