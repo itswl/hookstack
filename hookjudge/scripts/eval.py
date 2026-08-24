@@ -10,8 +10,13 @@ Usage (from the hookjudge directory, with the AI credentials in the environment)
 
     .venv/bin/python scripts/eval.py --dataset eval/dataset.jsonl
     .venv/bin/python scripts/eval.py --route rule --baseline eval/results/ai.json
+    .venv/bin/python scripts/eval.py --gate --votes 3   # what deploy.sh runs
 
-Never runs in CI: it spends money and needs a provider.
+Never runs in CI (it spends money, needs a provider, and the dataset holds
+real alert text that stays out of the public repo) — but it is NOT unwired:
+scripts/deploy.sh runs `--route ai --gate --votes 3` between build and up on
+the deploy host, where all three ingredients meet. A red gate stops the
+deploy; SKIP_EVAL=1 is the recorded emergency hatch.
 """
 
 from __future__ import annotations
