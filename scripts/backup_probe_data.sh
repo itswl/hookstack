@@ -25,12 +25,39 @@ mkdir -p "$TARGET"
 
 stamp="$(date +%F)"
 tmp="$TARGET/.probe-data-$stamp.tgz.partial"
+
+# The ledgers are WAL-mode SQLite, and a plain tar of a live one grabs db,
+# -shm and -wal at three different instants — a copy that can refuse to open,
+# which is the one failure a backup exists to not have. So before the tar,
+# write a CONSISTENT `<name>.db.snapshot` beside each db via the SQLite backup
+# API (safe against a concurrent writer; it takes read locks page by page).
+# The snapshots ride inside the tar because they live inside the member dirs.
+#
+# Best-effort ON TOP of the raw copy, never instead: a locked or absent db, or
+# a host without python3, degrades to today's behaviour (raw files, torn-copy
+# risk) rather than to no backup — a backup that needs the thing it protects
+# to be healthy is not a backup, and that doctrine covers its databases too.
+snapshots=()
+while IFS= read -r db; do
+  snap="$db.snapshot"
+  if python3 - "$db" "$snap" <<'PYEOF'
+import sqlite3, sys
+src = sqlite3.connect(sys.argv[1])
+dst = sqlite3.connect(sys.argv[2])
+with dst:
+    src.backup(dst)
+dst.close(); src.close()
+PYEOF
+  then snapshots+=("$snap")
+  else echo "warning: could not snapshot $db — the raw copy is in the tar, torn-copy risk stands" >&2; rm -f "$snap"
+  fi
+done < <(find "${members[@]/#/$ROOT/}" -maxdepth 3 -name '*.db' 2>/dev/null)
 # Clean up after ourselves however this run ends. The partial is dot-prefixed
 # with a .partial suffix, which makes it invisible to the retention glob below
 # and to the closing count — so a run that died mid-tar left one behind for
 # good, and they accumulated where nobody looks until the backup volume was the
 # thing that needed rescuing.
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "${snapshots[@]:-}"' EXIT
 # Leftovers from before this trap existed, and from the one death a trap cannot
 # catch (SIGKILL, a hard reboot). Only once they are a day old: a concurrent run
 # writing right now must not have its file pulled out from under it.

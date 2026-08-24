@@ -60,6 +60,12 @@ python3 scripts/assert_docs.py
 # description cannot drift from the code that defines it. This asserts the
 # committed output still matches — the same contract requirements.lock has.
 python3 scripts/gen_reference.py --check
+# The root shell scripts run where nobody watches — backup from cron at 04:15,
+# smoke from a deploy checklist — and hookprobe's patrol.sh once shipped
+# unparseable because only ITS component gate ran bash -n. Same lesson, wider
+# net: a script that cannot parse must fail here, not at 04:15.
+find scripts deploy -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+echo "shell: every root script parses"
 # The bridge was checked by NOTHING — not compiled, not linted, not typed, not
 # tested — while being a live production component on the card-callback path. It
 # is not inside a service package, so no component gate reaches it, and the stack
