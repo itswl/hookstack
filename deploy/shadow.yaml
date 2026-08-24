@@ -64,6 +64,11 @@ sources:
     recovery: "{meta.is_recovery}"
     fields:
       origin: "{meta.source}"
+      # The judge's second axis: does a person need to ACT on this now.
+      # "yes" / "no" / "" when the model did not answer. Extracted so the
+      # quiet-wake-no stage below can route on it — the answer was paid for,
+      # and until this line nothing used it.
+      wake: "{meta.wake_someone}"
 
   # The investigator's report, coming back to be dressed as a card. Unsigned for
   # the same reason as the door above: a loopback hop inside hookstack_net.
@@ -164,7 +169,23 @@ routes:
 # The judge does the noise accounting (reuse/recovery are the point of the
 # shadow), so the pipe's own dedup stays off — same posture as the family
 # stack, for the same reason: two counters and neither ledger true.
-pipeline: [silence, routes]
+# `filter` before the rest: a verdict the judge marked "nobody needs to act on
+# this now" is dropped HERE, by name, with skip_code wake_no on the event's own
+# trace — not deleted: the judge's board keeps every row, this only stops the
+# card. Measured the week this was added: 440 interruptions, 95% repeats, and
+# the two loudest rules answered wake=no every time they were asked.
+#
+# '' (unanswered) deliberately does not match: only an explicit "no" quiets.
+# A parse failure or a pre-wake row fails open into a card, never into silence.
+# Recoveries ride along by inheritance: a resolution card for a firing nobody
+# was interrupted for would be the same interruption one step later.
+pipeline:
+  - name: quiet-wake-no
+    type: filter
+    when: {source: "judge-notify", wake: "no"}
+    skip_code: wake_no
+  - silence
+  - routes
 
 # The buttons a card carries. hookjudge DECLARES which ones a verdict deserves
 # (silence plus the useful/useless pair); this decides which the deployment

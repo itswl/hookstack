@@ -485,6 +485,12 @@ def reuse_verdict(prior: dict[str, Any], *, recovery: bool) -> Verdict:
         importance=str(prior.get("importance") or "medium"),
         event_type=str(prior.get("event_type") or ""),
         impact_scope=str(prior.get("impact_scope") or ""),
+        # The wake answer rides along for the same reason importance does: it is
+        # the same question about the same condition, already paid for. Without
+        # this, only the AI-routed firing carried an answer, and the pipe's
+        # wake-aware delivery saw '' on every repeat — 117 of one rule's 194
+        # rows, measured the week this line was written.
+        wake_someone=str(prior.get("wake_someone") or ""),
         route=ROUTE_RECOVERY if recovery else ROUTE_REUSE,
         model=str(prior.get("model") or ""),
     ).normalized()
@@ -503,6 +509,8 @@ def rule_reuse_verdict(prior: dict[str, Any], event: Incoming) -> Verdict:
         importance=str(prior.get("importance") or "medium"),
         event_type=str(prior.get("event_type") or ""),
         impact_scope=str(prior.get("impact_scope") or "unknown (reused for this rule)"),
+        # Same carry-over as reuse_verdict, same reason.
+        wake_someone=str(prior.get("wake_someone") or ""),
         route=ROUTE_RULE_REUSE,
         model=str(prior.get("model") or ""),
     ).normalized()

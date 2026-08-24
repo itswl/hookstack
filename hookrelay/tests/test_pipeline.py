@@ -160,3 +160,52 @@ def test_a_judgment_stage_in_front_of_a_brain_says_so() -> None:
         }
     )
     assert _warn_posture_mix(clean_paired.pipeline, clean_paired.channels) == ""
+
+
+async def test_wake_no_quiets_and_everything_else_fails_open(store):
+    """The shadow deployment's quiet stage, exercised with its real shape: a
+    filter on an EXTRACTED field carrying the judge's wake answer.
+
+    Three payloads, three fates. An explicit "no" is dropped with a named code
+    on its own trace; an explicit "yes" delivers; and '' — the unanswered rows,
+    every pre-wake verdict and every parse failure — delivers too. That last
+    one is the contract: a quiet that triggers on absence would silently extend
+    itself to every row a future bug fails to annotate.
+    """
+    cfg = Config.from_dict(
+        {
+            "sources": [
+                {
+                    "name": "judge-notify",
+                    "secret": "",
+                    "title": "{meta.alert_name}",
+                    "body": "{analysis.summary}",
+                    "fields": {"wake": "{meta.wake_someone}"},
+                }
+            ],
+            "channels": [{"name": "to-me", "type": "feishu", "url": "http://bridge:9000/send"}],
+            "routes": [{"name": "verdict-to-me", "source": "judge-notify", "send_to": ["to-me"]}],
+            "pipeline": [
+                {
+                    "type": "filter",
+                    "name": "quiet-wake-no",
+                    "when": {"source": "judge-notify", "wake": "no"},
+                    "skip_code": "wake_no",
+                },
+                "routes",
+            ],
+        }
+    )
+    source = cfg.sources["judge-notify"]
+
+    def verdict(wake: str, name: str) -> dict:
+        return {"meta": {"alert_name": name, "wake_someone": wake}, "analysis": {"summary": "s"}}
+
+    quiet = await handle_hook(store, cfg, source, verdict("no", "top-up over 500"), now=1000.0)
+    assert quiet["outcome"] == "skipped" and quiet["skip_code"] == "wake_no"
+
+    loud = await handle_hook(store, cfg, source, verdict("yes", "SES bounce rate"), now=1001.0)
+    assert loud["outcome"] == "routed" and loud["channels"] == ["to-me"]
+
+    unanswered = await handle_hook(store, cfg, source, verdict("", "legacy verdict"), now=1002.0)
+    assert unanswered["outcome"] == "routed", "'' must fail open into a card, never into silence"

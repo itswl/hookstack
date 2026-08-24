@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from hookjudge.contract import ROUTE_AI, ROUTE_RECOVERY, ROUTE_REUSE, ROUTE_RULE, Incoming, Outgoing
-from hookjudge.judge import ai_verdict, reuse_verdict, rule_verdict
+from hookjudge.judge import ai_verdict, reuse_verdict, rule_reuse_verdict, rule_verdict
 from hookjudge.settings import Settings
 
 
@@ -239,6 +239,34 @@ def test_reuse_serves_the_prior_answer_without_contradicting_it():
     assert ended.summary == "the original verdict", (
         "a recovery that disagrees with its firing reads as a second incident"
     )
+
+
+def test_reuse_carries_the_wake_answer_and_fails_open_without_one():
+    """The second axis rides reuse for the same reason importance does.
+
+    Both directions matter: 'no' must survive the ride (the pipe quiets on it),
+    and a prior row from before the column existed must come through as '' —
+    deliverable — rather than being guessed either way.
+    """
+    answered = {"summary": "s", "importance": "high", "wake_someone": "no"}
+    assert reuse_verdict(answered, recovery=False).wake_someone == "no"
+    assert reuse_verdict(answered, recovery=True).wake_someone == "no", (
+        "the resolution of a firing nobody was interrupted for must not itself interrupt"
+    )
+    assert rule_reuse_verdict(answered, event()).wake_someone == "no"
+
+    legacy = {"summary": "s", "importance": "high"}
+    assert reuse_verdict(legacy, recovery=False).wake_someone == ""
+    assert rule_reuse_verdict(legacy, event()).wake_someone == ""
+
+
+def test_the_return_payload_carries_the_wake_answer():
+    """The pipe routes on meta.wake_someone; a payload without it silently turns
+    the wake-aware delivery back into deliver-everything."""
+    incoming = event(title="Broker unacked > 100")
+    verdict = reuse_verdict({"summary": "s", "importance": "high", "wake_someone": "no"}, recovery=False)
+    meta = Outgoing(incoming=incoming, verdict=verdict).payload()["meta"]
+    assert meta["wake_someone"] == "no"
 
 
 @pytest.mark.parametrize(

@@ -237,7 +237,7 @@ class Store:
         route_clause = "" if any_route else " AND route = 'ai'"
         # `route_clause` is one of two literals; the values are parametrized.
         cursor = await self.db.execute(
-            "SELECT summary, importance, event_type, impact_scope, model FROM judgements"  # nosec B608
+            "SELECT summary, importance, event_type, impact_scope, wake_someone, model FROM judgements"  # nosec B608
             f" WHERE identity = ?{route_clause} AND received_at >= ? ORDER BY id DESC LIMIT 1",
             (identity, now - max(1, window_seconds)),
         )
@@ -262,7 +262,7 @@ class Store:
         if not rule_key or window_seconds <= 0:
             return None
         cursor = await self.db.execute(
-            "SELECT summary, importance, event_type, impact_scope, model FROM judgements"
+            "SELECT summary, importance, event_type, impact_scope, wake_someone, model FROM judgements"
             " WHERE rule_key = ? AND level = ? AND route = 'ai' AND is_recovery = 0 AND received_at >= ?"
             " ORDER BY id DESC LIMIT 1",
             (rule_key, level, now - max(1, window_seconds)),

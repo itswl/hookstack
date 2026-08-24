@@ -175,6 +175,31 @@ def main(argv: list[str]) -> int:
             f"a shadow run with one brain is not comparing anything"
         )
 
+    # The wake contract. The judge answers "does a person need to act NOW" per
+    # verdict, and the deployment quiets an explicit "no" — that pair is easy to
+    # break from either end without noticing: drop the extracted field and the
+    # filter matches nothing (every card delivers again, silently); loosen the
+    # match to a list or a `contains` and '' — the unanswered rows, every
+    # pre-wake verdict and every parse failure — starts matching too, which
+    # turns fail-open into fail-silent. Both ends are asserted, and the match
+    # must be the exact string "no".
+    notify = cfg.sources.get("judge-notify")
+    quiet = next((st for st in cfg.pipeline if st.type == "filter" and st.options.get("when", {}).get("wake")), None)
+    if notify is not None and "wake" in notify.fields:
+        if quiet is None:
+            problems.append("judge-notify extracts `wake` but no filter stage quiets on it — the field is decoration")
+        else:
+            when = quiet.options.get("when") or {}
+            if when.get("wake") != "no":
+                problems.append(
+                    f"the wake filter matches {when.get('wake')!r} — it must be the exact string 'no', "
+                    f"or unanswered ('') verdicts stop failing open into a card"
+                )
+            if when.get("source") != "judge-notify":
+                problems.append("the wake filter is not pinned to source judge-notify — it would drop other sources' events")
+    elif quiet is not None:
+        problems.append("a filter quiets on `wake` but judge-notify does not extract it — the stage can never match")
+
     for problem in problems:
         print(f"  FAIL  {problem}")
     if problems:

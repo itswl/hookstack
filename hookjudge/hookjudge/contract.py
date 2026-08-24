@@ -478,6 +478,12 @@ class Outgoing:
                 "is_recovery": self.incoming.is_recovery,
                 "timestamp": self.incoming.received_at,
                 "route": self.verdict.route,
+                # The second axis travels with the verdict so the pipe can ROUTE
+                # on it — a "nobody needs to act now" that only ever reached a
+                # board was an answer this service paid for and nothing used.
+                # '' when unanswered, and the pipe must treat '' as deliverable:
+                # fail open, never quiet on a parse failure.
+                "wake_someone": self.verdict.wake_someone,
             },
             "analysis": {
                 "summary": self.verdict.summary,
