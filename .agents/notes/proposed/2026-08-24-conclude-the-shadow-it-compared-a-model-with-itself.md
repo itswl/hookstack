@@ -76,6 +76,19 @@ sides MUST be configured to differ, or the shadow refuses to start — because
 386 samples of a model agreeing with itself is the failure mode this note
 exists to record.
 
+## Addendum, same day: the disagreement axis measured its own instrument
+
+The cost above shrank within hours of being written. Re-sampling the queue's
+judges at three votes each showed 4 of the 5 "contested" rows were one judge
+flipping against itself (per-judge flip rate 11/32; 59% of rows had at least
+one flip — the pairwise form of the 83%/77% floor this note records). Denoised,
+the disagreement axis located nothing on this corpus, and the queue now
+disqualifies its own ranking above 20% instability. So the third opinion B
+supplies feeds an axis that, on current evidence, ranks noise. The retirement
+cost stands as written — it is just smaller than it looked for one afternoon,
+and the requirement survives either way: if B goes, the queue must SAY it has
+two sources, not quietly rank on less.
+
 ## What would change the answer
 
 Wanting the 5.3-vs-turbo answer anyway: then set a decision date (2-4 weeks),
