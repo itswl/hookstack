@@ -204,6 +204,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             importance=str(row["importance"]),
             event_type=str(row["event_type"]),
             impact_scope=str(row["impact_scope"]),
+            # The third place a Verdict is built, and the one the first wake=no
+            # on production fell through: payload() sends what THIS object
+            # holds, and a field left to its default here is '' on every
+            # return no matter what the ledger says. '' fails open into a
+            # card, which is why this was a board reading "routed" rather
+            # than a silence nobody could see.
+            wake_someone=str(row["wake_someone"] or ""),
             route=str(row["route"]),
         )
         payload = Outgoing(incoming=event, verdict=verdict).payload()

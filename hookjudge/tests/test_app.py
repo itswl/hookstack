@@ -1338,3 +1338,38 @@ def test_an_unanswered_second_axis_is_blank_not_a_no() -> None:
     assert Verdict(summary="s", importance="high", wake_someone="No").normalized().wake_someone == "no"
     for junk in ("", "maybe", "true", "1"):
         assert Verdict(summary="s", importance="high", wake_someone=junk).normalized().wake_someone == ""
+
+
+async def test_the_return_leg_rebuild_carries_the_wake_answer(app_client, monkeypatch):
+    """The delivered payload, not the Outgoing class. The first wake=no on
+    production reached the pipe as '' and was routed into a card, because the
+    return leg is the THIRD place a Verdict is constructed — from the stored
+    row — and a field missing there is defaulted no matter what the ledger
+    says. A test on Outgoing alone proved the two sites that already worked.
+    """
+    sink = Sink()
+    monkeypatch.setattr(app_client.app.state, "client", sink)
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    await store.record(
+        Incoming(
+            source="grafana",
+            title="DatasourceNoData",
+            body="value=null",
+            level="high",
+            fields={},
+            correlation_id="w-return",
+            received_at=time.time(),
+            recovery_flag=False,
+        ),
+        Verdict(summary="config misreport", importance="medium", wake_someone="no").normalized(),
+        1,
+    )
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+        if sink.received:
+            break
+
+    meta = sink.received[0]["body"]["meta"]
+    assert meta["wake_someone"] == "no", "the row said no; the wire must say no"
