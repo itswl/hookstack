@@ -218,6 +218,11 @@ class RunService:
                     f"已按 runbook 直接作答，未启动引擎（$0）。该条件 {age_days} 天前被裁定 not_worth_it："
                     f"{ruling.get('why', '')}"
                 ),
+                # The platform that polls /final reads root_cause for display
+                # (verified in its consumer: any balanced JSON dict is adopted
+                # whole, raw text retained). Same sentence as summary, in the
+                # slot the caller's UI actually shows.
+                "root_cause": f"条件已被裁定 not_worth_it（{age_days} 天前）：{ruling.get('why', '')}",
                 "verdict": "not_worth_it",
                 "ruled_at_days_ago": age_days,
                 "runbook": procedure[:2500],
