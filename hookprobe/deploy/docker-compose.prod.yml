@@ -66,10 +66,14 @@ services:
     volumes:
       - ../../probe-data:/data
       # The read-only user skills layer. Point HOOKPROBE_USER_SKILLS at any
-      # skills library (e.g. a repo's .claude/skills so skills version with
-      # the service they drive); the default is an empty host dir so the
-      # mount is inert until configured. Mount ONLY a skills subdir, never a
-      # whole ~/.claude (credentials live there).
+      # skills library (e.g. a repo's .agents/skills, so the skills version with
+      # the service they drive); the default is an empty host dir so the mount is
+      # inert until configured. Mount ONLY a skills subdir, never a whole
+      # ~/.claude or ~/.agents — credentials and local state live there.
+      #
+      # Prefer the real directory over a vendor symlink pointing at it. Docker
+      # resolves a symlinked source fine, but a mount that depends on a link
+      # resolving is one nobody can reason about mid-incident.
       - ${HOOKPROBE_USER_SKILLS:-../../probe-data/user-skills}:/data/home/.claude/skills:ro
       # Read-only credentials are the real security boundary — mount only
       # query-grade identities:
