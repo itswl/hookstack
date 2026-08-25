@@ -691,12 +691,27 @@ class Store:
         # signal to narrow the quiet; a pattern of them deletes it. Kept beside
         # the wake counts because a delivery policy that cannot see its own
         # regrets is a policy nobody can argue with.
+        #
+        # Two joins, because the strict one turned out to be a guard that could
+        # not fire: `mattered` is only ever written by a card press carrying the
+        # pressed card's correlation_id, and a quieted row HAS no card — the
+        # same-row count below can move only through a hand-built API call. The
+        # condition-level count is the one a person can actually reach: their
+        # press lands on a DELIVERED sibling of the same condition, and quieting
+        # any instance of a condition a person says matters is the regret.
         quiet_regrets = int(totals["quiet_regrets"]) if totals else 0
         # A condition that interrupted once is not noise, so the view that is
         # meant to say "go turn something off" refuses to pad itself with
         # one-offs. `title` is a bare column beside max(id): SQLite documents it
         # as coming from the row the max was found on, which is the most recent
         # wording of a condition whose title may have been decorated since.
+        cursor = await self.db.execute(
+            "SELECT count(*) AS n FROM (SELECT identity FROM judgements WHERE received_at >= ?"
+            " GROUP BY identity HAVING sum(wake_someone = 'no') > 0 AND sum(mattered = 'yes') > 0)",
+            (since,),
+        )
+        row = await cursor.fetchone()
+        quiet_regret_conditions = int(row["n"]) if row else 0
         cursor = await self.db.execute(
             "SELECT identity, title, max(id) AS last_id, max(received_at) AS last_seen, count(*) AS n,"
             " coalesce(sum(route = 'ai'), 0) AS paid,"
@@ -772,6 +787,7 @@ class Store:
             "wake_no": wake_no,
             "wake_answered": wake_yes + wake_no,
             "quiet_regrets": quiet_regrets,
+            "quiet_regret_conditions": quiet_regret_conditions,
             "ai_ruled": len(ai),
             "ai_not_worth_it": sum(1 for row in ai.values() if row["verdict"] == "not_worth_it"),
             "noisiest": noisiest,

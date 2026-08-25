@@ -41,11 +41,14 @@ QUESTION: is the noise going up or down?
      relay number is unreachable, the judge's still answers the question.
    A quieted card is attention the operator did not spend; this is the line
    that says whether the quiet stage is earning.
-   And its price: summary.attention.quiet_regrets counts rows the model said
-   wake=no and a PERSON later ruled mattered. Zero is a sentence, not an
-   omission — write it. One is the lead of this report and a reason to name
-   the condition; a pattern is the quiet stage failing and the report should
-   say so in those words.
+   And its price, two clocks again: summary.attention.quiet_regret_conditions
+   is the number to read — conditions with a quieted instance AND a sibling a
+   person ruled mattered, in the window. (quiet_regrets, the same-row join, can
+   only move through a hand-built API call — a quieted row has no card to
+   press — so treat it as corroboration, never as the all-clear.) Zero is a
+   sentence, not an omission — write it. One is the lead of this report and a
+   reason to name the condition; a pattern is the quiet stage failing and the
+   report should say so in those words.
 
 WHAT YOU MUST NOT DO WITH MISSING DATA
 

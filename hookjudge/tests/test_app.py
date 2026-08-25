@@ -1369,6 +1369,49 @@ async def test_a_quiet_the_person_contradicts_is_counted_as_a_regret(tmp_path):
     assert "hookjudge_quiet_regrets 1" in metrics
 
 
+async def test_a_regret_a_person_can_actually_reach_is_counted_at_condition_level(tmp_path):
+    """The strict same-row join turned out to be a guard that cannot fire:
+    `mattered` is only written by a card press carrying the pressed card's
+    correlation_id, and a quieted row has no card. The reachable path is a
+    press on a DELIVERED sibling — so a condition with a quieted instance AND
+    a mattered sibling in the window counts, while the row-level count stays 0.
+    """
+    app = create_app(settings=_settings(tmp_path, db_path=str(tmp_path / "regret2.db")))
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        store = app.state.store
+        from hookjudge.contract import Incoming, Verdict
+
+        def incoming(cid: str) -> Incoming:
+            return Incoming(
+                source="grafana",
+                title="示例条件",
+                body="b",
+                level="high",
+                fields={},
+                correlation_id=cid,
+                received_at=time.time(),
+                recovery_flag=False,
+            )
+
+        # One instance quieted, its sibling delivered and later ruled mattered.
+        quiet = Verdict(summary="s", importance="high", wake_someone="no").normalized()
+        loud = Verdict(summary="s", importance="high", wake_someone="yes").normalized()
+        await store.record(incoming("r2-quieted"), quiet, 1)
+        await store.record(incoming("r2-delivered"), loud, 1)
+        await store.record_mattered("r2-delivered", mattered="yes", at=time.time(), actor="ou_x")
+        body = (await client.get("/status", headers={"X-Read-Token": "read-t"})).json()
+        metrics = (await client.get("/metrics", headers={"X-Read-Token": "read-t"})).text
+
+    a = body["summary"]["attention"]
+    assert a["quiet_regret_conditions"] == 1
+    assert a["quiet_regrets"] == 0, "the row-level join stays strict — the mattered press was on the sibling"
+    assert "hookjudge_quiet_regret_conditions 1" in metrics
+
+
 def test_an_unanswered_second_axis_is_blank_not_a_no() -> None:
     """A parse failure must not become a vote for a quiet night."""
     from hookjudge.contract import Verdict
