@@ -1,3 +1,10 @@
+---
+title: hookstack
+description: Three services that split alert handling — plus a read-only agent runner you can use entirely on its own.
+---
+
+**English** · [中文](zh/)
+
 Alert handling, split into three services that each do one job — and an agent
 runner ([hookprobe](#hookprobe-an-agent-run-behind-an-http-contract)) that is
 useful on its own, whether or not you care about alerts.
