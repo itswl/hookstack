@@ -1,0 +1,5 @@
+title: hookstack
+description: >-
+  Three services that split alert handling — plus a read-only agent runner
+  you can use entirely on its own.
+theme: jekyll-theme-cayman
