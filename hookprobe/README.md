@@ -1,22 +1,66 @@
 # hookprobe
 
-A single-purpose deep-analysis agent runner. Third member of the hook\* family:
+One unattended agent run, behind an HTTP contract that terminates.
+
+You POST a task. hookprobe runs a single tool-using agent session (Claude Agent
+SDK: bash, MCP servers, web search, SKILL.md skills) and serves the report to
+whoever polls for it. No channels, no device pairing, no chat history — and a
+run reaches a real terminal state, so the caller needs no stability heuristics
+to decide the answer stopped moving.
+
+It speaks an OpenClaw-compatible dialect, so a client that already treats that
+gateway as its analysis backend switches by changing a URL.
+
+## Sixty seconds
+
+```bash
+git clone https://github.com/itswl/hookstack && cd hookstack
+printf 'HOOKPROBE_TOKEN=change-me\nANTHROPIC_API_KEY=sk-ant-...\n' > .env
+docker compose --env-file .env -f hookprobe/deploy/docker-compose.yml up -d --build
+
+curl -s -X POST localhost:8088/hooks/agent \
+  -H "Authorization: Bearer change-me" -H 'Content-Type: application/json' \
+  -d '{"message":"Which processes are listening, and on what?","sessionKey":"demo:1"}'
+
+curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/final
+# 202 while it works · 200 {"isFinal": true, "text": ...} when it is done
+```
+
+Then `http://127.0.0.1:8088/ui` for the sessions page.
+
+## Why this one
+
+**It terminates.** `/final` answers `202`, or a `200` that is final — including
+when the run crashed or timed out, where the report's `root_cause` names the
+runner failure instead of leaving the caller to wait out its own timeout. A
+poller can write the result on its first confirming read.
+
+**The agent cannot edit what steers the next run.** `.claude/` (skills, roles,
+settings), `CLAUDE.md` and the audit log are closed to it — by a PreToolUse hook
+that refuses the write, and by a digest of every input file compared before and
+after each run, because the two fail differently. Without this, one injected
+line reaching `.claude/skills/` outlives the run that read it and comes back as
+the operator's own runbook. Read-only is enforced in four layers; this is the
+one about the investigator itself, which turns out to be the only target it can
+always reach. See [Security model](#security-model).
+
+**Finished runs leave runbooks behind.** A completed investigation distills its
+own record — the question, the tool sequence, the conclusion — into a
+`SKILL.md`, written by the service and never through the agent's tools. The
+second investigation of the same condition adds a case rather than replacing
+what was there, and every write, by a run or by a person, snapshots what it
+displaced first. See [The learning loop](#the-learning-loop).
+
+## The hook\* family
+
+hookprobe stands alone. It is also the third member of a family that splits
+alert handling three ways:
 
 | project | role |
 |---|---|
 | hookrelay | the pipe — adapts alert dialects in and out, content-blind |
 | hookjudge | the judge — one cheap verdict per alert |
 | **hookprobe** | **the investigator — one read-only agent run per analysis task** |
-
-hookprobe is what you run instead of a full OpenClaw gateway when all you
-need from it is "take a task, run a tool-using agent, return the text". It
-accepts one task over an OpenClaw-compatible HTTP contract — any client that
-already integrates that gateway dialect as an analysis backend switches by
-changing a URL — runs one unattended agent session (Claude Agent SDK:
-built-in tools, MCP servers, web search, SKILL.md skills), and serves the
-final report to whoever polls for it. No channels, no device pairing, no chat
-history — and a run has a real terminal state, so the caller needs no
-stability heuristics.
 
 ```
 caller ── POST /hooks/agent ───────────────▶ hookprobe ── Claude Agent SDK
