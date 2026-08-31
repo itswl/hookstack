@@ -43,7 +43,7 @@ from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
 from hookprobe.retention import prune
-from hookprobe.runs import RUNNING, Run
+from hookprobe.runs import INFERRED_BY_PREFIX, RUNNING, Run
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
 from hookprobe.wire import constant_time_eq
@@ -109,11 +109,21 @@ def _summary(run: Run) -> dict[str, Any]:
         # What the run left for the next one: {"installed": name} or
         # {"skipped": reason}, empty when the loop is off.
         "distilled": dict(run.distilled),
-        # "useful" / "useless" / "" — a person's ruling on whether this
-        # investigation earned its bill. On the summary rather than only the
-        # detail record, because the aggregate on /v1/budget is unreadable
-        # without being able to see which run it counted.
+        # "useful" / "useless" / "" — the ruling on whether this investigation
+        # earned its bill. On the summary rather than only the detail record,
+        # because the aggregate on /v1/budget is unreadable without being able
+        # to see which run it counted.
         "ruling": run.ruling,
+        # And WHO said so, which is the half that decides what the number means.
+        # A patrol can infer a ruling from a run's own evidence (ruled_by carries
+        # the "patrol:" prefix for exactly that); a person clicking a list cannot
+        # be told apart from it once the prefix is dropped. Every ruling on this
+        # deployment today is patrol-inferred — 13 useless against 6 useful — and
+        # a board that showed only `ruling` was answering "was this worth paying
+        # for?" with the model's own opinion of itself.
+        "ruled_by": run.ruled_by,
+        "ruled_at": run.ruled_at,
+        "inferred": run.ruled_by.startswith(INFERRED_BY_PREFIX),
     }
 
 

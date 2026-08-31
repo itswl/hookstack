@@ -525,3 +525,22 @@ def test_a_timed_out_turn_shows_up_as_unpriced_on_metrics(tmp_path) -> None:
         # reached the SDK yet). A flat zero here is the feature working.
         assert "hookprobe_unpriced_turns 0" in body, f"the interrupt did not price the turn:\n{body}"
         assert "hookprobe_window_spend_usd" in body
+
+
+def test_the_board_can_tell_a_person_from_a_patrol(tmp_path) -> None:
+    """Every ruling on the live deployment is patrol-inferred. A summary that
+    showed only `ruling` answered "was this worth paying for?" with the model's
+    own opinion of itself — the one reading the ruling column exists to avoid."""
+    from hookprobe.app import _summary
+    from hookprobe.runs import INFERRED_BY_PREFIX, Run
+
+    inferred = Run(
+        session_key="k1", run_id="a", ruling="useless", ruled_by=f"{INFERRED_BY_PREFIX}run-rulings:2026-08-24"
+    )
+    by_hand = Run(session_key="k2", run_id="b", ruling="useful", ruled_by="ou_operator_42")
+    unrated = Run(session_key="k3", run_id="c")
+
+    assert _summary(inferred)["inferred"] is True
+    assert _summary(by_hand)["inferred"] is False
+    assert _summary(by_hand)["ruled_by"] == "ou_operator_42"
+    assert _summary(unrated)["inferred"] is False and _summary(unrated)["ruling"] == ""
