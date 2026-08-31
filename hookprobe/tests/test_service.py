@@ -500,7 +500,22 @@ def test_a_failed_run_reports_what_the_engine_said_not_its_subtype() -> None:
     assert len(long) == 200
 
     # The subtype is still the fallback, for an error that came with no words.
-    assert engine_error(_Result(is_error=True, subtype="error_max_turns"), "  ") == "engine reported error_max_turns"
+    assert engine_error(_Result(is_error=True, subtype="mystery"), "  ") == "engine reported mystery"
+
+    # But a CUTOFF is the exception to preferring the text, because there the
+    # text is the model's last sentence mid-thought rather than a fault it
+    # reported. A live run put `reason=That prior analysis is rich. Now I need
+    # to place the current alert…` on the board — neither an error nor an
+    # answer. The limit that stopped it is the actionable fact.
+    cut = engine_error(
+        _Result(is_error=True, subtype="error_max_turns"),
+        "That prior analysis is rich. Now I need to place the current alert",
+    )
+    assert cut == "stopped at the turn limit before reaching a conclusion (error_max_turns)"
+    assert "prior analysis" not in cut
+
+    tokens = engine_error(_Result(is_error=True, subtype="error_max_tokens"), "and then I would")
+    assert tokens is not None and tokens.startswith("stopped at the output limit")
 
     # And a genuine success stays a success; an empty one is still a failure.
     assert engine_error(_Result(is_error=False, subtype="success"), "the report") is None

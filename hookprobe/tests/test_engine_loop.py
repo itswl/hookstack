@@ -158,9 +158,22 @@ def test_a_failed_result_reports_what_the_engine_said(engine) -> None:
 
 
 def test_a_failure_with_no_words_falls_back_to_the_subtype(engine) -> None:
-    """Which is the only case the subtype was ever any use for."""
-    result = _run(engine, [_result(is_error=True, subtype="error_max_turns", result="")])
-    assert result.error == "engine reported error_max_turns"
+    """Which is the only case the subtype was ever any use for — bar the
+    cutoffs below, where it is the whole answer."""
+    result = _run(engine, [_result(is_error=True, subtype="provider_hiccup", result="")])
+    assert result.error == "engine reported provider_hiccup"
+
+
+def test_a_run_cut_off_at_its_limit_names_the_limit_not_the_last_sentence(engine) -> None:
+    """A live run reported `reason=That prior analysis is rich. Now I need to
+    place the current alert…` — the model's narration mid-thought, presented as
+    a failure. On a cutoff the text is not a fault the engine reported, and the
+    limit is what an operator can act on."""
+    result = _run(
+        engine,
+        [_result(is_error=True, subtype="error_max_turns", result="Now I need to place the current alert")],
+    )
+    assert result.error == "stopped at the turn limit before reaching a conclusion (error_max_turns)"
 
 
 def test_cost_and_session_survive_a_result(engine) -> None:
