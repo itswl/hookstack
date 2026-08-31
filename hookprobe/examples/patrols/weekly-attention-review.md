@@ -27,28 +27,13 @@ QUESTION: is the noise going up or down?
    `interruptions` is the line worth quoting: twelve interruptions with one
    paid means eleven free cards that still spent somebody's attention.
 
-5. Then what never reached anyone. Since 2026-08-24 the pipe drops a card
-   whose verdict answered wake_someone=no — judged "nobody needs to act on
-   this now", still on every board, just not an interruption. Two numbers,
-   two different clocks, name both:
-   - summary.attention.wake_no from step 1 is the WEEK's count of quietable
-     verdicts (windowed like everything else there);
-   - curl -sS http://hookrelay:8100/metrics -H "Authorization: Bearer $HOOKRELAY_READ_TOKEN"
-     (or $SHADOW_READ_TOKEN if that is the name this deployment set), the
-     hookrelay_events_total{...outcome="wake_no"} line, is the pipe's count
-     of cards actually dropped — SINCE ITS LAST RESTART, not this week. Do
-     not subtract one from the other; quote each with its clock. If the
-     relay number is unreachable, the judge's still answers the question.
-   A quieted card is attention the operator did not spend; this is the line
-   that says whether the quiet stage is earning.
-   And its price, two clocks again: summary.attention.quiet_regret_conditions
-   is the number to read — conditions with a quieted instance AND a sibling a
-   person ruled mattered, in the window. (quiet_regrets, the same-row join, can
-   only move through a hand-built API call — a quieted row has no card to
-   press — so treat it as corroboration, never as the all-clear.) Zero is a
-   sentence, not an omission — write it. One is the lead of this report and a
-   reason to name the condition; a pattern is the quiet stage failing and the
-   report should say so in those words.
+5. What never reached anyone: since 2026-08-24 the pipe DROPS cards whose
+   verdict said wake_someone=no (all still on the boards). Report, each with
+   its clock: attention.wake_no (the week's quietable verdicts), and
+   attention.quiet_regret_conditions — conditions with a quieted instance AND
+   a sibling a person ruled mattered: the quiet stage's price. Zero is a
+   sentence, write it; one is this report's lead and names its condition; a
+   pattern means the quiet stage is failing — say so in those words.
 
 WHAT YOU MUST NOT DO WITH MISSING DATA
 

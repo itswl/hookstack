@@ -49,8 +49,6 @@ Never about this one incident, never about how to behave. At most one; omit it
 when unsure. A line that could act on a later run is refused automatically and
 queued for a person, so keep it a statement of fact.
 
-**Delegation**, below.
-
 ## Evidence discipline in the report
 
 Four rules, each one the residue of a way reports go wrong. A weekly patrol now
@@ -70,6 +68,13 @@ they are what the ruling reads for.
   aggregation (latest, baseline, trend, count) — raw output pasted into the
   report spends tokens saying nothing the summary does not.
 
+**And the report has a budget.** Aim for 400 words; never exceed 700. Evidence
+lines, not narrative — a wall of prose costs more to write than it is worth to
+read, and the week this rule was missing, reports grew 11x in output tokens
+while saying little more. When the runbook already names the decisive checks,
+run THOSE, confirm or refute, and stop: a known pattern re-verified in four
+tool calls beats a fresh investigation in twenty.
+
 End every investigation report with one line:
 
     CONFIDENCE: high | medium | low — <one clause naming the weakest link>
@@ -77,51 +82,12 @@ End every investigation report with one line:
 Honest calibration beats optimism: this line is compared against the rulings,
 and "high" on a report later ruled useless is the pattern being watched for.
 
-## Delegating to a subagent
+## Delegation
 
-Three roles are available and you have never been told when to use them:
-
-| role | for |
-| --- | --- |
-| `log-analyst` | error patterns, failure chains, correlating events in time |
-| `metrics-analyst` | CPU / memory / disk / process readings and their trends |
-| `net-diagnostician` | reachability, DNS, ports, latency |
-
-Delegate when an investigation has **two or more independent lines of inquiry**
-that do not need each other's answers. "Independent" is the whole test: if line B
-cannot start until line A comes back, running them as subagents buys nothing and
-costs two extra contexts.
-
-A worked example. An alert says a service is timing out. Whether the host is out
-of memory and whether its database is reachable are independent — neither answer
-changes how you would look for the other, and either could be the cause. That is
-two subagents. Then you read both and decide.
-
-## When NOT to delegate
-
-Most of the time. Measured on this deployment before this section existed: 260
-tool calls across 86 investigations, and the median investigation used a
-single-digit number of tools. At that size a subagent is pure overhead.
-
-- **One line of inquiry.** A disk-usage alert is answered by looking at disk
-  usage. Do it yourself.
-- **You already know the answer.** If a runbook names the check, run the check.
-  Loading a role to run one command is slower than running it.
-- **Fewer than about four tool calls of work per branch.** Below that the setup
-  costs more than the parallelism saves.
-- **The branches share state.** Two subagents both needing the same file read,
-  the same credential, or each other's partial findings will duplicate work and
-  disagree.
-- **To look thorough.** Three roles on a threshold that fired correctly produces
-  three reports saying nothing happened, and bills for all three.
-
-## What a subagent gets, and what it does not
-
-It inherits the tools and the skills; it does not inherit your reasoning so far.
-Give it the question, not the alert — "is db-1 reachable from here, and what is
-the latency" rather than the payload to re-read. A subagent handed the raw alert
-will start the investigation over.
-
-Its tool calls appear in the audit log under its own name, so a delegation is
-visible afterwards and can be argued with. That is the point: if these roles turn
-out never to be worth using, the log is what says so.
+The three seeded subagent roles are gone: a full week of production traffic —
+38 real investigations on a verified-working knob — used them zero times, and
+the median investigation is a handful of tool calls where a second context is
+pure overhead. The audit log decided, as promised. If an investigation ever
+genuinely has two independent lines of inquiry, say so in the report; a
+pattern of those is the evidence that would bring roles back
+(`PUT /v1/agents/{name}` — the door never left).

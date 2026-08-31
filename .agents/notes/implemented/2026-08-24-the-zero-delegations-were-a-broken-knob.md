@@ -56,3 +56,13 @@ subagents' own `ls` and `df`. First time asked, it worked.
 
 A week of healthy-knob zeros. Then the roles go, cleanly, and this note is
 the record that the deletion was earned rather than inherited from a typo.
+
+## Executed 2026-08-31
+
+The week ran: 38 organic investigations on the fixed knob, and the only Agent
+entries in the whole audit are the 2026-08-24 wiring test. The three seeded
+roles, the seeds module, and the prompt's delegation sections are deleted; the
+/v1/agents door and HOOKPROBE_AGENTS_CONFIG stay, so an operator can bring
+roles back the day an investigation shape demands them — the prompt now asks
+reports to SAY when they had two independent lines of inquiry, which is the
+evidence that would reopen this. Zero finally meant what it said.

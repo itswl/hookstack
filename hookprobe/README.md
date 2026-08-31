@@ -743,11 +743,11 @@ Three more surfaces shape a run, all optional:
   (project and user layers both), or pin roles in deployment config with
   `HOOKPROBE_AGENTS_CONFIG` (JSON: name → {description, prompt, tools?,
   model?, skills?}). The main agent delegates to them through the Task
-  tool; the bash guard binds them the same as the main loop. A fresh
-  volume is seeded once with three readable examples (log-analyst,
-  metrics-analyst, net-diagnostician) so the format teaches itself —
-  edit or delete them freely, the `.defaults-seeded` marker keeps reboots
-  from re-writing your choices.
+  tool; the bash guard binds them the same as the main loop. No roles ship
+  by default — a measured week of production traffic never delegated once,
+  so the seeded examples were removed (the decision and its evidence:
+  `.agents/notes/implemented/2026-08-24-the-zero-delegations-were-a-broken-knob.md`).
+  Add your own via `PUT /v1/agents/{name}` or the config above.
 - **Audit trail** — every tool call in every run (subagents included)
   appends one JSONL line to `{workdir}/audit/YYYY-MM-DD.jsonl`: timestamp,
   session, tool, one-line detail, error flag. The run's event feed is the
