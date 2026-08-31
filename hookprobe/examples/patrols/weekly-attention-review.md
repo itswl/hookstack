@@ -17,8 +17,10 @@ QUESTION: is the noise going up or down?
    is a finding, not a failure.
 
 3. Lead with the direction. The number that answers the question is
-   interruptions / conditions — cards per condition. Give last week's, this
-   week's, the direction, and the size of the change. `repeats` is the same
+   (interruptions - wake_no) / conditions — DELIVERED cards per condition,
+   since the pipe drops wake_no verdicts. Give last week's, this week's, the
+   direction, and the size. Judged density (interruptions / conditions) is
+   the secondary line, for continuity with pre-quiet editions. `repeats` is the same
    fact from the other side: cards that restated a condition the operator had
    already been told about.
 
