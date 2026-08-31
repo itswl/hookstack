@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -1140,3 +1142,100 @@ def test_eval_scoring_counts_the_two_errors_with_teeth():
     assert report["missed"] == 1 and report["missed_ids"] == ["b"]
     assert report["false_quiet"] == 1 and report["false_quiet_ids"] == ["c"]
     assert report["wake_scored"] == 2 and report["wake_accuracy"] == 0.5
+
+
+# --- the one retry, and its exact boundaries ---------------------------------
+
+
+async def _verdict_with(monkeypatch, responses):
+    """Drive ai_verdict against a scripted transport; returns (verdict, calls)."""
+
+    from hookjudge import judge as judge_mod
+    from hookjudge.contract import Incoming
+
+    monkeypatch.setattr(judge_mod, "_RETRY_BACKOFF_SECONDS", 0.0)
+    calls = []
+
+    class Client:
+        async def post(self, url, **kwargs):
+            calls.append(url)
+            item = responses[min(len(calls) - 1, len(responses) - 1)]
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    settings = SimpleNamespace(
+        ai_api_key="k",
+        ai_base_url="https://x/v1",
+        ai_model="m",
+        ai_timeout_seconds=5.0,
+        ai_body_limit=4000,
+        ai_fields_limit=2000,
+        ai_title_limit=200,
+        ai_price_in_per_1k=0.0,
+        ai_price_out_per_1k=0.0,
+        ai_structured_output="json_object",
+    )
+    event = Incoming.parse({"event": {"title": "t", "body": "b", "level": "high"}}, now=time.time())
+    verdict = await judge_mod.ai_verdict(Client(), settings, event)
+    return verdict, calls
+
+
+def _ok_response():
+    import httpx
+
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "summary": "s",
+                            "importance": "medium",
+                            "event_type": "infrastructure",
+                            "impact_scope": "one host",
+                            "wake_someone": "no",
+                        }
+                    )
+                }
+            }
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
+    return httpx.Response(200, json=payload, request=httpx.Request("POST", "https://x/v1/chat/completions"))
+
+
+async def test_a_timeout_is_retried_once_and_can_succeed(monkeypatch):
+    """The 2.1% of production verdicts that fell to the keyword floor on a
+    ReadTimeout. The call is a pure classification — nothing executed, nothing
+    to make un-idempotent — so asking again is safe."""
+    import httpx
+
+    verdict, calls = await _verdict_with(monkeypatch, [httpx.ReadTimeout("slow"), _ok_response()])
+
+    assert len(calls) == 2, "one retry"
+    assert verdict.route == "ai" and verdict.importance == "medium"
+    assert not verdict.degraded_reason
+
+
+async def test_a_second_timeout_lands_on_the_floor(monkeypatch):
+    import httpx
+
+    verdict, calls = await _verdict_with(monkeypatch, [httpx.ReadTimeout("slow")])
+
+    assert len(calls) == 2, "exactly one retry, then stop"
+    assert verdict.route == "rule"
+    assert "ReadTimeout" in verdict.degraded_reason
+
+
+async def test_a_5xx_is_retried_but_a_4xx_is_not(monkeypatch):
+    import httpx
+
+    req = httpx.Request("POST", "https://x/v1/chat/completions")
+    _, calls = await _verdict_with(monkeypatch, [httpx.Response(503, text="busy", request=req), _ok_response()])
+    assert len(calls) == 2, "5xx is worth a second look"
+
+    # A 401/400 does not improve on a second look, and the dialect negotiation
+    # owns the one 400 that does.
+    _, calls = await _verdict_with(monkeypatch, [httpx.Response(401, text="bad key", request=req)])
+    assert len(calls) == 1, "4xx is answered, not retried"
