@@ -308,10 +308,8 @@ def test_agents_endpoints_mirror_the_skills_story(tmp_path, monkeypatch) -> None
     host_dir = home / ".claude" / "agents"
     host_dir.mkdir(parents=True)
     (host_dir / "host-role.md").write_text("---\nname: host-role\ndescription: from host\n---\nhost prompt\n")
-    # Suppress the first-boot seeds: this test pins the exact listing.
     project_agents = workdir / ".claude" / "agents"
     project_agents.mkdir(parents=True, exist_ok=True)
-    (project_agents / ".defaults-seeded").write_text("test")
 
     with client:
         listing = {a["name"]: a["source"] for a in client.get("/v1/agents", headers=AUTH).json()}
@@ -377,27 +375,6 @@ def test_audit_tail_filters_by_session(tmp_path, monkeypatch) -> None:
         # equivalent, not a bug; I claimed otherwise before checking.)
         capped = client.get("/v1/audit?limit=1", headers=AUTH).json()
         assert capped["count"] == 1 and capped["entries"][0]["ts"] == 3.0, "the newest, not the first written"
-
-
-def test_default_agents_seed_once_and_respect_choices(tmp_path) -> None:
-    from hookprobe.seeds import DEFAULT_AGENTS, seed_default_agents
-
-    workdir = tmp_path / "wd"
-    agents_dir = workdir / ".claude" / "agents"
-    # An operator file that predates the seeding must never be clobbered.
-    agents_dir.mkdir(parents=True)
-    (agents_dir / "log-analyst.md").write_text("mine")
-
-    written = seed_default_agents(workdir)
-    assert written == len(DEFAULT_AGENTS) - 1
-    assert (agents_dir / "log-analyst.md").read_text() == "mine"
-    assert (agents_dir / "metrics-analyst.md").exists()
-    assert (agents_dir / ".defaults-seeded").exists()
-
-    # Deleting a seed sticks: the marker stops any re-seeding.
-    (agents_dir / "metrics-analyst.md").unlink()
-    assert seed_default_agents(workdir) == 0
-    assert not (agents_dir / "metrics-analyst.md").exists()
 
 
 def test_spend_is_reported_even_with_no_ceiling_set(tmp_path) -> None:

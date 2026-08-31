@@ -214,8 +214,6 @@ page — secrets as set/unset, never values.
 
 ![system view: the whole runtime, from model and budget to MCP servers and health](docs/img/hookprobe-system.png)
 
-![agents view: the three seeded investigation roles and how delegation works](docs/img/hookprobe-agents.png)
-
 ## The family loop: escalation in, report out
 
 The investigator is wired into the family's own alert flow: the pipe's
