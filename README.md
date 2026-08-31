@@ -31,6 +31,24 @@ swallowed. The unattended posture has one hard edge: anything irreversible —
 memory, remediation, a runbook a human relies on — keeps a write gate,
 proposes rather than acts, and stays reversible in one call.
 
+## Where this sits in an AI-native SDLC
+
+Anthropic's [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
+names the stage this family is built for — **Maintain**: cheap deterministic
+answers before a model is paid, an investigator only for the alerts that
+earned one, remediation proposed rather than applied, every decision in a
+ledger a person can audit later. That posture is enforced here rather than
+described: the verdict routes are ordered so most events never reach a paid
+call, the write-gates are tested, and a prompt change that under-calls a
+golden incident does not deploy.
+
+[How Anthropic secures its own AI-native SDLC](https://claude.com/blog/how-anthropic-secures-its-ai-native-software-development-lifecycle)
+treats agents as monitored actors rather than trusted authors. Same side
+taken here, for the same reason: the investigator runs read-only, cannot edit
+what steers its next run, its runbooks are written by the service and never
+through its own tools — and a red-team run drives injections at the memory
+path on the deploy host before an operator is asked to trust it.
+
 ## Ten minutes, no keys, no bill
 
 ```bash
