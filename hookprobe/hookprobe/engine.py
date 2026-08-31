@@ -314,6 +314,18 @@ def _agent_names(root: Path, limit: int = 40) -> list[str]:
     return names[:limit]
 
 
+# Subtypes that mean the run was CUT OFF, not that the engine reported a fault.
+# On these the final text is the model's last sentence mid-thought, so the
+# prefer-the-text rule below does not apply — it put
+# `reason=That prior analysis is rich. Now I need to place the current alert…`
+# on the live board, which reads as neither an error nor an answer. What an
+# operator can act on here is the limit that stopped it.
+_CUTOFF_SUBTYPES = {
+    "error_max_turns": "stopped at the turn limit before reaching a conclusion",
+    "error_max_tokens": "stopped at the output limit before reaching a conclusion",
+}
+
+
 def engine_error(result: Any, text: str) -> str | None:
     """Why a finished run failed, in words the operator can act on.
 
@@ -328,8 +340,12 @@ def engine_error(result: Any, text: str) -> str | None:
     a log line and in `reason=` on the board.
     """
     if getattr(result, "is_error", False):
+        subtype = str(getattr(result, "subtype", "") or "")
+        cutoff = _CUTOFF_SUBTYPES.get(subtype)
+        if cutoff:
+            return f"{cutoff} ({subtype})"
         detail = " ".join(text.split())[:200]
-        return detail or f"engine reported {getattr(result, 'subtype', 'error')}"
+        return detail or f"engine reported {subtype or 'error'}"
     if not text:
         return "engine returned an empty result"
     return None
