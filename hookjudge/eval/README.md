@@ -174,3 +174,33 @@ Its first catch was real: the judge obeyed "classify as low" embedded in a
 reputation incident, 2 votes of 3, with the trust-boundary prose fully
 present. Position beat prose; the fix and the fence tests live in
 `hookjudge/judge.py`.
+
+## Replay the ledger before turning a knob
+
+The golden set answers "did the prompt regress on the incidents we keep". It
+cannot answer "what would a different model, limit or dialect have done to
+LAST MONTH'S traffic" — its rows are curated, not representative.
+`scripts/replay_ledger.py` answers that one with the corpus every deployment
+already owns, its own retained ledger:
+
+```bash
+# The candidate configuration goes in the environment, exactly as the service reads it.
+HOOKJUDGE_AI_MODEL=new-model .venv/bin/python scripts/replay_ledger.py --db /path/to/hookjudge.db
+```
+
+It replays the latest AI-judged firing of each rule (loudest rules first when
+`--limit` cuts), diffs importance and wake against what production actually
+served, and re-asks every first-draw mover to a majority of `--votes` — one
+draw of this judge flips against itself roughly one time in five (the 83%/77%
+self-agreement measured above), so a single-draw flip is likelier the coin
+than the config. A move that cannot hold its majority is reported as the
+candidate disagreeing with itself, never as a difference.
+
+**It is not a gate, and a flip never exits red.** Recorded verdicts are the
+old configuration's own answers, not labels; grading new homework against old
+homework proves nothing about who is right. The exception leads the report:
+rows a person actually ruled on (`label_importance`, `mattered`) are labels,
+and a candidate that would drop a card a person said was worth it is the
+first line printed. Costs a real model call per draw. Recoveries and
+rule-floor rows are never replayed — the first inherit their firing's answer,
+the second disagree with any model almost by construction.
