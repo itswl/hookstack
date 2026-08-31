@@ -481,6 +481,7 @@ with them.
 ```python
 from hookrelay import registry
 
+
 @registry.channel("pagerduty")
 def build(channel, message, now):
     # message: event_id, source, title, body, level, fields, received_at

@@ -83,6 +83,7 @@ boot, never the first event. Tested examples live in `examples/plugins/`.
 # plugins/pagerduty_channel.py — a complete custom channel
 from hookrelay import registry
 
+
 @registry.channel("pagerduty")
 def build(channel, message, now):
     return channel.url, {"summary": message["title"], "severity": message["level"]}, {}

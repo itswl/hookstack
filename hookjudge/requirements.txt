@@ -1,13 +1,13 @@
 # Four runtime dependencies, chosen to stay four.
 fastapi>=0.141.1
-uvicorn[standard]>=0.52.3
+uvicorn[standard]>=0.52.4
 aiosqlite>=0.22.1
 httpx>=0.28.1
 
 # Test + lint
 pytest>=9.1.1
 pytest-asyncio>=1.4.0
-ruff==0.16.3
+ruff==0.16.4
 bandit>=1.9.4
 pip-audit>=2.10.1
 mypy>=2.3.1
