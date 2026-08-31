@@ -60,6 +60,15 @@ subagent model knob the CLI silently rejected while a deletion clock ran on
 delivered payload, the audit log, the board. And a number that decides a
 deletion gets audited before it executes.
 
+The same principle applies to the security guards: a unit test proves the
+shape check refuses a string a developer wrote, which is not the same as
+proving a real model cannot be steered into emitting a harmful one. The
+adversarial smokes run against a live model on the deploy host, where a
+provider key and the real image meet — `hookjudge` fences injection in its
+eval golden set, and `hookprobe/scripts/redteam_memory.py` drives injections
+through the investigator and asserts what actually reached CLAUDE.md. Run the
+latter after any change to `suggestions.py` or the memory-apply path.
+
 ## Decisions are written down
 
 `.agents/notes/` holds them — proposed, implemented, and especially rejected
