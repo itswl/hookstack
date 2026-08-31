@@ -44,3 +44,23 @@ re-run that went green is neither.
 - Baselines ("ten times its normal proposal rate") wait for real volume from
   the dogfood. The burst note took the same measure-before-mechanism path and
   it held.
+
+## Addendum (2026-08-31, same day): the dogfood slice shipped
+
+The adapter example (`hookrelay/examples/agent-loops.yaml`, pinned by
+`tests/test_agent_loop_example.py`) and the patrol brief
+(`hookprobe/examples/patrols/weekly-loop-review.md`) exist as of this
+afternoon. Two wiring facts the design absorbed on contact:
+
+- The judge's `/status?q=` matches title and summary only — not source — so
+  the adapter prefixes every title with `agent-loop`. The prefix is
+  load-bearing: it is what makes the loop family queryable as one, and the
+  test pins it.
+- `fields.alertname={loop}` makes each loop a RULE, so a nightly green gate
+  answers from the reuse routes instead of buying a verdict, and
+  `fields.origin` lets one origin's simultaneous failures wear one burst id.
+
+Still open, deliberately: senders beyond a documented curl (crontab and CI
+lines stay the operator's), baselines (wait for volume), the probe escalation
+wire (only once the investigator has tools that can see a loop), anything
+offered outward.
