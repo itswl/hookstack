@@ -18,7 +18,7 @@ COPY config.example.yaml .
 # ./hookrelay/examples from a checkout, so "try it" started with a git clone
 # and a build of the very thing already published. examples/stack.yaml is the
 # wiring and examples/sink.py is the readable downstream.
-COPY hookrelay/examples/ examples/
+COPY examples/ examples/
 
 ENV HOOKRELAY_HOST=0.0.0.0 \
     HOOKRELAY_PORT=8100 \
