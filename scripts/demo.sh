@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# The ten-minute tour, against the hermetic family stack:
+# The ten-minute tour, against the hermetic family stack. Either way of
+# starting it works — this script only talks to the ports:
 #
-#   docker compose up -d --build     # pipe + judge + stub model + sink
-#   bash scripts/demo.sh
+#   curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
+#   docker compose -f docker-compose.quickstart.yml up -d   # published images
+#
+#   docker compose up -d --build                            # or from source
+#
+#   bash scripts/demo.sh   (or: bash <(curl -fsSL .../scripts/demo.sh))
 #
 # No keys, no .env, no bill: the stub model answers the paid route, the sink
 # prints what an operator would have received (`docker compose logs -f sink`),
@@ -51,4 +56,5 @@ for row in reversed(d.get('recent', [])):
 
 printf '\nWhat the operator would have received:  docker compose logs -f sink\n'
 printf 'The boards:  http://127.0.0.1:8100  (pipe)   http://127.0.0.1:8200  (judge)\n'
-printf 'The investigator (needs a model key):  docker compose --profile probe up -d --build\n'
+printf 'The investigator (needs a model key):  ANTHROPIC_API_KEY=sk-ant-... \\\n'
+printf '    docker compose -f docker-compose.quickstart.yml --profile probe up -d\n'
