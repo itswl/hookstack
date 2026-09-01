@@ -123,3 +123,20 @@ the one-sample picture, where five rows looked contested and a third opinion was
 doing visible work. Re-sampling narrowed that the same afternoon, and the
 argument above — that losing B would leave an ordering unable to discriminate —
 assumes an ordering that discriminates today. On current evidence it does not.
+
+## Addendum (2026-09-01): the offline form answered the question
+
+The instrument this note predicted — "mining offline against the retained
+ledgers, no live second brain" — was built on 2026-08-31 as
+`hookjudge/scripts/replay_ledger.py`, and on 2026-09-01 it answered the
+5.3-vs-turbo question this shadow was kept alive for: against 29 rules and
+30 days of ledger, turbo confirmed 16 differences to the null run's 7,
+fourteen of them quieter, seven of them new-quiets landing on payment-silence
+and deliverability-enforcement classes. Seven cents, both runs together.
+The ruling is recorded in
+`rejected/2026-09-01-glm-5-turbo-as-the-judge.md`: the judge stays on 5.3.
+
+What this changes here: the one thing retirement was said to cost — the live
+A/B whose question might someday be wanted — has been answered without a
+live second brain, at a price that makes re-asking routine. The proposal
+above now stands with no counterweight.
