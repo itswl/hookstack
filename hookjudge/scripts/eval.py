@@ -90,6 +90,13 @@ async def judge_one(client: httpx.AsyncClient, settings: Settings, row: dict[str
         now=time.time(),
     )
     started = time.monotonic()
+    # Whether the condition ENDED. Read here so the summary can keep recovery
+    # payloads out of the gating numbers: this harness calls the judge
+    # directly, so the recovery route -- which reuses the firing's verdict and
+    # is the only thing production ever does with one -- never runs. Scoring a
+    # recovery's standalone importance against its firing label measures a code
+    # path that does not exist.
+    is_recovery = event.is_recovery
     if route == "rule":
         verdict = rule_verdict(event)
     else:
@@ -120,6 +127,7 @@ async def judge_one(client: httpx.AsyncClient, settings: Settings, row: dict[str
     over_delivered = wake_scored and want_wake == ["no"] and got_wake != "no"
     return {
         "id": row.get("id", ""),
+        "is_recovery": is_recovery,
         "got": f"{got_importance}/{got_wake or '-'}",
         # The raw verdict too, not only whether it matched. --collect needs the
         # opinion itself, and parsing it back out of "got" would be a second
@@ -144,18 +152,45 @@ async def judge_one(client: httpx.AsyncClient, settings: Settings, row: dict[str
     }
 
 
+# Below this, the gate is passing on too few firing rows to be evidence of
+# anything. Not a hard failure: a thin gate that still runs beats one nobody
+# can turn green. It prints to stderr on every green run until the dataset grows.
+MIN_GATE_FIRING_CASES = 15
+
+
 def summarize(rows: list[dict[str, Any]], unreviewed: int, route: str) -> dict[str, Any]:
     total = len(rows) or 1
-    missed = [r for r in rows if r["severity_distance"] < 0]
+    # Recovery payloads are scored, reported, and kept OUT of `missed`.
+    #
+    # A label states what the CONDITION is worth. A recovery says that
+    # condition ended, and production never asks the judge to rate one --
+    # the recovery route reuses the firing's verdict. This harness calls the
+    # judge directly, so a recovery row asks a question the product does not,
+    # and answering it lower is right rather than wrong.
+    #
+    # Left in `missed` it was not a rounding error: every one of the five
+    # misses on the rule route was a recovery, so the deploy gate was red on
+    # correct behaviour -- and a gate that cannot go green is one people learn
+    # to pass with SKIP_EVAL=1.
+    firing = [r for r in rows if not r.get("is_recovery")]
+    recoveries = [r for r in rows if r.get("is_recovery")]
+    missed = [r for r in firing if r["severity_distance"] < 0]
     over = [r for r in rows if r["severity_distance"] > 0]
     costs = [r["cost"] for r in rows]
     return {
         "route": route,
         "cases": len(rows),
         "unreviewed": unreviewed,
+        # The gate reasons over firing rows only; this is how many there are.
+        # Watch it: a dataset that drifts to mostly recoveries quietly shrinks
+        # the gate to nothing while `cases` still looks healthy.
+        "firing_cases": len(firing),
+        "recovery_cases": len(recoveries),
+        "recovery_under_called": sum(1 for r in recoveries if r["severity_distance"] < 0),
         "importance_accuracy": round(sum(r["importance_ok"] for r in rows) / total, 4),
         "event_type_accuracy": round(sum(r["event_type_ok"] for r in rows) / total, 4),
-        # The number that matters most: alerts judged less severe than the truth.
+        # The number that matters most: FIRING alerts judged less severe than
+        # the truth. Recoveries are excluded -- see the note above.
         "missed": len(missed),
         "missed_ids": [r["id"] for r in missed],
         "over_escalated": len(over),
@@ -344,7 +379,21 @@ async def main() -> int:
         )
         return 1
     if args.gate:
-        print(f"\ngate: {report['cases']} golden incidents, 0 missed, 0 false quiets")
+        # A gate is only as strong as the rows it can actually reason over.
+        # Say the firing count out loud rather than the friendlier `cases`:
+        # the difference is exactly how much of the dataset the gate ignores.
+        if report["firing_cases"] < MIN_GATE_FIRING_CASES:
+            print(
+                f"\ngate: only {report['firing_cases']} firing row(s) of {report['cases']} — "
+                f"under {MIN_GATE_FIRING_CASES}, so this passes on too little to mean much. "
+                "Add firing payloads to the dataset.",
+                file=sys.stderr,
+            )
+        print(
+            f"\ngate: {report['firing_cases']} firing golden incidents, 0 missed, 0 false quiets"
+            f" ({report['recovery_cases']} recovery rows scored but not gated,"
+            f" {report['recovery_under_called']} of them under-called)"
+        )
     return 0
 
 
