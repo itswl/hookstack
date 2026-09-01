@@ -1,0 +1,71 @@
+# Agent loops as an upstream: the stack reporting on its own automation.
+#
+# Gate verdicts, deploy-eval results, memory auto-applies — the events your
+# OWN loops emit — walk through the same front door as any alert, get judged
+# by the same brain, and land on the same boards. The proposal this implements
+# is .agents/notes/proposed/2026-08-31-agent-loops-are-an-upstream-dialect.md;
+# tests/test_agent_loop_example.py holds this file to the config schema,
+# because an example nothing tests rots.
+#
+# The payload convention (what a sender curls):
+#
+#   curl -sS http://hookrelay:8100/hook/agent-loop -H 'Content-Type: application/json' -d '{
+#     "loop": "deploy-eval", "outcome": "red",
+#     "summary": "missed=1 false_quiet=0 — the gate stopped the deploy",
+#     "actor": "deploy.sh", "origin": "hookstack"
+#   }'
+#
+# Send the greens too, not only the reds. A loop that reports only failures is
+# indistinguishable from a loop whose sender died, and the greens are nearly
+# free: `alertname` below makes each loop a RULE, so a nightly green gate
+# answers from the judge's reuse routes instead of buying a fresh verdict.
+# The natural senders are one line at the end of a crontab entry or CI job —
+# they stay the operator's, deliberately; nothing in any service knows what a
+# loop event is (the same zero-new-code posture the patrols take).
+
+sources:
+  # Sign this door in production. An agent's reporting channel is exactly the
+  # thing a compromised or prompt-injected agent would want to spoof — a forged
+  # "green" here is a loop failure wearing a health report. Empty only works
+  # where the demo works: a private network with nothing at stake.
+  - name: agent-loop
+    secret: ""
+    # The `agent-loop` prefix is load-bearing, not decoration: the judge's
+    # /status?q= searches title and summary only, so the prefix is what makes
+    # the whole loop family queryable as one — the weekly-loop-review patrol
+    # greps for it. The loop's own name stays next, for the human reading cards.
+    title: "agent-loop {loop}: {outcome}"
+    body: "{summary}"
+    level: "{outcome}"
+    # red/regression interrupt-worthy, applied worth a board row, green/ok
+    # ledger-only. An outcome this map does not name passes through as itself
+    # and the judge's floor deals with it — escalating, never muting.
+    level_map: {red: high, regression: high, applied: medium, green: info, ok: info}
+    fields:
+      # The loop is the rule: same reuse economics as a Grafana alertname.
+      alertname: "{loop}"
+      loop: "{loop}"
+      outcome: "{outcome}"
+      actor: "{actor}"
+      # One origin's simultaneous failures (a red gate, a red eval and an
+      # auto-apply spike from one repo in ten minutes) are one incident: the
+      # judge's burst grouping keys on fields.origin, so carrying it is what
+      # lets those rows wear one burst id instead of arriving as three stories.
+      origin: "{origin}"
+
+# The channel and route below make this file complete enough for the config
+# loader; in a real deployment you graft the source block above into your own
+# config and let your existing catch-all route ("*" -> to-judge) carry it.
+# No escalation route on purpose: an investigation of "the gate went red" is
+# only worth paying for once the investigator has tools that can see the loop
+# it would be investigating — that wire is a later, deliberate decision.
+channels:
+  - name: to-judge
+    type: generic
+    url: http://hookjudge:8200/events
+    options: {payload: normalized}
+
+routes:
+  - name: loops-to-brain
+    source: agent-loop
+    send_to: [to-judge]

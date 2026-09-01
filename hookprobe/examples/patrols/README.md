@@ -7,8 +7,10 @@ comes back through `probe-notify` onto the same channels. Nothing in any
 service knows what a patrol is — see *Patrol mode* in
 [hookprobe's README](../../README.md) for the mechanism.
 
-Two patrols live here. Both answer questions the family could not answer
-before, and neither needed a line of service code:
+The patrols live in this directory. Each answers a question the family could
+not answer before, and none needed a line of service code (the row count here
+once said "two" while the table held five — a number in prose is a promise,
+so the sentence no longer carries one):
 
 | brief | schedule | question |
 | --- | --- | --- |
@@ -17,6 +19,7 @@ before, and neither needed a line of service code:
 | [`self-review.md`](self-review.md) | Fridays | What should the investigator itself remember — and what has it proposed that nobody accepted? |
 | [`ai-rulings.md`](ai-rulings.md) | Thursdays | Which conditions can be ruled on from the case files, now that `ruled` is never going to move? |
 | [`run-rulings.md`](run-rulings.md) | Wednesdays | Which finished investigations earned their bill — the worth column, filed as an inference and labelled as one? |
+| [`weekly-loop-review.md`](weekly-loop-review.md) | Tuesdays | Did any agent loop go red and stay red — and is the automation volume drifting? |
 
 [`patrol.sh`](patrol.sh) is the sender: it reads a brief, signs the request and
 posts it.
