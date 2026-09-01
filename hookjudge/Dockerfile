@@ -12,6 +12,10 @@ RUN pip install --no-cache-dir -c requirements.lock \
       "$(grep -E '^httpx' requirements.txt)"
 
 COPY hookjudge/ hookjudge/
+# The canned model, so the quickstart can exercise the paid route with no key.
+# See the note in hookrelay/Dockerfile: an image that cannot run its own demo
+# forces every trial to begin with a clone and a build.
+COPY hookjudge/examples/ examples/
 
 ENV HOOKJUDGE_HOST=0.0.0.0 \
     HOOKJUDGE_PORT=8200 \
