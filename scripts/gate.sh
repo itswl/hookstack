@@ -88,4 +88,24 @@ hookrelay/.venv/bin/python -m ruff check deploy/lark-bridge
 hookrelay/.venv/bin/python -m ruff format --check deploy/lark-bridge
 echo "lark-bridge: OK"
 
+# A Dockerfile is the one file no test opens. `COPY hookjudge/examples/` was
+# correct read from the repo root and wrong for a build context of hookjudge/,
+# and nothing local said so: the gates passed, the tag went out, and the
+# release job found it eleven seconds after CI had already failed. `docker
+# build --check` does NOT catch a missing COPY source — measured; it reports
+# "no warnings found" on exactly this — so only a real build does.
+#
+# One second with a warm layer cache, and the release workflow builds these
+# anyway. hookprobe is deliberately absent: its image carries Node, apt
+# packages and the Claude CLI, so a cold build is minutes, and a gate people
+# start skipping protects nothing. Its own CI job covers it.
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  echo "docker build (hookrelay, hookjudge)"
+  docker build -q ./hookrelay >/dev/null
+  docker build -q ./hookjudge >/dev/null
+  echo "images build: OK"
+else
+  echo "docker not available — image builds skipped (CI still runs them)"
+fi
+
 printf '\033[1;32mSTACK GATE GREEN\033[0m — every component gate + the stack checks.\n'
