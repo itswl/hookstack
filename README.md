@@ -52,10 +52,15 @@ path on the deploy host before an operator is asked to trust it.
 ## Ten minutes, no keys, no bill
 
 ```bash
-git clone https://github.com/itswl/hookstack && cd hookstack
-docker compose up -d --build   # pipe + judge + a stub model + a readable sink
-bash scripts/demo.sh           # four alerts; every judgement route fires once
+curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
+docker compose -f docker-compose.quickstart.yml up -d   # pipe + judge + stub model + readable sink
+bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
 ```
+
+No checkout and no build: everything runs from published images, and the stub
+model and the sink ship inside them. To hack on it instead, clone and
+`docker compose up -d --build` — that file builds from source and is the one
+the gate tests.
 
 The demo posts a fresh alert (judged by the stub model), the same alert again
 (reused, no call), its recovery (reuses the firing's verdict), and a different
@@ -115,7 +120,8 @@ service more than the others.
 
 ```
 hookstack/
-├── docker-compose.yml        the pipe + brain demo, one command
+├── docker-compose.quickstart.yml   published images, no checkout, no build
+├── docker-compose.yml        the same demo built from source (what the gate tests)
 ├── deploy/                   the three services together, real credentials
 ├── STACK.md
 ├── hookrelay/               the pipe

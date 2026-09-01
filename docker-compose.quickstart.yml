@@ -1,0 +1,132 @@
+# The family, from published images. No checkout, no build.
+#
+#   curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
+#   docker compose -f docker-compose.quickstart.yml up -d
+#   bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
+#
+# Everything below runs on ghcr.io/itswl images and needs no key and no bill:
+# the model is a canned stub that ships inside the judge's image, and the
+# downstream is a readable sink that ships inside the pipe's. That is why this
+# file has no `build:` and no bind mount — an image that cannot run its own
+# demo makes every trial start by rebuilding what was already published.
+#
+# The investigator is opt-in, because it is the one part that needs a real
+# model key:
+#
+#   ANTHROPIC_API_KEY=sk-ant-... docker compose -f docker-compose.quickstart.yml --profile probe up -d
+#
+# Pinned by tag on purpose. `latest` moves under you between two `up`s and
+# turns "it worked yesterday" into a question nobody can answer.
+
+name: hookstack
+
+services:
+  hookrelay:
+    image: ghcr.io/itswl/hookrelay:0.1.1
+    container_name: hs-hookrelay
+    restart: unless-stopped
+    environment:
+      HOOKRELAY_HOST: 0.0.0.0
+      HOOKRELAY_PORT: 8100
+      HOOKRELAY_DB: /data/hookrelay.db
+      # The demo wiring, from inside the image.
+      HOOKRELAY_CONFIG: /app/examples/stack.yaml
+      HOOKRELAY_WORKER_INTERVAL: "0.5"
+      # Where the escalation route delivers. Without --profile probe this is
+      # the sink wearing a /probe-standin path, so the escalation SHAPE is
+      # visible without a model key; with the profile it is the investigator.
+      HOOKPROBE_EVENT_URL: ${HOOKPROBE_EVENT_URL:-http://sink:9000/probe-standin}
+    ports:
+      - "127.0.0.1:8100:8100"
+    volumes:
+      - relay-data:/data
+    depends_on:
+      - sink
+
+  hookjudge:
+    image: ghcr.io/itswl/hookjudge:0.1.1
+    container_name: hs-hookjudge
+    restart: unless-stopped
+    environment:
+      HOOKJUDGE_HOST: 0.0.0.0
+      HOOKJUDGE_PORT: 8200
+      HOOKJUDGE_DB: /data/hookjudge.db
+      # One outbound address, and it is the pipe. Fan-out is not its business.
+      HOOKJUDGE_RETURN_URL: http://hookrelay:8100/hook/judge-notify
+      HOOKJUDGE_WORKER_INTERVAL: "0.5"
+      HOOKJUDGE_REUSE_WINDOW_SECONDS: "3600"
+      # Defaults to the stub beside it. Leaving these empty instead would send
+      # every event to the rule floor, and `reuse` — which only ever follows an
+      # ai verdict — would never happen, hiding half the cost policy.
+      HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:-http://stub-ai:8300/v1}
+      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:-stub-key}
+      HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_AI_MODEL:-stub-4o-mini}
+      HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:-0.00015}
+      HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:-0.0006}
+    ports:
+      - "127.0.0.1:8200:8200"
+    volumes:
+      - judge-data:/data
+    depends_on:
+      - stub-ai
+
+  # The last link, otherwise invisible: `docker compose logs -f sink` is what an
+  # operator would actually have received. It runs from the pipe's own image
+  # because that image now carries it — one fewer thing to pull, and no mount.
+  sink:
+    image: ghcr.io/itswl/hookrelay:0.1.1
+    container_name: hs-sink
+    restart: unless-stopped
+    command: ["python", "-u", "/app/examples/sink.py"]
+    healthcheck:
+      disable: true
+
+  # Canned verdicts over a real OpenAI-compatible endpoint, so the client, the
+  # JSON-in-content convention and the token accounting are all exercised. It is
+  # not a model: it reports itself as `stub-4o-mini`. Point the judge's AI vars
+  # at a real provider and this stops being used.
+  stub-ai:
+    image: ghcr.io/itswl/hookjudge:0.1.1
+    container_name: hs-stub-ai
+    restart: unless-stopped
+    command: ["python", "-u", "/app/examples/stub_ai.py"]
+    healthcheck:
+      disable: true
+
+  # Opt-in: it needs a real model key to be worth starting, so the plain `up`
+  # stays hermetic. High/critical alerts then ALSO get a deep read-only
+  # investigation, whose report returns through the pipe to the same channels.
+  hookprobe:
+    image: ghcr.io/itswl/hookprobe:0.1.1
+    container_name: hs-hookprobe
+    profiles: ["probe"]
+    restart: unless-stopped
+    # The agent executes arbitrary bash, so the container is bounded even in a
+    # demo. Same numbers as the production compose.
+    mem_limit: ${HOOKPROBE_MEM_LIMIT:-2g}
+    pids_limit: 512
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-quickstart-token}
+      HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Any Anthropic-dialect provider: base URL, token and model aliases move
+      # together. See the provider notes in hookprobe/README.md.
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      # A demo should not be able to run up a bill unattended.
+      HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-5}
+      HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-24}
+    ports:
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - probe-data:/data
+
+volumes:
+  relay-data:
+  judge-data:
+  probe-data:
