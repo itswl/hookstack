@@ -332,7 +332,12 @@ function mdInline(s) {
   return s
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // esc() upstream leaves the double quote alone (it escapes text nodes), so a
+    // URL like https://x/"onmouseover="alert(1) would close the href and add a
+    // handler. The label came through esc() already; the href needs attr()'s
+    // quote-escaping too before it goes inside href="…".
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+      (_m, label, url) => '<a href="' + attr(url) + '" target="_blank" rel="noopener">' + label + "</a>");
 }
 function mdToHtml(src) {
   let text = esc(src || "");

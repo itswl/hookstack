@@ -402,6 +402,47 @@ class ClaudeAgentEngine:
             env["BASH_MAX_TIMEOUT_MS"] = str(self._settings.bash_max_timeout_ms)
         return env
 
+    # Secrets the SERVICE holds but the agent's shell has no business reading.
+    # The SDK inherits os.environ into the CLI subprocess, so the way to REMOVE a
+    # variable is to override it to "" in options.env — which is what this does.
+    # Two groups: the family's own HMAC keys (with them the agent could forge
+    # signed reports, rulings and escalations that the service exists to sign for
+    # it), and the platform/sibling secrets that share the deployment's .env
+    # (Lark app, the shadow ingest secret that can forge judgements, the admin
+    # token). The service already read what it needs at startup.
+    #
+    # HOOKPROBE_TOKEN is deliberately NOT blanked: the run-rulings patrol has the
+    # agent POST to this service's OWN API with it. That the agent holds a bearer
+    # to its own write surface is a real residual; narrowing it to a lesser,
+    # read-or-rulings-only credential is a separate change, recorded in
+    # .agents/notes/proposed/2026-09-02-the-agent-shares-the-services-secrets.md.
+    # ANTHROPIC_*/model keys are left intact — the model call needs them.
+    _SECRETS_WITHHELD_FROM_AGENT = (
+        "HOOKPROBE_EVENT_SECRET",
+        "HOOKPROBE_RETURN_SECRET",
+        "HOOKPROBE_RULING_SECRET",
+        "LARK_APP_ID",
+        "LARK_APP_SECRET",
+        "LARK_CHAT_ID",
+        "SHADOW_INGEST_SECRET",
+        "SHADOW_ADMIN_TOKEN",
+        "SHADOW_READ_TOKEN",
+        "SHADOW_ACTION_SECRET",
+        "SHADOW_RULING_SECRET",
+        "SHADOW_RETURN_URL",
+        "WW_RELAY_SECRET",
+    )
+
+    def _subprocess_env(self) -> dict[str, str]:
+        """The env overrides for the agent's CLI subprocess: per-command
+        deadlines, plus the service's own secrets blanked so a Bash step (or an
+        injected instruction that reaches one) cannot read them out of the
+        environment. See _SECRETS_WITHHELD_FROM_AGENT for what and why."""
+        env = self._engine_env()
+        for name in self._SECRETS_WITHHELD_FROM_AGENT:
+            env[name] = ""
+        return env
+
     def describe_inputs(self, *, resume: str | None = None) -> dict[str, Any]:
         """What this run will actually put in front of the model.
 
@@ -558,8 +599,9 @@ class ClaudeAgentEngine:
                     ),
                 ],
             },
-            # Per-command deadlines; see _engine_env.
-            env=self._engine_env(),
+            # Per-command deadlines plus the service secrets blanked; see
+            # _subprocess_env and _SECRETS_WITHHELD_FROM_AGENT.
+            env=self._subprocess_env(),
             # Follow-up turns reopen the original investigation with its full
             # context (transcripts live under $HOME/.claude — keep that on the
             # persistent volume).

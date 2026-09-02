@@ -146,3 +146,31 @@ def test_bash_deadlines_are_handed_to_the_engine(tmp_path: Path) -> None:
     # Zero means "leave the CLI's own default alone", not "no timeout".
     unset = ClaudeAgentEngine(make_settings(tmp_path, bash_timeout_ms=0, bash_max_timeout_ms=0))
     assert unset._engine_env() == {}
+
+
+def test_service_secrets_are_withheld_from_the_agent_subprocess(tmp_path: Path) -> None:
+    """The CLI subprocess inherits os.environ, so the family HMAC keys and the
+    sibling-service secrets that share the deployment .env are blanked in the
+    env overrides — a Bash step cannot read them back. The model keys and the
+    service's own bearer are left to be inherited (the model call and the
+    run-rulings self-call need them)."""
+    from hookprobe.engine import ClaudeAgentEngine
+    from tests.helpers import make_settings
+
+    env = ClaudeAgentEngine(make_settings(tmp_path, bash_timeout_ms=30000, bash_max_timeout_ms=90000))._subprocess_env()
+    for name in (
+        "HOOKPROBE_EVENT_SECRET",
+        "HOOKPROBE_RETURN_SECRET",
+        "HOOKPROBE_RULING_SECRET",
+        "LARK_APP_SECRET",
+        "SHADOW_INGEST_SECRET",
+        "SHADOW_ADMIN_TOKEN",
+        "WW_RELAY_SECRET",
+    ):
+        assert env[name] == "", name
+    # Not blanked → inherited from os.environ, which is where they must reach the
+    # model call and the agent's own API self-call.
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "HOOKPROBE_TOKEN" not in env
+    # The deadlines still ride alongside the scrub.
+    assert env["BASH_DEFAULT_TIMEOUT_MS"] == "30000"
