@@ -25,17 +25,6 @@ ENV HOOKRELAY_HOST=0.0.0.0 \
     HOOKRELAY_DB=/data/hookrelay.db \
     HOOKRELAY_CONFIG=/data/config.yaml
 
-# Non-root: the pipe is an HTTP server that reads its config and writes its
-# ledger to /data — it needs no privilege and no Linux capability. A named
-# volume (the demo/quickstart shape) inherits this ownership automatically; a
-# bind mount (the prod shape) must be chowned to uid 10001 on the host, which is
-# why the compose that binds it says so. uid 10001 matches hookprobe's, so one
-# chown convention covers the family.
-RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /data \
-    && chown -R app:app /data
-USER app
-
 EXPOSE 8100
 HEALTHCHECK --interval=15s --timeout=3s CMD ["python", "-c", "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"HOOKRELAY_PORT\",\"8100\")}/healthz')"]
 CMD ["python", "-m", "hookrelay"]

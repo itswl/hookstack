@@ -28,8 +28,9 @@ services:
     # hookprobe was capped before.
     mem_limit: 256m
     # An HTTP server needs no Linux capability and no privilege escalation;
-    # drop both. It runs as non-root (uid 10001) from the image — see the
-    # Dockerfile and the shadow-data chown note on the bind mount below.
+    # drop both. (Running as a non-root uid is the next step and is deferred —
+    # it needs the CI docker-smoke's bind mount chowned, which is a workflow-file
+    # edit; see the decision note.)
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -66,10 +67,7 @@ services:
     volumes:
       - ./shadow.yaml:/etc/hookrelay/config.yaml:ro
       # Bind mounts at the deployment root, like the investigator's: state in
-      # plain sight for the backup script, not inside a named volume. The
-      # services now run non-root (uid 10001), and a bind mount keeps host
-      # ownership, so these dirs must be owned by 10001:
-      #   sudo chown -R 10001:10001 ../shadow-data/{hookrelay,hookjudge,hookjudge-b}
+      # plain sight for the backup script, not inside a named volume.
       - ../shadow-data/hookrelay:/data
     ports:
       - "127.0.0.1:8100:8100"
