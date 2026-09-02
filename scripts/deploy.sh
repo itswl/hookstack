@@ -4,6 +4,15 @@
 #   ./scripts/deploy.sh              # pull main, rebuild both projects, read back health
 #   DEPLOY_NO_PULL=1 ./scripts/deploy.sh   # rebuild what is already checked out
 #
+# Rollback: every successful deploy tags the images it shipped `:<name>-rb-<sha>`
+# (kept: the last ROLLBACK_KEEP=3), so a bad ship recovers in seconds without a
+# rebuild of an older commit:
+#   docker tag hookrelay:hookrelay-rb-<oldsha> hookrelay:shadow
+#   docker tag hookjudge:hookjudge-rb-<oldsha> hookjudge:shadow
+#   docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml up -d
+#   # (hookprobe: hookprobe-rb-<oldsha> -> hookprobe:latest, then its own up -d)
+# `docker images | grep -- -rb-` lists what is on hand; the sha is the commit.
+#
 # Codified because deploying from memory failed twice in one day, both times
 # on knowledge this file now holds:
 #   - compose resolves .env relative to the COMPOSE FILE's directory, not the
@@ -71,4 +80,22 @@ while :; do
   sleep 3
 done
 docker ps --format '  {{.Names}} {{.Status}}' | awk '$1 ~ /^(hookrelay|hookjudge|hookjudge-b|hookprobe|lark-bridge)$/'
-echo "deployed and healthy."
+
+# Rollback anchors: only now, past the health gate, is this image set known-good.
+# Tag each with the commit it was built from so a later bad ship can be reverted
+# by re-tagging instead of rebuilding an older commit (which the prune then
+# removes). The tags pin the layers, so pruning leaves the kept ones alone;
+# ROLLBACK_KEEP bounds the disk they hold (the images share layers until source
+# changes, so the real cost is roughly one extra hookprobe image per kept sha).
+sha="$(git rev-parse --short HEAD)"
+keep="${ROLLBACK_KEEP:-3}"
+for ref in hookrelay:shadow hookjudge:shadow hookjudge-b:shadow lark-bridge:shadow hookprobe:latest; do
+  name="${ref%%:*}"
+  docker image inspect "$ref" >/dev/null 2>&1 || continue
+  docker tag "$ref" "$name:$name-rb-$sha"
+  # Keep the newest $keep rollback tags for this image, by image creation time.
+  docker images "$name" --format '{{.Tag}} {{.CreatedAt}}' \
+    | awk '$1 ~ /-rb-/ {print}' | sort -rk2 | tail -n "+$((keep + 1))" \
+    | while read -r tag _; do docker rmi "$name:$tag" >/dev/null 2>&1 || true; done
+done
+echo "deployed and healthy. rollback anchor: -rb-$sha (kept $keep)"
