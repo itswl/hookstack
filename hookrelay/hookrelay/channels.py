@@ -290,10 +290,13 @@ async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, A
     """
     try:
         url, payload, headers = build_request(channel, message)
-    except (ValueError, TypeError, KeyError) as error:
+    except (ValueError, TypeError, KeyError, AttributeError) as error:
         # A builder complaining about its inputs is a MISCONFIGURATION, and it
         # belongs in the delivery ledger with a name — not raised into the
         # worker, where one bad channel would stall every other delivery.
+        # AttributeError is here too: a processed payload whose meta/analysis is
+        # the wrong type reaches an accessor as a poison pill, and a row that
+        # raises instead of failing is retried every tick forever.
         return False, f"build: {error.__class__.__name__}: {error}", None
     # Headers, never body: a receiver that dedupes needs a stable key, and a
     # brain that will hand work BACK to us needs something to quote so the two

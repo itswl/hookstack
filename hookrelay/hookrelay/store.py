@@ -386,16 +386,18 @@ class Store:
 
     async def defer_delivery(self, delivery_id: int, until: float) -> None:
         """Rate-limit pushback: not an attempt, not an error — just later."""
-        await self.db.execute("UPDATE deliveries SET next_attempt_at = ? WHERE id = ?", (until, delivery_id))
-        await self.db.commit()
+        async with self._write_lock:
+            await self.db.execute("UPDATE deliveries SET next_attempt_at = ? WHERE id = ?", (until, delivery_id))
+            await self.db.commit()
         self._announce()
 
     async def mark_sent(self, delivery_id: int, now: float, sent_body: str | None = None) -> None:
-        await self.db.execute(
-            "UPDATE deliveries SET status = 'sent', sent_at = ?, last_error = NULL, sent_body = ? WHERE id = ?",
-            (now, sent_body, delivery_id),
-        )
-        await self.db.commit()
+        async with self._write_lock:
+            await self.db.execute(
+                "UPDATE deliveries SET status = 'sent', sent_at = ?, last_error = NULL, sent_body = ? WHERE id = ?",
+                (now, sent_body, delivery_id),
+            )
+            await self.db.commit()
         self._announce()
 
     async def mark_failed(
@@ -409,31 +411,33 @@ class Store:
         bytes: overwriting them with NULL destroyed the only record of what the
         receiver was sent, on the exact rows an operator opens to find out.
         """
-        if next_at is None:
-            await self.db.execute(
-                "UPDATE deliveries SET status = 'dead', attempts = ?, last_error = ?, "
-                "sent_body = COALESCE(?, sent_body) WHERE id = ?",
-                (attempts, error[:500], sent_body, delivery_id),
-            )
-        else:
-            await self.db.execute(
-                "UPDATE deliveries SET attempts = ?, last_error = ?, next_attempt_at = ?, "
-                "sent_body = COALESCE(?, sent_body) WHERE id = ?",
-                (attempts, error[:500], next_at, sent_body, delivery_id),
-            )
-        await self.db.commit()
+        async with self._write_lock:
+            if next_at is None:
+                await self.db.execute(
+                    "UPDATE deliveries SET status = 'dead', attempts = ?, last_error = ?, "
+                    "sent_body = COALESCE(?, sent_body) WHERE id = ?",
+                    (attempts, error[:500], sent_body, delivery_id),
+                )
+            else:
+                await self.db.execute(
+                    "UPDATE deliveries SET attempts = ?, last_error = ?, next_attempt_at = ?, "
+                    "sent_body = COALESCE(?, sent_body) WHERE id = ?",
+                    (attempts, error[:500], next_at, sent_body, delivery_id),
+                )
+            await self.db.commit()
         self._announce()
 
     async def retry_delivery(self, delivery_id: int, now: float) -> bool:
         """Operator second chance: a dead delivery back to queued, due now.
         Attempts reset — the operator's judgement outranks the backoff ledger."""
-        cursor = await self.db.execute(
-            "UPDATE deliveries SET status = 'queued', attempts = 0, next_attempt_at = ? "
-            "WHERE id = ? AND status = 'dead'",
-            (now, delivery_id),
-        )
-        await self.db.commit()
-        return cursor.rowcount > 0
+        async with self._write_lock:
+            cursor = await self.db.execute(
+                "UPDATE deliveries SET status = 'queued', attempts = 0, next_attempt_at = ? "
+                "WHERE id = ? AND status = 'dead'",
+                (now, delivery_id),
+            )
+            await self.db.commit()
+            return cursor.rowcount > 0
 
     async def cold_events(self, *, before: float, levels: tuple[str, ...], limit: int = 50) -> list[dict[str, Any]]:
         """Alerts that were delivered, nobody touched, and have gone cold.
@@ -475,11 +479,12 @@ class Store:
     async def mark_escalated(self, event_id: int, now: float) -> bool:
         """Stamp it before the deliveries are enqueued, so a crash mid-enqueue
         cannot turn one cold alert into an escalation every tick forever."""
-        cursor = await self.db.execute(
-            "UPDATE events SET escalated_at = ? WHERE id = ? AND escalated_at IS NULL", (now, event_id)
-        )
-        await self.db.commit()
-        return cursor.rowcount > 0
+        async with self._write_lock:
+            cursor = await self.db.execute(
+                "UPDATE events SET escalated_at = ? WHERE id = ? AND escalated_at IS NULL", (now, event_id)
+            )
+            await self.db.commit()
+            return cursor.rowcount > 0
 
     # ── card actions ──────────────────────────────────────────────────────
 
@@ -500,22 +505,24 @@ class Store:
         get through to something that spends money or restarts a service. The
         row is written first and annotated with its outcome afterwards.
         """
-        try:
-            await self.db.execute(
-                "INSERT INTO card_actions (jti, kind, event_id, correlation_id, actor, pressed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (jti, kind, event_id, correlation_id, actor[:120], now),
-            )
-        except aiosqlite.IntegrityError:
-            return False
-        await self.db.commit()
+        async with self._write_lock:
+            try:
+                await self.db.execute(
+                    "INSERT INTO card_actions (jti, kind, event_id, correlation_id, actor, pressed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (jti, kind, event_id, correlation_id, actor[:120], now),
+                )
+            except aiosqlite.IntegrityError:
+                return False
+            await self.db.commit()
         self._announce()
         return True
 
     async def record_action_outcome(self, jti: str, outcome: str) -> None:
         """What the press achieved, for the timeline and for a dispute later."""
-        await self.db.execute("UPDATE card_actions SET outcome = ? WHERE jti = ?", (outcome[:200], jti))
-        await self.db.commit()
+        async with self._write_lock:
+            await self.db.execute("UPDATE card_actions SET outcome = ? WHERE jti = ?", (outcome[:200], jti))
+            await self.db.commit()
         self._announce()
 
     async def recent_actions(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -537,18 +544,21 @@ class Store:
         return dict(row) if row else None
 
     async def add_silence(self, source: str, until_ts: float, note: str, now: float) -> int:
-        cursor = await self.db.execute(
-            "INSERT INTO silences (source, until_ts, note, created_at) VALUES (?, ?, ?, ?)",
-            (source, until_ts, note, now),
-        )
-        await self.db.commit()
+        async with self._write_lock:
+            cursor = await self.db.execute(
+                "INSERT INTO silences (source, until_ts, note, created_at) VALUES (?, ?, ?, ?)",
+                (source, until_ts, note, now),
+            )
+            await self.db.commit()
+            row_id = int(cursor.lastrowid or 0)
         self._announce()
-        return int(cursor.lastrowid or 0)
+        return row_id
 
     async def delete_silence(self, silence_id: int) -> bool:
-        cursor = await self.db.execute("DELETE FROM silences WHERE id = ?", (silence_id,))
-        await self.db.commit()
-        return cursor.rowcount > 0
+        async with self._write_lock:
+            cursor = await self.db.execute("DELETE FROM silences WHERE id = ?", (silence_id,))
+            await self.db.commit()
+            return cursor.rowcount > 0
 
     async def list_silences(self, now: float) -> list[dict[str, Any]]:
         cursor = await self.db.execute("SELECT * FROM silences WHERE until_ts > ? ORDER BY id DESC", (now,))
@@ -627,22 +637,23 @@ class Store:
         through it. An event is purgeable when it is older than the cutoff AND
         none of its deliveries is still queued — a promise in flight is never
         deleted out from under the worker. Expired silences go with them."""
-        cursor = await self.db.execute(
-            "SELECT id FROM events e WHERE e.received_at < ?"
-            " AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.event_id = e.id AND d.status = 'queued')",
-            (cutoff,),
-        )
-        ids = [int(row["id"]) for row in await cursor.fetchall()]
-        for start in range(0, len(ids), 500):
-            chunk = ids[start : start + 500]
-            marks = ",".join("?" for _ in chunk)
-            # `marks` is only "?" placeholders; the values are parametrized.
-            await self.db.execute(f"DELETE FROM deliveries WHERE event_id IN ({marks})", chunk)  # nosec B608
-            await self.db.execute(f"DELETE FROM decisions WHERE event_id IN ({marks})", chunk)  # nosec B608
-            await self.db.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk)  # nosec B608
-        cursor = await self.db.execute("DELETE FROM silences WHERE until_ts < ?", (now,))
-        silences = cursor.rowcount
-        await self.db.commit()
+        async with self._write_lock:
+            cursor = await self.db.execute(
+                "SELECT id FROM events e WHERE e.received_at < ?"
+                " AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.event_id = e.id AND d.status = 'queued')",
+                (cutoff,),
+            )
+            ids = [int(row["id"]) for row in await cursor.fetchall()]
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                marks = ",".join("?" for _ in chunk)
+                # `marks` is only "?" placeholders; the values are parametrized.
+                await self.db.execute(f"DELETE FROM deliveries WHERE event_id IN ({marks})", chunk)  # nosec B608
+                await self.db.execute(f"DELETE FROM decisions WHERE event_id IN ({marks})", chunk)  # nosec B608
+                await self.db.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk)  # nosec B608
+            cursor = await self.db.execute("DELETE FROM silences WHERE until_ts < ?", (now,))
+            silences = cursor.rowcount
+            await self.db.commit()
         return {"events": len(ids), "silences": max(0, silences)}
 
     # ── status view ───────────────────────────────────────────────────────

@@ -64,14 +64,24 @@ _LEVEL_TAG = {
 }
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    """The wire is untyped: a dict where an object was expected, else empty."""
+    return value if isinstance(value, dict) else {}
+
+
 class Processed:
     """A brain's result, with the accessors every renderer needs."""
 
     def __init__(self, payload: dict[str, Any]) -> None:
         self.raw = payload if isinstance(payload, dict) else {}
-        self.meta: dict[str, Any] = self.raw.get("meta") or {}
-        self.analysis: dict[str, Any] = self.raw.get("analysis") or {}
-        self.identity: dict[str, Any] = self.raw.get("identity") or {}
+        # `.get("meta") or {}` still returns a str/list when the sender put one
+        # there, and the accessors below then call .get() on it → AttributeError,
+        # which escapes send()'s narrow except and dead-letters nothing: the row
+        # is retried every tick forever, head-of-line blocking its channel. Coerce
+        # to a dict so a malformed field renders as absent, not as a poison pill.
+        self.meta: dict[str, Any] = _as_dict(self.raw.get("meta"))
+        self.analysis: dict[str, Any] = _as_dict(self.raw.get("analysis"))
+        self.identity: dict[str, Any] = _as_dict(self.raw.get("identity"))
         self.links: list[dict[str, Any]] = [x for x in (self.raw.get("links") or []) if isinstance(x, dict)]
         self.actions: list[dict[str, Any]] = [x for x in (self.raw.get("actions") or []) if isinstance(x, dict)]
 
