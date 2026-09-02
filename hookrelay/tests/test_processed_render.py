@@ -165,6 +165,35 @@ async def test_a_non_object_payload_fails_into_the_ledger():
     assert body is None  # nothing was built, so there are no bytes to keep
 
 
+@pytest.mark.parametrize("bad", ["a string", ["a", "list"], 7])
+def test_a_non_object_meta_is_not_a_poison_pill(bad: object):
+    """A processed payload whose meta/analysis/identity is the wrong type used to
+    reach an accessor as an AttributeError during build, escape send()'s narrow
+    except, never dead-letter, and be retried every tick forever — head-of-line
+    blocking its channel. Coercion to {} means build renders (from whatever is
+    left) instead of raising."""
+    message = _message()
+    payload = dict(message["payload"])
+    payload["meta"] = bad
+    payload["analysis"] = bad
+    payload["identity"] = bad
+    message = {**message, "payload": payload}
+    # The whole point: this does not raise. It renders a card from the defaults.
+    _url, built, _headers = build_request(_channel("feishu"), message, now=0.0)
+    assert built  # something was rendered, not an exception
+
+
+def test_a_supplied_link_label_cannot_hijack_the_card_link():
+    """A link label carrying `](…)` used to close the markdown link early, so the
+    payload's own target became the clickable one. Escaping `]` keeps the label
+    (evil URL and all) inside its brackets; the real target stays the only href."""
+    from hookrelay.markup import markdown_link
+
+    out = markdown_link("Runbook](https://evil.example) click", "https://kb.example/ok")
+    assert out.endswith("](https://kb.example/ok)")  # the only real link target
+    assert "Runbook\\](https://evil.example) click" in out  # evil is escaped label text
+
+
 def test_missing_optional_blocks_render_without_holes():
     """Brains differ: a lite brain has no impact analysis and no KB. Its result must
     still produce a clean card, not one with empty sections."""

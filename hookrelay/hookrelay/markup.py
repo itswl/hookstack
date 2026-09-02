@@ -34,7 +34,12 @@ from __future__ import annotations
 # alert ugly; it cannot make it reach somebody or send them anywhere, and an
 # escape that fires on every `*` in every stack trace would be its own kind of
 # damage to the thing an operator is trying to read.
-_OPENERS = ("\\", "<", "[")
+# `]` is here as well as `[`: a link label carrying a `]` ("Runbook](http://evil) x")
+# closes the `[label](url)` early, so the payload's own `](…)` becomes a live link
+# the card never intended. Escaping both brackets keeps a supplied label inside its
+# label. `\` is first so an escape can never assemble a new opener from a supplied
+# backslash.
+_OPENERS = ("\\", "<", "[", "]")
 
 # Two schemes get to be links, because a card is a thing people click without
 # reading a status bar first. `javascript:` and `data:` reaching a Feishu card
