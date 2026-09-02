@@ -41,13 +41,15 @@ _SEG = r"[^|;&\n]*"
 _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
-            rf"\bkubectl\b{_SEG}\b(apply|create|delete|edit|patch|replace|scale|autoscale|rollout|run|"
+            rf"\b(?:kubectl|oc|kubecolor)\b{_SEG}\b(apply|create|delete|edit|patch|replace|scale|autoscale|rollout|run|"
             rf"cordon|uncordon|drain|taint|label|annotate|expose|set|exec|attach|cp|port-forward|proxy|debug)\b"
         ),
         "kubectl mutation or pod entry",
     ),
     (
-        re.compile(rf"\bhelm\b{_SEG}\b(install|upgrade|uninstall|delete|rollback|push)\b"),
+        re.compile(
+            rf"\b(?:helm|helmfile)\b{_SEG}\b(install|upgrade|uninstall|delete|rollback|push|apply|sync|destroy)\b"
+        ),
         "helm mutation",
     ),
     (
@@ -77,6 +79,12 @@ _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
 
 def bash_deny_reason(command: str) -> str | None:
     """Return a human-readable denial reason, or None when the command may run."""
+    # A shell line-continuation (backslash then newline) joins two physical lines
+    # into ONE logical command, but _SEG stops at \n — so `kubectl \<newline>
+    # delete pod x` split the verb into a second segment and passed. Models wrap
+    # long kubectl/helm lines exactly this way, so this was an accidental hole,
+    # not only an adversarial one. Collapse continuations before matching.
+    command = re.sub(r"\\\r?\n", " ", command)
     for pattern, label in _DENY_RULES:
         if pattern.search(command):
             return f"read-only guard: {label} is blocked; this runner may only observe, never change"
