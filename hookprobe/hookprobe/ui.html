@@ -204,6 +204,18 @@ button.danger{color:var(--red);border-color:var(--red)}
      padding:8px 10px;resize:vertical;min-height:46px;font:inherit}
 #msg:focus{outline:none;border-color:var(--accent)}
 .empty{color:var(--dim);padding:26px;text-align:center}
+/* Responsive: an on-call person opens a session from a card on their phone. The
+   330px sidebar and side-by-side layout stack under 720px. Additive only —
+   desktop (>720px) is untouched. */
+@media (max-width:720px){
+  main{flex-direction:column}
+  aside{width:auto;max-height:40vh;border-right:0;border-bottom:1px solid var(--line)}
+  header{flex-wrap:wrap;gap:8px 10px;padding:8px 12px}
+  #token{margin-left:0;width:100%}
+  .kv-grid{grid-template-columns:1fr}
+  .audit-row .a-session{width:auto}
+  pre,table{overflow-x:auto}
+}
 </style>
 </head>
 <body>
