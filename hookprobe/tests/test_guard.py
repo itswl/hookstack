@@ -35,6 +35,16 @@ ALLOWED = [
 DENIED = [
     "kubectl delete pod api-0 -n prod",
     "kubectl -n prod delete pod api-0",
+    # A shell line-continuation used to split the verb into a second segment and
+    # slip past — the way a model wraps a long line, not only an attacker.
+    "kubectl \\\n  delete pod api-0 -n prod",
+    "kubectl -n prod \\\n  rollout restart deploy/api",
+    "helm \\\n  upgrade api ./chart",
+    # Alternate binaries for the same clusters.
+    "oc delete pod api-0 -n prod",
+    "kubecolor delete pod api-0",
+    "helmfile apply",
+    "helmfile destroy",
     "kubectl apply -f fix.yaml",
     "kubectl rollout restart deploy/api",
     "kubectl exec -it api-0 -- sh",

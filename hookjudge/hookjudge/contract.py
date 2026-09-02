@@ -79,6 +79,10 @@ _RECOVERY_MENTION = re.compile(
 _NEGATED_BEFORE = re.compile(r"(?:not|isn't|is not|hasn't|has not|no longer|未|尚未|没有|无法)\s*\W*$", re.IGNORECASE)
 # 恢复中 / 恢复了一部分 — the condition is still moving.
 _IN_PROGRESS_AFTER = ("中",)
+# 恢复失败 / 恢复失效 — the recovery itself did NOT happen. The word is present,
+# the event is the opposite of a recovery, and reading it as one reports a live
+# incident as resolved.
+_FAILED_AFTER = ("失败", "失效")
 
 
 def _asserts_recovery(text: str) -> bool:
@@ -87,7 +91,10 @@ def _asserts_recovery(text: str) -> bool:
         preceding = text[max(0, match.start() - 24) : match.start()]
         if _NEGATED_BEFORE.search(preceding):
             continue
-        if text[match.end() :].startswith(_IN_PROGRESS_AFTER):
+        following = text[match.end() :]
+        if following.startswith(_IN_PROGRESS_AFTER):
+            continue
+        if following.startswith(_FAILED_AFTER):
             continue
         return True
     return False
@@ -349,10 +356,20 @@ class Incoming:
         word at all, and sniffing called it a fresh firing."""
         if self.recovery_flag is not None:
             return self.recovery_flag
-        haystack = f"{self.title} {self.body} {' '.join(self.fields.values())}".lower()
-        # "ok" only counts as a standalone word: "okhttp timeout" is not a recovery.
-        words = set(haystack.replace("[", " ").replace("]", " ").replace(":", " ").split())
-        return _asserts_recovery(haystack) or "ok" in words
+        # Recovery is stated in the SUBJECT line — a bracketed marker ([RESOLVED],
+        # [OK], 【恢复】), an edge word (a leading/trailing resolved / OK / 已恢复),
+        # or a plain assertion the condition ended — or in a STRUCTURED state
+        # field (Alertmanager's status=resolved, carried as fields.status per
+        # STACK.md). It is NOT mined from free-text BODY prose: "…resolved to
+        # 10.0.0.1…" is a verb and "probe not OK for 5m" a health phrase, and
+        # scanning the body for either turned live incidents into green,
+        # button-less recovery cards. A pipe that knows the fact sets
+        # recovery_flag above; this keyword sniff is only the flagless fallback.
+        title = self.title.lower()
+        if _MARKER_BRACKETED.search(title) or _MARKER_EDGE.search(title):
+            return True
+        fields_text = " ".join(str(value) for value in self.fields.values()).lower()
+        return _asserts_recovery(title) or _asserts_recovery(fields_text)
 
 
 @dataclass(frozen=True, slots=True)

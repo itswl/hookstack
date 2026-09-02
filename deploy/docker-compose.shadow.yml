@@ -22,6 +22,11 @@ services:
     image: hookrelay:shadow
     container_name: hookrelay
     restart: unless-stopped
+    # 12 GB box, no swap, one cgroup OOM on record (2026-08-24). These services
+    # idle near 50-90 MB; 256 MB is ~4x headroom and bounds a runaway's blast
+    # radius so it cannot take the host (and its neighbours) with it. Only
+    # hookprobe was capped before.
+    mem_limit: 256m
     environment:
       HOOKRELAY_HOST: 0.0.0.0
       HOOKRELAY_PORT: 8100
@@ -65,6 +70,7 @@ services:
     image: hookjudge:shadow
     container_name: hookjudge
     restart: unless-stopped
+    mem_limit: 256m
     environment:
       HOOKJUDGE_HOST: 0.0.0.0
       HOOKJUDGE_PORT: 8200
@@ -110,6 +116,7 @@ services:
     image: hookjudge:shadow
     container_name: hookjudge-b
     restart: unless-stopped
+    mem_limit: 256m
     environment:
       HOOKJUDGE_HOST: 0.0.0.0
       HOOKJUDGE_PORT: 8200
@@ -156,6 +163,7 @@ services:
     image: lark-bridge:shadow
     container_name: lark-bridge
     restart: unless-stopped
+    mem_limit: 256m
     environment:
       LARK_APP_ID: ${LARK_APP_ID:?set LARK_APP_ID in .env}
       LARK_APP_SECRET: ${LARK_APP_SECRET:?set LARK_APP_SECRET in .env}

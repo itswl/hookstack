@@ -28,6 +28,17 @@ services:
       HOOKJUDGE_PORT: 8200
       HOOKJUDGE_DB: /data/hookjudge.db
       HOOKJUDGE_RETURN_URL: ${HOOKJUDGE_RETURN_URL:?where verdicts go — your pipe's judge-notify door}
+      # These publish port 8200 (below) to 0.0.0.0, so the door and the board are
+      # reachable by anything that reaches the host. Forward the guards that
+      # .env.example documents, or this deployment ingests unsigned events and
+      # serves its whole ledger to anyone: INGEST_SECRET signs /events and
+      # /feedback, RULING_SECRET the /rulings/ai door (empty = that door stays
+      # shut), READ_TOKEN guards /status and /live (empty = the board is open —
+      # tolerable ONLY behind loopback or a tunnel, which is why the port note
+      # below matters). The root shadow compose already forwards all three.
+      HOOKJUDGE_INGEST_SECRET: ${HOOKJUDGE_INGEST_SECRET:-}
+      HOOKJUDGE_RULING_SECRET: ${HOOKJUDGE_RULING_SECRET:-}
+      HOOKJUDGE_READ_TOKEN: ${HOOKJUDGE_READ_TOKEN:-}
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
       HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
       HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:-}

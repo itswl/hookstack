@@ -80,10 +80,20 @@ services:
       # - ../../secrets/kubeconfig-readonly:/data/home/.kube/config:ro
       # MCP servers the agent may query (same shape as .mcp.json):
       # - ../../probe-mcp.json:/config/mcp.json:ro
-    env_file:
-      - ../../.env
+    # NO env_file here, on purpose. `env_file: ../../.env` injected the WHOLE
+    # deployment .env into this container — the Lark app secret, the shadow
+    # ingest secret that can forge judgements, the admin token, the platform
+    # relay secret — none of which this service reads. The agent runs arbitrary
+    # bash in here, so every one of those was a `printenv` away. The block below
+    # already names everything the service needs, pulled from .env by compose's
+    # ${...} interpolation (that still reads ../../.env via `--env-file`, it just
+    # no longer dumps the file wholesale into the container). engine.py
+    # additionally blanks the family HMAC keys from the agent's own subprocess.
     environment:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
+      # Was reaching the container only through the deleted env_file. It gates
+      # whether the budget breaker also refuses the agent door; keep it explicit.
+      HOOKPROBE_BUDGET_GATES_AGENT_DOOR: ${HOOKPROBE_BUDGET_GATES_AGENT_DOOR:-}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       # The pipe's report door on the same network. Only runs that arrived
       # through /hooks/event ever deliver here; callers that poll /final
