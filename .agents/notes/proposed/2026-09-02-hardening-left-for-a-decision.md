@@ -33,14 +33,15 @@ Still deferred:
   nothing is `unhealthy`/`starting`; a crash-looping `lark-bridge` (no
   HEALTHCHECK) passes as "deployed and healthy". Give the bridge a healthcheck,
   or assert each expected container is `healthy`.
-- **lark-bridge non-root.** The other three services dropped to uid 10001; the
-  bridge stays root (node:22-alpine, a different user model, and it is the live
-  delivery path — a uid mistake there drops the operator's cards). Do it on its
-  own, with a config-volume chown.
-- **lark-bridge.** Inbound POST is unauthenticated on the shared platform
-  network, and `entrypoint.sh` keeps an existing config so rotating
+- **lark-bridge secret rotation.** Inbound-card auth now exists
+  ([[the-lark-bridge-refuses-a-forged-card]]); what remains is that
+  `entrypoint.sh` keeps an existing lark-cli config, so rotating
   `LARK_APP_SECRET` silently needs the named volume deleted (the compose comment
-  claims otherwise). Both are bridge changes, out of scope for this pass.
+  claims otherwise). Fix the entrypoint to re-init on a changed secret.
+- **lark-bridge non-root.** It still runs as root (node:22-alpine, a different
+  user model, and it is the live delivery path — a uid mistake there drops the
+  operator's cards). Do it on its own, with a config-volume chown, together with
+  the pipe/brain non-root uid that is also deferred above.
 - **Guard breadth.** The bash guard now catches line-continuation, `oc`,
   `kubecolor`, `helmfile`; still by-design open on cloud CLIs, `curl -X DELETE`,
   and process kills — the read-only credentials remain the real boundary

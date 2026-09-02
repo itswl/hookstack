@@ -23,6 +23,9 @@ coupling needed to keep them out.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -46,6 +49,41 @@ LISTEN_PORT = int(os.environ.get("BRIDGE_PORT", "9100"))
 # Max bytes accepted from the pipe. A card is a few KB; anything near this is a
 # misconfiguration, not a notification.
 MAX_BODY = 256 * 1024
+
+# Inbound authentication. This listens on 0.0.0.0 over a network SHARED with the
+# platform's containers, so "only the pipe can reach it" was never true —
+# anything on the wire could POST a card into the operator's private chat as the
+# app. When BRIDGE_INBOUND_SECRET is set, require the pipe's Feishu-style sign:
+# hookrelay's feishu channel, given a channel secret, adds {timestamp, sign} to
+# the body, sign = base64(HMAC-SHA256(key="{ts}\n{secret}", msg="")). Set the
+# same value as the `to-me` channel's secret. Unset = accept everything, which
+# is the previous behaviour, so turning this on is a two-line .env change with no
+# code risk: an unset bridge never rejects a card.
+INBOUND_SECRET = os.environ.get("BRIDGE_INBOUND_SECRET", "")
+_SIGN_SKEW_SECONDS = 300
+
+
+def is_authentic(payload: dict) -> bool:
+    """True when the body proves knowledge of the shared secret within the skew.
+
+    The sign covers the timestamp, not the card body, so a captured card can be
+    replayed inside the window — bounded, and the card is not attacker-chosen.
+    Forging a NEW card still needs the secret. Unset secret = always True.
+    """
+    if not INBOUND_SECRET:
+        return True
+    timestamp = str(payload.get("timestamp") or "")
+    provided = str(payload.get("sign") or "")
+    if not timestamp or not provided:
+        return False
+    try:
+        if abs(time.time() - int(timestamp)) > _SIGN_SKEW_SECONDS:
+            return False
+    except ValueError:
+        return False
+    key = f"{timestamp}\n{INBOUND_SECRET}".encode()
+    expected = base64.b64encode(hmac.new(key, b"", hashlib.sha256).digest()).decode()
+    return hmac.compare_digest(expected, provided)
 
 
 def _lark(
@@ -117,7 +155,17 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._reply(400, {"ok": False, "error": "body is not JSON"})
             return
-        card = payload.get("card") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            self._reply(400, {"ok": False, "error": "body is not a JSON object"})
+            return
+        if not is_authentic(payload):
+            # A card that cannot prove the shared secret is refused, not
+            # delivered. hookrelay treats the 401 as a failed delivery and
+            # dead-letters it in the open, which is the visible failure we want.
+            logger.warning("inbound card refused: signature missing or invalid")
+            self._reply(401, {"ok": False, "error": "unauthenticated"})
+            return
+        card = payload.get("card")
         if not isinstance(card, dict):
             # The pipe sends {msg_type: interactive, card: {...}}. Anything else
             # is a channel pointed here by mistake, and saying so beats a 200.
