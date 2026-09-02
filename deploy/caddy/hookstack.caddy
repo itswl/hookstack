@@ -39,6 +39,17 @@
 #     memory, which are the things the whole design withholds from its own agent.
 
 relay.internal.example:80 {
+	# Security headers: these pages are single-file with inline <script>/<style>
+	# and NO external assets, so 'self' + 'unsafe-inline' does not break them
+	# while connect-src 'self' blocks token exfiltration and frame-ancestors
+	# 'none' blocks clickjacking. (unsafe-inline is a real limit: it does not
+	# stop an inline handler, which is why the console also escapes link hrefs.)
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
 	@live path /live
 	header @live {
 		X-Accel-Buffering no
@@ -54,6 +65,17 @@ relay.internal.example:80 {
 }
 
 judge.internal.example:80 {
+	# Security headers: these pages are single-file with inline <script>/<style>
+	# and NO external assets, so 'self' + 'unsafe-inline' does not break them
+	# while connect-src 'self' blocks token exfiltration and frame-ancestors
+	# 'none' blocks clickjacking. (unsafe-inline is a real limit: it does not
+	# stop an inline handler, which is why the console also escapes link hrefs.)
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
 	# /judgements/*/label is a write, and it is here on purpose: it is the review
 	# queue, where one click is one eval label. Making that cheap is the point.
 	# Cloudflare buffers a streamed response unless it is told not to. Direct to
@@ -79,6 +101,17 @@ judge.internal.example:80 {
 }
 
 probe.internal.example:80 {
+	# Security headers: these pages are single-file with inline <script>/<style>
+	# and NO external assets, so 'self' + 'unsafe-inline' does not break them
+	# while connect-src 'self' blocks token exfiltration and frame-ancestors
+	# 'none' blocks clickjacking. (unsafe-inline is a real limit: it does not
+	# stop an inline handler, which is why the console also escapes link hrefs.)
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
 	# Read the console; adopt nothing. Every route here is bearer-guarded, but the
 	# same /v1 prefix carries `PUT /v1/skills/{name}`, `PUT /v1/memory` and
 	# `POST /v1/remediations/{id}/approve` — the writes this whole design withholds
