@@ -64,6 +64,12 @@ services:
       # everyone rather than admitting anyone. That is why this was missing for
       # weeks without being a hole: the admin surface simply did not work.
       HOOKRELAY_ADMIN_TOKEN: ${SHADOW_ADMIN_TOKEN:-}
+      # Signs the card the `to-me` channel hands the lark-bridge, so the bridge
+      # can refuse a forged card from anything else on this shared network.
+      # Empty (the default) means the hop stays unsigned and the bridge accepts
+      # it, exactly as before — set it in .env, same value as the bridge's
+      # BRIDGE_INBOUND_SECRET, to turn the check on.
+      LARK_BRIDGE_SECRET: ${LARK_BRIDGE_SECRET:-}
     volumes:
       - ./shadow.yaml:/etc/hookrelay/config.yaml:ro
       # Bind mounts at the deployment root, like the investigator's: state in
@@ -185,6 +191,11 @@ services:
       # person and not a group notification.
       LARK_CHAT_ID: ${LARK_CHAT_ID:?set LARK_CHAT_ID in .env}
       RELAY_ACTION_URL: http://hookrelay:8100/card-action
+      # Inbound card authentication. Same value as hookrelay's LARK_BRIDGE_SECRET
+      # above. Empty (default) = accept any inbound card (previous behaviour);
+      # set both to close the shared-network hole where a neighbour could post a
+      # card into the operator's chat as the app.
+      BRIDGE_INBOUND_SECRET: ${LARK_BRIDGE_SECRET:-}
     volumes:
       # lark-cli's credential file and event cursor. A named volume rather than
       # a bind: nothing in here is worth reading from the host, and the

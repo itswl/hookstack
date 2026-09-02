@@ -131,12 +131,14 @@ channels:
   # re-sends it as the application so its buttons can be pressed.
   - name: to-me
     type: feishu
-    # Explicitly unsigned, and the empty string is the point: a missing key here
-    # is an oversight, a present-and-empty one is a decision. This hop is the
-    # pipe handing a rendered card to the bridge beside it on the compose
-    # network, and the bridge's own credential is what authenticates the leg
-    # that actually leaves the machine.
-    secret: ""
+    # Signs the card handed to the bridge. This hop shares a network with the
+    # platform's containers, so an unsigned door let any neighbour post a card
+    # into the operator's chat as the app. With a secret set, the feishu builder
+    # adds {timestamp, sign} and the bridge (BRIDGE_INBOUND_SECRET, same value)
+    # refuses anything that cannot prove it. Empty (default) keeps the old
+    # unsigned behaviour, and the bridge accepts it — so this is off until the
+    # .env line is set on both sides.
+    secret: ${LARK_BRIDGE_SECRET}
     url: http://lark-bridge:9100/
     options: {payload: processed}
 
