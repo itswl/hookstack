@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -127,6 +127,12 @@
   .tokenbar button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
                      padding: 8px 16px; cursor: pointer; }
   /* ── end token bar ──────────────────────────────────────────────────────── */
+  /* Minimal responsive pass (page-specific, additive; desktop untouched). */
+  @media (max-width: 640px) {
+    body { font-size: 14px; }
+    header { flex-wrap: wrap; row-gap: 8px; }
+    pre { overflow-x: auto; }
+  }
 </style>
 </head>
 <body>
