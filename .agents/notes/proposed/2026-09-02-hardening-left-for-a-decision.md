@@ -7,22 +7,23 @@ scope: stack
 
 ## Decision
 
-Not built in the 2026-09-02 review-fix pass, each for a reason worth recording
-rather than rediscovering. The pass took the security and correctness fixes that
-were small and low-regression; these need a decision, a destination, or a
-riskier change.
+Second pass, 2026-09-02: several items below shipped; the rest still need a
+decision, a destination, or a riskier change.
 
-- **Off-host backups + a restore procedure.** `backup_probe_data.sh` keeps 7
-  daily tarballs on the SAME disk as the data (it does snapshot the WAL-mode
-  SQLite ledgers correctly). Host loss = ledgers and investigator memory gone,
-  and there is no restore doc anywhere. Needs a destination the operator picks
-  (an object store / another host) and a documented, tested restore. This is the
-  highest-value item left.
-- **Non-root images for the pipe, the brain and the bridge.** Only hookprobe
-  sets `USER`. Switching the others is a one-line Dockerfile change PLUS a chown
-  of the existing `shadow-data/*` bind mounts (currently root-owned), so it must
-  be done with the ownership migration or the containers cannot write their
-  ledgers. Deferred to avoid a mid-review deploy that can't start.
+DONE this day (see the implemented notes):
+- **cap_drop:[ALL] + no-new-privileges on the pipe and the brain**, and
+  **dependabot `docker` ecosystem** → [[the-pipe-and-the-brain-run-non-root]].
+- **Backup verification, `.env` coverage, off-host hook, restore script** →
+  [[backups-verify-themselves-and-can-leave-the-host]]. The remaining decision
+  is only WHERE off-host goes — the mechanism is one env var now.
+
+Still deferred:
+
+- **Non-root uid for the pipe and the brain, and the CI `requirements.lock`
+  pin.** Both edit `.github/workflows/*` (the non-root uid needs the CI
+  docker-smoke's bind mount chowned) and the push token lacks the `workflow`
+  scope. One branch, behind `gh auth refresh -h github.com -s workflow`.
+
 - **deploy.sh rollback + a version stamp.** Mutable local tags
   (`hookrelay:shadow`, `hookprobe:latest`) mean the previous image is untagged
   and pruned, so rollback is a rebuild of an older commit; `/healthz` and the
@@ -32,10 +33,10 @@ riskier change.
   nothing is `unhealthy`/`starting`; a crash-looping `lark-bridge` (no
   HEALTHCHECK) passes as "deployed and healthy". Give the bridge a healthcheck,
   or assert each expected container is `healthy`.
-- **CI installs deps without `-c requirements.lock`** while the images install
-  through it, so CI can be green on versions the image never ships. Add `-c` in
-  the three workflows. `dependabot` has no `docker` ecosystem, so base images are
-  never nagged.
+- **lark-bridge non-root.** The other three services dropped to uid 10001; the
+  bridge stays root (node:22-alpine, a different user model, and it is the live
+  delivery path — a uid mistake there drops the operator's cards). Do it on its
+  own, with a config-volume chown.
 - **lark-bridge.** Inbound POST is unauthenticated on the shared platform
   network, and `entrypoint.sh` keeps an existing config so rotating
   `LARK_APP_SECRET` silently needs the named volume deleted (the compose comment
@@ -55,6 +56,11 @@ loud items are fixed.
 
 ## Consequences
 
-- The biggest standing risk after this pass is the backup: green everything
-  else, and a lost host still loses the ledgers. That one should be next.
+- The biggest standing risk is now narrow: backups verify and a restore is
+  written, but nothing leaves the host until `BACKUP_OFFHOST_DEST` is set to a
+  real (trusted, encrypted) destination. Setting it is the single most valuable
+  next action; the code is already there.
+- After that, deploy rollback: a bad ship still means rebuilding an old commit,
+  because the previous image was pruned. A commit-stamped, retained tag is the
+  fix.
 - None of these blocks the fixes that shipped; they are additive.
