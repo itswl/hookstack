@@ -24,11 +24,11 @@ Still deferred:
   docker-smoke's bind mount chowned) and the push token lacks the `workflow`
   scope. One branch, behind `gh auth refresh -h github.com -s workflow`.
 
-- **deploy.sh rollback + a version stamp.** Mutable local tags
-  (`hookrelay:shadow`, `hookprobe:latest`) mean the previous image is untagged
-  and pruned, so rollback is a rebuild of an older commit; `/healthz` and the
-  image labels carry no git SHA. Propose: tag each build with the commit, keep
-  the last N, stamp the SHA into a label the board reads.
+- **A version stamp the board can show.** The rollback half is now done —
+  deploys tag `-rb-<sha>` anchors ([[a-deploy-leaves-a-rollback-anchor]]). What
+  remains is telling an operator WHICH image is live: a build-arg → env →
+  `/healthz` git-sha, so the board (and a monitor) can see a drift between the
+  running image and `main`.
 - **Health read-back checks absence, not presence.** deploy.sh breaks when
   nothing is `unhealthy`/`starting`; a crash-looping `lark-bridge` (no
   HEALTHCHECK) passes as "deployed and healthy". Give the bridge a healthcheck,
