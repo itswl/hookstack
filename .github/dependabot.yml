@@ -60,3 +60,29 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: chore(hookprobe)
+
+  # The base images were the one thing nothing nagged: python:3.14-slim /
+  # python:3.12-slim / node:22-alpine drift silently, and a base with a fixed
+  # CVE never arrives without someone bumping the tag. One entry per Dockerfile,
+  # same one-PR-per-service reasoning as the pip groups above. The pinned tool
+  # versions inside (CLAUDE_CODE_VERSION, nodesource) stay manual by design.
+  - package-ecosystem: docker
+    directory: "/hookrelay"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(hookrelay)
+
+  - package-ecosystem: docker
+    directory: "/hookjudge"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(hookjudge)
+
+  - package-ecosystem: docker
+    directory: "/hookprobe"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(hookprobe)
