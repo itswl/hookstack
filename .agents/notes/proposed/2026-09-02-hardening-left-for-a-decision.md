@@ -11,15 +11,18 @@ Second pass, 2026-09-02: several items below shipped; the rest still need a
 decision, a destination, or a riskier change.
 
 DONE this day (see the implemented notes):
-- **Non-root pipe and brain + cap_drop** →
-  [[the-pipe-and-the-brain-run-non-root]] (lark-bridge stays root, below).
+- **cap_drop:[ALL] + no-new-privileges on the pipe and the brain**, and
+  **dependabot `docker` ecosystem** → [[the-pipe-and-the-brain-run-non-root]].
 - **Backup verification, `.env` coverage, off-host hook, restore script** →
   [[backups-verify-themselves-and-can-leave-the-host]]. The remaining decision
   is only WHERE off-host goes — the mechanism is one env var now.
-- **CI installs through `requirements.lock`; dependabot `docker` ecosystem** —
-  folded into the non-root note.
 
 Still deferred:
+
+- **Non-root uid for the pipe and the brain, and the CI `requirements.lock`
+  pin.** Both edit `.github/workflows/*` (the non-root uid needs the CI
+  docker-smoke's bind mount chowned) and the push token lacks the `workflow`
+  scope. One branch, behind `gh auth refresh -h github.com -s workflow`.
 
 - **deploy.sh rollback + a version stamp.** Mutable local tags
   (`hookrelay:shadow`, `hookprobe:latest`) mean the previous image is untagged
