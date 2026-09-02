@@ -294,6 +294,9 @@ def test_recovery_is_read_not_asked(title: str, expected: bool):
         "Backlog not cleared for 30m",  # a recovery word under a negation
         "恢复中: 支付网关仍在重试",  # recovering, not recovered
         "未恢复: 数据库仍然不可用",
+        "Payment probe not OK for 5m",  # "OK" mid-sentence is not a recovery
+        "status != OK for 10m",  # nor is an inequality against OK
+        "自动恢复失败",  # the recovery FAILED — the opposite of a recovery
     ],
 )
 def test_a_live_incident_is_never_read_as_its_own_recovery(title: str):
@@ -301,6 +304,18 @@ def test_a_live_incident_is_never_read_as_its_own_recovery(title: str):
     a false positive here reports a firing incident as resolved. Each of these
     read as a recovery under plain containment."""
     assert event(title=title, body="").is_recovery is False
+
+
+def test_recovery_words_in_body_prose_do_not_trigger_recovery():
+    """A firing whose body happens to contain a recovery word — a DNS "resolved
+    to", a note that a *different* thing "recovered" — is still a firing. The
+    sniff reads the subject line, not free-text prose, so the body cannot flip a
+    live alert to a green card. (Production carries the platform's explicit flag,
+    which wins over this path outright.)"""
+    firing = event(title="Payment gateway 5xx climbing", body="probe resolved to 10.0.0.1; errors rising")
+    assert firing.is_recovery is False
+    other = event(title="DB connections exhausted", body="the earlier cache incident recovered at 09:00")
+    assert other.is_recovery is False
 
 
 @pytest.mark.parametrize(
