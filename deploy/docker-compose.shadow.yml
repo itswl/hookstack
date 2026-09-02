@@ -27,6 +27,13 @@ services:
     # radius so it cannot take the host (and its neighbours) with it. Only
     # hookprobe was capped before.
     mem_limit: 256m
+    # An HTTP server needs no Linux capability and no privilege escalation;
+    # drop both. (Running as a non-root uid is the next step and is deferred —
+    # it needs the CI docker-smoke's bind mount chowned, which is a workflow-file
+    # edit; see the decision note.)
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     environment:
       HOOKRELAY_HOST: 0.0.0.0
       HOOKRELAY_PORT: 8100
@@ -71,6 +78,9 @@ services:
     container_name: hookjudge
     restart: unless-stopped
     mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     environment:
       HOOKJUDGE_HOST: 0.0.0.0
       HOOKJUDGE_PORT: 8200
@@ -117,6 +127,9 @@ services:
     container_name: hookjudge-b
     restart: unless-stopped
     mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     environment:
       HOOKJUDGE_HOST: 0.0.0.0
       HOOKJUDGE_PORT: 8200

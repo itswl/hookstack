@@ -10,6 +10,12 @@
 #
 # Install (host crontab):
 #   15 4 * * * /srv/hookstack/scripts/backup_probe_data.sh
+#
+# Off-host copy (a backup on the same disk dies with it): set BACKUP_OFFHOST_DEST
+# to an rsync target and each fresh tarball is mirrored there.
+#
+# Restore: scripts/restore_probe_data.sh <tarball> — it extracts, verifies every
+# db snapshot opens, and prints the exact copy-back procedure.
 set -euo pipefail
 
 ROOT="${HOOKSTACK_ROOT:-/srv/hookstack}"
@@ -20,6 +26,11 @@ members=()
 for dir in probe-data shadow-data; do
   [ -d "$ROOT/$dir" ] && members+=("$dir")
 done
+# .env is the one part of the deployment a `git pull` cannot rebuild — every
+# secret and every model alias. It rides in the tar so the backup can actually
+# reconstitute the stack, not just its ledgers. It carries secrets: keep $TARGET
+# host-local unless BACKUP_OFFHOST_DEST is trusted and encrypted at rest.
+[ -f "$ROOT/.env" ] && members+=(".env")
 [ ${#members[@]} -gt 0 ] || { echo "nothing to back up under $ROOT" >&2; exit 1; }
 mkdir -p "$TARGET"
 
@@ -77,6 +88,12 @@ find "$TARGET" -maxdepth 1 -name '.probe-data-*.tgz.partial' -mtime +0 -delete 2
 quiet=""
 tar --version 2>/dev/null | grep -qi 'gnu tar' && quiet="--warning=no-file-changed"
 tar -czf "$tmp" ${quiet:+"$quiet"} -C "$ROOT" "${members[@]}" || [ $? -eq 1 ]
+# Verify the archive lists end to end BEFORE it replaces yesterday's. A
+# truncated or corrupt tarball that silently overwrote the last good one is the
+# second failure a backup exists to not have; the raw-copy tolerance above buys
+# nothing if the container itself is unreadable. exit here fires the trap, so
+# the partial and the snapshots are cleaned and the previous backup stands.
+tar -tzf "$tmp" >/dev/null 2>&1 || { echo "archive failed verification, keeping the previous backup" >&2; exit 1; }
 mv "$tmp" "$TARGET/probe-data-$stamp.tgz"
 
 # Keep the newest KEEP, delete the rest — by name, which is by date.
@@ -93,3 +110,16 @@ ls -1 "$TARGET"/probe-data-*.tgz 2>/dev/null | sort -r | tail -n "+$((KEEP + 1))
 done
 
 echo "backed up $(du -h "$TARGET/probe-data-$stamp.tgz" | cut -f1) -> $TARGET/probe-data-$stamp.tgz ($(ls -1 "$TARGET"/probe-data-*.tgz | wc -l | tr -d ' ') kept)"
+
+# Optional off-host mirror. A backup that shares a disk with the thing it
+# protects dies with it — this instance is kept alive by one health-check bot
+# and nothing else. Left unset = no copy; a failed copy warns but never fails
+# the local backup (which already succeeded). The tarball carries .env, so the
+# destination must be trusted and encrypted at rest.
+if [ -n "${BACKUP_OFFHOST_DEST:-}" ]; then
+  if rsync -a "$TARGET/probe-data-$stamp.tgz" "$BACKUP_OFFHOST_DEST"/ 2>/dev/null; then
+    echo "mirrored -> $BACKUP_OFFHOST_DEST"
+  else
+    echo "warning: off-host copy to $BACKUP_OFFHOST_DEST failed — the local backup stands" >&2
+  fi
+fi
