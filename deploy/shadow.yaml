@@ -99,6 +99,12 @@ channels:
     secret: ${SHADOW_INGEST_SECRET}
     options: {payload: normalized}
 
+  - name: to-judge-c
+    type: generic
+    url: http://hookjudge-c:8200/events
+    secret: ${SHADOW_INGEST_SECRET}
+    options: {payload: normalized}
+
   # Where a card press bound for the investigator lands. `payload: raw` for the
   # same reason as the judge's feedback channel below: the action envelope IS the
   # content.
@@ -165,7 +171,7 @@ routes:
 
   - name: shadow-to-judges
     source: ww
-    send_to: [to-judge, to-judge-b]
+    send_to: [to-judge, to-judge-b, to-judge-c]
     priority: 0
 
 # The judge does the noise accounting (reuse/recovery are the point of the

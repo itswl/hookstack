@@ -1,9 +1,16 @@
 ---
 title: Conclude the shadow — it spent 386 samples comparing a model with itself
-status: proposed
+status: rejected
 date: 2026-08-24
 scope: stack
 ---
+
+> **Rejected 2026-09-03** — see
+> `implemented/2026-09-03-a-third-brain-and-a-guard-against-flattening.md`.
+> The measurements below stand and are why the guard exists; the conclusion
+> does not. The premise this note found unasserted is now asserted, and the
+> disagreement-mining it concedes as the shadow's unique value got better
+> with a third vendor rather than being retired.
 
 ## Decision proposed
 
