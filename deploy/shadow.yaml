@@ -69,6 +69,11 @@ sources:
     level: "{signal.level}"
     fields:
       origin: "{signal.origin}"
+      # What KIND of thing this is, carried through to the investigator: its
+      # escalation door asks "find the root cause" by default, which is the
+      # wrong question for work somebody assigned. `task` selects the other
+      # prompt. Absent or anything else stays an alert.
+      kind: "{signal.kind}"
 
   # Brain A's verdict, coming back to be dressed as a card. Unsigned: it is a
   # loopback hop inside hookstack_net between two containers of one deployment,
