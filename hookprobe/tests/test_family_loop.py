@@ -75,6 +75,54 @@ def test_event_door_escalates_and_skips(tmp_path) -> None:
         assert detail["meta"]["title"] == EVENT["title"]
 
 
+def test_a_work_item_is_investigated_as_work_not_as_an_incident(tmp_path) -> None:
+    """`fields.kind: task` asks a different question of the same door.
+
+    The watcher forwards work signals — someone assigned something, someone
+    asked — and "find the root cause" is the wrong instruction for those:
+    nothing is broken. The door keeps one contract and swaps the question.
+    """
+    engine = FakeEngine()
+    with make_client(tmp_path, engine) as client:
+        task = dict(
+            EVENT,
+            event_id=77,
+            title="Redis monitoring: slow-command rate and key-count growth",
+            fields={"kind": "task", "origin": "the chat server"},
+        )
+        assert client.post("/hooks/event", json=task).json()["status"] == "accepted"
+        for _ in range(100):
+            detail = client.get("/v1/runs/probe:inbound:77", headers=AUTH).json()
+            if detail["status"] != "running":
+                break
+
+    prompt = engine.messages[0]
+    assert "how would this be done" in prompt
+    assert "NOT an alert" in prompt
+    # Assert the INSTRUCTION is gone, not the words: the task prompt says
+    # "no root cause to find", which is the point, so a substring check on
+    # "root cause" would pass for the wrong reason and fail for the right one.
+    assert "find the root cause" not in prompt
+    assert "no root cause to find" in prompt
+    # And it must not invite a remediation block, which is what feeds the
+    # approval path — this door answers how, the person does it.
+    assert "```remediation" not in prompt
+    # The ceiling is stated rather than hidden: it cannot read repositories, so
+    # it is told to name the gap instead of guessing at one.
+    assert "unknowns" in prompt
+
+
+def test_an_event_without_a_kind_is_still_investigated_as_an_alert(tmp_path) -> None:
+    engine = FakeEngine()
+    with make_client(tmp_path, engine) as client:
+        assert client.post("/hooks/event", json=EVENT).json()["status"] == "accepted"
+        for _ in range(100):
+            detail = client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()
+            if detail["status"] != "running":
+                break
+    assert "root cause" in engine.messages[0]
+
+
 def test_event_door_requires_signature_when_secret_set(tmp_path) -> None:
     with make_client(tmp_path, FakeEngine(), event_secret="pipe-secret") as client:
         body = json.dumps(EVENT).encode()

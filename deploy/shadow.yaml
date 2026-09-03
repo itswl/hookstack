@@ -133,6 +133,16 @@ channels:
   # for a report the investigator itself sent is the opposite direction and buys
   # something the exclusion was never protecting: the only path by which a line
   # the shape check refused can ever be adopted.
+  # The investigator's ESCALATION door (not the button door below). Every watch
+  # signal is handed over and the probe decides by level whether it is worth a
+  # paid investigation — settings.py states that division: escalate_levels is
+  # the investigator's judgement to make, and the pipe stays content-blind.
+  - name: to-probe
+    type: generic
+    url: http://hookprobe:8088/hooks/event
+    secret: ${HOOKPROBE_EVENT_SECRET}
+    options: {payload: normalized}
+
   - name: to-probe-action
     type: generic
     url: http://hookprobe:8088/hooks/action
@@ -213,7 +223,7 @@ routes:
   # and be handed to three brains that have nothing useful to say about it.
   - name: watch-to-me
     source: watch
-    send_to: [to-me-watch]
+    send_to: [to-me-watch, to-probe]
     priority: 100
     stop: true
 
