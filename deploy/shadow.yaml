@@ -52,6 +52,24 @@ sources:
       triage_verdict: "{analysis.triage_verdict}"
       triage_confidence: "{analysis.triage_confidence}"
 
+  # The attention watcher's signals — work chat / tickets that need the operator,
+  # already judged by the watcher itself. It arrives from OUTSIDE this compose
+  # (a laptop cron reaching the server), which is exactly the day the comment
+  # below says a door should stop being unsigned, so this one is signed.
+  #
+  # Deliberately NOT fed to the brains: the judges are calibrated on alerts
+  # (severity keywords, recovery semantics, flap suppression) and would re-judge
+  # a colleague's question with vocabulary that means nothing here. The watcher's
+  # own verdict is final; the pipe is transport and ledger for it, not a second
+  # opinion. Its route is terminal for the same reason verdict-to-me is.
+  - name: watch
+    secret: ${WATCH_INGEST_SECRET}
+    title: "{signal.title}"
+    body: "{signal.detail}"
+    level: "{signal.level}"
+    fields:
+      origin: "{signal.origin}"
+
   # Brain A's verdict, coming back to be dressed as a card. Unsigned: it is a
   # loopback hop inside hookstack_net between two containers of one deployment,
   # and the platform's own door above is the one that faces outward. Give it a
@@ -165,6 +183,15 @@ routes:
   # to shadow-to-judges would be handed to a brain as though it were an alert.
   - name: report-to-me
     source: probe-notify
+    send_to: [to-me]
+    priority: 100
+    stop: true
+
+  # The bypass. Same shape and the same reason as verdict-to-me: without a
+  # higher-priority terminal route this would fall through to shadow-to-judges
+  # and be handed to three brains that have nothing useful to say about it.
+  - name: watch-to-me
+    source: watch
     send_to: [to-me]
     priority: 100
     stop: true
