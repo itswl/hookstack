@@ -38,7 +38,7 @@ services:
       HOOKRELAY_HOST: 0.0.0.0
       HOOKRELAY_PORT: 8100
       HOOKRELAY_DB: /data/hookrelay.db
-      HOOKRELAY_CONFIG: /etc/hookrelay/config.yaml
+      HOOKRELAY_CONFIG: /etc/hookrelay/shadow.yaml
       HOOKRELAY_WORKER_INTERVAL: "0.5"
       WW_RELAY_SECRET: ${WW_RELAY_SECRET:?mirror FORWARD_RELAY_SECRET into .env}
       SHADOW_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
@@ -79,7 +79,14 @@ services:
       # BRIDGE_INBOUND_SECRET, to turn the check on.
       LARK_BRIDGE_SECRET: ${LARK_BRIDGE_SECRET:-}
     volumes:
-      - ./shadow.yaml:/etc/hookrelay/config.yaml:ro
+      # The DIRECTORY, not the file. A single-file bind mount binds an inode,
+      # and `git pull` replaces the file rather than writing through it — so
+      # the container went on serving the config from before the pull, looking
+      # completely healthy, with the new file sitting on disk beside it. That
+      # cost two debugging rounds in one day: a route that was deployed and not
+      # loaded, then a channel that was deployed and not loaded. Mounting the
+      # directory means what the container reads is always what is on disk.
+      - ./:/etc/hookrelay/:ro
       # Bind mounts at the deployment root, like the investigator's: state in
       # plain sight for the backup script, not inside a named volume.
       - ../shadow-data/hookrelay:/data
