@@ -11,7 +11,11 @@ ENV PYTHONUNBUFFERED=1 \
 # silently adopts whatever shipped upstream that day — the one dependency
 # where drift changes behaviour most, pinned last. Bump deliberately:
 #   docker compose build --build-arg CLAUDE_CODE_VERSION=x.y.z
-ARG CLAUDE_CODE_VERSION=2.1.232
+# 2.1.259: 2.1.232 rejected third-party model names its catalog did not know
+# (`[claude-code:unrecognized_model]` on e.g. gpt-5.6-luna behind a custom
+# ANTHROPIC_BASE_URL), which broke the investigator against gateways that serve
+# only their own model ids. 2.1.259 accepts them.
+ARG CLAUDE_CODE_VERSION=2.1.259
 
 # The diagnostic core: what any investigation reaches for first, and what
 # marketplace runbooks assume exists (a patrol skill mis-read this container
