@@ -22,7 +22,7 @@ name: hookstack
 
 services:
   hookrelay:
-    image: ghcr.io/itswl/hookrelay:0.1.1
+    image: ghcr.io/itswl/hookrelay:0.2.0
     container_name: hs-hookrelay
     restart: unless-stopped
     environment:
@@ -44,7 +44,7 @@ services:
       - sink
 
   hookjudge:
-    image: ghcr.io/itswl/hookjudge:0.1.1
+    image: ghcr.io/itswl/hookjudge:0.2.0
     container_name: hs-hookjudge
     restart: unless-stopped
     environment:
@@ -74,7 +74,7 @@ services:
   # operator would actually have received. It runs from the pipe's own image
   # because that image now carries it — one fewer thing to pull, and no mount.
   sink:
-    image: ghcr.io/itswl/hookrelay:0.1.1
+    image: ghcr.io/itswl/hookrelay:0.2.0
     container_name: hs-sink
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/sink.py"]
@@ -86,7 +86,7 @@ services:
   # not a model: it reports itself as `stub-4o-mini`. Point the judge's AI vars
   # at a real provider and this stops being used.
   stub-ai:
-    image: ghcr.io/itswl/hookjudge:0.1.1
+    image: ghcr.io/itswl/hookjudge:0.2.0
     container_name: hs-stub-ai
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/stub_ai.py"]
@@ -97,7 +97,7 @@ services:
   # stays hermetic. High/critical alerts then ALSO get a deep read-only
   # investigation, whose report returns through the pipe to the same channels.
   hookprobe:
-    image: ghcr.io/itswl/hookprobe:0.1.1
+    image: ghcr.io/itswl/hookprobe:0.2.0
     container_name: hs-hookprobe
     profiles: ["probe"]
     restart: unless-stopped
