@@ -213,6 +213,9 @@ services:
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       # Any Anthropic-dialect provider: map the engine's model aliases here.
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      # The CLI's max context window; some third-party gateways/models want it
+      # set explicitly. Empty = the CLI's own default.
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: ${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}
       ANTHROPIC_DEFAULT_HAIKU_MODEL: ${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}
       ANTHROPIC_DEFAULT_SONNET_MODEL: ${ANTHROPIC_DEFAULT_SONNET_MODEL:-}
       ANTHROPIC_DEFAULT_OPUS_MODEL: ${ANTHROPIC_DEFAULT_OPUS_MODEL:-}
