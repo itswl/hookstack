@@ -208,8 +208,24 @@ def main(argv: list[str]) -> int:
     # moment a return door and a card channel existed: the platform's door feeds
     # the brains, the return door feeds the card, and neither should feed the
     # other. What must not happen is a brain nobody routes to.
+    #
+    # Narrowed a second time (2026-09-03) for the same reason, by a door that
+    # deliberately feeds NO brain: the attention watcher arrives pre-judged and
+    # the brains are calibrated on alerts, so routing it to them would spend
+    # three model calls to re-judge a colleague's question in severity
+    # vocabulary. "Every source reaches every brain" would have forbidden that
+    # bypass; the sentence above never asked for it. Two invariants say what
+    # was actually meant:
+    #
+    #   1. no PARTIAL fan-out — a source feeding one brain feeds all of them,
+    #      or the comparison has a hole for that source that reads as agreement;
+    #   2. no STARVED brain — every brain is fed by at least one source.
+    #
+    # A source feeding zero brains is now legal, and has to be, or a pipe can
+    # only ever carry things worth judging.
     brains = sorted(name for name in cfg.channels if name.startswith("to-judge") and "feedback" not in name)
     inbound = sorted(name for name in cfg.sources if name not in internal_doors)
+    fed_brains: set[str] = set()
     for source in inbound:
         reached = {
             channel
@@ -217,12 +233,22 @@ def main(argv: list[str]) -> int:
             if route.source in (source, "*") and not route.when
             for channel in route.send_to
         }
+        hit = [brain for brain in brains if brain in reached]
+        fed_brains.update(hit)
+        if not hit:
+            continue  # a deliberate bypass; invariant 2 below still guards the brains
         missing = [brain for brain in brains if brain not in reached]
         if missing:
             problems.append(
-                f"source {source!r} does not reach {', '.join(missing)} unconditionally — "
-                f"a brain that is configured but not routed to is an empty ledger, not a comparison"
+                f"source {source!r} reaches {', '.join(hit)} but not {', '.join(missing)} — "
+                f"a partial fan-out leaves that source's comparison a hole shaped like agreement"
             )
+    starved = [brain for brain in brains if brain not in fed_brains]
+    if starved:
+        problems.append(
+            f"brain channel(s) no source routes to: {', '.join(starved)} — "
+            f"a brain that is configured but not routed to is an empty ledger, not a comparison"
+        )
     # The failure this catches has happened twice and was invisible both times:
     # every brain pointed at ONE model, so the shadow spent 386 samples (Aug) and
     # then a whole morning (Sep) comparing a model with itself while every
