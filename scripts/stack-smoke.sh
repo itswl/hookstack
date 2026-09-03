@@ -49,6 +49,10 @@ echo "stack compose parses"
   # here. It needs no .env branch: its `networks.default.external: true` names a
   # network `config` never looks for, so the parse works in a fresh checkout.
   export LARK_APP_ID=placeholder LARK_APP_SECRET=placeholder LARK_CHAT_ID=placeholder
+  # Brain C's endpoint and model are ${...:?} (a third brain with no provider is
+  # not comparing anything), so `config` needs them seeded like the two secrets
+  # above — its key falls back to A's, so only these two have no default.
+  export HOOKJUDGE_C_AI_BASE_URL=https://api.deepseek.com/v1 HOOKJUDGE_C_AI_MODEL=placeholder
   docker compose -f deploy/docker-compose.shadow.yml config >/dev/null
 )
 echo "standalone, family and shadow composes parse"
