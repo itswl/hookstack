@@ -64,6 +64,14 @@ services:
       # everyone rather than admitting anyone. That is why this was missing for
       # weeks without being a hole: the admin surface simply did not work.
       HOOKRELAY_ADMIN_TOKEN: ${SHADOW_ADMIN_TOKEN:-}
+      # shadow.yaml's ${...} refs are expanded by hookrelay from its OWN
+      # environment, not by compose — so every name used there has to be
+      # passed through here or it silently resolves to empty. An empty URL
+      # crashes at boot (loud); an empty SECRET just opens the door (quiet),
+      # which is the failure the config guard's own comment warns about and
+      # which this file is the other half of.
+      WATCH_INGEST_SECRET: ${WATCH_INGEST_SECRET:?set WATCH_INGEST_SECRET in .env}
+      WATCH_FEISHU_WEBHOOK: ${WATCH_FEISHU_WEBHOOK:?set WATCH_FEISHU_WEBHOOK in .env}
       # Signs the card the `to-me` channel hands the lark-bridge, so the bridge
       # can refuse a forged card from anything else on this shared network.
       # Empty (the default) means the hop stays unsigned and the bridge accepts
