@@ -41,6 +41,60 @@ from hookrelay.config import Config, ConfigError  # noqa: E402
 
 ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 DEFAULT = Path(__file__).resolve().parent.parent / "deploy" / "shadow.yaml"
+COMPOSE = Path(__file__).resolve().parent.parent / "deploy" / "docker-compose.shadow.yml"
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+COMPOSE_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([-?])([^}]*))?\}")
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def _resolve_compose_value(expr: str, env: dict[str, str]) -> str:
+    """Resolve one ${VAR}, ${VAR:-default} or ${VAR:?msg} against an env file."""
+    match = COMPOSE_VAR.fullmatch(expr.strip())
+    if not match:
+        return expr.strip()
+    name, kind, default = match.group(1), match.group(2), match.group(3) or ""
+    value = env.get(name, "")
+    if value:
+        return value
+    if kind == "-":
+        # Defaults nest: ${A:-${B:-c}}
+        return _resolve_compose_value(default, env) if default.startswith("${") else default
+    # ${VAR:?msg} with nothing set — compose refuses to start, so it is not a model.
+    return ""
+
+
+def brain_models(compose_path: Path, env_path: Path) -> dict[str, tuple[str, str]]:
+    """service name -> (model it will actually run, where that value came from)."""
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    env = _read_env_file(env_path)
+    models: dict[str, tuple[str, str]] = {}
+    for name, service in (compose.get("services") or {}).items():
+        if not name.startswith("hookjudge"):
+            continue
+        expr = str((service.get("environment") or {}).get("HOOKJUDGE_AI_MODEL", ""))
+        models[name] = (_resolve_compose_value(expr, env), _origin(expr, env))
+    return models
+
+
+def _origin(expr: str, env: dict[str, str]) -> str:
+    """Where the value came from: the env file, a compose default, or nowhere."""
+    match = COMPOSE_VAR.fullmatch(expr.strip())
+    if not match:
+        return "literal"
+    name, kind = match.group(1), match.group(2)
+    if env.get(name):
+        return "env"
+    return "compose-default" if kind == "-" else "unset"
 
 
 def main(argv: list[str]) -> int:
@@ -169,6 +223,58 @@ def main(argv: list[str]) -> int:
                 f"source {source!r} does not reach {', '.join(missing)} unconditionally — "
                 f"a brain that is configured but not routed to is an empty ledger, not a comparison"
             )
+    # The failure this catches has happened twice and was invisible both times:
+    # every brain pointed at ONE model, so the shadow spent 386 samples (Aug) and
+    # then a whole morning (Sep) comparing a model with itself while every
+    # container stayed healthy and every ledger kept filling. Nothing asserted
+    # the sides were configured to DIFFER, so nothing complained.
+    #
+    # Only checkable where the env file is: inside the smoke's container compose
+    # has already resolved these away. Skipping is fine; skipping SILENTLY is not,
+    # so the summary says which of the two happened.
+    model_check = "brain models unchecked (no .env beside the compose file)"
+    if COMPOSE.is_file() and ENV_FILE.is_file():
+        resolved = brain_models(COMPOSE, ENV_FILE)
+
+        # 1. The flattening. Twice now, every brain has pointed at ONE model while
+        #    every container stayed healthy and every ledger kept filling: 386
+        #    samples in August, a morning in September. Nothing asserted the sides
+        #    were configured to DIFFER, so nothing complained.
+        seen: dict[str, list[str]] = {}
+        for name, (model, _) in resolved.items():
+            if model:
+                seen.setdefault(model, []).append(name)
+        for model, names in sorted((m, n) for m, n in seen.items() if len(n) > 1):
+            problems.append(
+                f"{' and '.join(sorted(names))} both run {model} — a shadow comparing a model "
+                f"with itself measures its own noise floor (83% importance, measured Aug 2026), not two brains"
+            )
+
+        # 2. The stale vendor default. A/B fall back to hard-coded DeepSeek names
+        #    when their env vars are missing, so a half-finished provider swap
+        #    silently points a brain at a vendor nobody chose.
+        defaulted = sorted(
+            f"{name} -> {model}" for name, (model, origin) in resolved.items() if origin == "compose-default"
+        )
+        if defaulted:
+            problems.append(
+                f"brain(s) taking a model from a compose DEFAULT rather than .env: {', '.join(defaulted)} — "
+                f"those defaults name a vendor this deployment may have left"
+            )
+
+        # 3. Genuinely unset. Only reachable where compose uses ${VAR:?}, which
+        #    already refuses to start, so this is reported rather than failed.
+        unset = sorted(name for name, (model, origin) in resolved.items() if origin == "unset")
+        if not seen and not defaulted:
+            model_check = "brain models unresolvable"
+        elif problems:
+            model_check = "brain models INCONSISTENT"
+        else:
+            distinct = ", ".join(f"{n}={m}" for n, (m, _) in sorted(resolved.items()) if m)
+            model_check = f"{len(seen)} distinct brain models ({distinct})"
+            if unset:
+                model_check += f"; {', '.join(unset)} unset (compose refuses to start)"
+
     if len(brains) < 2:
         problems.append(
             f"only {len(brains)} brain channel(s) found ({', '.join(brains) or 'none'}) — "
@@ -213,7 +319,8 @@ def main(argv: list[str]) -> int:
     reach = f"{len(chat_channels)} reach a person ({', '.join(chat_channels)})" if chat_channels else "none reach a person"
     print(
         f"shadow config: {path.name} boots — {len(cfg.sources)} door(s), "
-        f"{len(cfg.channels)} channel(s) all in-network, both brains fed, {reach}"
+        f"{len(cfg.channels)} channel(s) all in-network, {len(brains)} brains fed, "
+        f"{model_check}, {reach}"
     )
     return 0
 

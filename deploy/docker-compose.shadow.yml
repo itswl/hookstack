@@ -167,6 +167,43 @@ services:
     ports:
       - "127.0.0.1:8201:8200"
 
+  # The third brain. Same traffic, its own model and ledger — three-way
+  # disagreement (a vs b vs c vs the platform) is a stronger label signal than
+  # two-way, and the pipe's fan-out already exists to make it free.
+  #
+  # Unlike A and B, C's model and endpoint are REQUIRED rather than defaulted.
+  # A judge with no AI config does not fail — judge.py falls through to its rule
+  # route and keeps answering, so a typo here would look like a working brain
+  # producing suspiciously rule-shaped verdicts. Refusing to start is the
+  # louder, cheaper failure.
+  hookjudge-c:
+    build: ../hookjudge
+    image: hookjudge:shadow
+    container_name: hookjudge-c
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      HOOKJUDGE_HOST: 0.0.0.0
+      HOOKJUDGE_PORT: 8200
+      HOOKJUDGE_DB: /data/hookjudge.db
+      HOOKJUDGE_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
+      HOOKJUDGE_RULING_SECRET: ${SHADOW_RULING_SECRET:-}
+      # Ledger-only, like B: only brain A returns a verdict to a human.
+      HOOKJUDGE_RETURN_URL: "none"
+      HOOKJUDGE_WORKER_INTERVAL: "0.5"
+      HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
+      HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_C_AI_BASE_URL:?set HOOKJUDGE_C_AI_BASE_URL in .env}
+      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_C_AI_API_KEY:-${HOOKJUDGE_AI_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}}
+      HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_C_AI_MODEL:?set HOOKJUDGE_C_AI_MODEL in .env}
+      # Priced per model, like the others; re-check on a model change.
+      HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_C_AI_PRICE_IN_PER_1K:-0}
+      HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_C_AI_PRICE_OUT_PER_1K:-0}
+      HOOKJUDGE_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
+    volumes:
+      - ../shadow-data/hookjudge-c:/data
+    ports:
+      - "127.0.0.1:8202:8200"
+
 
   # The Lark adapter, deliberately outside the pipe. Two directions:
   #   out  the pipe's `feishu` channel POSTs a rendered card here, and this
