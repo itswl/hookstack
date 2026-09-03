@@ -76,6 +76,39 @@ Fields:
 {fields}
 ```"""
 
+_TASK_MESSAGE = """Run one read-only investigation of the work item below and answer one \
+question: concretely, how would this be done?
+
+This is NOT an alert. Nothing is broken and there is no root cause to find — somebody asked for \
+something or assigned it, and the operator wants to arrive already knowing the shape of the work. \
+Do not write an incident report.
+
+Establish what is true NOW from the systems you can actually reach, then say what the work \
+involves: what already exists, what is missing, the steps in order, and how the result would be \
+verified. Where you cannot see something — a repository, a file, a console you have no route to — \
+say so plainly under `unknowns` instead of guessing. A named gap is worth more to the operator \
+than a confident guess, because the gap is what they will go look at first.
+
+Open the case files first: Grep/Read /data/results/ for earlier work on the same subject.
+
+Answer with a short Markdown report, conclusion first: the opening paragraph is a one-sentence \
+answer a notification card can quote verbatim.
+If this taught you a durable fact about the ENVIRONMENT itself — topology, a naming convention, \
+where something lives; never about this one request — end with a line \
+`MEMORY-SUGGESTION: <the fact, one line>`. At most one; omit it when unsure.
+
+Deliberately no remediation block: this door answers how the work would be done, and the person \
+who asked for it is the one who does it. Propose nothing for execution.
+
+Source: {source}
+Level: {level}
+Title: {title}
+Body: {body}
+Fields:
+```json
+{fields}
+```"""
+
 _REFIRE_MESSAGE = """The same alert fired again — this is a follow-up in the investigation you \
 already ran, not a new incident.
 
@@ -360,7 +393,14 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
         # too. An id longer than this is not an identifier.
         key_id = str(event_id)[:_EVENT_ID_MAX] if event_id is not None else title[:80]
         session_key = f"probe:{source}:{key_id}"
-        message = _EVENT_MESSAGE.format(
+        # An alert and a work item are different questions, and the caller says
+        # which through `fields.kind` — the pipe stays content-blind, so the
+        # source that raised it is the one that knows. Anything unrecognised is
+        # an alert, which is what this door has always assumed.
+        raw_fields = event.get("fields")
+        kind = str(raw_fields.get("kind") or "").strip().lower() if isinstance(raw_fields, dict) else ""
+        template = _TASK_MESSAGE if kind == "task" else _EVENT_MESSAGE
+        message = template.format(
             source=source,
             level=level,
             title=title,
