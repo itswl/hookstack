@@ -153,6 +153,27 @@ channels:
 
   # Rendered by the pipe's own feishu builder and handed to the bridge, which
   # re-sends it as the application so its buttons can be pressed.
+  # The watcher's own bot, posted to DIRECTLY — no bridge hop. The bridge exists
+  # so cards can carry callback buttons (a press has to reach hookrelay), and a
+  # work signal has nothing to press: it is read and acted on outside this
+  # system. One less hop, and the watcher's signals land in their own chat
+  # instead of the alert card's.
+  #
+  # No secret: this bot has signature verification off (verified by an unsigned
+  # POST succeeding on 2026-09-03). Turn it on in Lark and set the value here —
+  # build_feishu adds {timestamp, sign} the moment a secret exists.
+  #
+  # Default options (payload: normalized) on purpose: the watcher sends a
+  # normalized event, not a judged RESULT, so the card is built from
+  # title/body/level/fields rather than a processed envelope.
+  - name: to-me-watch
+    type: feishu
+    url: ${WATCH_FEISHU_WEBHOOK}
+    # Explicitly empty, not omitted: this bot has signature verification OFF
+    # (an unsigned POST to it succeeded on 2026-09-03). The URL is the whole
+    # credential, which is why it lives in .env and never in this file.
+    secret: ""
+
   - name: to-me
     type: feishu
     # Signs the card handed to the bridge. This hop shares a network with the
@@ -192,7 +213,7 @@ routes:
   # and be handed to three brains that have nothing useful to say about it.
   - name: watch-to-me
     source: watch
-    send_to: [to-me]
+    send_to: [to-me-watch]
     priority: 100
     stop: true
 

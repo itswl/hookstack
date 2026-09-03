@@ -128,12 +128,29 @@ def main(argv: list[str]) -> int:
     # secret as "unsigned source" — so one typo'd variable name turns the door
     # the platform forwards production traffic to into an open one, quietly, at
     # boot, with nothing in the log to say so. Two failure modes, one check.
-    # An explicit empty secret is allowed on the hops that never leave the
-    # compose network, and only on those: a return door the pipe hands itself,
-    # and the bridge it hands a card to. Everything else must carry a ${NAME},
-    # and a MISSING secret key is still a failure everywhere — the difference
-    # between `secret: ""` and no line at all is the difference between a
-    # decision and an oversight.
+    # A MISSING secret key is a failure everywhere, for sources and channels
+    # alike: the difference between `secret: ""` and no line at all is the
+    # difference between a decision and an oversight, and only the first one
+    # can be reviewed.
+    #
+    # An explicit empty secret is judged by DIRECTION, because the two ends do
+    # not mean the same thing (narrowed 2026-09-03, when the first channel
+    # leaving this network arrived):
+    #
+    #   SOURCE — an inbound door. Empty means anyone who can reach it can
+    #     inject events, which is the failure this check was written for: one
+    #     typo'd variable name turns the door the platform forwards production
+    #     traffic to into an open one, quietly, at boot. Allowed only on the
+    #     hops that never leave the compose network, and only those.
+    #
+    #   CHANNEL — an outbound hop. Empty means we do not authenticate OURSELVES
+    #     to the receiver. Nothing is opened by it, and some receivers offer no
+    #     signing at all, so requiring it here would forbid destinations rather
+    #     than protect anything. It stays a declared decision, not a silent one.
+    #
+    # For a Feishu custom bot specifically the URL is the whole credential, so
+    # signing is a second factor worth turning on where the receiver supports
+    # it — recommended, not enforced.
     internal_hops = {"judge-notify", "probe-notify", "to-me"}
     for kind in ("sources", "channels"):
         for item in raw.get(kind) or []:
@@ -142,9 +159,9 @@ def main(argv: list[str]) -> int:
             if secret is None:
                 problems.append(f"{kind[:-1]} {name!r}: no secret key at all — an unsigned hop by omission")
             elif str(secret).strip() == "":
-                if name not in internal_hops:
+                if kind == "sources" and name not in internal_hops:
                     problems.append(
-                        f"{kind[:-1]} {name!r}: secret is empty — only an in-network hop may be unsigned, "
+                        f"{kind[:-1]} {name!r}: secret is empty — only an in-network inbound door may be unsigned, "
                         f"and this one is not on the list"
                     )
             elif not ENV_REF.match(str(secret).strip()):
