@@ -67,7 +67,20 @@ deadline=$(( $(date +%s) + 90 ))
 # containers (webhookwise-* contains "hook"), and the first read-back after
 # that declared this deploy unhealthy over a one-off run container that was
 # never ours to wait for.
-OURS='^(hookrelay|hookjudge|hookjudge-b|hookprobe|lark-bridge)$'
+# Derived from compose, not typed here. The typed list silently stopped
+# covering hookjudge-c the day it was added: the readback said "deployed and
+# healthy" while never looking at one of the four services it had just
+# started. A list that has to be edited in lockstep with the compose file is
+# a list that will be forgotten again.
+compose_names() {
+  docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml ps --format '{{.Name}}' 2>/dev/null
+  docker compose -p hookprobe-prod  --env-file .env -f hookprobe/deploy/docker-compose.prod.yml ps --format '{{.Name}}' 2>/dev/null
+}
+OURS="^($(compose_names | sort -u | paste -sd'|' -))$"
+if [ "$OURS" = '^()$' ]; then
+  echo "could not derive the container list from compose; refusing to read back nothing" >&2
+  exit 1
+fi
 while :; do
   unhealthy=$(docker ps --filter "health=unhealthy" --format '{{.Names}}' | grep -E "$OURS" || true)
   starting=$(docker ps --filter "health=starting" --format '{{.Names}}' | grep -E "$OURS" || true)
@@ -79,7 +92,7 @@ while :; do
   fi
   sleep 3
 done
-docker ps --format '  {{.Names}} {{.Status}}' | awk '$1 ~ /^(hookrelay|hookjudge|hookjudge-b|hookprobe|lark-bridge)$/'
+docker ps --format '  {{.Names}} {{.Status}}' | grep -E " $OURS| ${OURS#^}" || docker ps --format '  {{.Names}} {{.Status}}' | awk -v re="$OURS" '$1 ~ re'
 
 # Rollback anchors: only now, past the health gate, is this image set known-good.
 # Tag each with the commit it was built from so a later bad ship can be reverted
@@ -89,9 +102,20 @@ docker ps --format '  {{.Names}} {{.Status}}' | awk '$1 ~ /^(hookrelay|hookjudge
 # changes, so the real cost is roughly one extra hookprobe image per kept sha).
 sha="$(git rev-parse --short HEAD)"
 keep="${ROLLBACK_KEEP:-3}"
-for ref in hookrelay:shadow hookjudge:shadow hookjudge-b:shadow lark-bridge:shadow hookprobe:latest; do
+# Derived too, and for a sharper reason than the readback: the typed list
+# carried `hookjudge-b:shadow`, an image that has never existed — b and c both
+# run `hookjudge:shadow` — so that anchor skipped itself every deploy and said
+# nothing. A missing image is now reported rather than passed over.
+compose_images() {
+  docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml config --images 2>/dev/null
+  docker compose -p hookprobe-prod  --env-file .env -f hookprobe/deploy/docker-compose.prod.yml config --images 2>/dev/null
+}
+for ref in $(compose_images | sort -u); do
   name="${ref%%:*}"
-  docker image inspect "$ref" >/dev/null 2>&1 || continue
+  if ! docker image inspect "$ref" >/dev/null 2>&1; then
+    echo "  no rollback anchor for $ref (image not present)" >&2
+    continue
+  fi
   docker tag "$ref" "$name:$name-rb-$sha"
   # Keep the newest $keep rollback tags for this image, by image creation time.
   docker images "$name" --format '{{.Tag}} {{.CreatedAt}}' \
