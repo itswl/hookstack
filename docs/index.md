@@ -68,7 +68,7 @@ snapshots what it displaced first.
 | --- | --- | --- |
 | **hookrelay** | the pipe — adapts every upstream dialect in and every channel format out, and accounts for all of it | understand content, or judge |
 | **hookjudge** | the judge — one event in, one verdict out, four routes ordered by cost | render cards, or know channels |
-| **hookprobe** | the investigator — one read-only agent run per alert that earns it | receive alerts, or send notifications |
+| **hookprobe** | the investigator — one read-only agent run per event that earns it, answering *what broke* for an alert and *how would this be done* for a work item | receive alerts, or send notifications |
 
 ```
 upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
@@ -79,7 +79,28 @@ upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
                              │
                              └──► hookprobe :8088 ──► hookrelay ──► the same channels
                                   (investigator: read-only)  /hook/probe-notify
+
+a source that already judged its own signal takes a terminal route instead:
+
+  your source ──► hookrelay ──┬──► the channel you named   (no judge: it is decided)
+  (signed door)               └──► hookprobe :8088         (only if it says so)
 ```
+
+### Not everything through the pipe is an alert
+
+The judge earns its keep on alerts — severity, recovery, flapping, the four
+routes ordered by cost. A source that has ALREADY decided (a watcher forwarding
+"this needs a person", a system that only emits what matters) gains nothing from
+being judged again, and would be judged in a vocabulary that does not fit it.
+
+So a route may be terminal: a signed door of your own, straight to the channel
+you named, past the judge. It still gets the pipe's ledger, retries and dead
+letters — the parts that are about delivery rather than about content.
+
+The investigator is still reachable from there, and asks a different question
+when the event is work rather than a fault: what exists now, what is missing,
+the steps, how the result would be verified — and what it could not see, named
+rather than guessed at. It proposes nothing for execution either way.
 
 ![hookrelay's ledger: every message accounted for, every delivery with an outcome](img/hookrelay-ledger.png)
 

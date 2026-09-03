@@ -150,6 +150,23 @@ title just comes out empty.
 excludes state fields from identity (alongside timestamps), so carrying it does
 not split the firing/resolved pair into two conditions.
 
+**A source that already judged its own signal takes a terminal route.** Not
+every upstream is an alert source. One that has decided for itself — a watcher
+forwarding "this needs a person", a system that only emits what matters —
+gains nothing from the brain, and would be judged in alert vocabulary
+(severity, recovery, flapping) that does not describe it. Give it a signed door
+of its own and a route with a higher `priority` and `stop: true`, straight to
+the channel you named: it keeps the pipe's ledger, retries and dead letters,
+and skips the judging. `deploy/shadow.yaml`'s `watch` source is the worked
+example, and `scripts/post_watch_signal.py` posts to one from off-host without
+the sending machine needing a copy of the secret.
+
+Such a source can still reach the investigator, and should say what kind of
+thing it is sending: `fields.kind: task` asks how the work would be done
+instead of what broke it. `level` remains the only thing with teeth — the
+investigator funds `critical`/`high` and declines the rest itself, so a signal
+worth telling somebody about but not worth investigating is simply `low`.
+
 ## Down
 
 ```bash
