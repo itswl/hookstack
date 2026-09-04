@@ -16,6 +16,7 @@ import html
 import json
 import logging
 import os
+import re
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -37,6 +38,37 @@ from hookrelay.security import token_ok, verify_signature
 from hookrelay.settings import Settings
 from hookrelay.store import Store, now_ts
 from hookrelay.topology import render as render_topology
+
+# A `secret:` whose value is written out rather than referenced. Empty values and
+# ${REFS} are excluded in the pattern itself, not filtered afterwards, so the one
+# thing this must never do — mask an unsigned door into looking like a signed one
+# — cannot happen through a later edit to the replacement.
+# `[ \t]*`, never `\s*`: under re.MULTILINE, `\s` matches a newline, so a `\s*`
+# prefix lets a match START on an earlier line and slide past the lookaheads
+# below — which it did, masking both `${REF}` and `""` on the first attempt.
+_INLINE_SECRET = re.compile(
+    # Each lookahead tolerates leading whitespace ITSELF, because the `[ \t]*`
+    # in the prefix can backtrack to zero — which let the check run one space
+    # early and miss both `${` and `""`, masking the two things it must not.
+    r"^([ \t]*(?:-[ \t]+)?secret:[ \t]*)"
+    r"(?![ \t]*\$\{)"  # a reference: the name is the useful part, the value is elsewhere
+    r"(?![ \t]*$)"  # no value at all
+    r"""(?![ \t]*(?:""|'')[ \t]*$)"""  # an explicitly EMPTY secret = an unsigned door, a fact to show
+    r".+?[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _redact_secrets(text: str) -> str:
+    """Mask inline `secret:` values, leaving the file otherwise byte-identical.
+
+    A regex over the raw text rather than a YAML round-trip on purpose: the
+    configs in this family carry their reasoning in comments, and a re-emit
+    would drop every one of them to redact a line that is usually `${NAME}`
+    anyway.
+    """
+    return _INLINE_SECRET.sub(lambda m: f"{m.group(1)}<redacted>", text)
+
 
 logger = logging.getLogger("hookrelay.app")
 
@@ -686,12 +718,32 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.get("/config")
     async def get_config(x_admin_token: str | None = Header(default=None)) -> JSONResponse:
-        """Admin: the running config with secrets redacted."""
+        """Admin: the running config file, with inline `secret:` values redacted.
+
+        This docstring used to say "with secrets redacted" while returning the
+        file's bytes unchanged. It was true only by convention — every config in
+        this family writes `secret: ${NAME}` — and a convention is not what a
+        promise like that should rest on, least of all in a repository where the
+        docstring IS the decision record.
+
+        What is redacted: a `secret:` whose value is written out rather than
+        referenced. What is NOT, deliberately:
+
+        - `secret: ""` stays visible. An unsigned door is a fact an admin reading
+          this needs, and hiding it behind the same mask as a real credential
+          would make the two indistinguishable.
+        - `secret: ${NAME}` stays visible. The name is the useful part and the
+          value is not here.
+        - URLs. A webhook URL can BE a credential (a Lark bot URL carries its
+          token in the path), and this cannot tell one from an internal service
+          address — so inline such a URL and this endpoint will serve it. Write
+          it as `${NAME}`; `/topology` is the view that prints host only.
+        """
         _admin_guard(x_admin_token)
         path = Path(app.state.settings.config_path)
         if not path.is_file():
             raise HTTPException(status_code=404, detail=f"no config file at {path}")
-        return JSONResponse({"path": str(path), "yaml": path.read_text(encoding="utf-8")})
+        return JSONResponse({"path": str(path), "yaml": _redact_secrets(path.read_text(encoding="utf-8"))})
 
     @app.put("/config")
     async def put_config(request: Request, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:

@@ -30,6 +30,17 @@ printf '\033[1m════ stack ════\033[0m\n'
 python3 scripts/check-docs.py
 python3 scripts/assert_design.py
 python3 scripts/assert_agent_notes.py
+# The deployed configs' GRAPH, not their schema — assert_shadow_config.py already
+# answers "does it boot". hookrelay's /topology computes the three defects a
+# schema cannot see and REPORTS them, because a config reload that could be
+# refused is one nobody can iterate an orchestration behind. A gate is the other
+# situation: the loop that feeds a brain its own output was guarded by four
+# comments in two files, which is the sign a comment was the wrong mechanism.
+#
+# hookrelay's venv, like the bridge lint below: this needs yaml and the pipe's
+# own package, and a check that skips when an interpreter lacks them is a check
+# that passes by finding nothing.
+hookrelay/.venv/bin/python scripts/assert_topology.py
 
 # This repository is public. Without .estate-identifiers this SKIPs; copy
 # .estate-identifiers.example and fill it in, or set ESTATE_PATTERNS_FILE. CI
