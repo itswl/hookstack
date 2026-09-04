@@ -66,6 +66,14 @@ sources:
   - name: watch-due
     secret: ${WATCH_DUE_SECRET}
     dedup_window_seconds: 60
+    # 20-minute cadence, alarmed at 25 — one missed tick is noise (a slow round,
+    # a Mac waking up), two is a stopped clock. This is the one door here where
+    # silence is a DEFECT rather than the good outcome, and nothing else in the
+    # pipe can see it: a timer that never fires leaves no delivery to fail.
+    #
+    # It cost two rounds on 2026-09-04 to learn that, and they were found by a
+    # person asking about something else.
+    expect_every_seconds: 1500
     title: "{title}"
     body: "{message}"
     level: "{state}"
@@ -192,6 +200,16 @@ routes:
     source: watch-due
     send_to: [to-watcher]
     priority: 95
+    stop: true
+
+  # The pipe's own voice: a door that was expected to speak and did not. It
+  # deliberately does NOT route the way the silent door routes — a `watch-due`
+  # absence sent to `to-plan` would be addressed to the watcher that is not
+  # answering. Straight to the operator's chat, terminal.
+  - name: absence-to-me
+    source: absence
+    send_to: [to-lark-watch]
+    priority: 120
     stop: true
 
   # The end of the chain. Terminal for the same reason: a report that fell

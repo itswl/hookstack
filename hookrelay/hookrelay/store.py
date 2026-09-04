@@ -60,6 +60,17 @@ CREATE TABLE IF NOT EXISTS decisions (
     steps_json TEXT NOT NULL DEFAULT '[]'
 );
 
+-- One row per door that is currently overdue, claimed by whichever tick noticed
+-- first. It is DELETED when the door speaks again rather than updated, so the
+-- table's own size is the count of doors currently silent — and so the next
+-- silence after a recovery alarms again instead of being suppressed by a stamp
+-- from last week.
+CREATE TABLE IF NOT EXISTS absences (
+    source TEXT PRIMARY KEY,
+    claimed_at REAL NOT NULL,
+    last_seen_at REAL
+);
+
 CREATE TABLE IF NOT EXISTS deliveries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL REFERENCES events (id),
@@ -485,6 +496,39 @@ class Store:
             )
             await self.db.commit()
             return cursor.rowcount > 0
+
+    # ── absence ───────────────────────────────────────────────────────────
+
+    async def last_event_at(self, source: str) -> float | None:
+        """When this door last said anything, or None if it never has.
+
+        A door that has never spoken is deliberately not the same as one that
+        has gone quiet: a deployment that just came up should not alarm about
+        every timer that has not had its first tick yet.
+        """
+        async with self.db.execute("SELECT MAX(received_at) FROM events WHERE source = ?", (source,)) as cursor:
+            row = await cursor.fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+
+    async def claim_absence(self, source: str, now: float, last_seen: float | None) -> bool:
+        """True for the first tick to notice this door is overdue.
+
+        Claimed before the alarm is raised, like mark_escalated, so a crash
+        between the two costs one missed alarm rather than one per tick forever.
+        """
+        async with self._write_lock:
+            cursor = await self.db.execute(
+                "INSERT OR IGNORE INTO absences (source, claimed_at, last_seen_at) VALUES (?, ?, ?)",
+                (source, now, last_seen),
+            )
+            await self.db.commit()
+            return cursor.rowcount > 0
+
+    async def clear_absence(self, source: str) -> None:
+        """The door spoke. Forget it was ever quiet, so the NEXT silence alarms."""
+        async with self._write_lock:
+            await self.db.execute("DELETE FROM absences WHERE source = ?", (source,))
+            await self.db.commit()
 
     # ── card actions ──────────────────────────────────────────────────────
 

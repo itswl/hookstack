@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
-from hookrelay.config import Config, Route
+from hookrelay.config import SYNTHETIC_SOURCES, Config, Route
 
 
 def _target(url: str) -> str:
@@ -88,6 +88,41 @@ def render(config: Config) -> dict[str, Any]:
 
     doors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
+
+    # The pipe's own doors first. They have no `sources` entry — nothing posts to
+    # them from outside — so a graph built only from config would omit the routes
+    # that carry a card press and an absence alarm, and the absence route is
+    # precisely the one somebody checks after a quiet afternoon.
+    synthetic = [s for s in SYNTHETIC_SOURCES if any(r.source == s for r in config.routes)]
+    for name in synthetic:
+        candidates = _candidates(config, name)
+        doors.append(
+            {
+                "name": name,
+                "signed": None,  # not a door anything can post to
+                "adapter": "(the pipe itself)",
+                "routes": [
+                    {
+                        "name": r.name,
+                        "matches": r.source,
+                        "when": r.when,
+                        "send_to": list(r.send_to),
+                        "priority": r.priority,
+                        "stop": r.stop,
+                    }
+                    for r in candidates
+                ],
+                "walk_always_stops": _walk_is_guaranteed_terminal(candidates),
+            }
+        )
+        if not candidates:
+            warnings.append(
+                {
+                    "kind": "unreachable_door",
+                    "door": name,
+                    "detail": f"the pipe can raise {name} events and no route carries them — they would end no_route",
+                }
+            )
 
     for name, source in config.sources.items():
         candidates = _candidates(config, name)

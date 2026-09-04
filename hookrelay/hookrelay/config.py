@@ -27,6 +27,18 @@ from hookrelay.templates import ExtractTemplate, TemplateSelector
 _ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
+# Doors the PIPE itself speaks through. They have no entry under `sources`
+# because nothing posts to them from outside — but a route may name them, and
+# without this the validator refused a config that was correct.
+#
+#   card-action  a button somebody pressed
+#   absence      a door that was expected to speak and did not
+#
+# Listed rather than special-cased at each site, so adding a third does not
+# mean finding every place that knows about the first two.
+SYNTHETIC_SOURCES: tuple[str, ...] = ("card-action", "absence")
+
+
 class ConfigError(ValueError):
     """A configuration mistake worth stopping the process for."""
 
@@ -81,6 +93,15 @@ class Source:
     # Which extracted keys form the duplicate fingerprint. Empty = title+body.
     fingerprint_fields: tuple[str, ...] = ()
     dedup_window_seconds: int = 120
+    # How often something is expected through this door, in seconds. 0 = never
+    # alarm, and that is the default because most doors have no cadence: an
+    # alert source is silent when nothing is wrong, and that is the good outcome.
+    #
+    # A door that DOES have one — a timer, a scheduled watcher, a heartbeat —
+    # has the opposite property, and nothing else in this pipe can see it. There
+    # is no failed delivery to retry and no dead letter to raise, because the
+    # event that would have carried the failure is the event that never arrived.
+    expect_every_seconds: int = 0
     # Storm fuse (volume, not content — see hookrelay/fuse.py). 0 = no fuse.
     # Mandatory reading: a brain-paired deploy may rely on the brain's own
     # backpressure, but a relay in front of something WITHOUT backpressure
@@ -325,6 +346,7 @@ class Config:
                 fields={str(k): str(v) for k, v in (item.get("fields") or {}).items()},
                 fingerprint_fields=tuple(str(name) for name in (item.get("fingerprint_fields") or ())),
                 dedup_window_seconds=int(item.get("dedup_window_seconds", 120)),
+                expect_every_seconds=max(0, int(item.get("expect_every_seconds", 0))),
                 storm_threshold=max(0, int(item.get("storm_threshold", 0))),
                 storm_window_seconds=max(1, int(item.get("storm_window_seconds", 60))),
                 require_timestamp=bool(item.get("require_timestamp", False)),
@@ -405,8 +427,11 @@ class Config:
                 priority=int(item.get("priority", 0)),
                 stop=bool(item.get("stop", False)),
             )
-            if route.source != "*" and route.source not in sources:
-                raise ConfigError(f"route {route.name}: unknown source {route.source!r}")
+            if route.source not in ("*", *SYNTHETIC_SOURCES) and route.source not in sources:
+                raise ConfigError(
+                    f"route {route.name}: unknown source {route.source!r} "
+                    f"(sources: {', '.join(sorted(sources))}; synthetic: {', '.join(SYNTHETIC_SOURCES)})"
+                )
             if not route.send_to:
                 raise ConfigError(f"route {route.name}: send_to is empty")
             for channel_name in route.send_to:
