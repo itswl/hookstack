@@ -640,35 +640,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         straight into eval/data. The note keeps the provenance: what the
         platform said, what the judge said, whose answer the operator took.
 
+        TWO KINDS OF ROW, never merged. A review queue ruling labels importance
+        and ships `reviewed: true`; a card button labels `wake` — "was waking me
+        worth it" — and ships `reviewed: false`, so scripts/eval.py collects it
+        and refuses to score it until somebody confirms. They keep separate ids
+        for one alert rather than sharing a row, because `reviewed` is per row:
+        folding an untapped axis in would flip a reviewed row unreviewed and
+        quietly drop it out of the deploy gate, which is the failure
+        record_mattered() already refuses from the other side.
+
         A GET, but held to the write rule: one request hands over the full body
         of every labelled alert, which is the most sensitive payload this service
         holds. A bulk export with nothing configured to protect it disables
         itself — see _write_guard.
         """
         _write_guard(x_read_token, authorization)
-        lines = []
-        for row in await store.labeled():
+
+        def alert_of(row: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             try:
                 fields = json.loads(row["fields_json"] or "{}")
             except ValueError:
                 fields = {}
+            return fields, {
+                "source": str(fields.get("origin") or row["source"]),
+                "title": row["title"],
+                "body": row["body"],
+                "level": row["level"],
+                "fields": fields,
+            }
+
+        lines = []
+        for row in await store.labeled():
+            _, alert = alert_of(row)
             lines.append(
                 json.dumps(
                     {
                         "id": f"ledger-{row['id']}",
                         "seen": 1,
-                        "alert": {
-                            "source": str(fields.get("origin") or row["source"]),
-                            "title": row["title"],
-                            "body": row["body"],
-                            "level": row["level"],
-                            "fields": fields,
-                        },
+                        "alert": alert,
                         "expect": {"importance": row["label_importance"], "event_type": row["event_type"]},
                         "reviewed": True,
                         "note": (
                             f"ledger ruling ({row['label_source']}): platform said {row['level']}, "
                             f"judge said {row['importance']}"
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        for row in await store.interrupt_ruled():
+            _, alert = alert_of(row)
+            pressed = "useful" if row["mattered"] == "yes" else "useless"
+            said = row["wake_someone"] or "nothing"
+            lines.append(
+                json.dumps(
+                    {
+                        "id": f"interrupt-{row['id']}",
+                        "seen": 1,
+                        "alert": alert,
+                        # This axis only. A tap says nothing about severity, and
+                        # an empty importance would read as an expectation of "".
+                        "expect": {"wake": [row["mattered"]]},
+                        "reviewed": False,
+                        "note": (
+                            f"button ruling: a person pressed {pressed}; judge said wake={said}, "
+                            f"importance={row['importance']}. Confirm before scoring — a tap in a chat "
+                            f"window is a strong hint, not a review"
                         ),
                     },
                     ensure_ascii=False,
