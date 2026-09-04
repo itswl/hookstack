@@ -86,6 +86,7 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 | pipe + brain | run the demo pair locally in one command | [STACK.md](STACK.md) |
 | all three boards | one design language, one refresh clock | [docs/design-language.md](docs/design-language.md) |
 | every boundary | what stops an agent that costs money, reads attacker-influenced text and holds credentials — and, in its own column, what each boundary does NOT stop | [docs/containment.md](docs/containment.md) |
+| two deployments | the same services wired into two graphs that agree on almost nothing — alerts, and an operator's own attention — plus the four decisions that differ and why | [docs/deployments.md](docs/deployments.md) |
 | decisions | why it is done this way, and why not the obvious way | [.agents/README.md](.agents/README.md) |
 
 The split is the point: a brain that renders Feishu cards has to know Feishu's
@@ -123,7 +124,10 @@ service more than the others.
 hookstack/
 ├── docker-compose.quickstart.yml   published images, no checkout, no build
 ├── docker-compose.yml        the same demo built from source (what the gate tests)
-├── deploy/                   the three services together, real credentials
+├── deploy/                   real deployments, real credentials — see docs/deployments.md
+│   ├── docker-compose.yml    the three services together
+│   ├── *.shadow.yml + shadow.yaml   alerts: platform -> three judges -> card
+│   └── *.work.yml   + work.yaml     work signals: timer -> watcher -> two chats
 ├── STACK.md
 ├── hookrelay/               the pipe
 │   ├── hookrelay/           package
@@ -146,7 +150,9 @@ hookstack/
 Every service also deploys the same way: `<service>/deploy/docker-compose.yml`
 runs it standalone, `deploy/docker-compose.yml` at the root runs the three
 together with real credentials, and the root `docker-compose.yml` stays the
-zero-credential demo. All are run from the repo root with
+zero-credential demo. The two named deployments beside it — `shadow` and
+`work` — are the same services wired into different graphs, and the pair is
+worth reading as a unit: [docs/deployments.md](docs/deployments.md). All are run from the repo root with
 `docker compose --env-file .env -f <file> up -d --build`; the two
 `docker-compose.prod.yml` files under `hookrelay/deploy/` and
 `hookprobe/deploy/` are the shapes joined to a platform's own docker network.
