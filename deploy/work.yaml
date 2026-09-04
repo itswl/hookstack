@@ -110,6 +110,18 @@ sources:
       # counts those as `unpriced_hops`, because a free hop and an unpriced one
       # are different facts.
       cost_usd: "{meta.cost_usd}"
+      # What closes the round trip. The pipeline adopts `fields.correlation_id`
+      # as this event's correlation, so a return that quotes it lands in the
+      # chain of the signal that caused it — which is the whole of what
+      # /timeline projects. Without this line every event is its own chain, and
+      # a deployment reporting "39 chains across 39 hops" looks like a quiet
+      # week rather than a feature that cannot work.
+      #
+      # `meta.event_id` and not a correlation id of the node's own: hookprobe
+      # deliberately never sees the pipe's, and echoes back the id it was handed
+      # instead (see _resolve_run in hookprobe/events.py). The id both sides
+      # already agree on is the right thing to key on.
+      correlation_id: "{meta.event_id}"
 
 channels:
   # The signal, as itself. `payload: normalized` (the default, stated anyway):

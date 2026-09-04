@@ -98,6 +98,9 @@ sources:
       # quiet-wake-no stage below can route on it — the answer was paid for,
       # and until this line nothing used it.
       wake: "{meta.wake_someone}"
+      # Same round trip as probe-notify below: the verdict belongs to the chain
+      # of the alert it judged, not to a chain of its own.
+      correlation_id: "{meta.event_id}"
 
   # The investigator's report, coming back to be dressed as a card. Unsigned for
   # the same reason as the door above: a loopback hop inside hookstack_net.
@@ -119,6 +122,12 @@ sources:
       # counts those as `unpriced_hops`, because a free hop and an unpriced one
       # are different facts.
       cost_usd: "{meta.cost_usd}"
+      # What closes the round trip: the pipeline adopts `fields.correlation_id`
+      # as this event's correlation, so the report lands in the chain of the
+      # alert that caused it instead of standing alone. `meta.event_id` because
+      # hookprobe deliberately never sees the pipe's correlation id and echoes
+      # back the id it was handed — see _resolve_run in hookprobe/events.py.
+      correlation_id: "{meta.event_id}"
 
 channels:
   - name: to-judge
