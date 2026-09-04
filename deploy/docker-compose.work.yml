@@ -292,10 +292,22 @@ services:
       # instead of writing through it, so the container would go on running the
       # version from before the edit while looking healthy.
       #
-      # Checked before mounting: no credential-shaped string anywhere under it.
-      # Its runbooks come along, which is a small bonus — a round that sees a
-      # ticket can read what was already written about it.
-      - ${PROBE_WATCH_JIRA_DIR:-../work-data/probe-watch-jira}:/data/jira:ro
+      # Under data/, which is git-ignored — the same category as .env and the
+      # secrets directories: operator content that never enters a public
+      # repository but needs a stable, repo-relative path. It was briefly put in
+      # deploy/ instead, which is tracked; that would have published somebody's
+      # ticket tooling and their JQL along with it.
+      #
+      # What this does and does not buy, stated because the difference matters:
+      # the absolute host path leaves .env and the file lives with the rest of
+      # the deployment's private content. A fresh clone still will not have it —
+      # exactly like .env — so bringing this deployment up on a second machine
+      # is "clone, copy data/ and work-data/, up", not "clone and up".
+      #
+      # The project key and the comment handle are NOT in the script: they come
+      # from /data/secrets/atlassian.env, so the file stays publishable even
+      # though it is not published.
+      - ../data/watch:/data/jira:ro
     ports:
       - "127.0.0.1:8089:8088"
 
