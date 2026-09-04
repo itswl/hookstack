@@ -424,6 +424,13 @@ services:
       WATCH_ME: ${WATCH_ME:-}
       WATCH_BOTS: ${WATCH_BOTS:-}
       WATCH_JIRA_SCRIPT: /watch/jira_watch.py
+      # The digest's byte budget, and it must stay well under
+      # PATROL_BODY_MAX above minus the brief: patrol.sh REFUSES an
+      # oversized body rather than truncating it, so overrunning here
+      # loses the whole round, not a few lines. Measured on the case that
+      # forces it — the first round of a Monday, reading back across a
+      # weekend: 14 conversations alone came to ~20KB before filtering.
+      WATCH_DIGEST_MAX: ${WATCH_DIGEST_MAX:-11000}
       ATL_ENV_FILE: /timer-secrets/atlassian.env
       # Not under HOME: this container has no /data volume, so the script's
       # default would write into a layer that vanishes on restart — and a Jira
