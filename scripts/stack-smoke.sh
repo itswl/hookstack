@@ -30,29 +30,44 @@ echo "stack compose parses"
 # The standalone files and the family file guard their required variables
 # with ${...:?}. Feed placeholders in a subshell so `config` exercises each
 # file itself, not whatever this checkout's .env happens to contain.
+#
+# WHICH names those are is read back out of the compose files, not listed here.
+# It was a hand-kept list until 2026-09-03 and fell behind three times — the
+# shadow's secret pair, then brain C's endpoint and model, then the watch door's
+# two — each time turning main red until somebody appended one more export. A
+# ${...:?} is precisely the declaration that `config` will demand the name, so
+# deriving the list from it is the only version that cannot drift from the thing
+# it stands in for. Why any given name is required is written at its own
+# ${...:?} in the compose file; this step only owes each one a value.
 (
-  # Must LOOK like a path (leading ./) or compose reads it as a named
-  # volume; `config` does not check that the file exists.
+  seed_required() {
+    local name
+    for name in $(grep -hoE '\$\{[A-Z0-9_]+:\?' "$@" | sed 's/^\${//; s/:?$//' | sort -u); do
+      [ -n "${!name:-}" ] || export "$name=placeholder"
+    done
+  }
+
+  # The one name whose SHAPE compose reads, so a bare placeholder is wrong for
+  # it: this is a volume source, and with no leading ./ compose takes it for a
+  # named volume rather than a path. `config` does not check that the file
+  # exists, so the wrong shape passes here and fails somewhere far away.
   export HOOKRELAY_CONFIG_FILE=./config.yaml
-  export HOOKJUDGE_RETURN_URL=http://hookrelay:8100/hook/judge-notify
-  export HOOKPROBE_TOKEN=placeholder
-  # The shadow deployment's two required secrets. Every other knob in that file
-  # carries a ${...:-default}; these two are ${...:?} because a shadow with an
-  # unsigned door onto production traffic should refuse to start.
-  export WW_RELAY_SECRET=placeholder
-  export SHADOW_INGEST_SECRET=placeholder
-  docker compose -f hookrelay/deploy/docker-compose.yml config >/dev/null
-  docker compose -f hookjudge/deploy/docker-compose.yml config >/dev/null
-  docker compose -f hookprobe/deploy/docker-compose.yml config >/dev/null
-  docker compose -f deploy/docker-compose.yml config >/dev/null
+
+  # Seeded per file rather than once for all of them, so each parse answers for
+  # its own file: a variable that moves between composes still has to be
+  # declared where it is now actually used.
+  for compose in hookrelay/deploy/docker-compose.yml \
+                 hookjudge/deploy/docker-compose.yml \
+                 hookprobe/deploy/docker-compose.yml \
+                 deploy/docker-compose.yml; do
+    seed_required "$compose"
+    docker compose -f "$compose" config >/dev/null
+  done
+
   # The shadow compose was checked by nothing at all while being the newest file
   # here. It needs no .env branch: its `networks.default.external: true` names a
   # network `config` never looks for, so the parse works in a fresh checkout.
-  export LARK_APP_ID=placeholder LARK_APP_SECRET=placeholder LARK_CHAT_ID=placeholder
-  # Brain C's endpoint and model are ${...:?} (a third brain with no provider is
-  # not comparing anything), so `config` needs them seeded like the two secrets
-  # above — its key falls back to A's, so only these two have no default.
-  export HOOKJUDGE_C_AI_BASE_URL=https://api.deepseek.com/v1 HOOKJUDGE_C_AI_MODEL=placeholder
+  seed_required deploy/docker-compose.shadow.yml
   docker compose -f deploy/docker-compose.shadow.yml config >/dev/null
 )
 echo "standalone, family and shadow composes parse"
