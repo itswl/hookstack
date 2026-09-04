@@ -75,6 +75,23 @@ services:
   probe-plan:
     build:
       context: ../hookprobe
+      args:
+        # A build arg rather than a Dockerfile edit, because the Dockerfile says
+        # so: a deployment that tracks this repository with `git pull --ff-only`
+        # cannot carry a modified one. It also keeps these out of the production
+        # investigator's image, which has no use for either.
+        #
+        # git — read a mounted checkout's history, so "how would this be done"
+        # can cite when something last changed rather than only that it exists.
+        # `git push` is already denied by the bash guard.
+        #
+        # awscli — Debian trixie's package is v2 (2.23.6 as built on
+        # 2026-09-04), so this needs no architecture-specific installer. The bash
+        # guard gained an `aws` rule in the same commit that added this: adding
+        # the CLI without it would have quietly weakened the property the
+        # Dockerfile states two paragraphs down — that the guard blocks mutating
+        # verbs on top of whatever the mounted credential allows.
+        APT_EXTRAS: ${PROBE_PLAN_APT_EXTRAS:-git awscli}
     image: hookprobe:work
     container_name: work-probe-plan
     restart: unless-stopped
