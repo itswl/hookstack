@@ -221,11 +221,18 @@ retry cannot conjure the judgement, and a pipe reading it as a failure would
 redeliver a press nobody can ever file.
 
 The ruling is a **different axis** from `label_importance`, which answers what
-importance the alert should have had and feeds `/labels/export`. An alert
-correctly rated `high` can still not be worth waking anyone, so they are two
-columns and both can stand on one row. Sharing the column would have emitted
-`expect.importance: "yes"` into the eval set and quietly drained the review
-queue of rows nobody reviewed.
+importance the alert should have had. An alert correctly rated `high` can still
+not be worth waking anyone, so they are two columns and both can stand on one
+row. Sharing the column would have emitted `expect.importance: "yes"` into the
+eval set and quietly drained the review queue of rows nobody reviewed.
+
+Both reach `/labels/export`, and as separate rows for the same reason they are
+separate columns: a queue label ships `reviewed: true` on `importance`, a press
+ships `reviewed: false` on `wake`, and `reviewed` is per row — merging them
+would flip a reviewed row unreviewed the moment somebody tapped a button on it,
+and drop it out of the deploy gate without a word. A press is the cheapest label
+this service gets, and the cheapest to get wrong: the interesting one to read is
+a judge that answered `wake=no` on an alert a person then called useful.
 
 ## Endpoints
 
@@ -239,7 +246,7 @@ queue of rows nobody reviewed.
 | GET    | `/disagreements` | the review queue: platform vs judge, unlabeled     |
 | POST   | `/rulings/ai` | a model's retrospective ruling on a CONDITION, from hookprobe. Its OWN secret (`HOOKJUDGE_RULING_SECRET`), because the ingest one also opens `/events` and anything able to sign for that can forge judgements. Fails **closed** when unset, unlike every other door here |
 | POST   | `/judgements/{id}/label` | the operator's ruling. **Disabled** without a read token |
-| GET    | `/labels/export` | every ruling as eval-harness JSONL. **Disabled** without a read token |
+| GET    | `/labels/export` | every ruling as eval-harness JSONL — a queue label as `ledger-<id>` on `importance`, a card button as `interrupt-<id>` on `wake`, never merged. **Disabled** without a read token |
 | GET    | `/healthz` | liveness                                          |
 | GET    | `/`        | a dark one-page view of the ledger                |
 

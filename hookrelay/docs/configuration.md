@@ -39,7 +39,32 @@ sources:
     dedup_window_seconds: 60
     storm_threshold: 60                # storm FUSE: arrivals per window; 0 = off
     storm_window_seconds: 60
+    require_timestamp: false           # replay protection, see below
+    max_skew_seconds: 300
+    expect_every_seconds: 0            # 0 = off; silence on this door is a defect
 ```
+
+**Replay protection — `require_timestamp` / `max_skew_seconds`.** The preferred
+signature covers `"{timestamp}.{body}"`, sent as `X-Hook-Timestamp` beside
+`X-Hook-Signature`, and `max_skew_seconds` bounds how long a captured request
+stays replayable. `require_timestamp: true` refuses the legacy body-only form
+outright; it defaults to false so an existing sender keeps working, which means
+**turning it on is a deliberate act and leaving it off is a decision too**. What
+this does and does not buy is in [docs/containment.md](../../docs/containment.md).
+
+**A door that is expected to speak — `expect_every_seconds`.** Most doors have
+no cadence: an alert source is silent when nothing is wrong, and that is the
+good outcome. A door fed by a TIMER has the opposite property, and declaring the
+interval is the only way the pipe can tell the two apart. Set it and a door that
+goes quiet for longer raises an `absence` event, which walks the ordinary
+pipeline and needs a route (`source: absence`) to reach anybody.
+
+This is the one failure nothing else here can see. Every other guard watches
+something that happened — a delivery that failed, a route that matched nothing.
+An absence produces no delivery to retry and no dead letter to raise, because
+the event that would have carried the failure is the one that never arrived. It
+is off by default, and never inferred: a deployment that just came up must not
+alarm about every timer whose first tick has not landed.
 
 **The storm fuse is volume, not content** — it catches the high-cardinality
 flood that dedup structurally cannot (every payload different, so no
@@ -138,6 +163,11 @@ relay). Write it → the walk is exactly your list, in order. **Must contain
 — the brain owns dedup/noise judgment and its accounting must stay truthful;
 the edge keeps only the valve. This is how the reference production deploy
 runs.
+
+A stage is either a bare string (a built-in with no options) or a mapping whose
+`type` names the processor. `use` is accepted as a synonym for `type` and means
+exactly the same thing — one spelling per file, please; both exist only because
+early configs used `use` and breaking them buys nothing.
 
 ```yaml
 pipeline:

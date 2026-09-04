@@ -40,14 +40,29 @@ to act now. Measured the week it was added: 440 interruptions, 95% repeats.
 ## The work shape
 
 ```
-timer ──► /hook/watch-due ──► watcher
-                                │  one signal per finding, each with its own
-                                │  level and kind
-                                ▼
+timer ──► scan (plain code) ──► nothing new? the round ends here. No event,
+                             │  no model, no bill — which is most rounds.
+                             ▼
+              /hook/watch-due ──► watcher   reads findings, decides which are
+                                     │      worth interrupting a person for
+                                     ▼
                           /hook/watch ──┬──► chat A  (the signal)
                                         │
                         (kind=task) ────┴──► planner ──► /hook/plan-notify ──► chat B
 ```
+
+**The scan is not the watcher.** Reading a window of chat and tickets, comparing
+timestamps against a cursor and dropping fragments is procedure, and procedure
+written into a prompt is procedure a model can decline to follow — it declined
+once, posting a signal and advancing neither cursor. It is a script now, and the
+watcher is handed findings rather than instructions for finding them. The saving
+is not tokens: an empty round used to cost as much as a busy one, because the
+agent had to complete the whole scan to learn there was nothing in it.
+
+The timer's side of that is `PATROL_PRESCAN` in `patrol-timer.sh`, which is
+generic — a prescan that exits quiet skips the round, and one that FAILS fires
+anyway, carrying the failure. A prescan that broke and a prescan that found
+nothing are the same silence from outside, and only one of them is a quiet day.
 
 Two chats rather than one, which is the whole reason this is not the alert
 shape: a signal ("someone assigned you this") and a plan ("here is how it would
@@ -93,7 +108,7 @@ general form.
 |---|---|---|
 | absent, or anything else | what broke — root cause, impact, remediation | 4 KB |
 | `task` | how would this be done — what exists, what is missing, the steps | 4 KB |
-| `brief` | *the body IS the instruction*: a procedure, run as written | 16 KB |
+| `brief` | *the body IS the instruction*: read it and do what it says | 16 KB |
 
 `brief` exists because the other two presume a SUBJECT to analyse and wrap the
 body in that framing. A scheduled procedure has neither shape, and the framing
