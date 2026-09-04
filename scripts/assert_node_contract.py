@@ -26,11 +26,32 @@ is not an implementation convenience here; it is the only thing that can see the
 failure at all.
 
     assert_node_contract.py --before b.json --after a.json \
-        --ledger relay-status.json --since <unix> [--source watch]
+        --ledger relay-status.json --since <unix> [--source watch] \
+        [--cursors cursors.json]
 
 Exit 0 when every promise held, 1 otherwise, with the violated promise named in
 the words the brief uses — a violation is meant to be readable by whoever wrote
 the brief, not only by whoever wrote this.
+
+WHAT MOVED, AND WHY THE PROMISES CHANGED WITH IT. The node used to own both
+cursors: `feeds` (how far it had read) and `reported` (what it had actually told
+somebody about). Both are now written by different programs — a deterministic
+scanner owns `feeds` and writes it to its own file, and the node owns only
+`reported`, written by the same call that posts the signal. So two of the four
+original promises stopped being promises anybody makes:
+
+  - "both cursors end on the same timestamp" — they cannot. The scanner advances
+    `feeds` on every round it reads; `reported` only moves when something was
+    worth saying. Equality now means "nothing has happened since", not "the
+    round was honest", and keeping the check would fail every healthy round.
+  - "it advanced at least as many conversations as it reported" — the scanner
+    advances by construction, so this is now true whatever the node did.
+
+What replaced them is a promise the split makes checkable for the first time:
+a node can only report a conversation the scan actually OFFERED it. A signal
+naming a conversation nobody surfaced is either a mis-copied name — which breaks
+this checker's own subject matching, silently — or a round reporting something it
+did not read.
 """
 
 from __future__ import annotations
@@ -90,7 +111,7 @@ def _subjects(ledger: dict[str, Any], source: str, since: float) -> dict[str, fl
 
 def main() -> int:
     positional = [a for a in sys.argv[1:] if not a.startswith("--")]
-    named = {"--before", "--after", "--ledger", "--since", "--source"}
+    named = {"--before", "--after", "--ledger", "--since", "--source", "--cursors"}
     values = {n: _opt(n) for n in named}
     positional = [a for a in positional if a not in values.values()]
 
@@ -100,8 +121,29 @@ def main() -> int:
     since = float(values["--since"] or 0)
     source = values["--source"] or "watch"
 
-    b_feeds, b_reported = before.get("feeds") or {}, before.get("reported") or {}
-    a_feeds, a_reported = after.get("feeds") or {}, after.get("reported") or {}
+    # `feeds` lives with whoever writes it. A node that still keeps both cursors
+    # in one file needs no --cursors and is checked exactly as before; one whose
+    # reading was split out points at the scanner's file. `offered` is what that
+    # scan handed the node THIS round, and is absent for the single-file case —
+    # where the promise it backs cannot be checked and is skipped rather than
+    # asserted against an empty set, which would fail every round.
+    #
+    # A missing file is not a violation. The scan writes it on its first round
+    # inside the working window, so between a deploy and that round the path is
+    # configured and absent — and this runs from a timer that turns a non-zero
+    # exit into a signal, so crashing here would page somebody about a file that
+    # is merely not written yet. Falls back to the single-file reading, which
+    # then finds no `offered` and skips the promise that needs one.
+    cursors: dict[str, Any] = {}
+    if values["--cursors"]:
+        try:
+            cursors = json.loads(Path(values["--cursors"]).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"  note  no scan cursors yet ({exc}); checking the node's own file")
+    b_reported = before.get("reported") or {}
+    a_reported = after.get("reported") or {}
+    a_feeds = cursors.get("feeds") or after.get("feeds") or {}
+    offered = cursors.get("offered")
     signalled = _subjects(ledger, source, since)
 
     print(
@@ -121,34 +163,34 @@ def main() -> int:
         f"posted a signal and left the cursor where it was: {stalled}",
     )
 
-    # 2. Both cursors, not one. Advancing `reported` past `feeds` or leaving
-    #    `feeds` behind means the next round re-reads what it just told you about.
-    mismatched = [
-        (name, a_feeds.get(name), a_reported.get(name))
-        for name in signalled
-        if name in a_feeds
-        and float(a_reported.get(name, 0)) != float(a_feeds.get(name, 0))
-    ]
-    check(
-        not mismatched,
-        "a reported conversation ends the round with both cursors on the same timestamp",
-        f"{mismatched}",
-    )
+    # 2. It can only report what it was handed. A subject nobody offered is
+    #    either a conversation name copied wrong — which breaks the matching in
+    #    _subjects() above, so the FIRST promise would go quiet rather than
+    #    fail — or a round reporting something it never read.
+    #
+    #    Skipped, not asserted, when the scan file carries no `offered`: a node
+    #    that still keeps one state file has no scan to be handed anything by,
+    #    and checking it against an empty set would fail every round it works.
+    if offered is not None:
+        invented = [name for name in signalled if name not in offered]
+        check(
+            not invented,
+            "every conversation it reported was one the scan offered it",
+            f"reported a conversation nothing surfaced: {invented} (offered: {sorted(offered)})",
+        )
 
-    # 3. It cannot report more conversations than it looked at.
-    advanced = [n for n, v in a_feeds.items() if float(v) > float(b_feeds.get(n, 0))]
-    check(
-        len(advanced) >= len(signalled),
-        "it advanced at least as many conversations as it reported",
-        f"advanced {len(advanced)}, reported {len(signalled)}",
-    )
-
-    # 4. Structural, and true at every instant rather than only after a round:
+    # 3. Structural, and true at every instant rather than only after a round:
     #    you cannot have reported past what you have seen.
+    #
+    #    Only for conversations the reader still tracks. A name that has a
+    #    `reported` entry and no `feeds` one is not a node reporting ahead of
+    #    itself — it is a conversation that has since been excluded, renamed, or
+    #    dropped off the feed list, leaving stale bookkeeping behind. Treating
+    #    the missing side as zero made every one of those a permanent violation.
     impossible = [
-        (n, a_reported[n], a_feeds.get(n))
+        (n, a_reported[n], a_feeds[n])
         for n in a_reported
-        if float(a_reported[n]) > float(a_feeds.get(n, 0))
+        if n in a_feeds and float(a_reported[n]) > float(a_feeds[n])
     ]
     check(
         not impossible,

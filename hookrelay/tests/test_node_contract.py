@@ -22,7 +22,7 @@ CHECKER = ROOT / "scripts" / "assert_node_contract.py"
 FIX = ROOT / "scripts" / "fixtures" / "node-contract"
 
 
-def run(before: str, after: str, ledger: str, since: str) -> subprocess.CompletedProcess[str]:
+def run(before: str, after: str, ledger: str, since: str, cursors: str = "") -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
@@ -37,6 +37,7 @@ def run(before: str, after: str, ledger: str, since: str) -> subprocess.Complete
             since,
             "--source",
             "watch",
+            *(["--cursors", str(FIX / cursors)] if cursors else []),
         ],
         capture_output=True,
         text=True,
@@ -59,7 +60,12 @@ def test_the_same_work_done_correctly_passes() -> None:
     worse than none — it would make every round look broken."""
     out = run("ok-before.json", "ok-after.json", "ok-ledger.json", "1788509000")
     assert out.returncode == 0, out.stdout
-    assert "all 4 of them" in out.stdout
+    # Named, not counted. The count was pinned here once and it broke the day a
+    # promise stopped being one anybody makes — which taught the wrong lesson,
+    # because what a test should defend is that the round PASSED for the right
+    # reason, not that the checker still has the same number of reasons.
+    assert "kept its promises" in out.stdout
+    assert "cursor moved forward" in out.stdout
 
 
 def test_reporting_further_than_you_have_read_is_impossible() -> None:
@@ -72,6 +78,35 @@ def test_reporting_further_than_you_have_read_is_impossible() -> None:
         assert "reported further than it has been read" in out.stdout
     finally:
         bad.unlink()
+
+
+def test_it_cannot_report_a_conversation_nothing_offered_it() -> None:
+    """The promise the split made checkable. `feeds` is now written by the
+    scanner and `reported` by the node, so the scan file also records what it
+    handed over that round; a signal naming anything else is a conversation name
+    copied wrong — which would make the FIRST promise go quiet rather than fail,
+    since it matches subjects by that same name."""
+    scan = FIX / "_tmp-scan.json"
+    scan.write_text(json.dumps({"feeds": {"BCP-SRE": 1788510031.0}, "offered": {"Somewhere Else": 1.0}}))
+    try:
+        out = run("ok-before.json", "ok-after.json", "ok-ledger.json", "1788509000", "_tmp-scan.json")
+        assert out.returncode == 1, out.stdout
+        assert "the scan offered it" in out.stdout
+        assert "BCP-SRE" in out.stdout, "name the conversation it invented"
+    finally:
+        scan.unlink()
+
+
+def test_a_scan_that_offered_it_is_not_a_violation() -> None:
+    """The other half, without which the check above would pass by always failing."""
+    scan = FIX / "_tmp-scan-ok.json"
+    scan.write_text(json.dumps({"feeds": {"BCP-SRE": 1788510031.0}, "offered": {"BCP-SRE": 1788510031.0}}))
+    try:
+        out = run("ok-before.json", "ok-after.json", "ok-ledger.json", "1788509000", "_tmp-scan-ok.json")
+        assert out.returncode == 0, out.stdout
+        assert "the scan offered it" in out.stdout
+    finally:
+        scan.unlink()
 
 
 def test_a_quiet_round_is_not_a_violation() -> None:
