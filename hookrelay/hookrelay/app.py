@@ -36,6 +36,7 @@ from hookrelay.pipeline import handle_hook, record_storm_suppressed
 from hookrelay.security import token_ok, verify_signature
 from hookrelay.settings import Settings
 from hookrelay.store import Store, now_ts
+from hookrelay.topology import render as render_topology
 
 logger = logging.getLogger("hookrelay.app")
 
@@ -364,6 +365,24 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             dry_run=True,
         )
         return JSONResponse(result)
+
+    @app.get("/topology")
+    async def topology(x_admin_token: str | None = Header(default=None)) -> JSONResponse:
+        """The whole shape, from config alone — the read that belongs BEFORE a
+        route change rather than after one.
+
+        `/explain` answers "where does THIS event go"; this answers "what is my
+        graph", which is the question somebody composing nodes actually has. It
+        names the structural hazards it can see: a door no route can match, an
+        exit no route feeds, and a door that can fall through to a wildcard —
+        the loop every config in this family guards against by hand.
+
+        Admin-gated for the same reason /explain is: it reveals routing. It
+        REPORTS and never refuses — a topology check that could block a reload
+        would be a gate nobody can iterate a new orchestration behind, and the
+        hazard it names is legitimate on a front door."""
+        _admin_guard(x_admin_token)
+        return JSONResponse(render_topology(app.state.config))
 
     # ── the card's way back ───────────────────────────────────────────────
 

@@ -191,10 +191,24 @@ class HttpProcessor:
     A DRY RUN never calls the brain — see the module docstring. It still says
     where the call would have gone, because showing the walk is the whole point
     of an explain, and "the verdict comes from here" is part of the walk.
+
+    `when` puts the stage on ONE LANE — {source: probe-notify}, {level: [high]},
+    any routing key, same matcher as `set` and `filter`. It is what makes an
+    inline node PLACEABLE: without it the stage fires on every event, so the
+    only way to scope a decider was to teach it every source name in the config
+    — which an outside node cannot know, and which makes each new lane an edit
+    to somebody else's service. Checked before the dry-run branch on purpose: an
+    explain should say "not_applied" for a lane this stage does not cover, not
+    claim it would post there.
     """
 
     async def run(self, rt: Runtime, ctx: EventContext, options: dict[str, Any]) -> Verdict:
         name = options["_name"]
+        when: dict[str, Any] = options.get("when") or {}
+        context = ctx.routing_context()
+        if when and any(not _condition_matches(cond, context.get(key, "")) for key, cond in when.items()):
+            ctx.steps.append({"gate": name, "result": "not_applied"})
+            return PASS
         if rt.dry_run:
             # The one thing this stage cannot honestly show is the verdict it
             # never asked for, so it says that too — an operator reading the
