@@ -101,10 +101,33 @@ bash scripts/stack-smoke.sh          # build, drive every route, assert, tear do
 KEEP=1 bash scripts/stack-smoke.sh   # leave it up to poke at
 ```
 
-Nineteen assertions, run in CI by `ci-stack`. They exist because neither
-service's own gate can see the stack: each stays green while the pipe cannot
-reach the brain, a compose path points at a directory that moved, or a
-stand-in starts with nothing wired to it.
+Twenty-seven assertions, run in CI by `ci-stack`, and they come in two kinds
+that are worth keeping apart:
+
+- **Eight about the DIALECT** (`assert_dialect.py`), read from the pipe's own
+  ledger and the sink: the node took the handover, signed its way back in,
+  returned something the pipe could read and route, and the loop closed. Any
+  async node passes these. Nothing in them reads the node's ledger.
+- **Nineteen about hookjudge** (`assert_stack.py`), read from that service's
+  `/status`: judged counts, the ai/reuse/recovery split, priced tokens,
+  identity, recovery inheritance. Properties of one implementation.
+
+That split is what makes the family's own acceptance test runnable rather than
+aspirational:
+
+```bash
+STACK_BRAIN=mine RETURN_DOOR=my-notify BRAIN_CHANNEL=to-mine \
+  bash scripts/stack-smoke.sh        # your node, dialect assertions only
+```
+
+Until the two were separated, "swap hookjudge for a twenty-line judge of your
+own and this is still green" could not pass for anybody — the smoke asserted
+`summary.cost > 0` and a reuse-route count, which a conforming twenty-line node
+has no reason to have.
+
+They exist at all because neither service's own gate can see the stack: each
+stays green while the pipe cannot reach the brain, a compose path points at a
+directory that moved, or a stand-in starts with nothing wired to it.
 
 ## The two stand-ins
 
