@@ -95,6 +95,66 @@ def test_a_malformed_cost_does_not_break_the_stream() -> None:
     assert render(rows)["totals"]["cost_usd"] == 0.0
 
 
+def test_a_return_that_quotes_the_egress_stamp_joins_its_origin() -> None:
+    """The form the pipe actually mints.
+
+    delivery.py stamps `hr-<event_id>` on egress and hookjudge echoes exactly
+    that back, so a verdict arrives quoting `hr-1887` while the alert it judged
+    is keyed `1887`. Grouped on the raw string those are two chains — which on
+    production read as "50 chains across 50 hops", every event alone, the same
+    output as a pipe nothing had ever answered.
+
+    hookprobe returns the bare id instead, deliberately: it never sees the
+    pipe's correlation id. Both forms have to land in one chain, so this pins
+    both rather than whichever one was looked at first.
+    """
+    rows = [
+        {
+            "id": 1887,
+            "received_at": 100.0,
+            "source": "ww",
+            "title": "alert",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": None,
+        },
+        {
+            "id": 1888,
+            "received_at": 200.0,
+            "source": "judge-notify",
+            "title": "verdict",
+            "level": "low",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": "hr-1887",
+        },
+        {
+            "id": 1889,
+            "received_at": 300.0,
+            "source": "probe-notify",
+            "title": "report",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {"cost_usd": "1.44"},
+            "correlation_id": "1887",
+        },
+    ]
+    out = render(rows)
+    assert [c["chain"] for c in out["chains"]] == ["1887"], "one alert, one chain, both forms in it"
+    chain = out["chains"][0]
+    assert [h["id"] for h in chain["hops"]] == [1887, 1888, 1889]
+    assert chain["cost_usd"] == 1.44
+
+    # Not everything that looks like the prefix is one: a correlation a node
+    # chose for itself must stay its own chain rather than being parsed apart.
+    odd = render([dict(rows[1], correlation_id="hr-session-42")])
+    assert odd["chains"][0]["chain"] == "hr-session-42"
+
+
 async def test_the_ledger_query_returns_what_the_projections_read(store) -> None:
     """The gap every test above stepped over.
 

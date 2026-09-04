@@ -28,6 +28,21 @@ from __future__ import annotations
 from typing import Any
 
 
+def _chain_key(row: dict[str, Any]) -> str:
+    """Which chain this hop belongs to: what it quoted, else its own id.
+
+    delivery.py stamps `hr-<event_id>` on egress and hookjudge echoes it back,
+    so `hr-1887` and the event whose id is 1887 are one chain — keyed apart, a
+    verdict sits in a chain of its own beside the alert it judged. store.py
+    resolves the same prefix for /trace/{id}; the pipe mints it in one place and
+    this is the third reader of it.
+    """
+    quoted = str(row.get("correlation_id") or "")
+    if quoted.startswith("hr-") and quoted[3:].isdigit():
+        return quoted[3:]
+    return quoted or str(row.get("id"))
+
+
 def _cost(row: dict[str, Any]) -> float:
     """What this hop cost, when the node that produced it said so.
 
@@ -52,10 +67,7 @@ def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
     """Chronological chains, newest first, with what each one spent."""
     chains: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        # An event that quoted a correlation id belongs to whatever it quoted;
-        # everything else is the head of its own chain.
-        key = str(row.get("correlation_id") or row.get("id"))
-        chains.setdefault(key, []).append(
+        chains.setdefault(_chain_key(row), []).append(
             {
                 "id": row.get("id"),
                 "at": row.get("received_at"),
