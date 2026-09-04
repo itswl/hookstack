@@ -337,6 +337,45 @@ async def test_http_processor_error_policies(store):
     assert result["skip_code"] == "processor_error", "fail-closed must drop with the named code"
 
 
+async def test_a_when_puts_the_inline_stage_on_one_lane(store):
+    """The stage a topology can PLACE.
+
+    Without `when` an inline decider fires on every event, so the only way to
+    scope one was to teach the node every source name in the config — which a
+    node somebody else wrote cannot know, and which turns every new lane into an
+    edit to their service. Here the decider is wired for the return door only,
+    and the front door must reach the network zero times.
+    """
+    cfg = Config.from_dict(
+        {
+            "sources": [
+                {"name": "ci", "secret": "", "title": "{job}", "body": "{detail}", "level": "{status}"},
+                {"name": "report", "secret": "", "title": "{t}", "body": "{d}", "level": "{lvl}"},
+            ],
+            "channels": [{"name": "quiet", "type": "generic", "url": "https://quiet.example"}],
+            "routes": [{"name": "all", "source": "*", "send_to": ["quiet"]}],
+            "pipeline": [
+                {"type": "http", "name": "triage", "url": "https://b.example", "when": {"source": "report"}},
+                "routes",
+            ],
+        }
+    )
+    client = _StubClient(_StubResponse(200, {"action": "drop", "skip_code": "not_worth_it"}))
+
+    off_lane = await handle_hook(
+        store, cfg, cfg.sources["ci"], {"job": "build", "status": "low"}, now=1000.0, client=client
+    )
+    assert client.requests == [], "a stage scoped to another lane must not reach the network"
+    assert off_lane["outcome"] == "routed"
+    assert any(s.get("gate") == "triage" and s.get("result") == "not_applied" for s in off_lane["steps"])
+
+    on_lane = await handle_hook(
+        store, cfg, cfg.sources["report"], {"t": "x", "d": "y", "lvl": "low"}, now=2000.0, client=client
+    )
+    assert on_lane["skip_code"] == "not_worth_it", "the lane it IS on still gets the verdict"
+    assert len(client.requests) == 1
+
+
 async def test_a_dry_run_reports_the_brain_call_instead_of_making_it(store):
     """/explain promises an answer that cannot leave this process, and its
     docstring said so — while the http stage POSTed the payload to the

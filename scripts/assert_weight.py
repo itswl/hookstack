@@ -98,7 +98,18 @@ ROOT = Path(__file__).resolve().parent.parent
 # the commit message — that is the whole ceremony, and it is deliberately cheap
 # enough that nobody is tempted to route around it.
 CEILINGS: dict[str, tuple[int, Path]] = {
-    "hookrelay": (4600, Path("hookrelay/README.md")),
+    # 4600 -> 4800 on 2026-09-04, for the two seams that make the pipe
+    # ORCHESTRABLE by somebody who did not write it: `when` on the inline `http`
+    # stage, and `/topology`. Before them a decider could not be placed on one
+    # lane (the stage fired on every event, so scoping it meant teaching an
+    # outside node every source name in the config), and the shape of a
+    # multi-node graph could only be read by walking the route table by hand —
+    # which is how the same hazard, a return door falling through to a wildcard
+    # and handing a brain its own output, ended up guarded by four separate
+    # comments in two config files instead of by one check. Raised rather than
+    # trimmed because both are pipe properties, not judgments: neither reads an
+    # alert's content, and topology.py cannot even reach the network.
+    "hookrelay": (4800, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

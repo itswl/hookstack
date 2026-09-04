@@ -8,12 +8,12 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 4,600 source lines, five dependencies) that takes JSON
+A pluggable router (under 4,800 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
 to Feishu / DingTalk / WeCom / generic HTTP — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 4,600 source lines is the
+Both numbers are **budgets, not descriptions**. 4,800 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
@@ -101,6 +101,7 @@ pipeline:
     headers: {authorization: Bearer ${BRAIN_KEY}}
     timeout_seconds: 3
     on_error: pass      # fail-open (or `drop` to fail closed)
+    when: {source: probe-notify}   # optional: put the stage on ONE lane
   - type: filter
     name: mute-low
     when: {level: [low]}
@@ -123,6 +124,13 @@ Response:
 ```
 Timeout / non-2xx / bad JSON → the stage's `on_error` policy, recorded in the
 trace either way.
+
+`when` takes the same conditions as a route (`source`, `level`, `title`, any
+field) and is what makes an external decider **placeable**: without it the stage
+fires on every event, so the only way to scope one was to teach the node every
+source name in your config — which a node somebody else wrote cannot know, and
+which turns every new lane into an edit to their service. Off-lane events record
+a `not_applied` step and never reach the network.
 
 ### Pairing a comprehensive brain with hookrelay
 
@@ -228,6 +236,7 @@ alert goes.
 | `GET /trace/{event_id}` | one alert's whole journey — the original payload as received, every delivery with the exact body that left the socket (`sent_body`; body only, never headers), and what each brain sent back (read token) |
 | `GET /metrics` | Prometheus text: events by door/outcome, deliveries by channel/result, outbox depth, fuse and silences (read token) |
 | `POST /explain/{source}` | dry run — what WOULD this payload do; records nothing, delivers nothing, calls no brain (admin token) |
+| `GET /topology` | the whole graph from config alone — doors, stage placements, exits, who feeds whom, and the hazards the shape implies (a door no route matches, an exit no route feeds, a door that can fall through to a wildcard). Pure: no store, no network, no clock. Channel URLs are printed as `scheme://host:port` only — a webhook URL is its own credential (admin token) |
 | `GET/PUT /config`, `POST /config/reload` | the config file, validated-or-nothing, hot-applied (admin token) |
 | `POST /silences`, `DELETE /silences/{id}` | the valve (admin token) |
 | `POST /deliveries/{id}/retry` | a dead letter's second chance (admin token) |
