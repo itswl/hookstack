@@ -38,7 +38,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/` | The operator board — every page this service serves hangs off it |
 | GET | `/card-action` | Ask before doing |
 | POST | `/card-action` | A human pressed a button on a notification card |
-| GET | `/config` | Admin: the running config with secrets redacted |
+| GET | `/config` | Admin: the running config file, with inline secret: values redacted |
 | PUT | `/config` | Admin: replace the config after a dry parse — a config that cannot load never becomes the config |
 | POST | `/config/reload` | Admin: re-read the config file from disk, same dry-parse rule as PUT |
 | POST | `/deliveries/{delivery_id}/retry` | Admin: put one dead delivery back in the queue with a fresh attempt budget |

@@ -85,6 +85,7 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 | [`hookprobe/`](hookprobe) | the investigator. One read-only agent run per deep-analysis task, with a sessions page to keep asking. Replaces a full OpenClaw gateway. | [hookprobe/README.md](hookprobe/README.md) |
 | pipe + brain | run the demo pair locally in one command | [STACK.md](STACK.md) |
 | all three boards | one design language, one refresh clock | [docs/design-language.md](docs/design-language.md) |
+| every boundary | what stops an agent that costs money, reads attacker-influenced text and holds credentials — and, in its own column, what each boundary does NOT stop | [docs/containment.md](docs/containment.md) |
 | decisions | why it is done this way, and why not the obvious way | [.agents/README.md](.agents/README.md) |
 
 The split is the point: a brain that renders Feishu cards has to know Feishu's
