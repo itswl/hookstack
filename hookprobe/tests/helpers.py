@@ -52,6 +52,8 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "memory_auto_apply": False,
         "return_secret": "",
         "escalate_levels": frozenset({"critical", "high"}),
+        # Closed, like production: a test that wants an MCP tool names it.
+        "mcp_tools": frozenset(),
         # Empty, like production: a test that wants a report to conclude with a
         # routable label declares the vocabulary, so no other test acquires a
         # new routing input by existing.

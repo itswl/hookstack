@@ -78,6 +78,17 @@ class Settings:
     workdir: Path
     # MCP server config handed to the engine; empty means none.
     mcp_config: Path | None
+    # Which MCP tools this instance may actually call, as a closed set —
+    # `mcp__chat__chat_search_messages` or `mcp__chat__*` for a whole
+    # server. EMPTY DENIES EVERY MCP TOOL, deliberately: mounting a server is
+    # an act of plumbing, deciding what the agent may do with it is an act of
+    # policy, and this component reads attacker-influenced text, so the two are
+    # not allowed to be the same decision. A read-only server does not exist —
+    # a chat server ships `send_message` beside `search_chat_records` — and without
+    # this, "give it eyes" and "give it a mouth" were one mount. Enforced in
+    # engine.py by a PreToolUse hook, the same mechanism as the bash guard, so
+    # it does not depend on permission_mode.
+    mcp_tools: frozenset[str]
 
     # Skill layers. setting_sources picks which filesystem layers the engine
     # loads: "project" = {workdir}/.claude (the distilled runbooks), "user" =
@@ -236,6 +247,9 @@ class Settings:
             max_timeout_seconds=max(1, _int("HOOKPROBE_MAX_TIMEOUT_SECONDS", 1800)),
             workdir=Path(os.environ.get("HOOKPROBE_WORKDIR", "/data")),
             mcp_config=Path(mcp) if mcp else None,
+            mcp_tools=frozenset(
+                part.strip() for part in os.environ.get("HOOKPROBE_MCP_TOOLS", "").split(",") if part.strip()
+            ),
             setting_sources=sources or ("project",),
             skills=os.environ.get("HOOKPROBE_SKILLS", "").strip(),
             system_prompt_append=_path_env("HOOKPROBE_SYSTEM_PROMPT_APPEND"),

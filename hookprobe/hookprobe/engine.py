@@ -87,6 +87,69 @@ async def _bash_guard_hook(input_data: dict[str, Any], tool_use_id: str | None, 
     }
 
 
+def mcp_deny_reason(tool_name: str, allowed: frozenset[str]) -> str | None:
+    """Why this MCP tool may not run, or None to let it through.
+
+    Mounting an MCP server is plumbing; deciding what the agent may DO with it
+    is policy, and this is the component that reads attacker-influenced text —
+    so the two are separate settings and this one is closed by default. There is
+    no such thing as a read-only server: a chat server ships `send_message` beside
+    `search_chat_records`, so without a tool-level gate, "let the planner read
+    the thread" and "let a message in that thread post as the operator" were the
+    same mount.
+
+    Two forms, both exact: the full `mcp__server__tool`, or `mcp__server__*` for
+    a whole server. No general globbing — a pattern language here would be a
+    second thing to get subtly wrong, and the list is meant to be read by
+    somebody deciding what an agent may do on their behalf.
+
+    Non-MCP tools are not this guard's business; `_ALLOWED_TOOLS` and the bash
+    and input guards already answer for those.
+    """
+    if not tool_name.startswith("mcp__"):
+        return None
+    if tool_name in allowed:
+        return None
+    server = tool_name.split("__")[1] if tool_name.count("__") >= 2 else ""
+    if server and f"mcp__{server}__*" in allowed:
+        return None
+    if not allowed:
+        return (
+            f"{tool_name} refused: no MCP tool may run until HOOKPROBE_MCP_TOOLS names one. "
+            "Mounting a server does not grant its tools — list exactly the ones this instance "
+            "may call (or mcp__<server>__* for all of them), and remember that whoever can put "
+            "text in front of this agent can ask it to use every tool on that list."
+        )
+    return (
+        f"{tool_name} refused: not in HOOKPROBE_MCP_TOOLS. This instance may call "
+        f"{', '.join(sorted(allowed))} and nothing else."
+    )
+
+
+def _mcp_guard_hook(allowed: frozenset[str]) -> Callable[..., Any]:
+    """PreToolUse: refuse an MCP tool the operator did not name.
+
+    A hook rather than `allowed_tools` alone because the engine runs with
+    permission_mode="bypassPermissions", where an allowlist is a preference and
+    a hook is a decision — the same reason the bash guard is a hook.
+    """
+
+    async def hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
+        reason = mcp_deny_reason(str(input_data.get("tool_name") or ""), allowed)
+        if reason is None:
+            return {}
+        logger.warning("mcp tool denied: %s", input_data.get("tool_name"))
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    return hook
+
+
 # Tools that put bytes on disk. NotebookEdit and MultiEdit are not in
 # _ALLOWED_TOOLS today; naming them costs nothing and means enabling one later
 # cannot quietly reopen the hole.
@@ -557,7 +620,10 @@ class ClaudeAgentEngine:
             # console is for, and an agent that says nothing for two minutes and
             # then everything at once is indistinguishable from a hung one.
             include_partial_messages=True,
-            allowed_tools=_ALLOWED_TOOLS,
+            # The declared MCP tools ride along so the CLI exposes them at all.
+            # This is visibility, not enforcement — with bypassPermissions an
+            # allowlist is a preference. _mcp_guard_hook is the gate.
+            allowed_tools=[*_ALLOWED_TOOLS, *sorted(self._settings.mcp_tools)],
             max_turns=self._settings.max_turns,
             # Keep the engine's own system prompt; append the operator's
             # methodology when a system-prompt file is present.
@@ -580,6 +646,11 @@ class ClaudeAgentEngine:
                     # must not depend on how the SDK interprets a matcher
                     # pattern for the one thing it exists to stop.
                     HookMatcher(matcher=None, hooks=_hook_list(_input_guard_hook(self._workdir, self._home))),
+                    # matcher=None for the same reason as the line above: the
+                    # one guard standing between a colleague's chat message and
+                    # a tool that can act as the operator must not depend on
+                    # how the SDK interprets an `mcp__*` matcher pattern.
+                    HookMatcher(matcher=None, hooks=_hook_list(_mcp_guard_hook(self._settings.mcp_tools))),
                     HookMatcher(matcher=None, hooks=_hook_list(_step_begin)),
                 ],
                 # The flight recorder: every tool call, every run, one JSONL
