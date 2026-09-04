@@ -100,7 +100,14 @@ sources:
       wake: "{meta.wake_someone}"
       # Same round trip as probe-notify below: the verdict belongs to the chain
       # of the alert it judged, not to a chain of its own.
-      correlation_id: "{meta.event_id}"
+      #
+      # `meta.correlation_id` and NOT `meta.event_id`, which is what the two
+      # brains differ on and what makes this worth a line each. hookjudge echoes
+      # back the `hr-<id>` the pipe stamped on egress; hookprobe deliberately
+      # never sees that and returns the bare id it was handed. Guessing one form
+      # for both shipped a template that resolved to empty and was dropped —
+      # visible only as a card whose chain never formed.
+      correlation_id: "{meta.correlation_id}"
 
   # The investigator's report, coming back to be dressed as a card. Unsigned for
   # the same reason as the door above: a loopback hop inside hookstack_net.

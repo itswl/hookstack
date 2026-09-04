@@ -743,24 +743,19 @@ class Store:
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(max(1, min(500, int(limit))))
         # `where` is built from constant clause fragments; values are parametrized.
-        # `fields` and `correlation_id` are here because two readers need them
-        # and both were silently blind without them, for a week, looking healthy:
+        # `fields` and `correlation_id` are here because both readers of this
+        # query were silently blind without them, and blind looked healthy:
+        # /timeline (groups by correlation, sums `fields.cost_usd`) reported a
+        # live deployment as 39 chains across 39 hops at $0.00, all unpriced;
+        # scripts/assert_node_contract.py (finds a signal's subject in
+        # `fields.origin`) read every round as "posted 0 signals" and passed.
+        # Both are what a quiet week looks like. The checker's own fixture
+        # carries fields, written from what the code needs rather than from what
+        # this returns — how a golden sample comes to pin the wrong thing.
         #
-        #   /timeline sums `fields.cost_usd` and groups by `correlation_id`. On a
-        #   live deployment it reported 39 chains across 39 hops — every event
-        #   its own chain — and $0.00 with all 39 hops unpriced. Which is what a
-        #   quiet week looks like, so nothing asked.
-        #   scripts/assert_node_contract.py finds the conversation a signal was
-        #   about in `fields.origin`. With no fields it read every round as
-        #   "posted 0 signals" and passed. Its own gate fixture carries fields,
-        #   because a fixture is written from what the code needs rather than
-        #   from what the endpoint returns — which is how a golden sample comes
-        #   to pin the wrong thing.
-        #
-        # `body` and `payload_json` stay out: those are the forensic record and
-        # belong to /trace/{id}, one event at a time. These two are small,
-        # per-event metadata, and /trace already serves both behind this same
-        # read token, so nothing is exposed here that was not already.
+        # `body` and `payload_json` stay out: the forensic record belongs to
+        # /trace/{id}, one event at a time. These two are small per-event
+        # metadata that /trace already serves behind this same read token.
         cursor = await self.db.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.level,"  # nosec B608
             "       e.fields_json, e.correlation_id,"
