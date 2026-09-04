@@ -262,7 +262,13 @@ class Store:
         db = self._db
         if db is None:  # only ever called from open(), immediately after connect
             raise RuntimeError("store is not open")
-        for pragma in ("journal_mode=WAL", "synchronous=NORMAL", "busy_timeout=5000"):
+        # foreign_keys=ON, because SQLite's default is OFF and has been since
+        # the feature shipped: `REFERENCES events (id)` on decisions and
+        # deliveries was decoration for as long as nobody said this. The purge
+        # compensated by deleting children by hand, which is right and is also
+        # the only writer that ever did — anything else that removed an event
+        # would have left orphans nothing would notice.
+        for pragma in ("journal_mode=WAL", "synchronous=NORMAL", "busy_timeout=5000", "foreign_keys=ON"):
             await db.execute(f"PRAGMA {pragma}")  # nosec B608 — a constant from the tuple above
         cursor = await db.execute("PRAGMA journal_mode")
         row = await cursor.fetchone()
@@ -310,6 +316,29 @@ class Store:
         return self._db
 
     # ── the atomic unit ───────────────────────────────────────────────────
+
+    @contextlib.asynccontextmanager
+    async def _write(self) -> AsyncIterator[None]:
+        """One writer's turn: the lock, the commit, and the announcement.
+
+        Every single-statement writer below used to spell those three out, and
+        six of them lost the third. The cause was structural rather than
+        careless: a method that RETURNS a value writes `return cursor.rowcount`
+        inside the lock, and a `return` leaves the block before any line after
+        it runs. So `add_silence` announced and `delete_silence` did not, and
+        removing a silence left the boards showing one that was gone.
+
+        An `__aexit__` cannot be returned past, which is the whole reason this
+        is a context manager and not a helper somebody must remember to call.
+        """
+        async with self._write_lock:
+            try:
+                yield
+            except BaseException:
+                await self.db.rollback()
+                raise
+            await self.db.commit()
+        self._announce()
 
     @contextlib.asynccontextmanager
     async def transaction(self) -> AsyncIterator[Transaction]:
@@ -397,19 +426,15 @@ class Store:
 
     async def defer_delivery(self, delivery_id: int, until: float) -> None:
         """Rate-limit pushback: not an attempt, not an error — just later."""
-        async with self._write_lock:
+        async with self._write():
             await self.db.execute("UPDATE deliveries SET next_attempt_at = ? WHERE id = ?", (until, delivery_id))
-            await self.db.commit()
-        self._announce()
 
     async def mark_sent(self, delivery_id: int, now: float, sent_body: str | None = None) -> None:
-        async with self._write_lock:
+        async with self._write():
             await self.db.execute(
                 "UPDATE deliveries SET status = 'sent', sent_at = ?, last_error = NULL, sent_body = ? WHERE id = ?",
                 (now, sent_body, delivery_id),
             )
-            await self.db.commit()
-        self._announce()
 
     async def mark_failed(
         self, delivery_id: int, attempts: int, error: str, next_at: float | None, sent_body: str | None = None
@@ -422,7 +447,7 @@ class Store:
         bytes: overwriting them with NULL destroyed the only record of what the
         receiver was sent, on the exact rows an operator opens to find out.
         """
-        async with self._write_lock:
+        async with self._write():
             if next_at is None:
                 await self.db.execute(
                     "UPDATE deliveries SET status = 'dead', attempts = ?, last_error = ?, "
@@ -435,19 +460,16 @@ class Store:
                     "sent_body = COALESCE(?, sent_body) WHERE id = ?",
                     (attempts, error[:500], next_at, sent_body, delivery_id),
                 )
-            await self.db.commit()
-        self._announce()
 
     async def retry_delivery(self, delivery_id: int, now: float) -> bool:
         """Operator second chance: a dead delivery back to queued, due now.
         Attempts reset — the operator's judgement outranks the backoff ledger."""
-        async with self._write_lock:
+        async with self._write():
             cursor = await self.db.execute(
                 "UPDATE deliveries SET status = 'queued', attempts = 0, next_attempt_at = ? "
                 "WHERE id = ? AND status = 'dead'",
                 (now, delivery_id),
             )
-            await self.db.commit()
             return cursor.rowcount > 0
 
     async def cold_events(self, *, before: float, levels: tuple[str, ...], limit: int = 50) -> list[dict[str, Any]]:
@@ -490,11 +512,10 @@ class Store:
     async def mark_escalated(self, event_id: int, now: float) -> bool:
         """Stamp it before the deliveries are enqueued, so a crash mid-enqueue
         cannot turn one cold alert into an escalation every tick forever."""
-        async with self._write_lock:
+        async with self._write():
             cursor = await self.db.execute(
                 "UPDATE events SET escalated_at = ? WHERE id = ? AND escalated_at IS NULL", (now, event_id)
             )
-            await self.db.commit()
             return cursor.rowcount > 0
 
     # ── absence ───────────────────────────────────────────────────────────
@@ -516,19 +537,17 @@ class Store:
         Claimed before the alarm is raised, like mark_escalated, so a crash
         between the two costs one missed alarm rather than one per tick forever.
         """
-        async with self._write_lock:
+        async with self._write():
             cursor = await self.db.execute(
                 "INSERT OR IGNORE INTO absences (source, claimed_at, last_seen_at) VALUES (?, ?, ?)",
                 (source, now, last_seen),
             )
-            await self.db.commit()
             return cursor.rowcount > 0
 
     async def clear_absence(self, source: str) -> None:
         """The door spoke. Forget it was ever quiet, so the NEXT silence alarms."""
-        async with self._write_lock:
+        async with self._write():
             await self.db.execute("DELETE FROM absences WHERE source = ?", (source,))
-            await self.db.commit()
 
     # ── card actions ──────────────────────────────────────────────────────
 
@@ -549,7 +568,7 @@ class Store:
         get through to something that spends money or restarts a service. The
         row is written first and annotated with its outcome afterwards.
         """
-        async with self._write_lock:
+        async with self._write():
             try:
                 await self.db.execute(
                     "INSERT INTO card_actions (jti, kind, event_id, correlation_id, actor, pressed_at) "
@@ -558,16 +577,12 @@ class Store:
                 )
             except aiosqlite.IntegrityError:
                 return False
-            await self.db.commit()
-        self._announce()
         return True
 
     async def record_action_outcome(self, jti: str, outcome: str) -> None:
         """What the press achieved, for the timeline and for a dispute later."""
-        async with self._write_lock:
+        async with self._write():
             await self.db.execute("UPDATE card_actions SET outcome = ? WHERE jti = ?", (outcome[:200], jti))
-            await self.db.commit()
-        self._announce()
 
     async def recent_actions(self, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.db.execute(
@@ -588,20 +603,17 @@ class Store:
         return dict(row) if row else None
 
     async def add_silence(self, source: str, until_ts: float, note: str, now: float) -> int:
-        async with self._write_lock:
+        async with self._write():
             cursor = await self.db.execute(
                 "INSERT INTO silences (source, until_ts, note, created_at) VALUES (?, ?, ?, ?)",
                 (source, until_ts, note, now),
             )
-            await self.db.commit()
             row_id = int(cursor.lastrowid or 0)
-        self._announce()
         return row_id
 
     async def delete_silence(self, silence_id: int) -> bool:
-        async with self._write_lock:
+        async with self._write():
             cursor = await self.db.execute("DELETE FROM silences WHERE id = ?", (silence_id,))
-            await self.db.commit()
             return cursor.rowcount > 0
 
     async def list_silences(self, now: float) -> list[dict[str, Any]]:
@@ -681,24 +693,42 @@ class Store:
         through it. An event is purgeable when it is older than the cutoff AND
         none of its deliveries is still queued — a promise in flight is never
         deleted out from under the worker. Expired silences go with them."""
-        async with self._write_lock:
-            cursor = await self.db.execute(
-                "SELECT id FROM events e WHERE e.received_at < ?"
-                " AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.event_id = e.id AND d.status = 'queued')",
-                (cutoff,),
-            )
-            ids = [int(row["id"]) for row in await cursor.fetchall()]
-            for start in range(0, len(ids), 500):
-                chunk = ids[start : start + 500]
-                marks = ",".join("?" for _ in chunk)
-                # `marks` is only "?" placeholders; the values are parametrized.
-                await self.db.execute(f"DELETE FROM deliveries WHERE event_id IN ({marks})", chunk)  # nosec B608
-                await self.db.execute(f"DELETE FROM decisions WHERE event_id IN ({marks})", chunk)  # nosec B608
-                await self.db.execute(f"DELETE FROM events WHERE id IN ({marks})", chunk)  # nosec B608
+        # A batch at a time, each taking the write lock for itself and giving it
+        # back. The old shape selected every purgeable id, then deleted in
+        # chunks WITHOUT releasing — so chunking bought nothing but SQLite's
+        # variable limit, and the first sweep of a long retention held the lock
+        # against every inbound event for the whole of it.
+        #
+        # Re-selecting per batch is not just tidiness: with the lock released
+        # between them, an operator can retry a dead delivery on an old event,
+        # and a list taken up front would delete an event with a promise queued
+        # against it. The guard has to be re-evaluated, so it may as well be the
+        # thing that drives the loop.
+        events = 0
+        while True:
+            async with self._write():
+                cursor = await self.db.execute(
+                    "SELECT id FROM events e WHERE e.received_at < ?"
+                    " AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.event_id = e.id AND d.status = 'queued')"
+                    " LIMIT 500",
+                    (cutoff,),
+                )
+                batch = [int(row["id"]) for row in await cursor.fetchall()]
+                if batch:
+                    marks = ",".join("?" for _ in batch)
+                    # `marks` is only "?" placeholders; the values are parametrized.
+                    # Children first: the foreign keys are enforced now, so a parent
+                    # deleted ahead of its rows is a constraint failure, not a leak.
+                    await self.db.execute(f"DELETE FROM deliveries WHERE event_id IN ({marks})", batch)  # nosec B608
+                    await self.db.execute(f"DELETE FROM decisions WHERE event_id IN ({marks})", batch)  # nosec B608
+                    await self.db.execute(f"DELETE FROM events WHERE id IN ({marks})", batch)  # nosec B608
+                    events += len(batch)
+            if not batch:
+                break
+        async with self._write():
             cursor = await self.db.execute("DELETE FROM silences WHERE until_ts < ?", (now,))
             silences = cursor.rowcount
-            await self.db.commit()
-        return {"events": len(ids), "silences": max(0, silences)}
+        return {"events": events, "silences": max(0, silences)}
 
     # ── status view ───────────────────────────────────────────────────────
 
@@ -735,8 +765,14 @@ class Store:
             clauses.append("d.skip_code = ?")
             params.append(skip_code)
         if query:
-            clauses.append("(e.title LIKE ? OR e.body LIKE ?)")
-            params += [f"%{query}%", f"%{query}%"]
+            # The operator's text is a SUBSTRING, not a pattern. Unescaped, a
+            # search for "50%" is `LIKE '%50%%'` — which matches every row and
+            # scans the whole table to prove it, so the one query guaranteed to
+            # look broken is the one that reads like a filter and returns
+            # everything. `_` is the quieter half: it matches any character.
+            needle = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clauses.append("(e.title LIKE ? ESCAPE '\\' OR e.body LIKE ? ESCAPE '\\')")
+            params += [f"%{needle}%", f"%{needle}%"]
         if before_id:
             clauses.append("e.id < ?")
             params.append(int(before_id))

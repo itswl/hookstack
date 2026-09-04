@@ -138,7 +138,21 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # harder to read. Whoever touches this next should decide whether the
     # measure should be per-module rather than per-service, and record that
     # decision in .agents/notes rather than raising a fourth time in silence.
-    "hookrelay": (5100, Path("hookrelay/README.md")),
+    #
+    # 5100 -> 5200 on 2026-09-05, and the decision above was taken first:
+    # .agents/notes/implemented/2026-09-05-the-weight-ceiling-keeps-its-measure-
+    # and-changes-its-ceremony.md. The measure stays raw lines per service; what
+    # changed is that a raise must state the CODE split this script already
+    # prints, and argue the doctrine question for those lines only.
+    #
+    # This raise, under that rule: +36 source, **-1 code**. Four ledger fixes in
+    # store.py — foreign keys enforced instead of declared, commit-and-announce
+    # made unreturnable-past (six writers that returned a value had been leaving
+    # the boards stale), a batched purge that gives the write lock back, and
+    # LIKE escaping. The code got smaller; every added line is the record of a
+    # promise the schema and the helper names had been making and not keeping.
+    # No doctrine question applies, so this entry is short on purpose.
+    "hookrelay": (5200, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:
