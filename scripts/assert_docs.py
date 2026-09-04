@@ -72,7 +72,11 @@ ROUTES_UNWRITTEN: dict[str, str] = {
 # what this line exists to prevent.
 ENUMERATED = (
     ("card action kinds", "hookrelay/hookrelay/actions.py", "KINDS", Path("hookrelay/docs/configuration.md")),
-    ("ruling verdicts", "hookprobe/hookprobe/rulings.py", "VERDICTS", Path("hookprobe/README.md")),
+    # Moved with the table that states it, when hookprobe's README stopped being
+    # its own reference. Still a hand-written document, which is what makes this
+    # check mean something — pointing it at a GENERATED file would be asking the
+    # generator whether it generated.
+    ("ruling verdicts", "hookprobe/hookprobe/rulings.py", "VERDICTS", Path("hookprobe/docs/configuration.md")),
 )
 
 _PLACEHOLDER = re.compile(r"\{[^}]+\}")

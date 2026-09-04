@@ -49,17 +49,17 @@ own record — the question, the tool sequence, the conclusion — into a
 `SKILL.md`, written by the service and never through the agent's tools. The
 second investigation of the same condition adds a case rather than replacing
 what was there, and every write, by a run or by a person, snapshots what it
-displaced first. See [The learning loop](#the-learning-loop).
+displaced first. See [docs/learning.md](docs/learning.md).
 
 ## The hook\* family
 
-hookprobe stands alone. It is also the third member of a family that splits
-alert handling three ways:
+hookprobe stands alone. It is also the third member of a family that splits one
+job three ways — carrying a signal, judging it, and investigating what earns it:
 
 | project | role |
 |---|---|
-| hookrelay | the pipe — adapts alert dialects in and out, content-blind |
-| hookjudge | the judge — one cheap verdict per alert |
+| hookrelay | the pipe — adapts every upstream dialect in and every downstream format out, content-blind |
+| hookjudge | the judge — one cheap verdict per signal |
 | **hookprobe** | **the investigator — one read-only agent run per analysis task** |
 
 ```
@@ -82,12 +82,12 @@ caller ── POST /hooks/agent ───────────────▶
 | `GET/PUT /v1/memory` | The environment memory — `{workdir}/CLAUDE.md`, loaded into every engine session. Facts every investigation should start from: topology, known false alarms, conventions. |
 | `GET /v1/runs` | Session list, newest first (summaries). |
 | `GET /v1/runs/{key}` | Full run record: status, error, cost, engine session id, all turns. `inputs_now` carries the digests of the memory and methodology files *as they stand today*, so a recorded digest can be read as "still current" or "edited since". |
-| `POST /v1/runs/{key}/distill` | A SKILL.md draft for what a finished run learned — the question, the tool sequence, the conclusion. Returns it; never writes it. Saving is still `PUT /v1/skills/{name}`; the automatic path is `HOOKPROBE_AUTO_DISTILL_MAX` (see *The learning loop*). |
+| `POST /v1/runs/{key}/distill` | A SKILL.md draft for what a finished run learned — the question, the tool sequence, the conclusion. Returns it; never writes it. Saving is still `PUT /v1/skills/{name}`; the automatic path is `HOOKPROBE_AUTO_DISTILL_MAX` (see [docs/learning.md](docs/learning.md)). |
 | `GET /v1/skills/export` | Runbooks packaged to LEAVE this deployment. Cuts at `distill.CASES_MARKER`, so the procedure a consolidation wrote travels and the CASES it was distilled from — where the session keys, hostnames and figures live — do not. Credentials are redacted; anything else identifying is REPORTED under `review`, never removed, and `must_read` is emitted whether or not a pattern matched, because `review: []` means *no known shape matched* and never *safe to publish*. Only consolidated runbooks are exportable: an auto-written one is a pile of cases, and cutting them out leaves a title. |
 | `POST /v1/skills/{name}/review` | Mark a runbook read without changing a byte — the other outcome of a review, which used to be unrecordable. Saving an edit already counts. |
 | `GET /v1/skills/{name}/history[/{stamp}]` · `GET /v1/skills/{name}/origin` | Every version a write displaced, and the full revision log. The skills page renders these as a diff + restore. `POST /v1/skills/{name}/history/{stamp}/restore` puts a version back in one call — history used to be readable and not restorable, which was tolerable only while every write to a manifest went through a person. The restore is itself a write, so putting back the wrong version is also reversible. |
 | `GET /v1/runs/{key}/stream` | The open run as it happens — NDJSON, one object per line: an opening `snapshot`, the answer arriving as `delta` chunks (`kind: text` or `thinking`), each finished step, a `ping` every 15s of silence, and `done` when it settles, at which point it closes itself. Deltas are live-only and never recorded; the finished blocks are what the case file keeps. |
-| `GET /ui` | The sessions page (below). Markup is served unauthenticated; the data calls it makes are not. |
+| `GET /ui` | The sessions page ([docs/operating.md](docs/operating.md)). Markup is served unauthenticated; the data calls it makes are not. |
 | `GET /healthz` | Liveness, unauthenticated. |
 
 Auth: `Authorization: Bearer $HOOKPROBE_TOKEN` on everything except `/healthz`.
@@ -117,43 +117,32 @@ what runs.
 
 ## Configuration
 
-The terse version — every variable and its default, generated from
-`hookprobe/settings.py`: **[docs/reference.md](docs/reference.md)**. The table below
-is the long version, and says why each one exists.
+Two documents, and the split is deliberate:
 
-| env | default | meaning |
-|---|---|---|
-| `HOOKPROBE_TOKEN` | *(empty = unauthenticated)* | Bearer token callers must present |
-| `HOOKPROBE_MODEL` | `claude-opus-5` | Model for the agent session |
-| `HOOKPROBE_MAX_TURNS` | `32` | Hard agent-loop budget per run |
-| `HOOKPROBE_MAX_CONCURRENT` | `2` | Parallel runs; the rest queue |
-| `HOOKPROBE_DEFAULT_TIMEOUT_SECONDS` | `900` | When the trigger omits `timeoutSeconds` |
-| `HOOKPROBE_MAX_TIMEOUT_SECONDS` | `1800` | Upper clamp on requested timeouts |
-| `HOOKPROBE_WORKDIR` | `/data` | Persistent workspace (skills, results) |
-| `HOOKPROBE_MCP_CONFIG` | *(unset)* | Path to an `.mcp.json`-shaped file of MCP servers |
-| `HOOKPROBE_MCP_TOOLS` | *(empty = none may run)* | The closed set of MCP tools this instance may call: `mcp__chat__chat_search_messages`, or `mcp__webhookwise__*` for a whole server. **Mounting a server does not grant its tools.** There is no such thing as a read-only MCP server — a chat server ships `send_message` beside `search_chat_records` — and this component reads attacker-influenced text, so "let it read the thread" and "let a message in that thread post as you" must not be the same decision. Enforced by a PreToolUse hook, like the bash guard, because `permission_mode` is `bypassPermissions` and an allowlist there is a preference rather than a gate. A refusal names what the instance *may* call, so the wrong list is a readable error and not a mystery |
-| `HOOKPROBE_EVENT_SECRET` | *(empty = unsigned)* | Verifies the pipe's deliveries to `/hooks/event`. This is the one mutating route `HOOKPROBE_TOKEN` does not cover — the pipe delivers there, so the signature is its credential — and it is the only door that starts paid investigations. Setting the token and leaving this empty locks every door a person uses and leaves that one open; boot says so in the log |
-| `HOOKPROBE_RETURN_URL` | *(unset = no return)* | Where event-door investigations report back — the pipe's `probe-notify` front door |
-| `HOOKPROBE_RETURN_SECRET` | *(empty = unsigned)* | Signs the return delivery (timestamped HMAC) |
-| `HOOKPROBE_RULING_URL` · `HOOKPROBE_RULING_SECRET` | *(both unset = off)* | Where a retrospective condition ruling goes (the judge's `/rulings/ai`) and the credential for that one door. A verdict is `worth_it` or `not_worth_it` and must carry a reason; anything else is dropped before it is sent. The agent PROPOSES with an `AI-RULING:` line and the service signs — the same division as `MEMORY-SUGGESTION`, because the agent is the component that reads attacker-influenced text and does not get a reusable key for a sibling's ledger |
-| `HOOKPROBE_ESCALATE_LEVELS` | `critical,high` | The only content judgement the investigator makes: which levels are worth a paid run |
-| `HOOKPROBE_VERDICTS` | *(empty = off)* | A comma-separated closed vocabulary this instance may CONCLUDE with. Declared, the prompt asks the report to end with `VERDICT: <one of them>` and the return delivery carries it as `meta.verdict`, which a pipe extracts with `fields: {verdict: "{meta.verdict}"}` and routes on. It is the one field on the return trip the investigator *decides* — `meta.importance` is the level of the event that came in — so it is what lets a report be the MIDDLE of a chain instead of a leaf. Closed rather than free text because a routing key decides where money is spent, in the component that reads attacker-influenced prose: an undeclared label yields `""`, never a guess. See [the decision note](../.agents/notes/implemented/2026-09-04-an-investigator-verdict-may-steer-a-route-from-a-closed-set.md) |
-| `HOOKPROBE_BUDGET_USD` | `0` *(off)* | Window spend ceiling for the event door; refusals report themselves. `GET /v1/budget` shows the arithmetic |
-| `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24` | The sliding window the budget is measured over |
-| `HOOKPROBE_RETENTION_DAYS` | `0` *(keep all)* | Case files and transcripts older than this are pruned daily; skills and memory are never touched |
-| `HOOKPROBE_AUTO_DISTILL_MAX` | `0` *(manual)* | How many runbooks finished runs may leave behind. Above 0, each completed run writes its own `.claude/skills/<name>/SKILL.md` — from the service, create-only, marked unreviewed. See *The learning loop* |
-| `HOOKPROBE_MEMORY_AUTO_APPLY` | `1` *(on)* | The prompt invites at most one `MEMORY-SUGGESTION:` line per report and the service lifts it out. A line whose SHAPE cannot act — no imperative, no second person, no URL, no shell metacharacter, one line, under 400 characters — is appended to CLAUDE.md under its own `unverified` heading. Anything else is queued for a person, which is what the queue is now for. Set `0` to queue everything. The agent's own tools reach neither the queue nor the memory either way |
-| `HOOKPROBE_REMEDIATION_ALLOWLIST` | *(unset = collect-only)* | Path to a file of full-match regexes, one per line, hot-read at execution time. A report may append a fenced `remediation` block; the service parks it as a proposal on the **actions** page, and approving runs the steps sequentially, stop-on-failure, each audited. Deny-by-default: no allowlist, no execution. The read-only investigator never runs these — the service does, after an operator's click |
-| `HOOKPROBE_CONSOLIDATE_AT` | `5` *(0 = off)* | At this many accumulated cases, a runbook triggers ONE agent run that distills the pile into a curated procedure. The draft is APPLIED, snapshotting what it displaced — `auto_write` already installs these manifests with no human, so a gate on consolidating them guarded a class of text already arriving unguarded, and the draft simply stalled. Reversibility replaces permission: `POST /v1/skills/{name}/history/{stamp}/restore` puts the old version back in one call, and `reviewed` stays false because a machine writing a file does not make it read |
-| `HOOKPROBE_RULING_TTL_DAYS` | `14` *(0 = off)* | How long a standing `not_worth_it` ruling (filed by the weekly patrol, kept in `rulings.jsonl` beside the case files) may answer that condition's re-fires from its runbook instead of starting a paid run. The reply is report-shaped JSON marked `answered_from_runbook`, the run costs $0, and `{"force": true}` on the trigger bypasses it |
-| `HOOKPROBE_RULING_REVERIFY_DAYS` | `7` | A ruled-useless condition still gets a REAL investigation this often. Gated answers do not count as verification — only a run that actually looked does, or the gate would feed itself forever |
-| `HOOKPROBE_COALESCE_WINDOW_SECONDS` | `1800` | A re-fire of the same alert (same source+title, new event id) inside this window becomes a follow-up turn in the existing session instead of a new cold-start investigation. Redelivery of the same event id stays idempotent. `0` disables |
-| `HOOKPROBE_REPEAT_REMINDER_AT` | `3` *(0 = off)* | After N identical tool calls, remind the agent to change approach |
-| `HOOKPROBE_BASH_TIMEOUT_MS` | `120000` *(0 = CLI default)* | Deadline for a single command (`BASH_DEFAULT_TIMEOUT_MS`) |
-| `HOOKPROBE_BASH_MAX_TIMEOUT_MS` | `600000` *(0 = CLI default)* | Ceiling the agent may request per command (`BASH_MAX_TIMEOUT_MS`) |
-| `CLAUDE_CODE_ENABLE_TELEMETRY` + `OTEL_*` | *(unset = off)* | Passed to the CLI, which emits one OpenTelemetry event per model call. No default endpoint — see below |
-| `HOOKPROBE_HOST` / `HOOKPROBE_PORT` | `0.0.0.0` / `8088` | Bind address |
-| `ANTHROPIC_API_KEY` | — | Or `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` for a relay |
+- **[docs/reference.md](docs/reference.md)** — every variable and its default,
+  generated from `hookprobe/settings.py`. It cannot drift from the code.
+- **[docs/configuration.md](docs/configuration.md)** — the same variables with
+  the reasoning: why each one exists and what goes wrong without it. A generator
+  has nowhere to put that.
+
+The two you cannot skip: `HOOKPROBE_TOKEN` (empty means unauthenticated) and
+`HOOKPROBE_EVENT_SECRET` (empty means the one door that starts paid runs is
+open). Boot says so in the log when either is missing.
+
+## Where the rest of it is
+
+The front page answers *what is this, is it safe, and how do I call it*.
+Everything below that has its own document, because a README that also holds the
+reference is a README nobody finishes and a reference nobody trusts.
+
+| | |
+|---|---|
+| [docs/operating.md](docs/operating.md) | deploying it, the sessions page, following up on an answer, development |
+| [docs/configuration.md](docs/configuration.md) | every knob with the reason it exists; MCP servers by hand; browser evidence |
+| [docs/cost.md](docs/cost.md) | what a run costs, why reuse is the lever, loop hygiene, model-call telemetry |
+| [docs/learning.md](docs/learning.md) | case files, runbooks, skills, and the family loop that closes back onto the judge |
+| [examples/patrols/README.md](examples/patrols/README.md) | patrol mode — scheduled investigations with no new code, and the two clocks that can drive them |
+| [../docs/containment.md](../docs/containment.md) | every boundary in the family, each with a column for what it does **not** stop |
 
 ## Security model
 
@@ -196,575 +185,6 @@ itself, which turns out to be the one target it can always reach.
    (an operator installing a reviewed runbook) from a run editing itself, and
    mounting these paths read-only would take the operator's write endpoints
    down along with the attack.
-
-## The learning loop
-
-The investigator is told to read prior case files, and the skills directory is
-described as what earlier runs distilled — so the loop is only worth anything
-if something writes one. `HOOKPROBE_AUTO_DISTILL_MAX` closes it: above 0, each
-completed run assembles a runbook from its own record (the question, the tool
-sequence in order, the conclusion) and installs it.
-
-The write happens **in the service**, never through the agent's tools, and that
-distinction is the whole design. Layer 4 above blocks the agent from writing
-`.claude/` because a run that edits its own future instructions turns one
-injected line into a permanent one. Automatic distillation is a different act
-with a different failure mode.
-
-**Runbooks update themselves.** The second investigation of the same condition
-adds a case rather than replacing what was there — replacing would be
-regression dressed as learning, since a run only knows its own steps and would
-flatten a runbook that had already seen five incidents. Cases go newest first,
-inside a marked region:
-
-```markdown
-## Investigations
-<!-- hookprobe:cases -->
-<!-- case:start … -->   ← a new investigation inserts here
-```
-
-Neither side is restricted. A run may update a runbook a person edited; a
-person may edit one a run wrote. The invariant is not *who may write* but that
-**no write destroys what was there**:
-
-- automatic writes only insert into the case region, so anything outside it —
-  your corrections, your own sections, the title, the caveat — is carried
-  through untouched;
-- **every** write, by run or by operator, snapshots the previous manifest into
-  the runbook's `history/` first, so a bad one from either side is one file
-  copy away from being undone;
-- a runbook with no marker (hand-written, or older than this) is appended to,
-  never reshaped to fit.
-
-The rest of the terms:
-
-- **Never from a run that failed, produced nothing, or changed its own
-  inputs.** A run that already misbehaved does not get to leave instructions.
-- **New runbooks are capped**, because each is prefix cost on every later run.
-  The cap never stops an existing runbook from going on learning — that costs a
-  case, not a new prefix entry. At the cap the loop stops creating; it never
-  evicts, because something there may have been reviewed and this is not the
-  code that gets to price that. The case list itself keeps the most recent five.
-- **Stamped.** `origin.json` records every revision — who wrote it, when, from
-  which session, on which model — and whether anyone has read it. An operator
-  saving a runbook *is* the review, and flips it to `reviewed: true`; a later
-  machine write flips it back, because the text changed and nobody looked.
-  The skills page badges the unreviewed ones.
-
-Every run records what the loop did — `{"installed": name}`,
-`{"updated": name}` or `{"skipped": reason}` — so "it quietly did nothing
-again" is not a state this can be in.
-
-## Loop hygiene — the run's context and bill
-
-Two advisory guards, neither a security boundary. They exist because an
-unattended run cannot notice it is wasting itself.
-
-**Repeat reminder.** Running an identical call again returns the same answer at
-the same price. On the `HOOKPROBE_REPEAT_REMINDER_AT`-th identical call (and
-every multiple after) the result carries a note telling the agent to change
-approach or record what stays unknown and move on. The budget breaker stops
-spending after the fact; this is the nudge before it costs.
-
-**Per-command deadlines.** `HOOKPROBE_BASH_TIMEOUT_MS` and
-`HOOKPROBE_BASH_MAX_TIMEOUT_MS` become the CLI's `BASH_DEFAULT_TIMEOUT_MS` /
-`BASH_MAX_TIMEOUT_MS`, so a `curl` at an unreachable host or a `kubectl` at a
-wedged API server cannot hold a run slot until the whole run times out. The
-defaults match the CLI's own — this is a lever to tighten, not a change of
-behaviour.
-
-Every run also records **what the model was actually given**: model, skill
-layers and their names, subagent roles, MCP servers, and content digests of the
-environment memory and the appended methodology. Those files live on a mutable
-volume, so without that record a report cannot be explained after the volume
-moves on — a stale line in `CLAUDE.md` once made every report come back in the
-wrong language while the request looked identical. It sits on each run and each
-turn (`inputs`), and the console's session view shows it.
-
-Both guards and the inputs record are borrowed from
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-(`packages/guard`, and its "model-visible means logged" rule). Its third idea,
-spilling oversized tool output to a file, was built here and then removed: the
-Claude Code harness already does exactly that, and a second layer on top wrote a
-file that only held the harness's already-truncated copy while claiming to hold
-everything — see
-[the rejected note](../.agents/notes/rejected/2026-08-14-tool-output-spill-in-hookprobe.md).
-
-## What a run costs, and why reuse is the lever
-
-Each turn shows what it cost: model, tokens in and out, cache reads, dollars,
-seconds. The session's running total sits beside the session key, and the header
-chip carries the window's spend and its **cache %** — how much context was reused
-rather than paid for again.
-
-The other half of that arithmetic is **whether any of it helped**, which nothing
-measured. Cost was countable to the cent from the first commit and worth was
-countable nowhere, so the first question anyone asks about adopting this — *you
-want me to pay a model per alert?* — had a dollar figure and nothing to set
-against it. A delivered report now carries **Found the cause** / **Missed it**
-buttons, `GET /v1/budget` reports `investigations`, `ruled_useful`,
-`ruled_useless` and the sentence assembled from them, and the console prints it
-under the spend bars: *12 investigations, $3.42, 5 found the cause*. Only a
-person can supply that side, so an investigation nobody ruled on stays unrated —
-never counted as a miss.
-
-That number matters more than it looks, because the part of the bill you cannot
-negotiate is large. An investigation carries roughly 29k input tokens before its
-alert is even mentioned, and measured on a running container it does not shrink:
-
-| configuration | input tokens |
-| --- | --- |
-| preset `claude_code` + 12 tools | 26,920 |
-| no preset + 12 tools | 25,569 |
-| no preset + 4 tools | 25,569 |
-
-The preset is worth ~1,350 tokens and cutting the tool list changes nothing —
-`allowed_tools` gates execution, not what is sent. Everything of ours (memory,
-appended methodology, skills, roles) came to under 3% of the prefix on the
-deployment this was measured on.
-
-So the difference between an expensive week and a cheap one is reuse, and three
-habits decide it:
-
-- **Follow up in the session rather than opening a new investigation.** Measured
-  pair on the same context: $0.1490 fresh, $0.0156 on the follow-up.
-- **Let bursts run together.** Concurrent runs share a warm prefix, so lowering
-  `HOOKPROBE_MAX_CONCURRENT` to save money does the opposite.
-- **Batch edits to memory, prompt and skills.** Each change starts the prefix
-  over; adjusting them between alerts pays the full entry fee every time.
-
-Whether to pay that entry fee at all is decided upstream — `HOOKPROBE_ESCALATE_LEVELS`,
-the event door's idempotency, and the budget breaker. Caching only sets the
-discount. The reasoning and the rejected alternative (a timer to keep the cache
-warm — it costs about ten times what it saves at this volume) are in
-[.agents/notes](../.agents/README.md).
-
-## Model-call telemetry (on by default, no backend assumed)
-
-Every run's totals are already on its record — cost, tokens, per-model
-breakdown, duration, and the tool steps. What that cannot show is the *shape* of
-a run: how many model calls it took, which one was slow, where the context went,
-that one investigation spent on two different models.
-
-The bundled CLI emits all of that itself over OpenTelemetry, and the SDK merges
-this container's environment into the CLI's, so it is configuration rather than
-code. It is **on by default** because it costs nothing when nobody is listening —
-measured, not assumed: with no endpoint set, a run finishes in the same time,
-retries nothing and logs nothing. The only decision left is where to send it:
-
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://your-collector:4317   # that is the whole setup
-```
-
-No default endpoint, no vendor. Point it at whatever you already run, whenever
-you get to it.
-
-One event per model call, `claude_code.api_request`:
-
-```
-model: "deepseek-v4-pro"      input_tokens: 25853     output_tokens: 2
-cost_usd: 0.129315            duration_ms: 1752       cache_read_tokens: 0
-session.id: 1a09123d…         prompt.id: bcf7d8b9…    event.sequence: 1
-query_source: "sdk"           effort: "high"
-```
-
-Alongside it: `assistant_response`, `tool_decision`, and the counters
-`claude_code.token.usage` / `cost.usage` / `tool.execution` / `subagent.spawn` /
-`mcp.rpc` / `compaction` / `active_time.total`.
-
-This is where per-model detail appears that a run record cannot show: one
-investigation was observed spending on **two** models — a fast one for cheap
-turns and the main one for the reasoning — while the run's own total is a single
-number. Anyone re-pricing usage needs both names.
-
-### What is redacted, and by whom
-
-The CLI substitutes `<REDACTED>` for content in these events — nothing in this
-repository does that — under five independent switches. Measured on 2.1.229:
-
-| switch | exposes | default here |
-| --- | --- | --- |
-| `OTEL_LOG_ASSISTANT_RESPONSES` | the model's answers (`assistant_response.response`) | **on** |
-| `OTEL_LOG_USER_PROMPTS` | the prompt — *and* the answers with it | **on** |
-| `OTEL_LOG_TOOL_DETAILS` | tool arguments | **on** |
-| `OTEL_LOG_TOOL_CONTENT` | whole tool outputs | **on** |
-| `OTEL_LOG_RAW_API_BODIES` | raw request/response bodies per call | off |
-| `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` | lifts the 60 KiB cap on those raw bodies | off |
-
-Four of the five are on, which is a deliberate posture and not a default to drift
-into: everything the agent was given and everything it produced leaves the
-container in cleartext once an endpoint is set — including whatever a tool
-happened to print, credentials included. The fifth is off because it is the one
-that pays most and delivers least (below). It buys the material that cost and token
-counts cannot give you: what the model was actually asked, and what it actually
-answered. Note the asymmetry between the first two: enabling prompts also enables
-answers, but not the reverse.
-
-**The raw bodies are capped at 60 KiB.** The CLI truncates the attribute and says
-so in the value (`[TRUNCATED - Content exceeds 60KB limit]`) while `body_length`
-keeps reporting the true size, so the loss is visible rather than silent. Every
-real investigation exceeds it — one call here carried 113 KB. Because a request
-body is `{model, messages, system, tools}`, what falls off the end is the tool
-schemas first and the conversation only after that.
-`CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` lifts the cap (measured: 113426 declared,
-113425 received, valid JSON through the closing brace) and is left unset here —
-uncapping on top of five open switches would push the whole conversation on every
-call unconditionally. Set it when you want byte-exact replay. Note the unprefixed
-`OTEL_CONTENT_MAX_LENGTH` also exists and does *not* affect these bodies.
-
-Two things to know before you build on it, both measured rather than assumed
-(CLI 2.1.229):
-
-- **These are events, not spans.** `OTEL_TRACES_EXPORTER` is accepted but no
-  spans were emitted for a plain run, and the events carry no `traceId`. A call
-  tree is reconstructable from `session.id` + `prompt.id` + `event.sequence`; it
-  does not arrive as one.
-- **`cost_usd` prices Claude models.** On another provider reached through the
-  Anthropic dialect it is an over-estimate — the run above reports $0.129 for a
-  DeepSeek call. The event carries the real model name and the raw token counts,
-  so re-price from those and treat the field as a relative signal.
-
-## The family loop
-
-Inside hookstack the investigator is wired into the alert flow itself: the
-pipe's escalation routes copy every front-door event to `/hooks/event`, the
-probe decides by level whether an investigation is worth paying for, and the
-finished report POSTs back to the pipe's `probe-notify` door — dressed by the
-pipe and delivered to the same channels as the verdict. Escalated
-investigations also open the case files first: the task brief tells the agent
-to grep `/data/results/` for earlier investigations of the same alert and
-report how the last verdict held up — a recurrence gets "first seen 101
-minutes ago, verdict matched, the P1 was not acted on", not a fresh start.
-
-The event door is also where the budget breaker lives, because it is the one
-path that spends money without a human asking. Set `HOOKPROBE_BUDGET_USD`
-(with `HOOKPROBE_BUDGET_WINDOW_HOURS`, default 24): once the window's
-recorded spend reaches the budget, new escalations are refused — but a
-refusal is not a silent drop. It settles as a report-shaped run and returns
-through the same loop, so the channels say *why* there is no investigation
-("Budget breaker open…"). Idempotency still holds (a redelivered, already-funded event
-is never refused), operator paths — `/hooks/agent`, follow-ups, the UI — are
-never gated, and `GET /v1/budget` shows the window's arithmetic. The figure
-counts recorded turns only, so in-flight runs can overshoot by at most
-`max_concurrent` investigations: it is a brake, not an invoice.
-
-It is also a **floor**, and says so. The engine reports dollars only on the
-SDK's final result message, and a wall-clock timeout cancels the query before
-one arrives — so a turn cut off by the clock records `None`, meaning *nobody
-counted*, never `0.0`, meaning *free*. The money was really spent. Both
-`/v1/budget` and the `hookprobe_unpriced_turns` metric carry that count beside
-the spend, so the gap is visible rather than silent.
-
-Recovering those dollars exactly would mean driving the SDK through
-`ClaudeSDKClient` and `interrupt()`, which does yield a final result — a rewrite
-at the one boundary no test touches (the suite injects fake engines and never
-imports the SDK). Whether that is worth it depends entirely on what fraction of
-turns land there, which is why the count is a metric series and not just a number
-on a page: let the graph decide it after real traffic, not an argument before. The pipe stays
-content-blind; the judge is untouched; failure still completes the loop (a
-stopped, crashed, budget-refused — or restart-orphaned — investigation
-reports itself: runs are checkpointed at spawn, and the next boot sweeps
-whatever a dead process left mid-flight into failure reports). The plain demo compose
-points the escalation at the sink's `/probe-standin` so the shape is visible
-without a model key; `--profile probe` (plus `HOOKPROBE_EVENT_URL` in `.env`)
-swaps in the real investigator.
-
-### The card is not a dead end
-
-A report reaches a person as a chat card, and for a while that was where the
-loop stopped: asking a follow-up or approving the procedure the report proposed
-meant leaving the chat, finding the console URL and presenting a bearer token —
-at 3am, on a phone. So the returned payload now **declares** the actions its
-report deserves, as `actions: [{kind, text, …}]` alongside `meta`/`analysis`:
-`followup` when the run left a session that can be resumed, one `approve` per
-proposal still waiting (with the **command** in the label — a button that does
-not say what will run is a trap), and the ruling pair on every report including
-the failures. Declaring is a request, not a guarantee: the pipe drops kinds it
-is not configured to accept, and only channels that have callbacks render any of
-them.
-
-The division of labour is the family's usual one. This side judges *which*
-actions a report earns; hookrelay mints the signed card token and owns the IM
-callback, because a card token is channel edge — nothing here names a channel or
-signs a button. A press comes back to `POST /hooks/action`, signed exactly like
-the event door, and lands on the paths that already existed: the same
-`continue` a console follow-up takes, the same `approve` behind its two gates.
-
-Two properties carry the weight. **A press stands in for the operator's console
-click and for nothing else** — the allowlist is a file an operator edits on the
-host, no button, IM user or pipe can reach it, so a press has the blast radius
-of a click and a denial comes back as a denial (what the press adds is a *who*,
-which the console click never had, so the actor lands on the row as its
-approving note). And **each press is claimed by `(correlation_id, kind, at)`
-before anything happens** — with an `O_EXCL` create, so there is no window
-between looking and acting — because `followup` starts a paid turn and `approve`
-runs commands at a live target, while an IM platform retries any callback it did
-not hear an answer to. A redelivery reads back the first press's answer.
-
-First live run of the loop: a "host CPU high"
-alert came in, the judge ruled it medium within a second, and 3.7 minutes
-later the investigator's report landed on the same channels calling it a
-false alarm — with the one actionable finding named.
-
-## Patrol mode — proactive investigations, zero new code
-
-The family loop is event-driven, but nothing says the event has to come
-from a monitor. A cron job that posts a "patrol due" event to the pipe's
-front door gets the whole machinery for free: escalation copies it to the
-investigator, the investigation runs with every skill/role/MCP it has, and
-the report lands on the same channels as any alert:
-
-```cron
-# host crontab: a daily 09:00 patrol through the pipe's front door
-0 9 * * * curl -sf -X POST http://127.0.0.1:8100/hook/inbound \
-  -H 'content-type: application/json' \
-  -d '{"title":"Daily patrol","message":"Run a read-only health patrol of the infrastructure: host resources, key ports, the family services own checks. List anything abnormal in priority order; if all is well, say what you checked","state":"alerting","env":"prod"}'
-```
-
-Each firing is a new event id, so each patrol is its own investigation with
-its own case file — and the case-file recall means patrol N cites what
-patrol N-1 found. The budget breaker applies as usual: a patrol is an
-autonomous spend like any other.
-
-That case-file recall is what makes a patrol able to answer a question one
-run cannot. Two worked briefs ship in
-[`examples/patrols/`](examples/patrols/README.md), with their crontab lines
-and the HMAC signing spelled out: **"is the noise going up or down"** reads
-the judge's `summary.attention` over seven days
-(`GET /status?window_hours=168`), opens last week's edition of itself and
-reports the direction of cards-per-condition against the spend; **"propose a
-scheduled silence"** looks for a condition that fires in the same hour every
-night and was ruled not worth it, and proposes quieting it — naming which of
-the three things hookrelay can actually do it is asking for, because a
-recurring condition-scoped silence is not one of them.
-
-The briefs are the product, so they live where a person edits them rather
-than in an image: `patrol.sh` reads one at send time, which gives a task the
-same property the environment memory and the methodology already have. Two
-caveats they are written to respect. A brief is capped at 4000 bytes by the
-event door's body cap, and a patrol that is not routed around the judge
-becomes a row in the very ledger it is reporting on.
-
-## Parallel subagents
-
-The engine's Task tool is enabled: a cascading incident can fan out into
-parallel sub-investigations, each appearing in the process feed as a `Task`
-event. Hooks apply inside subagents too, so the bash guard binds them the
-same as the main loop.
-
-## Managing MCP servers by hand
-
-MCP is managed as one JSON file — no API writes, on purpose: server specs
-carry credentials in their `env`, and secrets belong in a file you mount,
-not in a web form. The loop is:
-
-1. Write the file. Three dialects are accepted: the bare
-   `{name: {command, args, env}}` mapping, the `.mcp.json` wrapper
-   (`{"mcpServers": {...}}`), and the marketplace `config.json` shape —
-   entries with `"enabled": false` are skipped and the flag is stripped, so
-   downloaded MCP packages work unedited.
-2. Mount it read-only and point `HOOKPROBE_MCP_CONFIG` at it (see the
-   commented lines in every compose). A path on the volume (e.g.
-   `/data/mcp.json`) also works and is editable without remounting.
-3. Verify with `GET /v1/mcp`: it reads the file fresh and shows each
-   server's command/args/type/url plus its env **key names only** — env
-   values never leave the file.
-4. Edit any time: the config is read fresh at every run (and every
-   `/v1/mcp` call), so changes apply to the next investigation without a
-   restart.
-
-## Browser evidence (optional)
-
-Give the agent an interactive browser for dashboards that have no API: copy
-`deploy/mcp.example.json` (a headless Playwright MCP server), point
-`HOOKPROBE_MCP_CONFIG` at it, and uncomment the chromium block in the
-Dockerfile so the image ships the browser. One caution: a browser can click
-and submit on any page it can reach — the bash guard does not see browser
-actions, so point it at read-only dashboards and viewer accounts; `--isolated`
-keeps it from retaining any profile state between runs.
-
-## Skills — the runner gets smarter
-
-The deep-analysis prompt asks the agent to distill verified diagnostic paths
-into reusable SKILL.md runbooks. Those land in `/data/.claude/skills` on the
-persistent volume and are loaded into every later run. Back up the volume if
-you care about the accumulated experience. The skills directory is plain
-files — review it, prune bad runbooks, or `git init` it for history; anything
-written there instructs future runs, so treat it as part of your trust
-boundary.
-
-Skills load in two layers. The **project layer** (`{workdir}/.claude/skills`,
-on the volume) is always on — it is where the agent distills. The **user
-layer** is an optional host library: point `HOOKPROBE_USER_SKILLS` at it in
-`.env` (the prod compose mounts it read-only at `/data/home/.claude/skills`;
-only a skills subdir — never a whole `~/.claude`, credentials live there) and
-set `HOOKPROBE_SETTING_SOURCES=user,project`. A library that lives in the
-repo of the service it drives (e.g. WebhookWise's `.claude/skills`) versions
-with that service for free. A host library tends to be big, so
-`HOOKPROBE_SKILLS` pins the session's skill list to named skills (or `all`);
-it is a context filter, not a sandbox. The `/v1/skills` browser shows
-exactly the layers the engine would load, tagged `project`/`user`. Two
-honest caveats. A skill is instructions, not a runtime — host skills that
-shell out to binaries the image does not carry will load and then fail at
-the tool, so pin `HOOKPROBE_SKILLS` to the ones whose tools exist. And mount
-the RESOLVED directory: skill libraries are often symlink farms
-(`~/.claude/skills/x -> ../../.agents/skills/x`), and a bind mount carries
-the links but not their targets — `readlink` one entry first and mount what
-it points at.
-
-The format is not ours and that is the point: a skill is a directory with a
-`SKILL.md` (YAML frontmatter: `name`, `description`), the shape the whole
-OpenClaw-lineage ecosystem shares. Marketplace packages install unchanged —
-verified live with two from the OpenOcta market
-(`https://openocta.com/api/v1/skills`, ~750 skills, strong ops section):
-unzip into `/data/.claude/skills/<name>/` (strip `__MACOSX`), the next run
-loads them, and the engine invoked `server-patrol` by name and followed its
-runbook. The trust boundary above applies double to third-party skills:
-read them before installing — they will be instructing an agent that holds
-your read-only credentials.
-
-## Web UI — operate sessions from a browser
-
-`http://<host>:8088/ui` is a single self-contained page (no build step, no
-external assets): sessions on the left, the conversation on the right, a
-composer at the bottom. Paste the bearer token once (kept in localStorage).
-From there you can read any investigation turn by turn (JSON reports
-pretty-print, Markdown answers render, long alert payloads collapse), watch a
-running turn's live process feed (tool calls, narration, the plan checklist),
-**Stop** a runaway turn, send follow-ups into a finished session, or hit
-**+ new session** for a free-form investigation. The sidebar filters by
-key/title and flags relay-born sessions with their return outcome.
-
-Six more views cover the rest of the surface: **skills** browses and edits
-the runbooks (layer-tagged, copy-on-write); **agents** does the same for
-subagent roles (config-pinned ones shown read-only); **memory** edits the
-environment memory (CLAUDE.md); **prompt** edits the system-prompt append —
-both hot-read by the next run; **system** shows the runtime knobs (secrets
-as set/unset, never values), the MCP servers the next run would load, and
-the health counters; **audit** follows the flight recorder, filterable by
-session. A **help** view carries the whole manual — what this is,
-the three-step start, every view, the API contract with curl templates,
-the file map and the safety model — written for a new operator or an AI
-driving the API, reachable at `#help`.
-
-## Follow-up exploration — reuse the session
-
-Every finished run keeps its engine session (transcripts live under
-`$HOME/.claude` on the volume, so they survive restarts). Three ways in — the
-web UI above, or:
-
-```bash
-# 1. HTTP: another turn in the same investigation, then poll /final again
-curl -s -X POST localhost:8088/sessions/hook:deep-analysis:x:1/continue \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"message": "root_cause says the node is oversubscribed — check that node allocatable and the neighbour pods requests back that up"}'
-
-# 2. Terminal: interactive REPL with the full investigation context
-docker compose exec hookprobe sh -c 'cd /data && claude -r <engine_session_id>'
-#   (engine_session_id comes from GET /v1/runs/{key})
-```
-
-Follow-ups run under the same read-only guard and timeout clamps as first
-passes. A failed follow-up never erases the original answer — earlier finals
-are kept on the run record (`previous_texts`).
-
-## Run it
-
-Four composes, four shapes: the repo-root stack compose runs the demo
-family and includes this service behind `--profile probe`; the repo-root
-`deploy/docker-compose.yml` runs the real family (pipe + brain +
-investigator, no demo containers); `deploy/docker-compose.yml` here runs
-the investigator standalone; `deploy/docker-compose.prod.yml` is the
-production shape — joined to the docker network of the platform it serves,
-admin port on loopback only, state bind-mounted at the deployment root for
-backup and review.
-
-**Pairing is the caller's job, and a compose file's rather than a command's.**
-A caller reaches this service by name (`http://hookprobe:8088`), which means
-docker DNS, which means both containers on one network. Two ways to arrange that,
-and only one of them is right for a shared service:
-
-The caller joins this service's network. It depends on the investigator already,
-so the dependency runs the way it already runs, and this service keeps standing
-alone — which is what lets it serve a second caller, or none:
-
-```yaml
-# in the CALLER's compose
-services:
-  its-worker:
-    networks: [its-own-net, investigator]   # list its own again: naming any
-networks:                                   # network opts out of the others
-  investigator:
-    name: hookstack_default                 # or whatever `docker network ls` says
-    external: true
-```
-
-The other way round — this service joining the caller's network — is what
-`deploy/docker-compose.prod.yml` does, and there it is correct: that file is one
-installation's deployment, pinned to the platform it was written for. Do not put
-it in the demo family's compose or a local override. A service that cannot start
-until its consumer is running has the dependency backwards.
-
-Either way, declare it. `docker network connect` does the job once and survives a
-restart but not a recreate, so the next `up --build` takes the leg down silently
-and the caller only finds out when an analysis stops coming back.
-
-Standalone, from the repo root:
-
-```bash
-printf 'HOOKPROBE_TOKEN=change-me\nANTHROPIC_API_KEY=sk-ant-...\n' > .env
-docker compose --env-file .env \
-  -f hookprobe/deploy/docker-compose.yml up -d --build
-curl -s localhost:8088/healthz
-
-# Smoke test one run end to end:
-curl -s -X POST localhost:8088/hooks/agent \
-  -H "Authorization: Bearer change-me" -H 'Content-Type: application/json' \
-  -d '{"message": "Reply with exactly: {\"summary\": \"hookprobe smoke test ok\"}", "sessionKey": "smoke:1"}'
-curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/smoke:1/final
-```
-
-The image ships a lean read-only diagnostic core (procps, jq, iproute2,
-dnsutils, netcat, lsof — what any investigation reaches for first and what
-marketplace runbooks assume exists); domain CLIs stay opt-in behind
-commented Dockerfile blocks (`kubectl`, postgres/mysql/redis clients). Hand
-MCP servers to the agent via `HOOKPROBE_MCP_CONFIG`.
-
-Three more surfaces shape a run, all optional:
-
-- **System prompt append** — drop operator methodology into
-  `{workdir}/system-prompt.md` (or point `HOOKPROBE_SYSTEM_PROMPT_APPEND`
-  at a file). It is appended to the engine's own system prompt and read
-  fresh at every run, so edits apply without a restart.
-  `examples/system-prompt.md` is a starting point, and exists because of a
-  measurement: three subagent roles shipped, loaded into every run, and were
-  invoked **zero** times across 260 recorded tool calls. The capability was
-  provided and never instructed, so nothing used it. That file says when to
-  delegate and — at more length — when not to.
-- **Named subagent roles** — `.claude/agents/*.md` files load like skills
-  (project and user layers both), or pin roles in deployment config with
-  `HOOKPROBE_AGENTS_CONFIG` (JSON: name → {description, prompt, tools?,
-  model?, skills?}). The main agent delegates to them through the Task
-  tool; the bash guard binds them the same as the main loop. No roles ship
-  by default — a measured week of production traffic never delegated once,
-  so the seeded examples were removed (the decision and its evidence:
-  `.agents/notes/implemented/2026-08-24-the-zero-delegations-were-a-broken-knob.md`).
-  Add your own via `PUT /v1/agents/{name}` or the config above.
-- **Audit trail** — every tool call in every run (subagents included)
-  appends one JSONL line to `{workdir}/audit/YYYY-MM-DD.jsonl`: timestamp,
-  session, tool, one-line detail, error flag. The run's event feed is the
-  live view; this is the uncapped, greppable account across runs, pruned
-  by the same retention window as case files.
-
-## Development
-
-```bash
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
-bash scripts/gate.sh   # the exact CI list: compileall, ruff, page JS, pytest
-```
-
-Tests inject fake engines; nothing in the suite needs the SDK, an API key,
-or the network.
 
 ## Non-goals (v1)
 
