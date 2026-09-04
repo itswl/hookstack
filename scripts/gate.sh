@@ -41,6 +41,25 @@ python3 scripts/assert_agent_notes.py
 # own package, and a check that skips when an interpreter lacks them is a check
 # that passes by finding nothing.
 hookrelay/.venv/bin/python scripts/assert_topology.py
+# scripts/assert_node_contract.py, against a REAL round from 2026-09-04 that
+# posted a signal and moved neither cursor. Inverted on purpose — the checker
+# must FAIL here, so this asserts the failure — because a checker that has
+# quietly stopped catching anything looks exactly like one with nothing to
+# catch. The companion case (the same work done correctly, twenty minutes
+# earlier) and the rest live in hookrelay/tests/test_node_contract.py.
+#
+# The LIVE check runs in the patrol timer: it needs a before/after pair of
+# runtime state, which a gate does not have. This proves the instrument still
+# reads.
+if hookrelay/.venv/bin/python scripts/assert_node_contract.py \
+     --before scripts/fixtures/node-contract/stalled-before.json \
+     --after  scripts/fixtures/node-contract/stalled-after.json \
+     --ledger scripts/fixtures/node-contract/stalled-ledger.json \
+     --since 1788510500 --source watch >/dev/null 2>&1; then
+  echo "  FAIL  assert_node_contract.py passed a round that broke its contract" >&2
+  exit 1
+fi
+echo "node contract: the checker still catches the round it was written for"
 
 # This repository is public. Without .estate-identifiers this SKIPs; copy
 # .estate-identifiers.example and fill it in, or set ESTATE_PATTERNS_FILE. CI
