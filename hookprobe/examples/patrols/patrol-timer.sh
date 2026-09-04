@@ -55,7 +55,50 @@ in_range() {  # in_range <value> <spec>  — "" matches, "9-19" and "1-5" are ra
   [ "$v" -ge "$lo" ] && [ "$v" -le "$hi" ]
 }
 
+SNAPSHOT="${CONTRACT_SNAPSHOT:-/tmp/patrol-timer-snapshot.json}"
+
+check_contract() {
+  # A node's brief makes promises about its own state that only a before/after
+  # comparison can check — see scripts/assert_node_contract.py for why three
+  # stateless formulations all passed on the real defect.
+  local since out
+  since="$(cat "$SNAPSHOT.at" 2>/dev/null || echo 0)"
+  [ -n "${CONTRACT_LEDGER_URL:-}" ] || return 0
+  curl -sf ${CONTRACT_READ_TOKEN:+-H "X-Read-Token: $CONTRACT_READ_TOKEN"} \
+    "$CONTRACT_LEDGER_URL" -o /tmp/patrol-timer-ledger.json 2>/dev/null || {
+      log "contract check skipped: ledger unreadable"; return 0; }
+  # Explicit path, not derived from $HERE: this script is mounted at /patrols
+  # and the checker lives in the repo's scripts/, which is a different mount.
+  if out=$(python3 "${CONTRACT_CHECKER:-/scripts/assert_node_contract.py}" \
+        --before "$SNAPSHOT" --after "$CONTRACT_STATE" \
+        --ledger /tmp/patrol-timer-ledger.json \
+        --since "$since" --source "${CONTRACT_SOURCE:-watch}" 2>&1); then
+    return 0
+  fi
+  log "CONTRACT VIOLATION: $(printf '%s' "$out" | grep FAIL | head -2 | tr '\n' ' ')"
+  # The violation travels as a signal, posted BY THE TIMER — deliberately not
+  # through the node whose failure it is reporting. `low` on purpose: this is a
+  # new detector with no track record, and a new detector that pages somebody on
+  # its first false positive is a detector that gets switched off. Raise it once
+  # a week of real rounds says the rate is worth waking up for.
+  [ -n "${CONTRACT_SIGNAL_POSTER:-}" ] || return 0
+  printf '%s' "$(python3 -c "
+import json,sys
+out=sys.stdin.read()
+fails=[l.strip()[6:] for l in out.splitlines() if l.strip().startswith('FAIL')]
+print(json.dumps({
+  'title': '⚠️ 盯守器违约：' + (fails[0].split('—')[0].strip() if fails else 'contract broken'),
+  'detail': '上一轮没有兑现 brief 里的承诺。\n\n' + '\n'.join('- '+f for f in fails),
+  'origin': 'patrol-timer / contract',
+  'level': 'low',
+  'kind': 'note',
+}, ensure_ascii=False))
+" <<< "$out")" | python3 "$CONTRACT_SIGNAL_POSTER" >/dev/null 2>&1 \
+    && log "violation posted as a signal" || log "violation signal FAILED to post"
+}
+
 log "patrol-timer up: every ${EVERY}m, hours=[${HOURS:-all}] days=[${DAYS:-all}] tz=${TZ:-system}, brief=$BRIEF"
+[ -n "${CONTRACT_STATE:-}" ] && log "contract check on: state=$CONTRACT_STATE snapshot=$SNAPSHOT"
 [ -r "$BRIEF" ] || log "WARNING: $BRIEF is not readable — every tick will fail until it is"
 
 while :; do
@@ -68,6 +111,26 @@ while :; do
   dow=$(date +%u); hour=$(date +%-H)
   if ! in_range "$dow" "$DAYS" || ! in_range "$hour" "$HOURS"; then
     continue
+  fi
+
+  # THE PREVIOUS ROUND'S CONTRACT, checked before firing the next one.
+  #
+  # Here rather than after the fire because patrol.sh returns as soon as the
+  # event is accepted — the round itself runs for minutes afterwards, so a timer
+  # cannot wait for the one it just started. By the time the next tick comes
+  # round, the last one has long settled.
+  #
+  # Off unless CONTRACT_STATE is set, so the timer stays useful to a patrol that
+  # has no state file to promise anything about.
+  if [ -n "${CONTRACT_STATE:-}" ] && [ -f "$SNAPSHOT" ]; then
+    check_contract || true
+  fi
+  if [ -n "${CONTRACT_STATE:-}" ] && [ -r "$CONTRACT_STATE" ]; then
+    # Snapshot BEFORE firing: this is what the round about to start will be
+    # measured against.
+    cp "$CONTRACT_STATE" "$SNAPSHOT" 2>/dev/null || log "WARNING: could not snapshot $CONTRACT_STATE"
+    SNAPSHOT_AT=$(date +%s)
+    printf '%s' "$SNAPSHOT_AT" > "$SNAPSHOT.at"
   fi
 
   # Never `set -e` around this: one failed round must not stop the clock. The

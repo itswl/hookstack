@@ -383,8 +383,42 @@ services:
       PATROL_HOURS: ${WATCH_HOURS:-9-19}
       PATROL_DAYS: ${WATCH_DAYS:-1-5}
       TZ: ${WATCH_TZ:-Asia/Singapore}
+      # The previous round's contract, checked before the next one fires. A
+      # brief makes promises about the node's own state that only a before/after
+      # comparison can see — three stateless formulations all PASSED on the real
+      # 2026-09-04 defect, because the round advanced neither cursor rather than
+      # one. See scripts/assert_node_contract.py.
+      #
+      # The violation is posted BY THE TIMER, deliberately not through the node
+      # whose failure it reports, and at `low`: a new detector that pages
+      # somebody on its first false positive is a detector that gets switched
+      # off. Raise it once a week of rounds says the rate is worth it.
+      # The file name carries the chat tool's own name, so it comes from .env
+      # rather than being written here — the estate guard caught this line on
+      # the commit that introduced it, which is the guard doing its job.
+      CONTRACT_STATE: /node-state/${WATCH_STATE_FILE:?set WATCH_STATE_FILE in .env}
+      CONTRACT_SNAPSHOT: /timer-state/snapshot.json
+      CONTRACT_CHECKER: /scripts/assert_node_contract.py
+      CONTRACT_LEDGER_URL: http://hookrelay:8100/status
+      CONTRACT_READ_TOKEN: ${WORK_READ_TOKEN:-}
+      CONTRACT_SOURCE: watch
+      CONTRACT_SIGNAL_POSTER: /scripts/post_watch_signal.py
+      HOOKSTACK_ENV_FILE: /timer-secrets/watch.env
+      HOOKSTACK_WATCH_DOOR: http://hookrelay:8100/hook/watch
     volumes:
       - ../hookprobe/examples/patrols:/patrols:ro
+      - ../scripts:/scripts:ro
+      # The node's state, READ-ONLY. The timer judges it and must not be able to
+      # edit the evidence.
+      - ../work-data/probe-watch:/node-state:ro
+      # Its own snapshot, writable and separate — kept out of probe-watch's
+      # volume so the node being checked cannot reach what it is checked against.
+      - ../work-data/watch-timer-state:/timer-state
+      # The watch door's signing key, so a violation can travel as a signal like
+      # everything else. This does give the timer the ability to post signals;
+      # it is the same trade the watcher already makes, and the timer runs no
+      # model and reads no attacker-influenced text.
+      - ../work-data/probe-watch-secrets:/timer-secrets:ro
       # The brief, read-only and deliberately NOT inside probe-watch's own
       # volume: a brief the agent could edit is the agent rewriting its own next
       # instructions, which is the persistence vector hookprobe.inputs exists to

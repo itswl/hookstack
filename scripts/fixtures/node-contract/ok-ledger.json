@@ -1,0 +1,19 @@
+{
+  "queue": {
+    "queued": 0,
+    "sent": 28,
+    "dead": 0
+  },
+  "recent": [
+    {
+      "id": 22,
+      "source": "watch",
+      "received_at": 1788510060.0,
+      "title": "Phil 在 BCP-SRE 表示暂不着急",
+      "fields": {
+        "origin": "TypeX / BCP-SRE",
+        "kind": "note"
+      }
+    }
+  ]
+}
