@@ -4,9 +4,18 @@
 [![ci-hookjudge](https://github.com/itswl/hookstack/actions/workflows/ci-hookjudge.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookjudge.yml)
 [![ci-hookprobe](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml)
 
-Two services that split one job in half, and an investigator for the alerts
-where a verdict is not enough. Narrative overview with screenshots of all three:
-[OVERVIEW.md](OVERVIEW.md). MIT licensed.
+Run agents in production and be able to account for them afterwards.
+
+Three services that split alert handling — a content-blind pipe, a judge, and a
+read-only investigator — wired by a config file rather than by code. What makes
+it more than a router is what surrounds each handover: every hop is signed,
+retried, dead-lettered, priced and replayable, and every agent runs behind a
+credential, a budget and a closed list of what it may do.
+
+Two deployments in this repository share every line of that code and agree on
+almost nothing else — one carries alerts, the other carries an operator's own
+work signals ([docs/deployments.md](docs/deployments.md)). Narrative overview
+with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 
 ## What it optimizes
 
@@ -30,6 +39,30 @@ falling, with a regret counter standing guard over everything the quiet
 swallowed. The unattended posture has one hard edge: anything irreversible —
 memory, remediation, a runbook a human relies on — keeps a write gate,
 proposes rather than acts, and stays reversible in one call.
+
+## What you get for putting an agent in front of real traffic
+
+An agent here is treated as an untrusted network service that costs money, reads
+text an attacker may have written, and holds credentials. Each row exists
+because one of those three is true, and
+[docs/containment.md](docs/containment.md) adds the column that matters most —
+what each one does **not** stop.
+
+| | |
+| --- | --- |
+| **Signed handovers** | every door verifies a timestamped HMAC; every node gets its own secret, budget and guards, so a container escape is not a full-line loss |
+| **A closed list of what it may do** | `HOOKPROBE_MCP_TOOLS` names the MCP tools an instance may call and **empty denies all of them** — mounting a server does not grant its tools, because no server is read-only just because you wanted it to be |
+| **A closed vocabulary for what it may conclude** | an investigator's verdict can reach a routing key, so it picks from a set the operator declared rather than writing free text into one |
+| **Read-only by construction** | a bash guard that refuses mutating verbs (and refuses `aws` unless the command *reads*), read-only credentials as the real boundary, and a hook that stops a run editing the files that steer the next one |
+| **A ceiling on spend** | window spend past the budget refuses new autonomous runs, and each refusal reports itself rather than going quiet |
+| **Failure policy per stage** | `on_error: pass` or `drop`, chosen where the stage is written, never defaulted globally |
+| **The graph, before you change it** | `GET /topology` renders doors, stage placements and exits from config alone — plus the hazards the shape implies. `scripts/assert_topology.py` makes them gate failures rather than comments |
+| **The whole journey, after** | `GET /trace/{id}` replays both directions of every hop — bodies only, never headers, because headers carry signatures and tokens |
+
+None of it assumes the agent is hookprobe. The node contract is small enough
+that `assert_dialect.py` checks it from the bus side, so "swap the reference
+implementation for twenty lines of your own and the smoke is still green" is a
+command somebody can run rather than a claim.
 
 ## Where this sits in an AI-native SDLC
 
