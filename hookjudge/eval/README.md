@@ -62,6 +62,30 @@ For each row: read the alert, fix `expect`, write down in `note` why that
 severity is right, and set `"reviewed": true`. The note is the part worth doing
 carefully — it is what makes a disagreement six months from now resolvable.
 
+### Rows that come from a button
+
+`GET /labels/export` emits two kinds, and the id says which:
+
+| id | axis | `reviewed` | where it came from |
+| --- | --- | --- | --- |
+| `ledger-<n>` | `importance`, `event_type` | `true` | somebody worked the `/disagreements` queue |
+| `interrupt-<n>` | `wake` only | `false` | somebody pressed useful/useless on a card |
+
+An `interrupt-` row is the cheapest label this system produces — no queue, no
+login, one tap in the chat window where the card already is — and the cheapest
+to get wrong for the same reason. Production holds a pair tapped useless and
+then useful two seconds apart. So it arrives unreviewed like any other
+suggestion, and the note carries what the judge had said, which is what makes
+the interesting ones findable: **judge said `wake=no`, a person pressed useful**
+is a quiet regret, and it is the one row in the set worth reading first.
+
+One alert can produce both kinds. They are separate rows on purpose: `reviewed`
+is per row, so merging them would flip a reviewed row unreviewed the moment
+somebody tapped a button on it, and drop it out of the gate without a word.
+
+A tap never touches `importance`. See `record_mattered()` in hookjudge/store.py
+for why the two rulings do not share a column.
+
 ### Do not read all 32 cold
 
 Several independent processes already have an opinion. Collect them, then work the
