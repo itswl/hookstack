@@ -38,6 +38,12 @@ ALLOWED = [
     "aws logs describe-log-groups",
     "aws iam list-users",
     "aws sts get-caller-identity",
+    # Not a read VERB and still a read: it calls DescribeCluster and writes a
+    # local file. Denying it left an investigator that may query EKS unable to
+    # reach the cluster API at all — the first false positive this inverted rule
+    # produced, and named individually rather than by widening "update".
+    "aws eks update-kubeconfig --name prod --region ap-southeast-1",
+    "aws eks get-token --cluster-name prod",
     "aws cloudwatch get-metric-statistics --namespace AWS/EC2",
     # Global flags before the service. Positional parsing denied these two,
     # because the regex could backtrack into reading "eu-west-1" as the service.
@@ -89,6 +95,10 @@ DENIED = [
     "aws ec2 delete-volume --volume-id v-1",
     "aws iam create-user --user-name x",
     "aws iam put-user-policy --user-name x --policy-name p",
+    # The exception is one operation, not the "update" family.
+    "aws eks update-cluster-config --name prod",
+    "aws eks update-nodegroup-config --cluster-name prod --nodegroup-name ng",
+    "aws eks delete-cluster --name prod",
     "aws lambda invoke --function-name f out.json",
     "aws --region eu-west-1 s3 rm s3://b/k",
     # A read verb inside a PATH must not vouch for the command around it.
