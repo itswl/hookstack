@@ -19,68 +19,33 @@ with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 
 ## What it optimizes
 
-Not response time, and not breadth of integrations — the two scarce resources
-an alert stream actually spends: **a person's attention** and **the model
-bill**. Every card and every paid call lands in a ledger, and the system's job
-is to spend both only where they change an outcome, then prove it:
+Not response time and not breadth of integrations — the two scarce resources an
+alert stream actually spends: **a person's attention** and **the model bill**.
+A verdict answers *does a person need to act now*, and delivery routes on the
+answer; a paid verdict is reused across restatements instead of bought again; a
+condition ruled not worth investigating answers its re-fires from the runbook
+earlier investigations wrote, at no cost. Every card and every paid call lands
+in a ledger, with a regret counter over what the quiet swallowed. The mechanics
+of each loop are in [OVERVIEW.md](OVERVIEW.md).
 
-- a verdict answers *does a person need to act now* — and delivery routes on
-  the answer, so a "no" never interrupts anyone (while staying on every board);
-- a paid verdict is reused across restatements instead of bought again;
-- a condition ruled *not worth investigating* answers its re-fires from the
-  runbook earlier investigations wrote, at no cost, and still re-verifies
-  itself on a schedule;
-- what a person never confirmed is inferred — and permanently labelled as
-  inference, never blended with a human's ruling.
+Anything irreversible — memory, remediation, a runbook a human relies on — keeps
+a write gate, proposes rather than acts, and stays reversible in one call.
 
-Each loop turns yesterday's spend into tomorrow's savings, so the curve to
-watch is the bend: cards per condition falling, dollars per answered incident
-falling, with a regret counter standing guard over everything the quiet
-swallowed. The unattended posture has one hard edge: anything irreversible —
-memory, remediation, a runbook a human relies on — keeps a write gate,
-proposes rather than acts, and stays reversible in one call.
+## Agents are treated as untrusted services
 
-## What you get for putting an agent in front of real traffic
+An agent here spends money, reads text an attacker may have written, and holds
+credentials. So every handover is signed and priced, every node gets its own
+secret, budget and guards, and what an agent may *do* and may *conclude* are
+both closed lists an operator writes down — an empty one denies everything.
+Mutating verbs are refused before they run; `GET /topology` shows the graph
+before you change it and `GET /trace/{id}` replays both directions of every hop
+after.
 
-An agent here is treated as an untrusted network service that costs money, reads
-text an attacker may have written, and holds credentials. Each row exists
-because one of those three is true, and
-[docs/containment.md](docs/containment.md) adds the column that matters most —
-what each one does **not** stop.
-
-| | |
-| --- | --- |
-| **Signed handovers** | every door verifies a timestamped HMAC; every node gets its own secret, budget and guards, so a container escape is not a full-line loss |
-| **A closed list of what it may do** | `HOOKPROBE_MCP_TOOLS` names the MCP tools an instance may call and **empty denies all of them** — mounting a server does not grant its tools, because no server is read-only just because you wanted it to be |
-| **A closed vocabulary for what it may conclude** | an investigator's verdict can reach a routing key, so it picks from a set the operator declared rather than writing free text into one |
-| **Read-only by construction** | a bash guard that refuses mutating verbs (and refuses `aws` unless the command *reads*), read-only credentials as the real boundary, and a hook that stops a run editing the files that steer the next one |
-| **A ceiling on spend** | window spend past the budget refuses new autonomous runs, and each refusal reports itself rather than going quiet |
-| **Failure policy per stage** | `on_error: pass` or `drop`, chosen where the stage is written, never defaulted globally |
-| **The graph, before you change it** | `GET /topology` renders doors, stage placements and exits from config alone — plus the hazards the shape implies. `scripts/assert_topology.py` makes them gate failures rather than comments |
-| **The whole journey, after** | `GET /trace/{id}` replays both directions of every hop — bodies only, never headers, because headers carry signatures and tokens |
-
-None of it assumes the agent is hookprobe. The node contract is small enough
-that `assert_dialect.py` checks it from the bus side, so "swap the reference
-implementation for twenty lines of your own and the smoke is still green" is a
-command somebody can run rather than a claim.
-
-## Where this sits in an AI-native SDLC
-
-Anthropic's [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
-names the stage this family is built for — **Maintain**: cheap deterministic
-answers before a model is paid, an investigator only for the alerts that
-earned one, remediation proposed rather than applied, every decision in a
-ledger a person can audit later. That posture is enforced here rather than
-described: the verdict routes are ordered so most events never reach a paid
-call, the write-gates are tested, and a prompt change that under-calls a
-golden incident does not deploy.
-
-[How Anthropic secures its own AI-native SDLC](https://claude.com/blog/how-anthropic-secures-its-ai-native-software-development-lifecycle)
-treats agents as monitored actors rather than trusted authors. Same side
-taken here, for the same reason: the investigator runs read-only, cannot edit
-what steers its next run, its runbooks are written by the service and never
-through its own tools — and a red-team run drives injections at the memory
-path on the deploy host before an operator is asked to trust it.
+[docs/containment.md](docs/containment.md) is the honest version: thirteen
+boundaries, each with a column for what it does **not** stop. None of them
+assume the agent is hookprobe — `assert_dialect.py` checks the node contract
+from the bus side, so replacing the reference implementation is a command
+rather than a claim.
 
 ## Ten minutes, no keys, no bill
 
@@ -95,14 +60,13 @@ model and the sink ship inside them. To hack on it instead, clone and
 `docker compose up -d --build` — that file builds from source and is the one
 the gate tests.
 
-The demo posts a fresh alert (judged by the stub model), the same alert again
-(reused, no call), its recovery (reuses the firing's verdict), and a different
-one — then prints the judge's ledger with routes and costs. Boards:
-`http://127.0.0.1:8100` (pipe) and `:8200` (judge); what an operator would
-have received: `docker compose logs -f sink`. Real credentials in `.env` make
-the stub step aside; `--profile probe` adds the investigator (needs a model
-key). Tagged releases publish images for both amd64 and arm64:
-`ghcr.io/itswl/{hookrelay,hookjudge,hookprobe}`.
+It posts a fresh alert, the same alert again (reused, no call), its recovery,
+and a different one — then prints the judge's ledger with routes and costs.
+Boards at `:8100` and `:8200`; what an operator would have received is in
+`docker compose logs -f sink`. Real credentials in `.env` make the stub step
+aside, and `--profile probe` adds the investigator.
+
+## The three services
 
 ```
 upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► lark / dingtalk / wecom / webhook
@@ -125,99 +89,10 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 The split is the point: a brain that renders Feishu cards has to know Feishu's
 card schema, then WeCom's, then DingTalk's. That work belongs to the pipe, and
 moving it there is what lets a brain be replaced — or compared against another
-one — without touching either edge. hookjudge is deliberately the smallest
-brain that can hold up its end of that bargain, and "smallest" is a number
-under a ceiling rather than an adjective: the pipe and the brain each state a
-source-line budget in their README, and `scripts/assert_weight.py` fails the
-gate when either drifts past it. hookprobe is uncapped on purpose — it carries
-Node and the Claude CLI, and being the heavy one is its job.
+one — without touching either edge. hookprobe answers a different question than
+the judge: not "does this deserve attention" but "what actually happened".
 
-hookprobe answers a different question than the judge: not "does this deserve
-attention" but "what actually happened". One unattended read-only agent
-session per alert, with none of the gateway product usually wrapped around
-that capability — it speaks the OpenClaw trigger/poll dialect, so anything
-that already integrates such a gateway as an analysis backend can switch by
-changing a URL. In this stack it is opt-in (see STACK.md): it needs a real
-model key to be worth starting.
-
-Each service has its own gate, its own Dockerfile and its own CI workflow, so a
-change to one does not queue the other's jobs. For a change that touches more
-than one, `bash scripts/gate.sh` runs every component's gate plus the stack
-checks in one command.
-
----
-
-## Layout
-
-The services are laid out the same way, each self-contained — its own package,
-tests, gate, Dockerfile and CI workflow. Nothing at the root belongs to one
-service more than the others.
-
-```
-hookstack/
-├── docker-compose.quickstart.yml   published images, no checkout, no build
-├── docker-compose.yml        the same demo built from source (what the gate tests)
-├── deploy/                   real deployments, real credentials — see docs/deployments.md
-│   ├── docker-compose.yml    the three services together
-│   ├── *.shadow.yml + shadow.yaml   alerts: platform -> three judges -> card
-│   └── *.work.yml   + work.yaml     work signals: timer -> watcher -> two chats
-├── STACK.md
-├── hookrelay/               the pipe
-│   ├── hookrelay/           package
-│   ├── tests/  scripts/  examples/  docs/  deploy/
-│   ├── Dockerfile  pyproject.toml  requirements.txt
-│   └── README.md
-├── hookjudge/               the brain
-│   ├── hookjudge/           package
-│   ├── tests/  scripts/  deploy/
-│   ├── Dockerfile  pyproject.toml  requirements.txt
-│   └── README.md
-├── hookprobe/               the investigator
-│   ├── hookprobe/           package (incl. the sessions page)
-│   ├── tests/  scripts/  deploy/
-│   ├── Dockerfile  pyproject.toml  requirements.txt
-│   └── README.md
-└── .github/workflows/       ci.yml (pipe) · ci-hookjudge.yml (brain) · ci-hookprobe.yml (investigator)
-```
-
-Every service also deploys the same way: `<service>/deploy/docker-compose.yml`
-runs it standalone, `deploy/docker-compose.yml` at the root runs the three
-together with real credentials, and the root `docker-compose.yml` stays the
-zero-credential demo. The two named deployments beside it — `shadow` and
-`work` — are the same services wired into different graphs, and the pair is
-worth reading as a unit: [docs/deployments.md](docs/deployments.md). All are run from the repo root with
-`docker compose --env-file .env -f <file> up -d --build`; the two
-`docker-compose.prod.yml` files under `hookrelay/deploy/` and
-`hookprobe/deploy/` are the shapes joined to a platform's own docker network.
-
-Each gate is run from its own directory, against that service's own venv — the
-tool versions are pinned in its `requirements.txt`, which is what keeps the gate
-and CI from disagreeing:
-
-```bash
-cd hookprobe
-python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt  # once
-bash scripts/gate.sh
-```
-
-```bash
-cd hookrelay && bash scripts/gate.sh
-cd hookjudge && bash scripts/gate.sh
-cd hookprobe && bash scripts/gate.sh
-```
-
-Neither gate can see the stack, so there is a third check that can:
-
-```bash
-bash scripts/stack-smoke.sh
-```
-
-It also checks what no service's own gate can: that the three boards still share
-one design language, and that every decision record under
-[`.agents/notes/`](.agents/README.md) keeps its shape. The `rejected/` bucket
-there is worth reading before proposing something — several obvious ideas have
-already been tried and removed.
-
-Four workflows, and between them nothing at the root is uncovered:
-`ci` (pipe) · `ci-hookjudge` (brain) · `ci-hookprobe` (investigator) ·
-`ci-stack` (the demo pair together, plus the docs and the compose files).
+Each service has its own gate, Dockerfile and CI workflow. For a change that
+touches more than one, `bash scripts/gate.sh` runs all of them plus the stack
+checks — read its verdict, never chain it. Layout, per-service gates and the
+rest of the working notes: [CONTRIBUTING.md](CONTRIBUTING.md).
