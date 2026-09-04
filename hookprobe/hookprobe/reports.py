@@ -21,6 +21,41 @@ schedules turns is not where their wording should be maintained.
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Iterable
+
+# Anchored like suggestions._MARKER, and for the same reason: reading structure
+# out of a model's prose is done with one explicit line the prompt asks for, not
+# by interpreting the paragraphs around it.
+_VERDICT = re.compile(r"^\s*VERDICT:\s*([A-Za-z0-9_-]{1,32})\s*$", re.MULTILINE)
+
+
+def verdict(text: str, allowed: Iterable[str]) -> str:
+    """The report's own conclusion, admitted ONLY if the operator declared it.
+
+    This value can reach a routing key, which means it can decide where money is
+    spent — and this is the component that reads attacker-influenced text. So the
+    vocabulary is closed: `allowed` comes from the deployment's env, and anything
+    outside it is `""`. An injection can then at worst pick a wrong lane among
+    lanes somebody already wrote down; it cannot invent a destination.
+
+    Empty `allowed` (the default) means the feature is off and this always
+    returns `""` — a deployment does not acquire a new routing input by
+    upgrading. The LAST marker wins: a run that revises itself should end on its
+    conclusion, and its first guess should not outrank it.
+
+    Unknown labels return `""` rather than raising. The run already cost money;
+    trading a delivered report for a typo in a label is the wrong exchange, and
+    the empty value routes to whatever the config does with no verdict.
+    """
+    vocabulary = {str(item).strip().lower() for item in allowed if str(item).strip()}
+    if not vocabulary:
+        return ""
+    found = _VERDICT.findall(text or "")
+    for candidate in reversed(found):
+        if candidate.strip().lower() in vocabulary:
+            return candidate.strip().lower()
+    return ""
 
 
 def report_summary(text: str) -> str:

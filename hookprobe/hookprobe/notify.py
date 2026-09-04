@@ -33,7 +33,7 @@ import time
 import urllib.request
 
 from hookprobe import actions
-from hookprobe.reports import report_summary
+from hookprobe.reports import report_summary, verdict
 from hookprobe.runs import Run, RunStore
 from hookprobe.settings import Settings
 from hookprobe.wire import sign_timestamped
@@ -72,6 +72,15 @@ class ReturnDelivery:
                     "status": run.status,
                     "cost_usd": run.cost_usd,
                     "error": run.error,
+                    # This report's own conclusion, from the closed vocabulary
+                    # this instance was given. "" when the deployment declared
+                    # none, which is the default. It is the one field here the
+                    # investigator DECIDES rather than echoes — `importance`
+                    # above is the incoming level, so without this a report
+                    # could only ever be a leaf and a chain could not have a
+                    # middle. A pipe reads it with fields: {verdict:
+                    # "{meta.verdict}"} and routes on it.
+                    "verdict": verdict(run.text, self._settings.verdicts),
                 },
                 "analysis": {"summary": summary, "event_type": "investigation"},
                 "identity": {"session": run.session_key},

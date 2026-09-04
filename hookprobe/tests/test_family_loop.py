@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from fastapi.testclient import TestClient
 
 from hookprobe.app import create_app
+from hookprobe.engine import EngineResult
 from hookprobe.runs import COMPLETED, Run, RunStore
 from hookprobe.service import RunService
 from hookprobe.wire import sign_timestamped, verify_timestamped
@@ -110,6 +111,26 @@ def test_a_work_item_is_investigated_as_work_not_as_an_incident(tmp_path) -> Non
     # The ceiling is stated rather than hidden: it cannot read repositories, so
     # it is told to name the gap instead of guessing at one.
     assert "unknowns" in prompt
+
+
+def test_the_prompt_asks_for_a_verdict_only_where_one_was_declared(tmp_path) -> None:
+    """A prompt change is a golden-replay event in this family, so a deployment
+    that has not opted in must keep a byte-identical prompt."""
+    silent = FakeEngine()
+    with make_client(tmp_path / "off", silent) as client:
+        assert client.post("/hooks/event", json=EVENT).json()["status"] == "accepted"
+        _drain(client, "probe:inbound:5")
+    assert "VERDICT" not in silent.messages[0]
+
+    asking = FakeEngine()
+    with make_client(tmp_path / "on", asking, verdicts=frozenset({"needs_plan", "informational"})) as client:
+        assert client.post("/hooks/event", json=EVENT).json()["status"] == "accepted"
+        _drain(client, "probe:inbound:5")
+    prompt = asking.messages[0]
+    assert "VERDICT: <one of: informational | needs_plan>" in prompt, (
+        "the options are spelled out so a run is not wasted guessing at a vocabulary it cannot see"
+    )
+    assert prompt.startswith(silent.messages[0]), "the instruction is appended, never woven into the question"
 
 
 def test_an_event_without_a_kind_is_still_investigated_as_an_alert(tmp_path) -> None:
@@ -230,6 +251,61 @@ def test_relay_born_runs_report_back(tmp_path) -> None:
         delivery["body"],
         delivery["headers"].get("X-Hook-Signature"),
         delivery["headers"].get("X-Hook-Timestamp"),
+    )
+
+
+def test_a_declared_verdict_reaches_the_pipe_and_an_undeclared_one_does_not(tmp_path) -> None:
+    """The chain's middle.
+
+    `meta.importance` is the level of the event that came IN, so it says nothing
+    about what the investigation found — this is the only field on the return
+    trip a downstream route can key on to learn the investigator's own
+    conclusion. The second half of the assertion is the point of the closed
+    vocabulary: a label nobody declared leaves no verdict rather than a lane.
+    """
+    _Capture.received = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Capture)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}/hook/probe-notify"
+
+    async def scenario(answer: str, key: str) -> None:
+        settings = make_settings(
+            tmp_path / key,
+            return_url=url,
+            return_secret="ret-secret",
+            verdicts=frozenset({"needs_plan"}),
+        )
+        service = RunService(
+            settings,
+            FakeEngine(result=EngineResult(text=answer, message_count=3, cost_usd=0.5)),
+            RunStore(tmp_path / key / "results"),
+        )
+        service.start(
+            {
+                "message": "investigate",
+                "sessionKey": f"probe:inbound:{key}",
+                "_meta": {"title": "Deploy blocked", "level": "high", "source": "inbound", "event_id": key},
+            },
+            origin="relay",
+        )
+        for _ in range(300):
+            run = service.get(f"probe:inbound:{key}")
+            if run is not None and run.return_status:
+                break
+            await asyncio.sleep(0.01)
+        assert run is not None and run.return_status == "sent"
+
+    try:
+        asyncio.run(scenario('{"summary": "ok"}\nVERDICT: needs_plan', "declared"))
+        asyncio.run(scenario('{"summary": "ok"}\nVERDICT: buy_a_server', "undeclared"))
+    finally:
+        server.shutdown()
+
+    declared, undeclared = (json.loads(item["body"]) for item in _Capture.received)
+    assert declared["meta"]["verdict"] == "needs_plan"
+    assert undeclared["meta"]["verdict"] == ""
+    assert declared["meta"]["importance"] == undeclared["meta"]["importance"] == "high", (
+        "importance echoes the incoming level in both — which is exactly why the verdict field had to exist"
     )
 
 
