@@ -123,7 +123,22 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # run somewhere else; a store it must write to would take the replaceable
     # node with it. So this is a projection of what the pipe already holds, and
     # asks nothing new of any node.
-    "hookrelay": (4900, Path("hookrelay/README.md")),
+    # 4900 -> 5100 on 2026-09-04, for absence alarming — a door declares its
+    # cadence and the pipe raises an event when nothing comes through it. It is
+    # the one failure nothing else here can see: no delivery to retry and no
+    # dead letter to raise, because the event that would have carried the
+    # failure is the event that never arrived.
+    #
+    # THIS IS THE THIRD RAISE IN ONE DAY, and that is worth more than the
+    # number. The ceiling exists so the next 400 lines cost a conversation, and
+    # three conversations in a day is a formality rather than a conversation.
+    # What it was built to constrain — "small enough that one person can read it
+    # end to end" — is not what it measured today: every raise was a projection
+    # or a sweep the pipe genuinely owns, and none of them made the service
+    # harder to read. Whoever touches this next should decide whether the
+    # measure should be per-module rather than per-service, and record that
+    # decision in .agents/notes rather than raising a fourth time in silence.
+    "hookrelay": (5100, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

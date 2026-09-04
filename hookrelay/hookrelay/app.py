@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Str
 from hookrelay import actions, metrics, registry
 from hookrelay.alarm import SelfAlarm
 from hookrelay.breaker import CircuitBreaker
-from hookrelay.config import CardAction, Config, ConfigError, _warn_posture_mix
+from hookrelay.config import CardAction, Config, ConfigError, Source, _warn_posture_mix
 from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
 from hookrelay.live import Live
@@ -76,6 +76,13 @@ logger = logging.getLogger("hookrelay.app")
 # The synthetic source a card press is recorded under. Named rather than blank
 # so it is obvious in the ledger that a human, not an upstream, made this event.
 _ACTION_SOURCE = "card-action"
+
+# The door an absence arrives at. Named rather than borrowed from the silent
+# source, because routing an absence the way that source routes would send it to
+# whatever has stopped answering — a timer's absence would go to the watcher the
+# timer feeds. It gets its own name in the ledger for the same reason
+# card-action does: it is obvious that the PIPE made this event, not an upstream.
+_ABSENCE_SOURCE = "absence"
 
 
 def _card_token(payload: dict[str, Any]) -> str:
@@ -213,6 +220,11 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 # This is that answer, and it deliberately needs no identity
                 # model: the card_actions ledger says whether ANY person acted.
                 await _escalate_cold(now)
+                # And the failure with no delivery to fail: a door that was
+                # expected to speak and did not. Same loop, because it is the
+                # same kind of sweep — something the ledger can see only by
+                # being asked, on a clock.
+                await _alarm_absent(now)
                 # Retention rides the same loop, hourly: once ALL traffic
                 # passes through this ledger it must not grow forever.
                 if app_settings.retention_days > 0 and now >= next_purge:
@@ -253,6 +265,68 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 ", ".join(rule.send_to),
                 rule.after_minutes,
             )
+
+    async def _alarm_absent(now: float) -> None:
+        """Raise an event for a door that was expected to speak and has not.
+
+        THE ONE FAILURE NOTHING ELSE HERE CAN SEE. Every other guard in this
+        pipe watches something that happened: a delivery that failed, a verdict
+        that came back wrong, a route that matched nothing. An absence produces
+        no delivery to retry and no dead letter to raise, because the event that
+        would have carried the failure is the event that never arrived. A
+        watcher that was never triggered and a quiet afternoon are the same
+        bytes — measured, not theorised: a timer failed silently on 2026-09-04
+        and two rounds were lost while the pipe, the investigator and the chat
+        all looked healthy.
+
+        A NEW EVENT, unlike the escalation sweep beside this, which deliberately
+        makes none. That rule is about not restating an alert that already
+        exists; here there is nothing to restate, and the absence is a fact the
+        ledger has never held. It walks the ordinary pipeline, so it is deduped,
+        silenceable, routed and accounted like anything else.
+        """
+        for name, source in app.state.config.sources.items():
+            if source.expect_every_seconds <= 0:
+                continue
+            last = await app.state.store.last_event_at(name)
+            if last is None:
+                # Never spoken. A deployment that just came up must not alarm
+                # about a timer whose first tick has not landed yet.
+                continue
+            overdue = now - last
+            if overdue <= source.expect_every_seconds:
+                await app.state.store.clear_absence(name)
+                continue
+            if not await app.state.store.claim_absence(name, now, last):
+                continue  # already alarmed; it stays claimed until the door speaks
+            minutes = int(overdue // 60)
+            extracted = {
+                "title": f"{name} has said nothing for {minutes} minutes",
+                "body": (
+                    f"The `{name}` door expects something every "
+                    f"{source.expect_every_seconds // 60} minutes and last spoke "
+                    f"{minutes} minutes ago. Whatever produces it is not producing it. "
+                    "Nothing failed — that is what makes this worth saying."
+                ),
+                "level": "high",
+                "fields": {"door": name, "silent_minutes": str(minutes), "kind": "note"},
+            }
+            await handle_hook(
+                app.state.store,
+                app.state.config,
+                # An empty secret here is not an unsigned DOOR — this source has
+                # no door at all. Nothing posts to it; the pipe constructs the
+                # event itself, having already decided the fact is true. The
+                # extraction templates are empty for the same reason: `extracted`
+                # is passed in whole, so there is nothing to extract from.
+                Source(name=_ABSENCE_SOURCE, secret="", title="", body="", level=""),  # nosec B106
+                {"door": name, "silent_seconds": int(overdue)},
+                now,
+                settings=app_settings,
+                client=app.state.http_client,
+                extracted=extracted,
+            )
+            logger.warning("absence: %s silent for %d minutes", name, minutes)
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
