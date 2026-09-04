@@ -299,6 +299,69 @@ services:
     ports:
       - "127.0.0.1:8089:8088"
 
+  # The clock. A separate service from the watcher it triggers, because "the
+  # timer died" and "the watcher died" want different fixes and a timer living
+  # inside its own target cannot tell you which happened.
+  #
+  # It replaces a host crontab line that could never work: macOS keeps
+  # ~/Documents behind TCC and `cron` is not allowed through, so every fire
+  # logged "Operation not permitted" while the pipe had no delivery to fail, the
+  # investigator sat healthy and idle, and the chat stayed quiet. A watcher that
+  # was never triggered looks exactly like a quiet afternoon. Shipping the clock
+  # with the deployment removes the whole class: the container carries its own
+  # filesystem, and `up -d` starts the timer with the thing it triggers.
+  #
+  # Reuses hookprobe:work rather than adding an image — it already carries bash,
+  # curl and python3, which is the whole dependency list.
+  watch-timer:
+    image: hookprobe:work
+    container_name: work-watch-timer
+    restart: unless-stopped
+    depends_on: [hookrelay]
+    mem_limit: 128m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: ["/bin/bash", "/patrols/patrol-timer.sh", "/brief/brief.md", "工作信号盯守"]
+    # The image's own check probes hookprobe's port, and this service overrides
+    # the entrypoint so nothing listens there — it reported `unhealthy` while
+    # firing correctly. A container that is wrong about its own health is worse
+    # than one with no check: it teaches whoever reads `docker ps` to skip the
+    # column. This one's liveness is its log, one line per tick.
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f patrol-timer.sh >/dev/null"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    environment:
+      PATROL_TARGET: relay
+      HOOKRELAY_URL: http://hookrelay:8100
+      HOOKRELAY_SOURCE: watch-due
+      HOOKRELAY_INBOUND_SECRET: ${WATCH_DUE_SECRET:?set WATCH_DUE_SECRET in .env}
+      PATROL_STATE: alerting
+      PATROL_ENV: work
+      # The watch-due door is configured with fields.kind: brief, whose body cap
+      # is 16000 rather than an alert's 4000. patrol.sh cannot see the door's
+      # kind, so it has to be told; raising it here and not there would let the
+      # door truncate silently, which is what its own check exists to prevent.
+      PATROL_BODY_MAX: "16000"
+      PATROL_EVERY_MINUTES: ${WATCH_EVERY_MINUTES:-20}
+      # An economy, not the authority: the brief runs `date` first and answers
+      # [SILENT] outside Mon-Fri 09:30-19:30 regardless. Keep this WIDER than
+      # the brief's window, never narrower, or the gate moves somewhere nobody
+      # reading the brief would think to look.
+      PATROL_HOURS: ${WATCH_HOURS:-9-19}
+      PATROL_DAYS: ${WATCH_DAYS:-1-5}
+      TZ: ${WATCH_TZ:-Asia/Singapore}
+    volumes:
+      - ../hookprobe/examples/patrols:/patrols:ro
+      # The brief, read-only and deliberately NOT inside probe-watch's own
+      # volume: a brief the agent could edit is the agent rewriting its own next
+      # instructions, which is the persistence vector hookprobe.inputs exists to
+      # refuse for CLAUDE.md and skills. The timer reads it; the watcher only
+      # ever sees it as an event body.
+      - ../work-data/watch-brief:/brief:ro
+
   # Opt-in, and worth opting into ONCE before the real webhooks go in:
   #
   #   LARK_WATCH_WEBHOOK=http://sink:9000/lark-watch \
