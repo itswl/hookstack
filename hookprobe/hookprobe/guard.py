@@ -37,6 +37,18 @@ import re
 # read-only credential mounted into the container — and for the remediation path,
 # the allowlist plus exec-without-a-shell (see hookprobe/remediation.py).
 _SEG = r"[^|;&\n]*"
+# An AWS operation that only reads, by the API's own naming convention. The
+# lookbehind keeps a path from counting as one: `aws s3 rm s3://b/list-of-keys`
+# contains "list" and must still be denied.
+#
+# Positional parsing was tried first and abandoned — `aws --region eu-west-1 ec2
+# describe-volumes` was DENIED because the regex could backtrack into reading
+# "eu-west-1" as the service and "ec2" as the operation. Asking "does this
+# command read anything at all" needs no parse and has no such seam.
+_AWS_READ = (
+    r"(?<![/:.\w-])(?:describe|get|list|search|head|scan|query|select|lookup|"
+    r"estimate|preview|validate|check|test|ls)[a-z0-9-]*\b"
+)
 
 _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (
@@ -74,6 +86,21 @@ _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b(ssh|scp|sftp|rsync)\b"), "remote shell / file transfer"),
     (re.compile(r"\b(shutdown|reboot|poweroff|halt)\b"), "host power control"),
     (re.compile(rf"\bgit\b{_SEG}\bpush\b"), "git push"),
+    # AWS is the one CLI here whose surface is too large and too fast-moving to
+    # enumerate mutating verbs for, so this inverts: an operation is denied
+    # unless it reads. Every other rule above is "deny these verbs"; this is
+    # "deny anything that is not one of these", because a denylist against an
+    # API that gains operations weekly is a list that is wrong by next quarter,
+    # and being wrong in that direction means an agent holding somebody's keys.
+    #
+    # `aws s3 ls` and `aws s3api get-object` pass; `aws s3 cp|mv|rm|sync` and
+    # every `put-`/`create-`/`delete-`/`terminate-` do not. The read verbs are
+    # the AWS API's own naming convention, which is the only reason a list this
+    # short can cover it.
+    (
+        re.compile(rf"\baws\b(?![^|;&\n]*{_AWS_READ})"),
+        "aws non-read operation",
+    ),
 )
 
 

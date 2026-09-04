@@ -30,6 +30,21 @@ ALLOWED = [
     "rm -rf ./scratch && mkdir ./scratch",
     "git log --oneline -5",
     "git diff HEAD~1",
+    # AWS reads. The rule for this CLI is INVERTED — deny unless the command
+    # reads — so both directions need pinning or the inversion rots quietly.
+    "aws s3 ls s3://bucket",
+    "aws s3api get-object --bucket b --key k /tmp/o",
+    "aws ec2 describe-instances",
+    "aws logs describe-log-groups",
+    "aws iam list-users",
+    "aws sts get-caller-identity",
+    "aws cloudwatch get-metric-statistics --namespace AWS/EC2",
+    # Global flags before the service. Positional parsing denied these two,
+    # because the regex could backtrack into reading "eu-west-1" as the service.
+    "aws --region eu-west-1 ec2 describe-volumes",
+    "aws --profile viewer --output json rds describe-db-instances",
+    "aws ec2 describe-instances | jq .",
+    "aws s3 ls && aws s3api list-buckets",
 ]
 
 DENIED = [
@@ -62,6 +77,24 @@ DENIED = [
     "scp node-1:/var/log/app.log .",
     "reboot",
     "git push origin main",
+    # AWS writes. Enumerating this CLI's mutating verbs was rejected: the API
+    # gains operations weekly, so a denylist against it is wrong by next
+    # quarter, and wrong in that direction means an agent holding real keys.
+    "aws s3 rm s3://bucket/key",
+    "aws s3 cp ./local s3://b/k",
+    "aws s3 sync . s3://b",
+    "aws s3api put-object --bucket b --key k",
+    "aws ec2 terminate-instances --instance-ids i-1",
+    "aws ec2 run-instances --image-id ami-1",
+    "aws ec2 delete-volume --volume-id v-1",
+    "aws iam create-user --user-name x",
+    "aws iam put-user-policy --user-name x --policy-name p",
+    "aws lambda invoke --function-name f out.json",
+    "aws --region eu-west-1 s3 rm s3://b/k",
+    # A read verb inside a PATH must not vouch for the command around it.
+    "aws s3 rm s3://b/list-of-keys",
+    # One read does not license the write chained after it.
+    "aws ec2 describe-instances && aws ec2 terminate-instances --instance-ids i-1",
 ]
 
 
