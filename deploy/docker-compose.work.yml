@@ -3,11 +3,22 @@
 #   docker compose -p hookstack-work --env-file .env \
 #     -f deploy/docker-compose.work.yml up -d --build
 #
-# Two containers and one agent that is NOT a container: probe-watch runs as a
-# Claude Code session on this host, watches chat and tickets, and posts each
-# finding through scripts/post_watch_signal.py — which reaches 127.0.0.1:8100
-# and reads WATCH_INGEST_SECRET from this same .env, so the signing secret never
-# leaves the machine. See deploy/work.yaml for the shape of the pipe itself.
+# Three containers and a timer. probe-watch reads chat on a schedule and posts
+# one signal per finding; the pipe routes each on its own level and kind;
+# probe-plan answers the ones that are work. Both watchers use the same poster
+# (scripts/post_watch_signal.py, mounted read-only) so the container and a laptop
+# send byte-identical signatures through one piece of code.
+#
+# The timer is NOT here, on purpose: hookprobe/examples/patrols/patrol.sh reads
+# the brief from a file at send time, so the round's instructions are editable
+# without a restart or a rebuild. See work.yaml's `watch-due` door.
+#
+# probe-watch ran as a desktop agent before this and the move is not only
+# tidiness: it read colleagues' messages — attacker-influenced text, by the
+# family's own name for it — with no bash guard, no MCP tool allowlist and no
+# budget ceiling. In here it has all three. What it also has, and what no
+# boundary in this file removes, is the watch door's signing key: see
+# .agents/notes and docs/containment.md for what that means.
 #
 # Separate from the shadow deployment in every way that can collide: its own
 # project name, its own bind-mounted data root (../work-data), its own config
@@ -54,6 +65,15 @@ services:
       # local process post a fabricated plan card into the operator's chat, and
       # that failure is silent — the card just arrives, looking real.
       PLAN_RETURN_SECRET: ${PLAN_RETURN_SECRET:?set PLAN_RETURN_SECRET in .env}
+      # The watcher's two, and both `:?` because forgetting them is not a loud
+      # failure — it is the exact one the paragraph above describes, and it
+      # happened here on the first round: the pair resolved to empty, so the
+      # trigger door silently stopped checking signatures (accepting my signed
+      # post for the wrong reason) while the delivery to probe-watch went out
+      # UNSIGNED and was refused 401 five times. Nothing said either thing; the
+      # only symptom was a watcher that never ran.
+      WATCH_DUE_SECRET: ${WATCH_DUE_SECRET:?set WATCH_DUE_SECRET in .env}
+      WATCH_EVENT_SECRET: ${WATCH_EVENT_SECRET:?set WATCH_EVENT_SECRET in .env}
       # Guards /status, /live and /topology. Empty read token means the ledger
       # answers anyone who can reach the port; empty ADMIN token fails CLOSED,
       # so the admin surface simply does not work until it is set.
@@ -192,6 +212,81 @@ services:
     ports:
       # The sessions page, for watching a plan being written. Loopback only.
       - "127.0.0.1:8088:8088"
+
+  # The watcher. Same image, same doors, a different job — which is the claim
+  # the PRD makes about this family and this is the second instance proving it:
+  # N roles cost N env blocks and N volumes, not N services.
+  #
+  # What makes it a WATCHER rather than an investigator is three things, none of
+  # them code: the brief patrol.sh posts, the read-only chat tools it is allowed
+  # to call, and the absence of a return URL.
+  probe-watch:
+    build:
+      context: ../hookprobe
+      args:
+        APT_EXTRAS: ${PROBE_PLAN_APT_EXTRAS:-git awscli}
+    image: hookprobe:work
+    container_name: work-probe-watch
+    restart: unless-stopped
+    mem_limit: 2g
+    pids_limit: 512
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      HOOKPROBE_EVENT_SECRET: ${WATCH_EVENT_SECRET:-}
+      # NO return url, deliberately. Its product is the signals it posts during
+      # the run, not a summary afterwards — see the to-watcher channel's comment
+      # in work.yaml. The round's own text stays in the case file, which is what
+      # the next round reads to know where a conversation had got to.
+      #
+      # Every round is a NEW investigation: coalescing is off because the trigger
+      # carries the same source and title each time, so the default 1800s would
+      # fold round two into round one's session and carry its context — and the
+      # brief's whole first line is that a round is self-contained.
+      HOOKPROBE_COALESCE_WINDOW_SECONDS: "0"
+      HOOKPROBE_ESCALATE_LEVELS: ${WATCH_ESCALATE_LEVELS:-critical,high}
+      # A GUESS until three rounds have been measured, and deliberately not the
+      # planner's number: this runs ~24 times a weekday rather than on demand,
+      # so the ceiling is a cadence question, not a per-run one. Read
+      # `GET /v1/budget` after a day and set it from the arithmetic.
+      HOOKPROBE_BUDGET_USD: ${WATCH_BUDGET_USD:-15}
+      HOOKPROBE_BUDGET_WINDOW_HOURS: ${WATCH_BUDGET_WINDOW_HOURS:-24}
+      HOOKPROBE_MCP_CONFIG: /data/mcp.json
+      # Read-only chat tools ONLY. This instance reads colleagues' messages for
+      # a living, so the list is the difference between "it can see the thread"
+      # and "a message in the thread can post as the operator".
+      HOOKPROBE_MCP_TOOLS: ${WATCH_MCP_TOOLS:-}
+      # How the agent posts a finding: `echo '<JSON>' | python3
+      # /data/bin/post_watch_signal.py`, the same script and the same exit codes
+      # the laptop watcher uses. The script reads the signing secret itself, so
+      # the brief never has to mention it.
+      HOOKSTACK_ENV_FILE: /data/secrets/watch.env
+      HOOKSTACK_WATCH_DOOR: http://hookrelay:8100/hook/watch
+      # The brief's first instruction is `date`, and the window it checks is
+      # the operator's, not UTC. Without this the container reads UTC and every
+      # round decides it is outside working hours.
+      TZ: ${WATCH_TZ:-Asia/Singapore}
+      HOOKPROBE_HOST: 0.0.0.0
+      HOOKPROBE_PORT: 8088
+      HOOKPROBE_WORKDIR: /data
+    volumes:
+      - ../work-data/probe-watch:/data
+      # Its own secrets, not the planner's: this one needs the watch door's
+      # signing key and nothing else, and the planner needs Jira/Grafana/AWS and
+      # not that key. Two directories is how "independent credentials per node"
+      # stays true once there are two nodes.
+      - ../work-data/probe-watch-secrets:/data/secrets:ro
+      # The poster, read-only. Mounted rather than reimplemented in the brief so
+      # the container and the laptop send byte-identical signatures through one
+      # piece of code.
+      - ../scripts:/data/bin:ro
+    ports:
+      - "127.0.0.1:8089:8088"
 
   # Opt-in, and worth opting into ONCE before the real webhooks go in:
   #
