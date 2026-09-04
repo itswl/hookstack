@@ -573,6 +573,68 @@ async def test_a_disagreement_is_labeled_in_one_click_and_exports_as_an_eval_row
     assert (await app_client.post(f"/judgements/{row_id}/label", json={"importance": "low"})).status_code == 401
 
 
+async def test_a_button_press_exports_as_its_own_unreviewed_wake_row(app_client):
+    """The other half of the loop, and the one nothing was reading.
+
+    A card button is already carried end to end — pressed in chat, forwarded by
+    the pipe, filed by /feedback as `mattered` — and then it stopped. Measured on
+    production: 1005 judgements, 5 of them ruled on by a button, and not one
+    reachable by the deploy gate. One of those five is a judge that answered
+    wake=no on an alert a person then called useful, which is the single most
+    expensive kind of mistake this service can make.
+
+    Exported as `wake` and never as importance, `reviewed: false` so eval.py
+    collects it and refuses to score it, and under its OWN id so a labelled row
+    keeps its review.
+    """
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    quiet = Incoming.parse(
+        {"meta": {"correlation_id": "hr-900"}, "event": {"title": "queue stalled", "body": "x", "level": "medium"}},
+        now=time.time(),
+    )
+    verdict = Verdict(summary="s", importance="medium", wake_someone="no", route="ai", model="m")
+    await store.record(quiet, verdict.normalized(), 10)
+    assert await store.record_mattered("hr-900", mattered="yes", at=100.0, actor="ou_x") is not None
+
+    export = (await app_client.get("/labels/export", headers={"X-Read-Token": "read-t"})).text
+    rows = [json.loads(ln) for ln in export.splitlines() if ln]
+    press = [r for r in rows if r["id"].startswith("interrupt-")]
+    assert len(press) == 1, "one press, one row"
+    assert press[0]["expect"] == {"wake": ["yes"]}, "the axis a button actually rules on"
+    assert press[0]["reviewed"] is False, "a tap in a chat window is not a review"
+    assert "wake=no" in press[0]["note"], "the note carries what the judge had said, so the regret is readable"
+    assert press[0]["alert"]["title"] == "queue stalled"
+
+
+async def test_a_press_on_a_labelled_row_does_not_unreview_it(app_client):
+    """Why the two rulings get separate rows rather than two axes on one.
+
+    `reviewed` is per row. Folding a tap into a row somebody had reviewed would
+    flip it unreviewed and drop it out of the gate silently — the same failure
+    record_mattered() refuses from the other side when it declines to write
+    label_importance.
+    """
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    ev = Incoming.parse(
+        {"meta": {"correlation_id": "hr-901"}, "event": {"title": "disk full", "body": "x", "level": "high"}},
+        now=time.time(),
+    )
+    await store.record(ev, Verdict(summary="s", importance="medium", route="ai", model="m").normalized(), 10)
+    await store.set_label(1, "high", "platform", 200.0)
+    await store.record_mattered("hr-901", mattered="no", at=300.0, actor="ou_x")
+
+    export = (await app_client.get("/labels/export", headers={"X-Read-Token": "read-t"})).text
+    rows = {r["id"]: r for r in (json.loads(ln) for ln in export.splitlines() if ln)}
+    assert set(rows) == {"ledger-1", "interrupt-1"}, "one alert, two questions, two ids"
+    assert rows["ledger-1"]["reviewed"] is True and rows["ledger-1"]["expect"]["importance"] == "high"
+    assert rows["interrupt-1"]["reviewed"] is False and rows["interrupt-1"]["expect"] == {"wake": ["no"]}
+    assert "importance" not in rows["interrupt-1"]["expect"], "a tap says nothing about severity"
+
+
 async def test_an_agreement_is_not_a_review_item(app_client):
     store = app_client.app.state.store
     from hookjudge.contract import Incoming, Verdict

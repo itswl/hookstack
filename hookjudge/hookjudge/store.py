@@ -457,6 +457,22 @@ class Store:
         )
         return [dict(row) for row in await cursor.fetchall()]
 
+    async def interrupt_ruled(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Rows a person ruled on with a BUTTON — the other axis, kept apart.
+
+        Separate from labeled() rather than folded into it, because the two
+        rulings answer different questions and record_mattered() says why they
+        must never share a column: a press means "waking me was/was not worth
+        it", which is the `wake` axis, and importance stays whatever the review
+        queue decides. Merging them would put an unreviewed tap into a row the
+        gate scores.
+        """
+        cursor = await self.db.execute(
+            "SELECT * FROM judgements WHERE mattered != '' ORDER BY id ASC LIMIT ?",
+            (max(1, min(5000, limit)),),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
     async def pending_returns(self, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.db.execute(
             "SELECT * FROM judgements WHERE return_status = 'queued' ORDER BY id LIMIT ?", (limit,)
