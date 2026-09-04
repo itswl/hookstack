@@ -78,6 +78,25 @@ ENUMERATED = (
 _PLACEHOLDER = re.compile(r"\{[^}]+\}")
 _ROUTE = re.compile(r'@app\.(?:get|post|put|delete)\("([^"]+)"')
 
+# The third member of the family in the header, and the one this check was
+# missing. A route is a surface an operator calls; an env var is a surface an
+# operator sets; a YAML key is a surface an operator WRITES, and hookrelay's is
+# the largest of the three — a config file is how every deployment in this
+# repository is wired. It went unchecked and three keys had accumulated with no
+# mention anywhere, two of them replay-protection knobs that other documents
+# already told people to rely on.
+#
+# Read from the loader rather than the dataclass: `item.get("name")` is the
+# thing that makes a key user-facing, and a dataclass field with no loader line
+# is internal state that nobody can set.
+_YAML_KEY = re.compile(r'item\.get\(\s*"([a-z][a-z0-9_]*)"')
+CONFIG_LOADERS = ((Path("hookrelay/hookrelay/config.py"), Path("hookrelay/docs/configuration.md")),)
+# Keys that are deliberately not in the reference, with the reason.
+KEYS_UNWRITTEN = {
+    "name": "every section has one; naming it as a key would be noise",
+    "type": "documented per channel type rather than as a key",
+}
+
 
 def _normalised(text: str) -> str:
     """Placeholders collapsed, so `{source_name}` and `{source}` are one path."""
@@ -120,6 +139,13 @@ def main() -> int:
                 continue
             problems.append(f"{service}: route {route} appears in no document and is not in ROUTES_UNWRITTEN")
 
+    for loader, doc in CONFIG_LOADERS:
+        text = doc.read_text(encoding="utf-8")
+        for key in sorted(set(_YAML_KEY.findall(loader.read_text(encoding="utf-8")))):
+            if key in KEYS_UNWRITTEN or f"`{key}`" in text or f"{key}:" in text:
+                continue
+            problems.append(f"{loader.parent.parent.name}: config key `{key}` appears in no document")
+
     for label, module, name, doc in ENUMERATED:
         members = _tuple_members(module, name)
         if not members:
@@ -146,7 +172,7 @@ def main() -> int:
         return 1
 
     print(
-        f"docs: every route and knob across {len(SERVICES)} services is written up or named as not, "
+        f"docs: every route, knob and config key across {len(SERVICES)} services is written up or named as not, "
         f"{len(ENUMERATED)} enumerated sets match their tuples"
     )
     return 0

@@ -92,6 +92,40 @@ there (`_BODY_MAX` in `hookprobe/hookprobe/events.py`) and notes in the prompt
 where it cut, which for a task brief means the last instruction quietly never
 arrived. `patrol.sh` refuses to send an oversized brief instead.
 
+## The clock: a crontab, or a container that carries one
+
+`patrol.sh` fires one patrol. What decides *when* is either the host's crontab
+(below) or `patrol-timer.sh`, a loop that ships inside the deployment. Same
+brief, same script, same door — only the clock moved.
+
+Prefer the timer where the host's cron cannot be trusted to read the files. That
+is not hypothetical: on macOS, `~/Documents` sits behind TCC and `cron` is not
+one of the processes allowed through it, so every fire logged `Operation not
+permitted` and **nothing else in the system noticed** — the pipe had no delivery
+to fail, the investigator was healthy and idle, the chat was quiet. A watcher
+that was never triggered and a quiet afternoon are the same bytes from outside.
+
+Two things the timer can do that a crontab line cannot:
+
+**Skip a round it would otherwise pay for.** `PATROL_PRESCAN` names a cheap
+deterministic command run before each fire. Exit 0 with no output and the round
+ends there — no event, no model, no bill. Exit 0 with output and that output is
+appended to the brief, so the model reads findings instead of instructions for
+producing them. This is the difference between an empty round costing what a
+busy one costs and an empty round costing nothing, and on a watcher most rounds
+are empty. A prescan that FAILS fires anyway, carrying the failure: a prescan
+that broke and a prescan that found nothing look identical from here.
+
+**Check the last round's promises before starting the next.** With
+`CONTRACT_STATE` set it runs `scripts/assert_node_contract.py` over a before/
+after pair of the node's own state and raises a `low` signal when a promise
+broke. Before the fire and not after, because `patrol.sh` returns as soon as the
+event is accepted — the round runs for minutes afterwards, so a timer cannot
+wait for the one it just started.
+
+Every knob is documented in the script's own header; that is the copy that
+cannot drift from the code.
+
 ## The crontab
 
 ```cron
