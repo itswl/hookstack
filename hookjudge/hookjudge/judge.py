@@ -26,6 +26,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import replace
 from typing import Any
 
@@ -344,9 +345,22 @@ _DIALECTS = ("schema", "tools", "object")
 # support this tool_choice"), which is what makes the narrower test sufficient.
 _FORMAT_REJECTED = re.compile(r"response_format|json_schema|json_object|tool_choice|\btools\b", re.IGNORECASE)
 
-# Negotiated once per model per process. A step-down costs one 400, not one per
-# alert, and the alert that paid it is still judged on the next attempt.
-_dialect_for_model: dict[str, str] = {}
+# Negotiated per model, and re-negotiated after this long. A step-down costs one
+# 400, not one per alert, and the alert that paid it is still judged on the next
+# attempt — but a pin with no expiry means a provider that FIXES its schema
+# support is never asked again until somebody restarts the process, and every
+# alert in between is judged with the enums unenforced. Narrowing
+# _FORMAT_REJECTED lowered how often that pin is wrong; it did not bound how
+# long being wrong lasts, which is what this does. One hour: long enough that a
+# genuinely unsupported dialect costs one 400 an hour, short enough that
+# recovering from a provider's bad afternoon does not need an operator.
+_DIALECT_TTL_SECONDS = 3600.0
+_dialect_for_model: dict[str, tuple[str, float]] = {}
+
+
+def _remembered_dialect(model: str, now: float) -> str:
+    pinned = _dialect_for_model.get(model)
+    return pinned[0] if pinned and now - pinned[1] < _DIALECT_TTL_SECONDS else ""
 
 
 def _parse_verdict(body: dict[str, Any]) -> dict[str, Any] | None:
@@ -385,7 +399,12 @@ def _bounded_fields(fields: dict[str, str], *, block_limit: int, value_limit: in
         if spent > max(0, block_limit):
             kept[_OMITTED_KEY] = f"{len(fields) - len(kept)} more fields dropped to fit the prompt budget"
             break
-        kept[key[:value_limit]] = value
+        # The key whole, not cut to the VALUE limit. Cutting it was both
+        # unnecessary and lossy: `spent` already bills the full key, so one long
+        # enough to matter breaks the loop before it is ever stored — and two
+        # keys sharing a prefix that long collided into one entry, dropping a
+        # field silently and leaving the "N more dropped" count wrong about it.
+        kept[key] = value
     return kept
 
 
@@ -466,7 +485,9 @@ async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) 
     # when it says it cannot. The alert being judged is never spent on the
     # negotiation: a rejected format is retried immediately in the next dialect.
     preferred = settings.ai_structured_output
-    dialect = _dialect_for_model.get(settings.ai_model) or (preferred if preferred in _DIALECTS else _DIALECTS[0])
+    dialect = _remembered_dialect(settings.ai_model, time.time()) or (
+        preferred if preferred in _DIALECTS else _DIALECTS[0]
+    )
     pinned = preferred in _DIALECTS
     body: dict[str, Any] = {}
     attempt = 1
@@ -507,7 +528,7 @@ async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) 
         except Exception as error:  # noqa: BLE001
             return rule_verdict(event, degraded_reason=f"AI call failed: {error.__class__.__name__}")
         break
-    _dialect_for_model[settings.ai_model] = dialect
+    _dialect_for_model[settings.ai_model] = (dialect, time.time())
 
     # Read the bill BEFORE deciding whether the answer was usable. A model that
     # returns prose instead of JSON still charges for the tokens it burned

@@ -214,6 +214,21 @@ class Store:
         self.on_change: Callable[[], None] | None = None
         self._path = path
         self._db: aiosqlite.Connection | None = None
+        # A SECOND connection, for reads only. One connection has one
+        # transaction, so a page asking /status while the pipeline is halfway
+        # through recording an event was reading that transaction's uncommitted
+        # rows — and if the pipeline then raised, the board had shown a row that
+        # never existed. Serialising writers (below) cannot fix that: the reader
+        # never took the lock, because taking it would make every board refresh
+        # wait behind the delivery worker.
+        #
+        # Under WAL this is close to free: a reader gets a consistent snapshot of
+        # the last commit and never blocks the writer, which is the property
+        # _apply_pragmas asked for and nothing was using. Autocommit reads only —
+        # a long-lived read transaction here would hold back WAL checkpointing
+        # and grow the -wal file, which is the actual version of a worry that is
+        # otherwise unfounded.
+        self._read_db: aiosqlite.Connection | None = None
         # EVERY writer holds this — see transaction() for why a single-statement
         # write needs it just as much as a grouped one.
         self._write_lock = asyncio.Lock()
@@ -226,15 +241,23 @@ class Store:
             await self._db.executescript(_SCHEMA)
             await self._migrate()
             await self._db.commit()
+            # After the schema, never before: this one runs no DDL and would
+            # otherwise race the writer to create the file.
+            self._read_db = await aiosqlite.connect(self._path)
+            self._read_db.row_factory = aiosqlite.Row
+            await self._apply_pragmas(self._read_db)
         except Exception:
             # The connection runs a thread; leaving it open on a failed start
             # hangs the process at exit and turns a clear schema error into a
             # mysterious timeout (it turned one into a killed CI job).
+            if self._read_db is not None:
+                await self._read_db.close()
+                self._read_db = None
             await self._db.close()
             self._db = None
             raise
 
-    async def _apply_pragmas(self) -> None:
+    async def _apply_pragmas(self, db: aiosqlite.Connection | None = None) -> None:
         """Three settings that decide how this ledger behaves under real load.
 
         open() ran the schema and nothing else, which means the ledger inherited
@@ -259,7 +282,7 @@ class Store:
           "database is locked" — an inbound event refused, or a delivery whose
           bookkeeping was lost, for a wait nobody would have noticed.
         """
-        db = self._db
+        db = db or self._db
         if db is None:  # only ever called from open(), immediately after connect
             raise RuntimeError("store is not open")
         # foreign_keys=ON, because SQLite's default is OFF and has been since
@@ -305,6 +328,9 @@ class Store:
             await db.execute("ALTER TABLE events ADD COLUMN escalated_at REAL")
 
     async def close(self) -> None:
+        if self._read_db is not None:
+            await self._read_db.close()
+            self._read_db = None
         if self._db is not None:
             await self._db.close()
             self._db = None
@@ -314,6 +340,19 @@ class Store:
         if self._db is None:
             raise RuntimeError("Store.open() was not called")
         return self._db
+
+    @property
+    def read(self) -> aiosqlite.Connection:
+        """The connection a query that changes nothing should be on.
+
+        Reads that are part of a DECISION do not come here — those live on
+        Transaction, deliberately, so "is this a duplicate" and "insert it" see
+        one snapshot. This is for everything asked from outside: the boards, the
+        traces, the worker's queue sweep.
+        """
+        if self._read_db is None:
+            raise RuntimeError("Store.open() was not called")
+        return self._read_db
 
     # ── the atomic unit ───────────────────────────────────────────────────
 
@@ -408,7 +447,7 @@ class Store:
             await tx.enqueue_deliveries(event_id, [channel], now)
 
     async def due_deliveries(self, now: float, limit: int = 50) -> list[dict[str, Any]]:
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT d.*, e.source, e.title, e.body, e.level, e.fields_json, e.payload_json, e.received_at,"
             " e.is_recovery"
             " FROM deliveries d JOIN events e ON e.id = d.event_id"
@@ -418,7 +457,7 @@ class Store:
         return [dict(row) for row in await cursor.fetchall()]
 
     async def sent_count_since(self, channel: str, since: float) -> int:
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT count(*) AS n FROM deliveries WHERE channel = ? AND sent_at >= ?", (channel, since)
         )
         row = await cursor.fetchone()
@@ -495,7 +534,7 @@ class Store:
             clause = f" AND lower(e.level) IN ({','.join('?' for _ in levels)})"
             params.extend(level.lower() for level in levels)
         params.append(max(1, min(limit, 200)))
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT e.id, e.source, e.title, e.level, e.received_at FROM events e"
             " WHERE e.received_at <= ?"
             "   AND e.correlation_id IS NULL"
@@ -527,7 +566,7 @@ class Store:
         has gone quiet: a deployment that just came up should not alarm about
         every timer that has not had its first tick yet.
         """
-        async with self.db.execute("SELECT MAX(received_at) FROM events WHERE source = ?", (source,)) as cursor:
+        async with self.read.execute("SELECT MAX(received_at) FROM events WHERE source = ?", (source,)) as cursor:
             row = await cursor.fetchone()
         return float(row[0]) if row and row[0] is not None else None
 
@@ -585,7 +624,7 @@ class Store:
             await self.db.execute("UPDATE card_actions SET outcome = ? WHERE jti = ?", (outcome[:200], jti))
 
     async def recent_actions(self, limit: int = 50) -> list[dict[str, Any]]:
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT kind, event_id, correlation_id, actor, outcome, pressed_at "
             "FROM card_actions ORDER BY id DESC LIMIT ?",
             (max(1, min(limit, 500)),),
@@ -595,7 +634,7 @@ class Store:
     # ── silences ──────────────────────────────────────────────────────────
 
     async def active_silence(self, source: str, now: float) -> dict[str, Any] | None:
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT * FROM silences WHERE (source = ? OR source = '*') AND until_ts > ? ORDER BY id DESC LIMIT 1",
             (source, now),
         )
@@ -617,7 +656,7 @@ class Store:
             return cursor.rowcount > 0
 
     async def list_silences(self, now: float) -> list[dict[str, Any]]:
-        cursor = await self.db.execute("SELECT * FROM silences WHERE until_ts > ? ORDER BY id DESC", (now,))
+        cursor = await self.read.execute("SELECT * FROM silences WHERE until_ts > ? ORDER BY id DESC", (now,))
         return [dict(row) for row in await cursor.fetchall()]
 
     async def round_trip(self, event_id: int) -> dict[str, Any] | None:
@@ -641,7 +680,7 @@ class Store:
             if anchor is not None:
                 origin, anchor_id = anchor, int(quoted[3:])
 
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT id FROM events WHERE correlation_id = ? ORDER BY id",
             (f"hr-{anchor_id}",),
         )
@@ -651,7 +690,7 @@ class Store:
                 item["latency_seconds"] = round(float(item["received_at"]) - float(origin["received_at"]), 3)
         # And what a PERSON did about it. The machine half of this timeline was
         # always here; a morning review opens with the other half.
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT kind, actor, outcome, pressed_at FROM card_actions "
             "WHERE correlation_id = ? OR event_id = ? ORDER BY pressed_at",
             (f"hr-{anchor_id}", anchor_id),
@@ -662,7 +701,7 @@ class Store:
         return {"origin": origin, "returns": [r for r in returns if r is not None], "human_actions": human}
 
     async def _event_row(self, event_id: int) -> dict[str, Any] | None:
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.body, e.level, e.fields_json, e.correlation_id,"
             "       e.payload_json, d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id WHERE e.id = ?",
@@ -677,7 +716,7 @@ class Store:
         event["steps"] = json.loads(event.pop("steps_json") or "[]")
         # Both halves of the forensic record: the payload exactly as received…
         event["payload"] = json.loads(event.pop("payload_json") or "null")
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             # …and per delivery, the exact body that left the socket.
             "SELECT id, channel, status, attempts, last_error, sent_at, sent_body"
             " FROM deliveries WHERE event_id = ? ORDER BY id",
@@ -733,7 +772,7 @@ class Store:
     # ── status view ───────────────────────────────────────────────────────
 
     async def queue_counts(self) -> dict[str, int]:
-        cursor = await self.db.execute("SELECT status, count(*) AS n FROM deliveries GROUP BY status")
+        cursor = await self.read.execute("SELECT status, count(*) AS n FROM deliveries GROUP BY status")
         counts = {row["status"]: int(row["n"]) for row in await cursor.fetchall()}
         return {"queued": counts.get("queued", 0), "sent": counts.get("sent", 0), "dead": counts.get("dead", 0)}
 
@@ -792,7 +831,7 @@ class Store:
         # `body` and `payload_json` stay out: the forensic record belongs to
         # /trace/{id}, one event at a time. These two are small per-event
         # metadata that /trace already serves behind this same read token.
-        cursor = await self.db.execute(
+        cursor = await self.read.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.level,"  # nosec B608
             "       e.fields_json, e.correlation_id,"
             "       d.outcome, d.skip_code, d.channels_json, d.steps_json"
@@ -808,7 +847,7 @@ class Store:
             event["fields"] = json.loads(event.pop("fields_json") or "{}")
             event["channels"] = json.loads(event.pop("channels_json") or "[]")
             event["steps"] = json.loads(event.pop("steps_json") or "[]")
-            cursor = await self.db.execute(
+            cursor = await self.read.execute(
                 "SELECT id, channel, status, attempts, last_error FROM deliveries WHERE event_id = ? ORDER BY id",
                 (event["id"],),
             )

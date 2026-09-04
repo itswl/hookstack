@@ -870,9 +870,33 @@ async def test_structured_output_steps_down_to_what_the_provider_accepts():
     assert verdict.importance == "high"
     assert not verdict.degraded_reason
     # Negotiated once: the next alert starts where the last one landed.
-    assert _dialect_for_model["negotiating-model"] == "tools"
+    assert _dialect_for_model["negotiating-model"][0] == "tools"
     await ai_verdict(ai, settings(ai_model="negotiating-model"), event(title="Disk 92%"))
     assert ai.dialects == ["schema", "tools", "tools"]
+
+
+async def test_the_pin_expires_so_a_provider_that_recovers_is_asked_again():
+    """The pin's blast radius, which narrowing _FORMAT_REJECTED lowered the odds
+    of and never bounded. A 400 that really is about the format steps this model
+    down for good — so a provider that later SHIPS schema support is never asked
+    again, and every alert until somebody restarts the process is judged with the
+    enums unenforced. One 400 an hour is the price of finding out."""
+    from hookjudge.judge import _DIALECT_TTL_SECONDS, _dialect_for_model, ai_verdict
+
+    _dialect_for_model.clear()
+    ai = _ScriptedAI(accepts="tools")
+    await ai_verdict(ai, settings(ai_model="recovering-model"), event(title="Disk 91%"))
+    assert ai.dialects == ["schema", "tools"]
+
+    # Still inside the window: no re-negotiation, which is the whole point of pinning.
+    await ai_verdict(ai, settings(ai_model="recovering-model"), event(title="Disk 92%"))
+    assert ai.dialects == ["schema", "tools", "tools"]
+
+    # Age the pin past its TTL rather than sleeping an hour.
+    dialect, at = _dialect_for_model["recovering-model"]
+    _dialect_for_model["recovering-model"] = (dialect, at - _DIALECT_TTL_SECONDS - 1)
+    await ai_verdict(ai, settings(ai_model="recovering-model"), event(title="Disk 93%"))
+    assert ai.dialects == ["schema", "tools", "tools", "schema", "tools"], "asks for the strong one again"
 
 
 async def test_a_pinned_dialect_is_not_negotiated_away():

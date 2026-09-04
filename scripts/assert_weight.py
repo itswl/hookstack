@@ -170,7 +170,24 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # boundary prose fully present — position beat prose, and the fix takes the
     # recency slot back with a post-alert reminder. Both cost lines; both are
     # the difference between an axis that acts and an axis nobody can argue with.
-    "hookjudge": (3150, Path("hookjudge/README.md")),
+    # 3150 -> 3250 on 2026-09-05. Split, under the rule in
+    # .agents/notes/implemented/2026-09-05-the-weight-ceiling-keeps-its-measure-
+    # and-changes-its-ceremony.md: +21 source, **+7 code**, so the doctrine
+    # question applies and this entry answers it.
+    #
+    # The seven give the structured-output pin an expiry. A 400 that names the
+    # request field steps a model down to a weaker dialect and pinned it there
+    # for the life of the process — so a provider that later SHIPS schema
+    # support is never asked again, and every alert until a restart is judged
+    # with the enums unenforced. Narrowing _FORMAT_REJECTED lowered how OFTEN
+    # that pin is wrong and did nothing about how LONG being wrong lasts.
+    #
+    # It belongs in the judge rather than behind it: negotiating how a verdict
+    # comes back is part of getting a verdict, not a judgement about an alert,
+    # and there is nowhere else that knows a dialect was stepped down. An hour
+    # is one 400 an hour against a provider that genuinely cannot, and no
+    # operator needed against one that recovers.
+    "hookjudge": (3250, Path("hookjudge/README.md")),
 }
 UNCAPPED = ("hookprobe",)
 
