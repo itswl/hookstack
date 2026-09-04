@@ -1,7 +1,18 @@
 # The hook\* alerting family — an overview
 
 A set of small services grown around one question: how does an alert get
-handled? The family's design philosophy is one job per component.
+handled?
+
+That question is this document's whole vocabulary, and it is worth saying once
+at the top that it is the ORIGIN rather than the boundary. The shape underneath
+— something produces signals, a pipe accounts for every hop, nodes decide or
+investigate, what survives reaches a person — has since carried an operator's
+own work signals from chat and tickets on the same code, with no service change
+at all. If you have no alert stream, read "alert" as "signal" throughout and
+almost nothing else needs translating; the two deployments are compared in
+[docs/deployments.md](docs/deployments.md).
+
+The family's design philosophy is one job per component.
 **hookrelay** is the pipe — it adapts every monitoring dialect in and every
 channel format out. **hookjudge** is the judge — one event, one verdict, one
 line in the ledger. **hookprobe** is the investigator — one read-only,

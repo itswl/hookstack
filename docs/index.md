@@ -7,10 +7,17 @@ description: Run agents in production and account for them afterwards — a sign
 
 Run agents in production and be able to account for them afterwards.
 
-Three services that split alert handling — a content-blind pipe, a judge, and a
-read-only investigator — wired by a config file rather than by code. Each
+The shape is always the same: **something produces signals, a pipe carries them
+and accounts for every hop, nodes decide or investigate, and what survives
+reaches a person.** Three services fill it — a content-blind pipe, a judge, and
+a read-only investigator — wired by a config file rather than by code. Each
 handover is signed, retried, dead-lettered, priced and replayable, and each
 agent runs behind a credential, a budget and a closed list of what it may do.
+
+**Alerts are the instance this was worn in on**, and most examples below speak
+that dialect. They are not the shape — the second deployment in this repository
+carries an operator's own work signals, chat and tickets, through a watcher and
+a planner, on the same code.
 
 The agent runner ([hookprobe](#hookprobe-an-agent-run-behind-an-http-contract))
 is useful entirely on its own, whether or not you care about alerts.
@@ -89,6 +96,22 @@ is [docs/containment.md](https://github.com/itswl/hookstack/blob/main/docs/conta
 A guard that is only described by what it catches gets trusted for things it
 never claimed.
 
+### Not everything through the pipe is an alert
+
+The judge earns its keep on alerts — severity, recovery, flapping, the four
+routes ordered by cost. A source that has ALREADY decided (a watcher forwarding
+"this needs a person", a system that only emits what matters) gains nothing from
+being judged again, and would be judged in a vocabulary that does not fit it.
+
+So a route may be terminal: a signed door of your own, straight to the channel
+you named, past the judge. It still gets the pipe's ledger, retries and dead
+letters — the parts that are about delivery rather than about content.
+
+The investigator is still reachable from there, and asks a different question
+when the event is work rather than a fault: what exists now, what is missing,
+the steps, how the result would be verified — and what it could not see, named
+rather than guessed at. It proposes nothing for execution either way.
+
 ### One codebase, two very different graphs
 
 The repository runs two deployments that share every line of service code. One
@@ -124,22 +147,6 @@ a source that already judged its own signal takes a terminal route instead:
   your source ──► hookrelay ──┬──► the channel you named   (no judge: it is decided)
   (signed door)               └──► hookprobe :8088         (only if it says so)
 ```
-
-### Not everything through the pipe is an alert
-
-The judge earns its keep on alerts — severity, recovery, flapping, the four
-routes ordered by cost. A source that has ALREADY decided (a watcher forwarding
-"this needs a person", a system that only emits what matters) gains nothing from
-being judged again, and would be judged in a vocabulary that does not fit it.
-
-So a route may be terminal: a signed door of your own, straight to the channel
-you named, past the judge. It still gets the pipe's ledger, retries and dead
-letters — the parts that are about delivery rather than about content.
-
-The investigator is still reachable from there, and asks a different question
-when the event is work rather than a fault: what exists now, what is missing,
-the steps, how the result would be verified — and what it could not see, named
-rather than guessed at. It proposes nothing for execution either way.
 
 ![hookrelay's ledger: every message accounted for, every delivery with an outcome](img/hookrelay-ledger.png)
 
