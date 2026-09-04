@@ -13,14 +13,20 @@
 #     disagreements — labelled comparison data, at production rates, for free;
 #   - reuse/recovery routes are exercised by real storms, not synthetic ones.
 #
-# What is deliberately ABSENT:
-#   - notification channels: a shadow that can page somebody is not a shadow;
-#   - probe escalation: the investigator already serves the platform's own
+# What this file USED to exclude, and no longer does — recorded because the
+# reasons were good ones and whoever narrows it again should meet them:
+#   - notification channels ("a shadow that can page somebody is not a shadow").
+#     This deployment now carries the operator's own alerting, so the verdict
+#     and the investigation both leave as cards.
+#   - probe escalation ("the investigator already serves the platform's own
 #     deep-analysis leg, and a second door onto the same runs would double the
-#     model bill for no new information;
-#   - a judge return door: HOOKJUDGE_RETURN_URL is empty, so the verdict stops
-#     in the judge's ledger instead of coming back as an event this config
-#     would then have to route into silence.
+#     model bill for no new information"). That objection was about the WW lane
+#     specifically. The chain below funds an investigation per judged
+#     critical/high alert, which is the bill this buys knowingly; the probe's
+#     escalate_levels and budget breaker are what bound it.
+#   - a judge return door. Live now via SHADOW_RETURN_URL on this host; judges b
+#     and c stay hardcoded to "none" because a comparison arm that answered back
+#     would be a second copy of the chain, not a second opinion.
 #
 # Caveat, stated where the data will be read: the judge sees the platform's
 # {alert title + AI summary}, not the raw webhook — the platform's feishu_relay
@@ -209,9 +215,19 @@ routes:
   # would fall through to shadow-to-judges and be judged again — the pipe
   # feeding a brain its own output, which is the loop the family's docs warn
   # about and the reason returns take a higher-priority terminal route.
+  # The chain: a verdict is both a card and the thing that funds the next hop.
+  # hookrelay -> hookjudge -> hookrelay -> hookprobe -> hookrelay -> Lark, with
+  # the card leaving on the first pass so the operator is not waiting on a 47s
+  # investigation to learn an alert exists. The investigator's report arrives
+  # afterwards through probe-notify, as a second card.
+  #
+  # What bounds the bill: the pipe hands over EVERY verdict and stays
+  # content-blind, and the probe's own HOOKPROBE_ESCALATE_LEVELS (critical,high)
+  # decides which of them is worth a paid run — the same division the watch lane
+  # already uses. HOOKPROBE_BUDGET_USD is the backstop behind that.
   - name: verdict-to-me
     source: judge-notify
-    send_to: [to-me]
+    send_to: [to-me, to-probe]
     priority: 100
     stop: true
 
