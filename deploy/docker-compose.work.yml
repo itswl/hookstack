@@ -129,12 +129,41 @@ services:
       HOOKPROBE_SYSTEM_PROMPT_APPEND: ${HOOKPROBE_SYSTEM_PROMPT_APPEND:-}
       HOOKPROBE_SETTING_SOURCES: ${HOOKPROBE_SETTING_SOURCES:-}
       HOOKPROBE_SKILLS: ${HOOKPROBE_SKILLS:-}
-      HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-}
+      # Lives inside the volume above, so it is hot-editable like the system
+      # prompt and needs no mount of its own. Servers reachable from a container
+      # only: an http:// server on the host is `host.docker.internal`, never
+      # 127.0.0.1, and a stdio server cannot be reached from here at all.
+      HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-/data/mcp.json}
+      # The closed set of MCP tools this planner may call. EMPTY DENIES ALL —
+      # mounting a server is plumbing, naming its tools is policy, and only the
+      # second one decides what a colleague's chat message can ask this agent to
+      # do on your behalf. Enforced by a PreToolUse hook, not by allowed_tools.
+      HOOKPROBE_MCP_TOOLS: ${HOOKPROBE_MCP_TOOLS:-}
       HOOKPROBE_HOST: 0.0.0.0
       HOOKPROBE_PORT: 8088
       HOOKPROBE_WORKDIR: /data
     volumes:
       - ../work-data/probe-plan:/data
+      # ── the two conventions that keep this file from growing a line per
+      # credential ────────────────────────────────────────────────────────
+      #
+      # /data/secrets — drop a file in, it is there next run. READ-ONLY, and a
+      # CURATED directory rather than a bind of ~/.aws or ~/.atlassian.env
+      # directly: those hold whatever profile you happen to have, including the
+      # ones that can write. Copy in only the query-grade identity, and put what
+      # it is and what it may do in the planner's CLAUDE.md — the agent reads
+      # that as memory, so the manifest and the mount stay one thought.
+      #
+      # This agent reads text other people wrote. Everything under here is
+      # reachable by anything anyone types in a watched chat.
+      - ${PROBE_PLAN_SECRETS:-../work-data/probe-plan-secrets}:/data/secrets:ro
+      #
+      # /data/code — the repositories a plan is usually ABOUT. Read-only and
+      # credential-free, which is why it is the cheapest useful thing to give a
+      # planner: "how would this be done" answered against the actual tree
+      # beats the same question answered from a title. Point it at a parent
+      # directory of your checkouts; inert until you do.
+      - ${PROBE_PLAN_CODE:-../work-data/probe-plan-code}:/data/code:ro
     ports:
       # The sessions page, for watching a plan being written. Loopback only.
       - "127.0.0.1:8088:8088"
