@@ -1,0 +1,102 @@
+"""One stream of what happened, projected from the ledger that already holds it.
+
+Written after an afternoon in which answering "how is this deployment doing"
+took five endpoints across two machines and a person joining them by eye. The
+pipe had every fact already; nothing could read them as one thing.
+"""
+
+from __future__ import annotations
+
+from hookrelay.timeline import render
+
+# A real shape: a trigger fans out to a node, the node's result comes back
+# quoting the original, and a second unrelated signal stands alone.
+ROWS = [
+    {
+        "id": 3,
+        "received_at": 300.0,
+        "source": "watch",
+        "title": "unrelated signal",
+        "level": "low",
+        "outcome": "routed",
+        "channels": ["to-lark"],
+        "fields": {},
+        "correlation_id": None,
+    },
+    {
+        "id": 2,
+        "received_at": 200.0,
+        "source": "plan-notify",
+        "title": "the plan",
+        "level": "high",
+        "outcome": "routed",
+        "channels": ["to-lark-plan"],
+        "fields": {"cost_usd": "0.42"},
+        "correlation_id": "1",
+    },
+    {
+        "id": 1,
+        "received_at": 100.0,
+        "source": "watch",
+        "title": "the signal",
+        "level": "high",
+        "outcome": "routed",
+        "channels": ["to-plan"],
+        "fields": {},
+        "correlation_id": None,
+    },
+]
+
+
+def test_a_chain_gathers_what_quoted_it() -> None:
+    out = render(ROWS)
+    chains = {c["chain"]: c for c in out["chains"]}
+    assert set(chains) == {"1", "3"}, "the return quoted event 1, so it belongs to it"
+    assert [h["id"] for h in chains["1"]["hops"]] == [1, 2], "hops read oldest first inside a chain"
+    assert chains["1"]["doors"] == ["plan-notify", "watch"]
+
+
+def test_an_uncorrelated_event_stands_alone() -> None:
+    """Honest rather than tidy: a watcher's signals really are unrelated to each
+    other, and grouping them would invent a story."""
+    assert len(render(ROWS)["chains"]) == 2
+
+
+def test_cost_is_summed_per_chain_from_the_ledger() -> None:
+    """The point of the whole exercise — what a chain spent, answered without
+    asking any node."""
+    chains = {c["chain"]: c for c in render(ROWS)["chains"]}
+    assert chains["1"]["cost_usd"] == 0.42
+    assert chains["3"]["cost_usd"] == 0.0
+
+
+def test_unpriced_is_not_free() -> None:
+    """A hop nobody priced and a hop that cost nothing are different facts, and
+    only the config knows which — so the projection counts them rather than
+    flattening both to zero."""
+    out = render(ROWS)
+    assert out["totals"]["unpriced_hops"] == 2, "only the plan-notify hop carries a cost field"
+    assert out["totals"]["cost_usd"] == 0.42
+    chains = {c["chain"]: c for c in out["chains"]}
+    assert chains["1"]["hops"][0]["cost_usd"] is None, "None, never 0.0, when nobody priced it"
+
+
+def test_newest_chain_first_and_limit_applies() -> None:
+    out = render(ROWS, limit=1)
+    assert len(out["chains"]) == 1
+    assert out["chains"][0]["chain"] == "3", "chain 3 started at 300, chain 1 at 100"
+    assert out["totals"]["chains"] == 1, "totals describe what was returned, not what was read"
+
+
+def test_a_malformed_cost_does_not_break_the_stream() -> None:
+    """`fields` values are strings from a template, so the cost can arrive as
+    anything a node put in `meta.cost_usd` — including nothing."""
+    rows = [dict(ROWS[1], fields={"cost_usd": "not-a-number"})]
+    assert render(rows)["totals"]["cost_usd"] == 0.0
+
+
+async def test_the_endpoint_is_read_gated(client) -> None:
+    assert (await client.get("/timeline")).status_code == 401  # read gate answers 401; the admin gate answers 403
+    answer = await client.get("/timeline", headers={"X-Read-Token": "read-t"})
+    assert answer.status_code == 200
+    assert {"chains", "totals"} <= answer.json().keys()

@@ -31,7 +31,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKRELAY_HOST` | `127.0.0.1` | Address the server binds to |
 | `HOOKRELAY_PORT` | `8100` | Port the server listens on |
 
-## Routes (17)
+## Routes (18)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -50,5 +50,6 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/silences` | Admin: quiet one source for a window; every silenced event still lands in the ledger |
 | DELETE | `/silences/{silence_id}` | Admin: lift a silence before its window ends |
 | GET | `/status` | The board's data: recent events, deliveries, breaker and silence state as JSON |
+| GET | `/timeline` | What happened — one stream, chains gathered, with what each one spent |
 | GET | `/topology` | The whole shape, from config alone — the read that belongs BEFORE a route change rather than after one |
 | GET | `/trace/{event_id}` | One alert's whole journey: the original, where it fanned out to, and what each processing system sent back |

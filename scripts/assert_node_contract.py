@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 # How a signal names the conversation it came from. The watcher writes
-# `origin: "TypeX / BCP-SRE"`, so the conversation is what follows the
+# `origin: "<tool> / <conversation>"`, so the conversation is what follows the
 # separator. Kept as a constant with the reason attached rather than inlined:
 # this is the one place this checker is coupled to a particular node's signal
 # format, and a node that names its subject differently changes THIS line.

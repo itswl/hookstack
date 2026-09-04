@@ -109,7 +109,21 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # comments in two config files instead of by one check. Raised rather than
     # trimmed because both are pipe properties, not judgments: neither reads an
     # alert's content, and topology.py cannot even reach the network.
-    "hookrelay": (4800, Path("hookrelay/README.md")),
+    # 4800 -> 4900 on 2026-09-04, later the same day, for /timeline. The pipe
+    # already recorded every hop — it is the only place a whole chain is visible,
+    # because every handover goes through it by construction — but nothing could
+    # READ that as one thing: /status answers "recently", /trace answers "this
+    # one", and reviewing a deployment took five endpoints across two machines
+    # joined by eye.
+    #
+    # Raised rather than trimmed, and the alternative is worth naming because it
+    # was rejected: Apache Maka keeps ONE runtime event log as the single source
+    # of truth with every UI a projection of it, which is right for one process
+    # and wrong here. A node in this family may be written by somebody else and
+    # run somewhere else; a store it must write to would take the replaceable
+    # node with it. So this is a projection of what the pipe already holds, and
+    # asks nothing new of any node.
+    "hookrelay": (4900, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

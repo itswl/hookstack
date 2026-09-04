@@ -114,6 +114,11 @@ sources:
     fields:
       origin: "{meta.source}"
       session: "{meta.session_key}"
+      # What this hop cost, so the PIPE's ledger can answer it without asking the
+      # node. Absent rather than zero when a node does not price itself — /timeline
+      # counts those as `unpriced_hops`, because a free hop and an unpriced one
+      # are different facts.
+      cost_usd: "{meta.cost_usd}"
 
 channels:
   - name: to-judge

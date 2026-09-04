@@ -37,6 +37,7 @@ from hookrelay.pipeline import handle_hook, record_storm_suppressed
 from hookrelay.security import token_ok, verify_signature
 from hookrelay.settings import Settings
 from hookrelay.store import Store, now_ts
+from hookrelay.timeline import render as render_timeline
 from hookrelay.topology import render as render_topology
 
 # A `secret:` whose value is written out rather than referenced. Empty values and
@@ -636,6 +637,33 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 limit, source=source, outcome=outcome, skip_code=skip_code, query=q, before_id=before_id
             ),
         }
+
+    @app.get("/timeline")
+    async def timeline(
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """What happened — one stream, chains gathered, with what each one spent.
+
+        `/status` answers "recently" and `/trace/{id}` answers "this one".
+        Neither answers "what happened", and the gap was measurable: reviewing a
+        deployment meant five endpoints across two machines joined by eye.
+
+        This is a PROJECTION, not a second ledger. The pipe already records every
+        hop, because every handover goes through it by construction — the only
+        thing missing was a way to read that as one thing. Nothing new is asked
+        of any node, which is the point: a node here may be written by somebody
+        else and run somewhere else, and a store it had to write to would take
+        the replaceable node down with it.
+
+        Cost appears per hop when a return door extracts `meta.cost_usd` into a
+        field, and `unpriced_hops` counts the ones where it does not — because a
+        free hop and an unpriced one are different facts and only the config
+        knows which is which."""
+        _read_guard(x_read_token, authorization)
+        rows = await app.state.store.recent_events(min(limit * 4, 400))
+        return render_timeline(rows, limit=limit)
 
     @app.get("/trace/{event_id}")
     async def round_trip(
