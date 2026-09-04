@@ -743,8 +743,27 @@ class Store:
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(max(1, min(500, int(limit))))
         # `where` is built from constant clause fragments; values are parametrized.
+        # `fields` and `correlation_id` are here because two readers need them
+        # and both were silently blind without them, for a week, looking healthy:
+        #
+        #   /timeline sums `fields.cost_usd` and groups by `correlation_id`. On a
+        #   live deployment it reported 39 chains across 39 hops — every event
+        #   its own chain — and $0.00 with all 39 hops unpriced. Which is what a
+        #   quiet week looks like, so nothing asked.
+        #   scripts/assert_node_contract.py finds the conversation a signal was
+        #   about in `fields.origin`. With no fields it read every round as
+        #   "posted 0 signals" and passed. Its own gate fixture carries fields,
+        #   because a fixture is written from what the code needs rather than
+        #   from what the endpoint returns — which is how a golden sample comes
+        #   to pin the wrong thing.
+        #
+        # `body` and `payload_json` stay out: those are the forensic record and
+        # belong to /trace/{id}, one event at a time. These two are small,
+        # per-event metadata, and /trace already serves both behind this same
+        # read token, so nothing is exposed here that was not already.
         cursor = await self.db.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.level,"  # nosec B608
+            "       e.fields_json, e.correlation_id,"
             "       d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id"
             f"{where}"
@@ -755,6 +774,7 @@ class Store:
         for event in events:
             # Parsed, not raw: the status page (and any client) gets the
             # decision trace as data, because WHY is the product.
+            event["fields"] = json.loads(event.pop("fields_json") or "{}")
             event["channels"] = json.loads(event.pop("channels_json") or "[]")
             event["steps"] = json.loads(event.pop("steps_json") or "[]")
             cursor = await self.db.execute(

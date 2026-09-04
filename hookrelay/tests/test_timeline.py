@@ -95,6 +95,32 @@ def test_a_malformed_cost_does_not_break_the_stream() -> None:
     assert render(rows)["totals"]["cost_usd"] == 0.0
 
 
+async def test_the_ledger_query_returns_what_the_projections_read(store) -> None:
+    """The gap every test above stepped over.
+
+    All of them hand `render()` rows with `fields` and `correlation_id` already
+    in them, so the projection was covered and the query that feeds it was not.
+    It did not select either column. On a live deployment that produced 39
+    chains across 39 hops — every event its own chain — at $0.00 with all 39
+    hops unpriced, which is indistinguishable from a quiet week, so nobody
+    asked. scripts/assert_node_contract.py went blind the same way at the same
+    time, reading every round as "posted 0 signals" and passing.
+
+    So this asserts about the SEAM rather than about either side of it.
+    """
+    await store.insert_event(
+        "plan-notify",
+        "fp-1",
+        {"title": "the plan", "body": "", "level": "high", "fields": {"cost_usd": "0.42", "origin": "chat / X"}},
+        "{}",
+        100.0,
+        correlation_id="7",
+    )
+    row = (await store.recent_events(10))[0]
+    assert row["fields"] == {"cost_usd": "0.42", "origin": "chat / X"}
+    assert row["correlation_id"] == "7"
+
+
 async def test_the_endpoint_is_read_gated(client) -> None:
     assert (await client.get("/timeline")).status_code == 401  # read gate answers 401; the admin gate answers 403
     answer = await client.get("/timeline", headers={"X-Read-Token": "read-t"})
