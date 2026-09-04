@@ -166,6 +166,13 @@ class Settings:
     memory_auto_apply: bool
     # Severities that may wake a person, as a comma-separated list.
     escalate_levels: frozenset[str]
+    # The closed vocabulary this instance is allowed to CONCLUDE with, so a
+    # report can steer the next hop instead of only being read. Empty (default)
+    # is off. The set is declared by the operator and the agent picks from
+    # inside it — never free text, because a routing key decides where money is
+    # spent and this is the component that reads attacker-influenced prose. See
+    # .agents/notes/implemented/2026-09-04-an-investigator-verdict-may-steer-a-route-from-a-closed-set.md
+    verdicts: frozenset[str]
 
     # The budget breaker, guarding the only path that spends money without a
     # human asking: once the window's recorded spend reaches budget_usd, the
@@ -249,6 +256,9 @@ class Settings:
             ruling_secret=os.environ.get("HOOKPROBE_RULING_SECRET", ""),
             memory_auto_apply=_flag("HOOKPROBE_MEMORY_AUTO_APPLY", True),
             escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
+            verdicts=frozenset(
+                part.strip().lower() for part in os.environ.get("HOOKPROBE_VERDICTS", "").split(",") if part.strip()
+            ),
             budget_usd=max(0.0, _float("HOOKPROBE_BUDGET_USD", 0.0)),
             budget_window_hours=max(0.1, _float("HOOKPROBE_BUDGET_WINDOW_HOURS", 24.0)),
             budget_gates_agent_door=_flag("HOOKPROBE_BUDGET_GATES_AGENT_DOOR", False),

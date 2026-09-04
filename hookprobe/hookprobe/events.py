@@ -76,6 +76,30 @@ Fields:
 {fields}
 ```"""
 
+
+def _verdict_instruction(vocabulary: frozenset[str]) -> str:
+    """Ask for a conclusion only when the deployment declared what may be said.
+
+    Appended rather than templated in, so the two prompts stay one question each
+    and neither grows a branch. Empty vocabulary (the default) appends nothing,
+    which keeps every existing deployment's prompt byte-identical — a prompt
+    change is a golden-replay event here, and this must not be one for anybody
+    who has not opted in.
+
+    The list is spelled out because that is the whole guarantee: the agent is
+    choosing from a set an operator wrote down, and `reports.verdict` drops
+    anything else. Naming the options here just saves a wasted run.
+    """
+    if not vocabulary:
+        return ""
+    options = " | ".join(sorted(vocabulary))
+    return (
+        "\n\nFinally, end the report with a line `VERDICT: <one of: "
+        f"{options}>` — exactly one of those words, nothing else on the line. "
+        "It routes what happens next. Omit the line if none of them is honestly true."
+    )
+
+
 _TASK_MESSAGE = """Run one read-only investigation of the work item below and answer one \
 question: concretely, how would this be done?
 
@@ -406,7 +430,7 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
             title=title,
             body=str(event.get("body") or "")[:_BODY_MAX],
             fields=_fenced_fields(event.get("fields")),
-        )
+        ) + _verdict_instruction(settings.verdicts)
         payload = {
             "message": message,
             "sessionKey": session_key,
