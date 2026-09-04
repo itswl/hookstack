@@ -32,6 +32,9 @@
 #   TZ                     the operator's zone, not UTC — the hours above and
 #                          the brief's own window check must agree about what
 #                          time it is.
+#   PATROL_PRESCAN         a command run before each fire. Empty = fire every
+#                          tick, which is what this did before the knob existed.
+#                          See the three outcomes at the call site below.
 #
 # The hour/day gate here is an ECONOMY, never the authority. The brief decides
 # whether a round does anything (it runs `date` first and answers [SILENT]
@@ -69,9 +72,13 @@ check_contract() {
       log "contract check skipped: ledger unreadable"; return 0; }
   # Explicit path, not derived from $HERE: this script is mounted at /patrols
   # and the checker lives in the repo's scripts/, which is a different mount.
+  # CONTRACT_CURSORS points at the reader's own state where a node no longer
+  # keeps both cursors in one file — see the checker's header for which promises
+  # that split changes. Unset for a node that does; the checker handles both.
   if out=$(python3 "${CONTRACT_CHECKER:-/scripts/assert_node_contract.py}" \
         --before "$SNAPSHOT" --after "$CONTRACT_STATE" \
         --ledger /tmp/patrol-timer-ledger.json \
+        ${CONTRACT_CURSORS:+--cursors "$CONTRACT_CURSORS"} \
         --since "$since" --source "${CONTRACT_SOURCE:-watch}" 2>&1); then
     return 0
   fi
@@ -125,9 +132,49 @@ while :; do
   if [ -n "${CONTRACT_STATE:-}" ] && [ -f "$SNAPSHOT" ]; then
     check_contract || true
   fi
+  # A cheap deterministic pass before the expensive one. Three outcomes, and
+  # the first is the whole reason this knob exists:
+  #
+  #   exit 0, no output   nothing to do. Skip the round entirely — no event, no
+  #                       model, no bill. A watcher whose quiet rounds cost the
+  #                       same as its busy ones is paying a model to discover
+  #                       there was nothing to discover, which on the deployment
+  #                       this was written for was $0.25-0.95 per empty round.
+  #   exit 0, output      what it found, appended to the brief. The model reads
+  #                       findings instead of instructions for how to find them,
+  #                       and does only the part that needs judging.
+  #   non-zero            fire ANYWAY, carrying the failure. A prescan that
+  #                       broke and a prescan that found nothing look identical
+  #                       from here, and only one of them is a quiet day. The
+  #                       same rule the briefs state for their own sources.
+  #
+  # The composed body is a temp file rather than an edit to the brief: the brief
+  # is mounted read-only for the reason documented beside its volume, and a
+  # findings section that accumulated across rounds would be the worst of both.
+  BODY="$BRIEF"
+  if [ -n "${PATROL_PRESCAN:-}" ]; then
+    scan_rc=0
+    # bash -c, not eval: the command is configuration and runs as itself,
+    # without reaching into this shell's variables or traps.
+    scan_out="$(bash -c "$PATROL_PRESCAN" 2>&1)" || scan_rc=$?
+    if [ "$scan_rc" -eq 0 ] && [ -z "$scan_out" ]; then
+      log "prescan: nothing to do, round skipped"
+      continue
+    fi
+    BODY="$(mktemp "${TMPDIR:-/tmp}/patrol-body.XXXXXX")"
+    if [ "$scan_rc" -ne 0 ]; then
+      log "prescan FAILED (rc=$scan_rc) — firing anyway so the failure gets reported"
+      printf '%s\n\n---\n\n## ⚠️ PRESCAN FAILED (rc=%s)\n\n```\n%s\n```\n' \
+        "$(cat "$BRIEF")" "$scan_rc" "$scan_out" > "$BODY"
+    else
+      printf '%s\n\n---\n\n%s\n' "$(cat "$BRIEF")" "$scan_out" > "$BODY"
+    fi
+  fi
+
   if [ -n "${CONTRACT_STATE:-}" ] && [ -r "$CONTRACT_STATE" ]; then
     # Snapshot BEFORE firing: this is what the round about to start will be
-    # measured against.
+    # measured against. After the prescan, so a skipped round leaves the
+    # previous snapshot in place rather than measuring a round that never ran.
     cp "$CONTRACT_STATE" "$SNAPSHOT" 2>/dev/null || log "WARNING: could not snapshot $CONTRACT_STATE"
     SNAPSHOT_AT=$(date +%s)
     printf '%s' "$SNAPSHOT_AT" > "$SNAPSHOT.at"
@@ -136,9 +183,10 @@ while :; do
   # Never `set -e` around this: one failed round must not stop the clock. The
   # round's own failure travels as a signal (the brief owes the operator that),
   # and the exit code lands in this log either way.
-  if out=$(bash "$HERE/patrol.sh" "$BRIEF" "$TITLE" 2>&1); then
+  if out=$(bash "$HERE/patrol.sh" "$BODY" "$TITLE" 2>&1); then
     log "fired: $out"
   else
     log "FAILED (rc=$?): $out"
   fi
+  [ "$BODY" = "$BRIEF" ] || rm -f "$BODY"
 done

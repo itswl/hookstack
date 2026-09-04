@@ -280,14 +280,25 @@ services:
       # and "a message in the thread can post as the operator".
       HOOKPROBE_MCP_TOOLS: ${WATCH_MCP_TOOLS:-}
       # How the agent posts a finding: `echo '<JSON>' | python3
-      # /data/bin/post_watch_signal.py`, the same script and the same exit codes
-      # the laptop watcher uses. The script reads the signing secret itself, so
-      # the brief never has to mention it.
+      # /data/jira/watch_report.py --conversation "<name>"`, which posts through
+      # post_watch_signal.py below AND records what it just reported, in one
+      # call. Two sentences in two sections of a brief is how a round came to
+      # post a signal and leave the cursor where it was; only the first of them
+      # had an observable effect. One call cannot be half-done.
+      WATCH_SCAN_FILE: /scan/scan.json
+      WATCH_REPORTED_STATE: /data/${WATCH_STATE_FILE:?set WATCH_STATE_FILE in .env}
+      WATCH_SIGNAL_POSTER: /data/bin/post_watch_signal.py
+      # What a card shows a finding came from. Separate from CHAT_TOOL_PREFIX
+      # because that one must be the exact lowercase name the MCP server
+      # dispatches on, and this one is read by a person. The contract checker
+      # only uses what follows " / ", so they may differ — but folding them into
+      # one variable would have silently restyled every card.
+      WATCH_ORIGIN_PREFIX: ${WATCH_ORIGIN_PREFIX:-${WATCH_CHAT_TOOL}}
       HOOKSTACK_ENV_FILE: /data/secrets/watch.env
       HOOKSTACK_WATCH_DOOR: http://hookrelay:8100/hook/watch
-      # The brief's first instruction is `date`, and the window it checks is
-      # the operator's, not UTC. Without this the container reads UTC and every
-      # round decides it is outside working hours.
+      # The round's findings are timestamped in the operator's zone by the
+      # scanner, and anything the agent writes should agree with them. Without
+      # this the container reads UTC and every rendering is eight hours off.
       TZ: ${WATCH_TZ:-Asia/Singapore}
       HOOKPROBE_HOST: 0.0.0.0
       HOOKPROBE_PORT: 8088
@@ -303,6 +314,15 @@ services:
       # the container and the laptop send byte-identical signatures through one
       # piece of code.
       - ../scripts:/data/bin:ro
+      # What the scan handed this round, READ-ONLY: which conversations it
+      # surfaced and how far each was read. The reporting tool takes the cursor
+      # value from here instead of asking the model to copy a number, and the
+      # contract checker reads the same file to see whether a signal named a
+      # conversation anything actually offered. Written only by the timer, one
+      # writer for one file — the node writing `reported` while the scanner
+      # wrote `feeds` in the same document is a lost update waiting for the
+      # first round where both had something to say.
+      - ../work-data/watch-timer-state:/scan:ro
       # The operator's own Jira watcher, read-only, ONE source of truth with the
       # laptop rather than a copy that drifts. The directory rather than the
       # file, which this repository learned the hard way elsewhere: a
@@ -376,13 +396,39 @@ services:
       # door truncate silently, which is what its own check exists to prevent.
       PATROL_BODY_MAX: "16000"
       PATROL_EVERY_MINUTES: ${WATCH_EVERY_MINUTES:-20}
-      # An economy, not the authority: the brief runs `date` first and answers
-      # [SILENT] outside Mon-Fri 09:30-19:30 regardless. Keep this WIDER than
-      # the brief's window, never narrower, or the gate moves somewhere nobody
-      # reading the brief would think to look.
+      # An economy, not the authority: watch_scan.py checks the real window
+      # (WATCH_WINDOW below, which knows about half-hours as a cron-shaped hour
+      # range cannot) and prints nothing outside it. Keep this WIDER than that
+      # window, never narrower, or the gate moves somewhere nobody reading the
+      # scanner would think to look.
       PATROL_HOURS: ${WATCH_HOURS:-9-19}
       PATROL_DAYS: ${WATCH_DAYS:-1-5}
       TZ: ${WATCH_TZ:-Asia/Singapore}
+      # The deterministic 85% of what used to be the brief. Nothing new to say
+      # means no event, no model and no bill — which is most rounds, and used to
+      # cost $0.25-0.95 each because the agent had to complete the whole scan to
+      # find out there was nothing. See the three outcomes in patrol-timer.sh.
+      PATROL_PRESCAN: python3 /watch/watch_scan.py
+      CHAT_MCP_URL: ${WATCH_CHAT_MCP_URL:-http://host.docker.internal:52222/mcp/}
+      # The chat tool's own name, which is an internal one — from .env for the
+      # same reason WATCH_STATE_FILE is. It is both the MCP tool prefix and the
+      # `origin` prefix the contract checker splits on.
+      CHAT_TOOL_PREFIX: ${WATCH_CHAT_TOOL:?set WATCH_CHAT_TOOL in .env}
+      WATCH_SCAN_FILE: /timer-state/scan.json
+      # Read once, only if scan.json does not exist yet: takes over the 47 feed
+      # cursors the node had accumulated instead of re-flooring them.
+      WATCH_SEED_STATE: /node-state/${WATCH_STATE_FILE}
+      WATCH_WINDOW: ${WATCH_WINDOW:-09:30-19:30}
+      WATCH_DOW: ${WATCH_DOW:-1-5}
+      WATCH_EXCLUDE: ${WATCH_EXCLUDE:-}
+      WATCH_ME: ${WATCH_ME:-}
+      WATCH_BOTS: ${WATCH_BOTS:-}
+      WATCH_JIRA_SCRIPT: /watch/jira_watch.py
+      ATL_ENV_FILE: /timer-secrets/atlassian.env
+      # Not under HOME: this container has no /data volume, so the script's
+      # default would write into a layer that vanishes on restart — and a Jira
+      # cursor that resets means a six-hour lookback replayed as new findings.
+      ATL_STATE_FILE: /timer-state/atlassian_watch_state.json
       # The previous round's contract, checked before the next one fires. A
       # brief makes promises about the node's own state that only a before/after
       # comparison can see — three stateless formulations all PASSED on the real
@@ -402,12 +448,21 @@ services:
       CONTRACT_LEDGER_URL: http://hookrelay:8100/status
       CONTRACT_READ_TOKEN: ${WORK_READ_TOKEN:-}
       CONTRACT_SOURCE: watch
+      # The reading cursor moved out of the node's file when the scan took it
+      # over, and two of the four promises changed with it — the checker's
+      # header says which and why. Unset this and it checks a single-file node
+      # exactly as before.
+      CONTRACT_CURSORS: /timer-state/scan.json
       CONTRACT_SIGNAL_POSTER: /scripts/post_watch_signal.py
       HOOKSTACK_ENV_FILE: /timer-secrets/watch.env
       HOOKSTACK_WATCH_DOOR: http://hookrelay:8100/hook/watch
     volumes:
       - ../hookprobe/examples/patrols:/patrols:ro
       - ../scripts:/scripts:ro
+      # The scanner and the reporting tool, one copy shared with probe-watch
+      # (which mounts the same directory at /data/jira). Read-only in both: the
+      # code that decides what a round even is must not be editable by the round.
+      - ../data/watch:/watch:ro
       # The node's state, READ-ONLY. The timer judges it and must not be able to
       # edit the evidence.
       - ../work-data/probe-watch:/node-state:ro
