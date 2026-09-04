@@ -1,0 +1,169 @@
+# The WORK deployment: the operator's own attention pipe, on their own machine.
+#
+#   docker compose -p hookstack-work --env-file .env \
+#     -f deploy/docker-compose.work.yml up -d --build
+#
+# Two containers and one agent that is NOT a container: probe-watch runs as a
+# Claude Code session on this host, watches chat and tickets, and posts each
+# finding through scripts/post_watch_signal.py — which reaches 127.0.0.1:8100
+# and reads WATCH_INGEST_SECRET from this same .env, so the signing secret never
+# leaves the machine. See deploy/work.yaml for the shape of the pipe itself.
+#
+# Separate from the shadow deployment in every way that can collide: its own
+# project name, its own bind-mounted data root (../work-data), its own config
+# directory. The two are only alike in binding to 127.0.0.1 — a laptop that
+# travels must not carry an open door with it.
+
+name: hookstack-work
+
+services:
+  hookrelay:
+    build: ../hookrelay
+    image: hookrelay:work
+    container_name: work-hookrelay
+    restart: unless-stopped
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOOKRELAY_HOST: 0.0.0.0
+      HOOKRELAY_PORT: 8100
+      HOOKRELAY_DB: /data/hookrelay.db
+      HOOKRELAY_CONFIG: /etc/hookrelay/work.yaml
+      HOOKRELAY_WORKER_INTERVAL: "0.5"
+      # work.yaml's ${...} refs are expanded by hookrelay from its OWN
+      # environment, not by compose — every name used there has to be passed
+      # through here or it silently resolves to empty. An empty URL crashes at
+      # boot (loud); an empty SECRET just opens the door (quiet), which is why
+      # the two that must never be empty use `:?` and fail the `up` instead.
+      WATCH_INGEST_SECRET: ${WATCH_INGEST_SECRET:?set WATCH_INGEST_SECRET in .env}
+      LARK_WATCH_WEBHOOK: ${LARK_WATCH_WEBHOOK:?set LARK_WATCH_WEBHOOK in .env}
+      LARK_PLAN_WEBHOOK: ${LARK_PLAN_WEBHOOK:?set LARK_PLAN_WEBHOOK in .env}
+      # Optional: only if the bot has signature verification switched on in
+      # Lark. The webhook URL is the credential either way.
+      LARK_WATCH_SECRET: ${LARK_WATCH_SECRET:-}
+      LARK_PLAN_SECRET: ${LARK_PLAN_SECRET:-}
+      # Signs the pipe's delivery to probe-plan's escalation door. Empty leaves
+      # that hop unsigned, which is survivable on a private compose network and
+      # is still worth setting: it is one line and it is the only thing standing
+      # between a local process and a paid investigation.
+      PLAN_EVENT_SECRET: ${PLAN_EVENT_SECRET:-}
+      # Verifies probe-plan's report on the way back in. `:?` rather than `:-`
+      # because this pipe is on a laptop: an empty value here would let any
+      # local process post a fabricated plan card into the operator's chat, and
+      # that failure is silent — the card just arrives, looking real.
+      PLAN_RETURN_SECRET: ${PLAN_RETURN_SECRET:?set PLAN_RETURN_SECRET in .env}
+      # Guards /status, /live and /topology. Empty read token means the ledger
+      # answers anyone who can reach the port; empty ADMIN token fails CLOSED,
+      # so the admin surface simply does not work until it is set.
+      HOOKRELAY_READ_TOKEN: ${WORK_READ_TOKEN:-}
+      HOOKRELAY_ADMIN_TOKEN: ${WORK_ADMIN_TOKEN:-}
+    volumes:
+      # The DIRECTORY, not the file: a single-file bind mount binds an inode,
+      # and `git pull` replaces the file rather than writing through it — the
+      # container then serves the config from before the pull while looking
+      # completely healthy. That cost the shadow two debugging rounds in a day.
+      - ./:/etc/hookrelay/:ro
+      - ../work-data/hookrelay:/data
+    ports:
+      - "127.0.0.1:8100:8100"
+
+  # The planner. Same image and same doors as the family's investigator; what
+  # makes it "plan" rather than "diagnose" is the `kind: task` its signals
+  # carry, which selects the how-would-this-be-done prompt at the door.
+  probe-plan:
+    build:
+      context: ../hookprobe
+    image: hookprobe:work
+    container_name: work-probe-plan
+    restart: unless-stopped
+    mem_limit: 2g
+    pids_limit: 512
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # NO env_file, deliberately — the same rule the production investigator
+    # learned: injecting the whole .env put every Lark webhook and every ingest
+    # secret one `printenv` away from an agent that runs arbitrary bash. The
+    # block below names only what this service reads.
+    environment:
+      HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      # Verifies what the pipe delivers to /hooks/event — the other half of
+      # work.yaml's PLAN_EVENT_SECRET, and the same value.
+      HOOKPROBE_EVENT_SECRET: ${PLAN_EVENT_SECRET:-}
+      # Where the finished plan goes back in. This is the second `hookrelay` in
+      # the operator's diagram; without it a report reaches a JSON file on the
+      # volume and stops, which is exactly how the shadow's patrol reports were
+      # silently going nowhere for a while.
+      HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/plan-notify
+      # Signs that report. Same value as the pipe's PLAN_RETURN_SECRET, by the
+      # same name, rather than a second variable somebody has to keep equal to
+      # it — two names for one value fails as a 401 nobody connects back to the
+      # .env line.
+      HOOKPROBE_RETURN_SECRET: ${PLAN_RETURN_SECRET:?set PLAN_RETURN_SECRET in .env}
+      # The one content judgement the investigator makes. The watcher's
+      # vocabulary is high/low, so `high` is what funds a run and every `low`
+      # signal reaches Lark without buying anything; `critical` is included as a
+      # superset in case a signal ever arrives with it.
+      HOOKPROBE_ESCALATE_LEVELS: ${HOOKPROBE_ESCALATE_LEVELS:-critical,high}
+      # A ceiling matters MORE here than in production: this runs unattended on
+      # a laptop, funded by an agent that decides for itself what is worth
+      # reporting. Window spend >= budget refuses new escalations and each
+      # refusal reports itself, so the failure is visible rather than silent.
+      HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-10}
+      HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-24}
+      HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
+      # Operator methodology appended to the system prompt, re-read every run —
+      # edit it and the next run uses it, no restart. That file is how this
+      # instance becomes a PLANNER with opinions rather than a generic
+      # investigator. Unset falls back to {workdir}/system-prompt.md, which is
+      # the volume below, which is `work-data/probe-plan/system-prompt.md` FROM
+      # THE REPOSITORY ROOT — every `../` in this file resolves against deploy/,
+      # not against wherever you are standing. Writing it one directory too high
+      # produces a file nothing reads and no error anywhere.
+      HOOKPROBE_SYSTEM_PROMPT_APPEND: ${HOOKPROBE_SYSTEM_PROMPT_APPEND:-}
+      HOOKPROBE_SETTING_SOURCES: ${HOOKPROBE_SETTING_SOURCES:-}
+      HOOKPROBE_SKILLS: ${HOOKPROBE_SKILLS:-}
+      HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-}
+      HOOKPROBE_HOST: 0.0.0.0
+      HOOKPROBE_PORT: 8088
+      HOOKPROBE_WORKDIR: /data
+    volumes:
+      - ../work-data/probe-plan:/data
+    ports:
+      # The sessions page, for watching a plan being written. Loopback only.
+      - "127.0.0.1:8088:8088"
+
+  # Opt-in, and worth opting into ONCE before the real webhooks go in:
+  #
+  #   LARK_WATCH_WEBHOOK=http://sink:9000/lark-watch \
+  #   LARK_PLAN_WEBHOOK=http://sink:9000/lark-plan \
+  #   docker compose -p hookstack-work --env-file .env \
+  #     -f deploy/docker-compose.work.yml --profile smoke up -d --build
+  #   docker compose -p hookstack-work logs -f sink
+  #
+  # It prints every card it is handed, laid out. Proving the wiring against a
+  # sink costs nothing and cannot post anything into a real chat — and the two
+  # failures this deployment is most likely to have (a signal that reaches no
+  # channel, a plan that reaches a JSON file on the volume and stops) are both
+  # visible here as an absence.
+  sink:
+    profiles: [smoke]
+    image: python:3.14-slim
+    container_name: work-sink
+    command: ["python", "-u", "/examples/sink.py"]
+    volumes:
+      - ../hookrelay/examples:/examples:ro
+    restart: unless-stopped
+
+# Explicit rather than inherited: the two services find each other by service
+# name on this network, which is what work.yaml's http://probe-plan:8088 and
+# this file's http://hookrelay:8100 both depend on.
+networks:
+  default:
+    name: work_net

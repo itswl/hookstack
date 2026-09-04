@@ -14,6 +14,11 @@ data/
 # public repository. `data/` alone did not cover them.
 probe-data/
 shadow-data/
+# The work deployment's root, and the highest stakes of the three: its case
+# files are investigations OF THE OPERATOR'S OWN WORK CHAT — colleague names,
+# ticket contents, whatever the watcher forwarded. Nothing under here is ever
+# publishable.
+work-data/
 .DS_Store
 docker-compose.override.yml
 

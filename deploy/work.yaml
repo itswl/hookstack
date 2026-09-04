@@ -1,0 +1,159 @@
+# The pipe's config for the WORK deployment (deploy/docker-compose.work.yml).
+#
+#                              ┌──► to-lark-watch   (the signal, immediately)
+#   probe-watch ──► /hook/watch ┤
+#                              └──► to-plan ──► probe-plan
+#                                                   │
+#                            to-lark-plan ◄── /hook/plan-notify
+#
+# Work signals, not alerts. probe-watch is a Claude Code agent on the operator's
+# own machine — it watches chat and tickets, decides what needs the operator,
+# and posts one signal per finding through scripts/post_watch_signal.py. It is
+# not a container and it is not in this file: the pipe does not care what wrote
+# a signal, only that the signal is signed.
+#
+# TWO Lark destinations, which is the whole reason this is not the shadow's
+# shape: a signal ("someone assigned you this") and a plan ("here is how it
+# would be done") are read at different moments and belong in different chats.
+# One bot would interleave a 5-second notice with a 5-minute investigation of
+# the notice before it.
+#
+# Deliberately ABSENT, and why:
+#   - a judge. The watcher already decided what deserves the operator's
+#     attention, and the judges are calibrated on alerts — severity keywords,
+#     recovery semantics, flap suppression — vocabulary that means nothing for
+#     a colleague's question. Same reason the shadow's watch lane bypasses them.
+#   - the lark-bridge, so no card here carries a button. A button needs a
+#     callback that reaches this pipe, which on a laptop means an inbound route
+#     from the internet. A work card is read and acted on outside this system.
+#   - a return door for probe-plan's report to be judged or re-planned. The
+#     plan is the end of the chain; plan-out is terminal for the same reason
+#     every return route in this family is.
+
+sources:
+  # The watcher's door. Signed, and the one door here that faces anything
+  # outside the compose — post_watch_signal.py holds the other half of this
+  # secret and reaches 127.0.0.1:8100, so the credential never leaves the host.
+  #
+  # dedup is ON for this lane (see `pipeline` below), so the window matters: a
+  # watcher that crashes mid-round and re-runs replays signals it already sent,
+  # and 30 minutes matches hookprobe's own coalesce window so the two agree
+  # about what "the same thing again" means.
+  - name: watch
+    secret: ${WATCH_INGEST_SECRET}
+    dedup_window_seconds: 1800
+    title: "{signal.title}"
+    body: "{signal.detail}"
+    level: "{signal.level}"
+    fields:
+      origin: "{signal.origin}"
+      # Load-bearing: `task` picks the investigator's how-would-this-be-done
+      # prompt over its root-cause one. A work item handed the root-cause prompt
+      # gets an incident report about something that is not broken. The pipe
+      # stays content-blind, so the watcher is the one that says which.
+      kind: "{signal.kind}"
+
+  # probe-plan's report coming back. SIGNED, unlike the equivalent door in the
+  # shadow deployment, and the difference is the threat model rather than a
+  # change of heart: there, "an in-network hop between two containers of one
+  # deployment" means a private server network. Here the pipe is bound to
+  # 127.0.0.1 on a laptop, so "in-network" means every process on this machine,
+  # any of which could otherwise post a fabricated plan card into the operator's
+  # chat. One .env line closes that.
+  #
+  # `report.summary` rather than `analysis.summary` — same value today, but this
+  # door exists to carry a REPORT, and naming the field it wants means a future
+  # change to the analysis block cannot silently empty the card.
+  - name: plan-notify
+    secret: ${PLAN_RETURN_SECRET}
+    title: "{meta.alert_name}"
+    body: "{report.summary}"
+    level: "{meta.importance}"
+    fields:
+      origin: "{meta.source}"
+      session: "{meta.session_key}"
+
+channels:
+  # The signal, as itself. `payload: normalized` (the default, stated anyway):
+  # a watch signal is an event, not a judged RESULT, so the card is built from
+  # title/body/level/fields rather than a processed envelope.
+  #
+  # No secret unless the bot has signature verification switched on in Lark —
+  # the webhook URL is the whole credential either way, which is why it lives in
+  # .env and never here. build_feishu adds {timestamp, sign} the moment a secret
+  # exists, so turning it on is one .env line on each side.
+  - name: to-lark-watch
+    type: feishu
+    url: ${LARK_WATCH_WEBHOOK}
+    secret: ${LARK_WATCH_SECRET}
+    options: {payload: normalized}
+
+  # The investigator's escalation door. Every signal is handed over and
+  # probe-plan decides by level whether it is worth a paid run
+  # (HOOKPROBE_ESCALATE_LEVELS) — the pipe stays content-blind, and the
+  # watcher's `low` signals therefore reach Lark without buying anything.
+  - name: to-plan
+    type: generic
+    url: http://probe-plan:8088/hooks/event
+    secret: ${PLAN_EVENT_SECRET}
+    options: {payload: normalized}
+
+  # The plan. `payload: processed` because probe-plan hands back a RESULT in the
+  # processed-event dialect, and the feishu builder dresses that shape properly
+  # — headline, body, level colour — instead of rendering a normalized event
+  # built around it.
+  - name: to-lark-plan
+    type: feishu
+    url: ${LARK_PLAN_WEBHOOK}
+    secret: ${LARK_PLAN_SECRET}
+    options: {payload: processed}
+
+routes:
+  # Two routes rather than one, because the watcher's own contract says
+  # "kind=task AND level=high buys an investigation" and the platform alone
+  # cannot say that: hookprobe gates on LEVEL only (escalate_levels) and uses
+  # `kind` merely to pick which prompt it runs. Left as one fan-out, a
+  # `kind: note` at `level: high` — a Phil/Alan discussion worth reading, say —
+  # would quietly fund a paid plan for something nobody asked to be planned.
+  #
+  # So the `kind` half of the contract is expressed HERE, where it is
+  # declarative and visible in /topology, and the `level` half stays with the
+  # investigator where the family keeps it. Order is load-bearing: `plan-it`
+  # must sit above `just-tell-me`, and both stop.
+  - name: plan-it
+    source: watch
+    when: {kind: task}
+    send_to: [to-lark-watch, to-plan]
+    priority: 100
+    stop: true
+
+  # Everything the watcher raised that is not a task: still worth the operator's
+  # eyes, never worth a plan. Sends to the same chat as above so the signal
+  # stream stays one thread.
+  - name: just-tell-me
+    source: watch
+    send_to: [to-lark-watch]
+    priority: 90
+    stop: true
+
+  # The end of the chain. Terminal for the same reason: a report that fell
+  # through to a future wildcard would be handed to a brain as though it were a
+  # fresh signal, and this deployment's brain is the thing that wrote it.
+  - name: plan-out
+    source: plan-notify
+    send_to: [to-lark-plan]
+    priority: 90
+    stop: true
+
+# dedup ON, unlike the shadow. There, the judge does the noise accounting and a
+# second counter would mean two ledgers and neither one true. Here nothing else
+# counts: the watcher dedups by TOPIC in its own state file (has this
+# conversation said anything new since I last reported it), which is a different
+# question from "is this the identical signal again". A re-run replaying its
+# last round would otherwise post duplicate cards; hookprobe's own idempotency
+# per (source, event_id) already stops the duplicate INVESTIGATION, so this is
+# specifically about not telling the operator the same thing twice.
+pipeline: [dedup, silence, routes]
+
+# No card_actions: no bridge, so no callback can reach this pipe, and an
+# unsigned button URL in a group chat is one anybody can press on your behalf.
