@@ -159,6 +159,14 @@ services:
       HOOKPROBE_HOST: 0.0.0.0
       HOOKPROBE_PORT: 8088
       HOOKPROBE_WORKDIR: /data
+      # Where the AWS CLI looks, pointed at the read-only mount instead of
+      # $HOME/.aws. Set once — this says where credentials LIVE, it is not a
+      # line per credential, so the drop-a-file convention still holds. The
+      # profile is named here too so a plan cannot reach for a different one by
+      # forgetting `--profile`; there is only ever one in that file anyway.
+      AWS_SHARED_CREDENTIALS_FILE: /data/secrets/aws/credentials
+      AWS_CONFIG_FILE: /data/secrets/aws/config
+      AWS_PROFILE: ${PROBE_PLAN_AWS_PROFILE:-}
     volumes:
       - ../work-data/probe-plan:/data
       # ── the two conventions that keep this file from growing a line per
