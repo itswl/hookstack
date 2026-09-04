@@ -73,13 +73,23 @@ case "$TARGET" in
   *) echo "patrol: PATROL_TARGET must be relay or probe, not '$TARGET'" >&2; exit 1 ;;
 esac
 
-# The event door caps the alert body at 4000 bytes and says so in the prompt
-# where it cut. A brief that overruns is not an error the pipe reports — it is
-# a prompt whose last instruction silently never reached the model, so refuse
-# here instead, while there is somebody to tell.
+# The event door caps the body and says so in the prompt where it cut. A brief
+# that overruns is not an error the pipe reports — it is a prompt whose last
+# instruction silently never reached the model, so refuse here instead, while
+# there is somebody to tell.
+#
+# The cap depends on how the DOOR will read this, and the door decides that from
+# `fields.kind` in the pipe's source config, which this script cannot see: an
+# alert body is capped at 4000, a `kind: brief` at 16000. So the number is an
+# env knob defaulting to the stricter one. Raise it in the caller that also
+# configured the door for briefs — and if you raise it here and not there, this
+# stops refusing and the door starts truncating, which is the failure this check
+# exists to prevent.
 size="$(wc -c < "$BRIEF" | tr -d ' ')"
-if [ "$size" -gt 4000 ]; then
-  echo "patrol: $BRIEF is $size bytes; the event door truncates the body at 4000" >&2
+cap="${PATROL_BODY_MAX:-4000}"
+if [ "$size" -gt "$cap" ]; then
+  echo "patrol: $BRIEF is $size bytes; the event door truncates the body at $cap" >&2
+  echo "        (a door configured with fields.kind: brief allows 16000 — set PATROL_BODY_MAX)" >&2
   exit 1
 fi
 

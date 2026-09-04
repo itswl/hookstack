@@ -285,6 +285,17 @@ services:
       # the container and the laptop send byte-identical signatures through one
       # piece of code.
       - ../scripts:/data/bin:ro
+      # The operator's own Jira watcher, read-only, ONE source of truth with the
+      # laptop rather than a copy that drifts. The directory rather than the
+      # file, which this repository learned the hard way elsewhere: a
+      # single-file bind mount binds an inode, and most editors replace the file
+      # instead of writing through it, so the container would go on running the
+      # version from before the edit while looking healthy.
+      #
+      # Checked before mounting: no credential-shaped string anywhere under it.
+      # Its runbooks come along, which is a small bonus — a round that sees a
+      # ticket can read what was already written about it.
+      - ${PROBE_WATCH_JIRA_DIR:-../work-data/probe-watch-jira}:/data/jira:ro
     ports:
       - "127.0.0.1:8089:8088"
 
