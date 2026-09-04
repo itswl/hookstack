@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""The stack ran — did it produce the right answer?
+"""HOOKJUDGE ran — did it produce the right answer?
+
+Every assertion here reads that one service's `/status`: judged counts, the
+ai/reuse/recovery route split, priced tokens, identity, recovery inheritance.
+They are properties of an IMPLEMENTATION, not of the async-node dialect, and
+naming that is not pedantry — it was the reason this family's own acceptance
+test could not pass. "Swap hookjudge for a twenty-line judge of your own and the
+stack smoke is still green" was checked by a script asserting `summary.cost > 0`
+and a reuse count, which a conforming twenty-line node has no reason to have. A
+test that measures the reference implementation cannot tell you the reference
+implementation is replaceable.
+
+So the dialect half moved to `assert_dialect.py`, which reads the PIPE's ledger
+instead and runs against whatever node is plugged in. This file is now skipped
+by `STACK_BRAIN=mine`, deliberately: it is the half that is allowed to know
+which brain it is talking to.
 
 These are the checks STACK.md tells a reader to make by eye, encoded so nobody
 has to. Each corresponds to a defect that actually shipped and looked healthy

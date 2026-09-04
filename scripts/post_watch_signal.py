@@ -37,7 +37,11 @@ from pathlib import Path
 # <deployment>/scripts/, so the env file is its parent's .env. That works in
 # any checkout, and keeps a deployment path out of a public repository.
 ENV_FILE = Path(os.environ.get("HOOKSTACK_ENV_FILE") or Path(__file__).resolve().parent.parent / ".env")
-DOOR = "http://127.0.0.1:8100/hook/watch"
+# Overridable for the same reason ENV_FILE is, and found the same way: the demo
+# stack (`scripts/stack-smoke.sh`) also binds 127.0.0.1:8100, so a machine
+# running a watch deployment cannot run the smoke without one of them moving.
+# The default is unchanged, so a caller that has never heard of this is unaffected.
+DOOR = os.environ.get("HOOKSTACK_WATCH_DOOR") or "http://127.0.0.1:8100/hook/watch"
 _REQUIRED = ("title", "level")
 
 

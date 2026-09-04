@@ -18,6 +18,15 @@ cd "$(dirname "$0")/.."
 
 RELAY=http://127.0.0.1:8100
 JUDGE=http://127.0.0.1:8200
+
+# The node under test, named rather than assumed. `STACK_BRAIN=mine` skips
+# hookjudge's own ledger assertions and leaves the dialect ones — that pair is
+# how "the reference implementation is replaceable" stops being a claim and
+# becomes a command somebody can run. RETURN_DOOR and BRAIN_CHANNEL are the two
+# names your node's wiring uses in examples/stack.yaml.
+STACK_BRAIN="${STACK_BRAIN:-hookjudge}"
+RETURN_DOOR="${RETURN_DOOR:-judge-notify}"
+BRAIN_CHANNEL="${BRAIN_CHANNEL:-to-judge}"
 step() { printf '\n\033[1;34m── %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[1;31mSTACK RED\033[0m — %s\n' "$1"; docker compose logs --tail 40; exit 1; }
 
@@ -177,22 +186,50 @@ sleep 4
 fire alertmanager '{"status":"resolved","commonLabels":{"alertname":"DiskWillFill","env":"prod"},"alerts":[{"status":"resolved","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},"annotations":{"summary":"k8s node disk usage 93%","description":"fell back to 41%"}}]}'
 
 step "wait for the far end"
-# Wait on the LAST link, not a midpoint. The brain's ledger reaching four only
+# Wait on the LAST link, not a midpoint. A brain's ledger reaching four only
 # means it judged four — the judgement still has to travel back through the
 # pipe and be delivered downstream. Waiting on the brain and then reading the
 # sink asserted against a chain that had not finished.
+#
+# Both signals are read from the PIPE and the sink, never from the brain's own
+# schema. A smoke that waits on `summary.judged` cannot be pointed at a node
+# that has no such field, and being pointable at one is the whole test below.
 for _ in $(seq 1 45); do
-  judged=$(curl -sf "$JUDGE/status" | python3 -c 'import sys,json;print(json.load(sys.stdin)["summary"]["judged"])' 2>/dev/null || echo 0)
+  returned=$(curl -sf "$RELAY/status" | RETURN_DOOR="$RETURN_DOOR" python3 -c \
+    'import sys,json,os;print(sum(1 for r in json.load(sys.stdin)["recent"] if r["source"]==os.environ["RETURN_DOOR"]))' \
+    2>/dev/null || echo 0)
   cards=$(docker compose logs sink 2>/dev/null | python3 -c 'import sys;print(sum("delivery on" in l for l in sys.stdin))' 2>/dev/null || echo 0)
-  # Four judgements, each dressed for two channels.
-  if [ "$judged" -ge 4 ] && [ "${cards:-0}" -ge 8 ]; then break; fi
+  # Four results, each dressed for two channels.
+  if [ "${returned:-0}" -ge 4 ] && [ "${cards:-0}" -ge 8 ]; then break; fi
   sleep 2
 done
-echo "brain judged $judged; sink received ${cards:-0} deliveries"
+echo "the node returned ${returned:-0} result(s); sink received ${cards:-0} deliveries"
 
 step "assert the ledger"
-curl -sf "$JUDGE/status" > /tmp/stack-judge.json || fail "the brain's ledger is unreadable"
+curl -sf "$RELAY/status" > /tmp/stack-relay.json || fail "the pipe's ledger is unreadable"
 docker compose logs sink > /tmp/stack-sink.log 2>&1 || true
-python3 scripts/assert_stack.py /tmp/stack-judge.json /tmp/stack-sink.log || fail "the stack ran but produced the wrong answer"
+
+# THE DIALECT, measured from the bus. Runs whatever node is plugged in, and
+# asserts only what the async-node contract asks of one: took the handover,
+# signed its way back in, returned something the pipe could read and route,
+# closed the loop. Nothing here reads the node's own ledger.
+python3 scripts/assert_dialect.py /tmp/stack-relay.json /tmp/stack-sink.log \
+  --return-door "$RETURN_DOOR" --brain-channel "$BRAIN_CHANNEL" --events 4 \
+  || fail "the node plugged in here does not speak the async-node dialect"
+
+# THE REFERENCE IMPLEMENTATION's own ledger — judged counts, the ai/reuse/
+# recovery split, priced tokens, identity, recovery inheritance. Every one is a
+# property of hookjudge and none is in the dialect, which is exactly why it is
+# skippable: `STACK_BRAIN=mine bash scripts/stack-smoke.sh` is how the stated
+# acceptance test ("swap hookjudge for a twenty-line judge of your own and this
+# is still green") is actually expressed. It used to be unexpressible, because
+# these assertions ran unconditionally and a conforming twenty-line node has no
+# reason to have `summary.cost`.
+if [ "${STACK_BRAIN:-hookjudge}" = "hookjudge" ]; then
+  curl -sf "$JUDGE/status" > /tmp/stack-judge.json || fail "the brain's ledger is unreadable"
+  python3 scripts/assert_stack.py /tmp/stack-judge.json /tmp/stack-sink.log || fail "the stack ran but produced the wrong answer"
+else
+  echo "STACK_BRAIN=${STACK_BRAIN} — hookjudge's own ledger assertions skipped; the dialect ones above still ran"
+fi
 
 printf '\n\033[1;32mSTACK GREEN\033[0m\n'
