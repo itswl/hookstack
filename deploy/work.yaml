@@ -53,6 +53,31 @@ sources:
       # stays content-blind, so the watcher is the one that says which.
       kind: "{signal.kind}"
 
+  # The patrol trigger. `hookprobe/examples/patrols/patrol.sh` posts here on a
+  # schedule and reads the brief from a FILE at send time, so editing the brief
+  # changes the next round with no restart and no rebuild — the same property
+  # the Hermes prompt had, which is the one thing worth keeping from it.
+  #
+  # dedup_window_seconds is 60, not the source default of 120 and not this
+  # deployment's 1800: every trigger carries the SAME title and body, so at the
+  # window used for real signals the pipe would score every second round a
+  # duplicate and drop it. 60s is below the cadence, so a genuine double-fire
+  # (cron overlap, a manual run beside the timer) is still caught.
+  - name: watch-due
+    secret: ${WATCH_DUE_SECRET}
+    dedup_window_seconds: 60
+    title: "{title}"
+    body: "{message}"
+    level: "{state}"
+    level_map: {alerting: high}
+    fields:
+      env: "{env}"
+      # `brief` means the body IS the instruction: the investigator runs it as
+      # written instead of wrapping it in "find the root cause". Without this the
+      # first round did `date`, grepped case files, called no MCP tool and
+      # answered with the brief's own silence token — a blend of two prompts.
+      kind: brief
+
   # probe-plan's report coming back. SIGNED, unlike the equivalent door in the
   # shadow deployment, and the difference is the threat model rather than a
   # change of heart: there, "an in-network hop between two containers of one
@@ -98,6 +123,22 @@ channels:
     secret: ${PLAN_EVENT_SECRET}
     options: {payload: normalized}
 
+  # The watcher's own door. It has no RETURN channel anywhere in this file, and
+  # that is the design rather than an omission: probe-watch's product is the N
+  # signals it POSTs to /hook/watch during its run, one per finding, each with
+  # its own level and kind so each gets routed on its own merits. A round
+  # summary delivered on top of those would card the operator twice for the
+  # same thing. The summary stays where it is useful — the case file, which the
+  # next round Greps.
+  #
+  # If probe-watch stops answering, the pipe says so without a return door: this
+  # channel's deliveries retry, dead-letter, and the dead letter self-alarms.
+  - name: to-watcher
+    type: generic
+    url: http://probe-watch:8088/hooks/event
+    secret: ${WATCH_EVENT_SECRET}
+    options: {payload: normalized}
+
   # The plan. `payload: processed` because probe-plan hands back a RESULT in the
   # processed-event dialect, and the feishu builder dresses that shape properly
   # — headline, body, level colour — instead of rendering a normalized event
@@ -134,6 +175,18 @@ routes:
     source: watch
     send_to: [to-lark-watch]
     priority: 90
+    stop: true
+
+  # The timer, on its way to the watcher. Terminal like everything else here.
+  # It goes through the pipe rather than straight to the probe's door on
+  # purpose — patrol.sh offers both — because this way the round is accounted,
+  # deduped and silenceable like any other event, and a watcher that stops
+  # answering shows up as a dead letter rather than as an absence somebody has
+  # to notice.
+  - name: watch-due-out
+    source: watch-due
+    send_to: [to-watcher]
+    priority: 95
     stop: true
 
   # The end of the chain. Terminal for the same reason: a report that fell

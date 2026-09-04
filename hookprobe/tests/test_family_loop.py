@@ -133,6 +133,58 @@ def test_the_prompt_asks_for_a_verdict_only_where_one_was_declared(tmp_path) -> 
     assert prompt.startswith(silent.messages[0]), "the instruction is appended, never woven into the question"
 
 
+def test_a_brief_is_run_as_written_instead_of_wrapped(tmp_path) -> None:
+    """The third question, and the one that is not a question.
+
+    Both other prompts presume a SUBJECT to analyse and wrap the body in that
+    framing. A scheduled procedure has neither shape, and the framing fights it:
+    the first watcher round did `date` (from the brief), grepped case files (from
+    the alert wrapper), called no MCP tool at all, and answered with the brief's
+    own silence token. A blend of two instructions is what wrapping a procedure
+    produces.
+    """
+    engine = FakeEngine()
+    brief = "Run `date` first. If outside 09:30-19:30, answer [SILENT].\nOtherwise list the feeds."
+    with make_client(tmp_path, engine) as client:
+        due = dict(EVENT, event_id=88, title="Watch round", body=brief, fields={"kind": "brief", "env": "work"})
+        assert client.post("/hooks/event", json=due).json()["status"] == "accepted"
+        _drain(client, "probe:inbound:88")
+
+    prompt = engine.messages[0]
+    assert prompt.startswith(brief), "the brief is the prompt, not an item inside one"
+    # None of the framing either other door adds may appear.
+    assert "find the root cause" not in prompt
+    assert "how would this be done" not in prompt
+    assert "Open the case files first" not in prompt
+    assert "MEMORY-SUGGESTION" not in prompt
+    # The trigger's own context still travels, marked as what it is.
+    assert "not instructions" in prompt and "work" in prompt
+
+
+def test_a_brief_gets_room_a_procedure_needs(tmp_path) -> None:
+    """Truncating an alert loses detail about one incident; truncating a
+    procedure deletes STEPS from it, and the run then does most of a job and
+    reports success. The first real brief landed at 3,799 bytes against the
+    4,000 cap — two more paragraphs from a failure nothing would have reported."""
+    engine = FakeEngine()
+    long_brief = "step one.\n" + ("padding line\n" * 900) + "FINAL STEP: post the signal."
+    assert len(long_brief) > 4000
+    with make_client(tmp_path, engine) as client:
+        due = dict(EVENT, event_id=89, title="Long round", body=long_brief, fields={"kind": "brief"})
+        assert client.post("/hooks/event", json=due).json()["status"] == "accepted"
+        _drain(client, "probe:inbound:89")
+    assert "FINAL STEP: post the signal." in engine.messages[0], "the last step survived the cap"
+
+    # An ALERT body keeps the tighter cap: it arrives from an upstream nobody
+    # here controls, which is the whole reason that cap exists.
+    alert_engine = FakeEngine()
+    with make_client(tmp_path / "alert", alert_engine) as client:
+        fat = dict(EVENT, event_id=90, body=long_brief)
+        assert client.post("/hooks/event", json=fat).json()["status"] == "accepted"
+        _drain(client, "probe:inbound:90")
+    assert "FINAL STEP: post the signal." not in alert_engine.messages[0]
+
+
 def test_an_event_without_a_kind_is_still_investigated_as_an_alert(tmp_path) -> None:
     engine = FakeEngine()
     with make_client(tmp_path, engine) as client:

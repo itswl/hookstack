@@ -133,6 +133,32 @@ Fields:
 {fields}
 ```"""
 
+# The third question, and the one that is not a question: the body IS the task.
+#
+# Both prompts above presume a SUBJECT to analyse — "what broke" or "how would
+# this be done" — and wrap the body in that framing. A scheduled brief has
+# neither shape: it is a procedure with its own steps and its own output
+# contract, and the framing fights it. Measured on the first watcher round: the
+# brief said "run `date`, then list conversations via MCP, then post one signal
+# per finding", the alert wrapper said "find the root cause, open the case files
+# first", and the run did `date`, grepped case files, called no MCP tool at all
+# and answered with the brief's silence token. A blend of two instructions is
+# what a wrapper around a procedure produces.
+#
+# NOT a trust boundary, and worth saying so where somebody might mistake it for
+# one: the wrapper never sanitised anything. A caller holding the door's secret
+# could always write "ignore the above" into a body. This removes framing, not a
+# control, and the door's HMAC is still the whole of what decides who may speak.
+_BRIEF_MESSAGE = """{body}
+
+---
+Context for the round above, not instructions:
+Source: {source} · Level: {level} · Title: {title}
+Fields:
+```json
+{fields}
+```"""
+
 _REFIRE_MESSAGE = """The same alert fired again — this is a follow-up in the investigation you \
 already ran, not a new incident.
 
@@ -165,6 +191,15 @@ _TITLE_MAX = 300
 _SOURCE_MAX = 120
 _EVENT_ID_MAX = 200
 _BODY_MAX = 4000
+# A brief gets four times the room, and the difference is defensible for exactly
+# one reason: every other body arrives from an upstream payload nobody in this
+# family controls, while a brief is a file the operator wrote and signed into
+# the door. Truncating an alert loses detail about one incident; truncating a
+# procedure silently deletes STEPS from it, and the run then does most of a job
+# and reports success. The first watcher brief landed at 3,799 bytes against the
+# 4,000 cap — two more paragraphs from a failure nothing would have reported.
+# Still bounded, and _EVENT_MAX_BYTES (128 KB) still gates the whole request.
+_BRIEF_BODY_MAX = 16000
 _FIELDS_MAX = 4000
 
 # What one button press may spend on the prompt and on the record. A press
@@ -423,12 +458,12 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
         # an alert, which is what this door has always assumed.
         raw_fields = event.get("fields")
         kind = str(raw_fields.get("kind") or "").strip().lower() if isinstance(raw_fields, dict) else ""
-        template = _TASK_MESSAGE if kind == "task" else _EVENT_MESSAGE
+        template = {"task": _TASK_MESSAGE, "brief": _BRIEF_MESSAGE}.get(kind, _EVENT_MESSAGE)
         message = template.format(
             source=source,
             level=level,
             title=title,
-            body=str(event.get("body") or "")[:_BODY_MAX],
+            body=str(event.get("body") or "")[: _BRIEF_BODY_MAX if kind == "brief" else _BODY_MAX],
             fields=_fenced_fields(event.get("fields")),
         ) + _verdict_instruction(settings.verdicts)
         payload = {
