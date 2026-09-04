@@ -6,21 +6,30 @@
 
 Run agents in production and be able to account for them afterwards.
 
-Three services that split alert handling — a content-blind pipe, a judge, and a
-read-only investigator — wired by a config file rather than by code. What makes
-it more than a router is what surrounds each handover: every hop is signed,
-retried, dead-lettered, priced and replayable, and every agent runs behind a
-credential, a budget and a closed list of what it may do.
+The shape is always the same: **something produces signals, a pipe carries them
+and accounts for every hop, nodes decide or investigate, and what survives
+reaches a person.** Three services fill it — a content-blind pipe, a judge, and
+a read-only investigator — wired by a config file rather than by code.
 
-Two deployments in this repository share every line of that code and agree on
-almost nothing else — one carries alerts, the other carries an operator's own
-work signals ([docs/deployments.md](docs/deployments.md)). Narrative overview
-with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
+What makes it more than a router is what surrounds each handover: every hop is
+signed, retried, dead-lettered, priced and replayable, and every agent runs
+behind a credential, a budget and a closed list of what it may do.
+
+**Alerts are the instance this was worn in on**, and most of the examples here
+speak that dialect. They are not the shape. The second deployment in this
+repository carries an operator's own work signals — chat and tickets, through a
+watcher and a planner, into two different chats — and shares every line of the
+same code with the first ([docs/deployments.md](docs/deployments.md)). If your
+signals come from somewhere else entirely, the pipe is content-blind by design
+and will not notice.
+
+Narrative overview with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 
 ## What it optimizes
 
-Not response time and not breadth of integrations — the two scarce resources an
-alert stream actually spends: **a person's attention** and **the model bill**.
+Not response time and not breadth of integrations — the two scarce resources a
+stream of signals actually spends: **a person's attention** and **the model
+bill**.
 A verdict answers *does a person need to act now*, and delivery routes on the
 answer; a paid verdict is reused across restatements instead of bought again; a
 condition ruled not worth investigating answers its re-fires from the runbook
