@@ -79,6 +79,31 @@ async def test_a_search_term_is_a_substring_and_not_a_pattern(store) -> None:
     assert await store.recent_events(50, query="_") == [], "`_` is the quiet half of the same bug"
 
 
+async def test_a_board_cannot_see_a_row_that_has_not_been_committed(store) -> None:
+    """One connection has one transaction, so every read shared the pipeline's.
+
+    A page asking /status while an event was halfway through being recorded saw
+    that transaction's uncommitted rows — and if the pipeline then raised, the
+    board had shown a row that never existed. Serialising writers cannot fix it:
+    the reader never took the lock, and making it take one would put every board
+    refresh behind the delivery worker. So reads moved to a second connection,
+    which under WAL sees the last COMMIT and nothing in flight.
+    """
+    async with store.transaction() as tx:
+        await tx.insert_event("s", "fp-mid", _event(title="halfway through"), "{}", 100.0)
+        assert await store.recent_events(50) == [], "not committed, so not anybody's business yet"
+    assert [r["title"] for r in await store.recent_events(50)] == ["halfway through"]
+
+    # And the phantom itself: read mid-flight, then let the pipeline raise. On
+    # one connection that read returned a row nothing would ever have again.
+    with pytest.raises(RuntimeError):
+        async with store.transaction() as tx:
+            await tx.insert_event("s", "fp-doomed", _event(title="never happened"), "{}", 100.0)
+            assert [r["title"] for r in await store.recent_events(50)] == ["halfway through"]
+            raise RuntimeError("the pipeline raised")
+    assert [r["title"] for r in await store.recent_events(50)] == ["halfway through"]
+
+
 async def test_the_purge_never_deletes_an_event_with_a_promise_still_queued(store) -> None:
     """The invariant the batching had to preserve when it started releasing the
     lock between batches: an operator retrying a dead delivery in the gap would

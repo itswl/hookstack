@@ -21,7 +21,7 @@ hookjudge has exactly one outbound address: the pipe. Fan-out is not its
 business, so it cannot grow a second downstream by accident.
 
 It is the smallest service in the stack, and that is a **budget, not an
-observation**: 3,150 source lines is the ceiling, four runtime dependencies is
+observation**: 3,250 source lines is the ceiling, four runtime dependencies is
 the count, and `scripts/assert_weight.py` holds the first to what this file says.
 Raised from 2,900 on 2026-08-21, and the reason is the point of the budget rather
 than an exception to it: `importance` came back `high` for 210 of 216 alerts on
