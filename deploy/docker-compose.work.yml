@@ -112,6 +112,16 @@ services:
         # Dockerfile states two paragraphs down — that the guard blocks mutating
         # verbs on top of whatever the mounted credential allows.
         APT_EXTRAS: ${PROBE_PLAN_APT_EXTRAS:-git awscli}
+        # kubectl, for the question AWS credentials cannot answer. `eks:*` on an
+        # IAM user proves nothing about what that user may do INSIDE a cluster:
+        # EKS authorises through Kubernetes RBAC, a second and separate layer, so
+        # "I can DescribeCluster" and "I can list pods" are unrelated facts. The
+        # planner found exactly that gap and could not close it without a client.
+        #
+        # Its mutating verbs were already refused by the bash guard before this
+        # was installed — that rule has been there since the guard existed,
+        # waiting for somebody to have a cluster to point at.
+        KUBECTL_VERSION: ${PROBE_PLAN_KUBECTL_VERSION:-v1.31.4}
     image: hookprobe:work
     container_name: work-probe-plan
     restart: unless-stopped
@@ -209,6 +219,14 @@ services:
       # beats the same question answered from a title. Point it at a parent
       # directory of your checkouts; inert until you do.
       - ${PROBE_PLAN_CODE:-../work-data/probe-plan-code}:/data/code:ro
+      # The kubeconfig, generated ONCE and mounted read-only, rather than built
+      # by the agent each run. `aws eks update-kubeconfig` would work — the guard
+      # allows it by name — but a credential file the agent writes is a
+      # credential file the agent controls, and the point of this directory is
+      # that it does not. Auth is `aws eks get-token` at call time, so this file
+      # holds no long-lived secret: the read-only IAM user behind it is the
+      # boundary, exactly like every other row in probe-plan-secrets.
+      - ../work-data/probe-plan-kube:/data/home/.kube:ro
     ports:
       # The sessions page, for watching a plan being written. Loopback only.
       - "127.0.0.1:8088:8088"

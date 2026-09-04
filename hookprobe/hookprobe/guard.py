@@ -45,9 +45,15 @@ _SEG = r"[^|;&\n]*"
 # describe-volumes` was DENIED because the regex could backtrack into reading
 # "eu-west-1" as the service and "ec2" as the operation. Asking "does this
 # command read anything at all" needs no parse and has no such seam.
+# `update-kubeconfig` is the one exception that is not a read VERB and is still
+# a read: it calls DescribeCluster and writes a file on this machine, and can
+# mutate nothing in AWS. Denying it was the first false positive this inverted
+# rule produced — an investigator that may query EKS could not reach the
+# cluster's API at all. Named individually rather than by loosening the verb
+# list, because "update" staying denied everywhere else is the point.
 _AWS_READ = (
     r"(?<![/:.\w-])(?:describe|get|list|search|head|scan|query|select|lookup|"
-    r"estimate|preview|validate|check|test|ls)[a-z0-9-]*\b"
+    r"estimate|preview|validate|check|test|ls|update-kubeconfig)[a-z0-9-]*\b"
 )
 
 _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
