@@ -286,7 +286,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         silenceable, routed and accounted like anything else.
         """
         for name, source in app.state.config.sources.items():
-            if source.expect_every_seconds <= 0:
+            if source.expect_every_seconds <= 0 or not source.expected_now(now):
                 continue
             last = await app.state.store.last_event_at(name)
             if last is None:

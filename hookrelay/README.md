@@ -13,7 +13,7 @@ webhooks in at one door, walks each event through three named gates, and deliver
 to Feishu / DingTalk / WeCom / generic HTTP — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 5,200 source lines is the
+Both numbers are **budgets, not descriptions**. 5,300 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped

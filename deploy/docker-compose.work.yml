@@ -82,6 +82,17 @@ services:
       PLAN_HANDOFF_SECRET: ${PLAN_HANDOFF_SECRET:?set PLAN_HANDOFF_SECRET in .env}
       WORK_EVENT_SECRET: ${WORK_EVENT_SECRET:?set WORK_EVENT_SECRET in .env}
       WORK_RETURN_SECRET: ${WORK_RETURN_SECRET:?set WORK_RETURN_SECRET in .env}
+      # The watch-due door's schedule, so the absence sweep knows a timer that
+      # stopped at 19:40 on a Friday is a timer doing its job. DEFAULTED HERE
+      # to the same values the timer defaults to: hookrelay's own ${...} has
+      # no default syntax, so an unset .env variable would reach the door as
+      # empty — meaning 'always expected' — and the false alarm would be back.
+      WATCH_HOURS: ${WATCH_HOURS:-9-19}
+      WATCH_DAYS: ${WATCH_DAYS:-1-5}
+      # The pipe reads those hours in ITS local zone. Without this it is UTC,
+      # eight hours from the timer, and the window would be for a different
+      # day's evening.
+      TZ: ${WATCH_TZ:-Asia/Singapore}
       # Guards /status, /live and /topology. Empty read token means the ledger
       # answers anyone who can reach the port; empty ADMIN token fails CLOSED,
       # so the admin surface simply does not work until it is set.

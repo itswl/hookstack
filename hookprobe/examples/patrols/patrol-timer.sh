@@ -117,6 +117,10 @@ while :; do
 
   dow=$(date +%u); hour=$(date +%-H)
   if ! in_range "$dow" "$DAYS" || ! in_range "$hour" "$HOURS"; then
+    # Logged, not silent. The header promises one line per tick so that
+    # `docker logs` answers "is it alive"; a weekend of nothing at all is the
+    # same bytes as a hung loop, and it was a whole weekend before anyone asked.
+    log "outside hours/days, tick skipped"
     continue
   fi
 

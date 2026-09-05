@@ -87,3 +87,43 @@ async def test_last_event_at_reads_the_newest(store, cfg) -> None:
         )
     assert await store.last_event_at("watch-due") == 300.0
     assert source.expect_every_seconds == 1200
+
+
+def _at(weekday: int, hour: int, minute: int = 0) -> float:
+    """A local timestamp on a fixed week. weekday 1 = Monday, matching the config."""
+    import calendar
+    import time
+
+    # 2026-09-07 is a Monday. Build local time, not UTC, because the schedule is
+    # read in the process's local zone — the whole point of the TZ line in compose.
+    base = time.mktime((2026, 9, 7 + (weekday - 1), hour, minute, 0, 0, 0, -1))
+    assert calendar.weekday(2026, 9, 7) == 0
+    return base
+
+
+def test_a_scheduled_door_is_not_expected_outside_its_hours() -> None:
+    """Measured on the first evening after absence alarming shipped: the timer
+    stopped at 19:40 as configured, and at 20:05 the pipe said it had 'said
+    nothing for 25 minutes'. It would have said so every weekday evening."""
+    src = Config.from_dict(
+        {**CFG, "sources": [{**CFG["sources"][0], "expect_hours": "9-19", "expect_days": "1-5"}]}
+    ).sources["watch-due"]
+    assert src.expected_now(_at(1, 20, 5)) is False, "Monday 20:05 — the clock is off duty"
+    assert src.expected_now(_at(6, 12, 0)) is False, "Saturday noon — the clock is off duty all day"
+    assert src.expected_now(_at(1, 14, 0)) is True, "Monday 14:00 — it had better be ticking"
+
+
+def test_the_window_opening_is_a_grace_not_an_alarm() -> None:
+    """09:00 Monday: silent since Friday, inside the window, and the first tick
+    lands one second from now. Without a grace the sweep alarms first."""
+    src = Config.from_dict(
+        {**CFG, "sources": [{**CFG["sources"][0], "expect_hours": "9-19", "expect_days": "1-5"}]}
+    ).sources["watch-due"]
+    assert src.expected_now(_at(1, 9, 0)) is False, "the window just opened; give it one interval"
+    assert src.expected_now(_at(1, 9, 19)) is False, "1200s expected; 19 minutes is not yet one interval"
+    assert src.expected_now(_at(1, 9, 21)) is True, "past one interval into the window, silence counts"
+
+
+def test_no_schedule_means_always_expected(cfg) -> None:
+    """The default, and the behaviour every existing door keeps."""
+    assert cfg.sources["watch-due"].expected_now(_at(6, 3, 0)) is True

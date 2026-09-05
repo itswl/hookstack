@@ -42,6 +42,8 @@ sources:
     require_timestamp: false           # replay protection, see below
     max_skew_seconds: 300
     expect_every_seconds: 0            # 0 = off; silence on this door is a defect
+    expect_hours: "9-19"              # optional: WHEN it is expected — same shape as
+    expect_days: "1-5"                #   a patrol timer's PATROL_HOURS / PATROL_DAYS
 ```
 
 **Replay protection — `require_timestamp` / `max_skew_seconds`.** The preferred
@@ -65,6 +67,15 @@ An absence produces no delivery to retry and no dead letter to raise, because
 the event that would have carried the failure is the one that never arrived. It
 is off by default, and never inferred: a deployment that just came up must not
 alarm about every timer whose first tick has not landed.
+
+**A door with a schedule declares it — `expect_hours` / `expect_days`.** A timer that
+stops at 19:40 on a Friday is doing its job, and without these the sweep called it
+silent at 20:05 and would have every weekday evening. Same shape and same values as
+the timer's own `PATROL_HOURS` / `PATROL_DAYS` — wire both from one variable so they
+cannot drift — and read in the pipe's **local zone**, so the relay must run in the
+operator's TZ, which the deployment files set. The window's opening is a grace, not an
+alarm: at 09:00 Monday the door has been silent since Friday and the first tick is a
+second away, so silence only counts once the window has been open for one interval.
 
 **The storm fuse is volume, not content** — it catches the high-cardinality
 flood that dedup structurally cannot (every payload different, so no
