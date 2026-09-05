@@ -74,6 +74,14 @@ services:
       # only symptom was a watcher that never ran.
       WATCH_DUE_SECRET: ${WATCH_DUE_SECRET:?set WATCH_DUE_SECRET in .env}
       WATCH_EVENT_SECRET: ${WATCH_EVENT_SECRET:?set WATCH_EVENT_SECRET in .env}
+      # The three the work lane added. Same rule as the pair above: work.yaml's
+      # ${...} are expanded by hookrelay from ITS environment, so a name used
+      # there and not passed here resolves to empty — and an empty secret on
+      # `plan-approved` means any local process can start a run that changes
+      # things. `:?` so a missing one fails the `up` instead of the door.
+      PLAN_HANDOFF_SECRET: ${PLAN_HANDOFF_SECRET:?set PLAN_HANDOFF_SECRET in .env}
+      WORK_EVENT_SECRET: ${WORK_EVENT_SECRET:?set WORK_EVENT_SECRET in .env}
+      WORK_RETURN_SECRET: ${WORK_RETURN_SECRET:?set WORK_RETURN_SECRET in .env}
       # Guards /status, /live and /topology. Empty read token means the ledger
       # answers anyone who can reach the port; empty ADMIN token fails CLOSED,
       # so the admin surface simply does not work until it is set.
@@ -148,6 +156,19 @@ services:
       # volume and stops, which is exactly how the shadow's patrol reports were
       # silently going nowhere for a while.
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/plan-notify
+      # The Hand off button on this node's sessions page, and the only reason
+      # it appears at all. It posts to the PIPE's plan-approved door, never to
+      # probe-work directly: one hop shorter would leave the handover with no
+      # event, no trace, no correlation and no dedup — and dedup is what turns
+      # a second click into a `duplicate` in the ledger instead of a second
+      # paid run against the same plan.
+      #
+      # This is the only write-adjacent thing the PLANNER holds, and it is not
+      # a write: it is the credential for asking the pipe to carry a report the
+      # operator just read. The agent inside cannot use it — the subprocess
+      # does not inherit the service's secrets.
+      HOOKPROBE_HANDOFF_URL: http://hookrelay:8100/hook/plan-approved
+      HOOKPROBE_HANDOFF_SECRET: ${PLAN_HANDOFF_SECRET:?set PLAN_HANDOFF_SECRET in .env}
       # Signs that report. Same value as the pipe's PLAN_RETURN_SECRET, by the
       # same name, rather than a second variable somebody has to keep equal to
       # it — two names for one value fails as a 401 nobody connects back to the
@@ -363,6 +384,88 @@ services:
   #
   # Reuses hookprobe:work rather than adding an image — it already carries bash,
   # curl and python3, which is the whole dependency list.
+  # The write node, and the only one in this file with credentials that change
+  # things. Same image as the other two — the difference is entirely env and
+  # volumes, which is the property that lets N roles cost N env blocks.
+  #
+  # It replaces the agent the operator was running on their own laptop for the
+  # plans they decided to act on. That agent had every credential they own, no
+  # audit, no budget and no declared permissions; the trade here is a much
+  # narrower blast radius and a record of what ran, in exchange for having to
+  # say in advance what it may reach.
+  #
+  # WHAT BOUNDS IT is the secrets directory below, and nothing else pretends to.
+  # HOOKPROBE_BASH_GUARD=danger-only allows the mutating verbs and refuses only
+  # what no credential scope could undo (guard.py lists them and says why an
+  # allowlist would be the wrong shape for a runner doing delegated work). If
+  # that directory holds a cluster-admin kubeconfig, this container is
+  # cluster-admin. Start it empty and add from the gaps it reports.
+  #
+  # NO MCP, deliberately: the chat tools belong to the watcher. This node must
+  # never read a message — it acts on a plan a person already read, and giving
+  # it eyes on the source of that plan would close the loop the click exists to
+  # keep open.
+  probe-work:
+    build:
+      context: ../hookprobe
+      args:
+        APT_EXTRAS: ${PROBE_WORK_APT_EXTRAS:-git awscli}
+        KUBECTL_VERSION: ${PROBE_PLAN_KUBECTL_VERSION:-v1.31.4}
+    image: hookprobe:work
+    container_name: work-probe-work
+    restart: unless-stopped
+    mem_limit: 2g
+    pids_limit: 512
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      # `:?` and not `:-`. This is the door that starts runs which change
+      # things; unsigned, any process on this laptop could start one.
+      HOOKPROBE_EVENT_SECRET: ${WORK_EVENT_SECRET:?set WORK_EVENT_SECRET in .env}
+      HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/work-notify
+      HOOKPROBE_RETURN_SECRET: ${WORK_RETURN_SECRET:?set WORK_RETURN_SECRET in .env}
+      # The whole reason this container exists as a separate service.
+      HOOKPROBE_BASH_GUARD: danger-only
+      # Every plan arrives at `high` from the plan-approved door, so this gate
+      # is not doing selection here — it is the backstop that keeps a stray
+      # low-level event from starting a write run.
+      HOOKPROBE_ESCALATE_LEVELS: high,critical
+      # Lower than the planner's on purpose: a work run is meant to be short and
+      # specific. A ceiling this node hits is a plan that was too big to hand
+      # over in one click, which is worth being told about.
+      HOOKPROBE_BUDGET_USD: ${WORK_BUDGET_USD:-5}
+      HOOKPROBE_BUDGET_WINDOW_HOURS: ${WORK_BUDGET_WINDOW_HOURS:-24}
+      # No MCP config at all, so the closed set is empty and every MCP tool is
+      # refused. Stated rather than omitted: an empty allowlist here IS the
+      # policy, and a future reader should see that it was chosen.
+      HOOKPROBE_MCP_TOOLS: ""
+      # A work run is one turn on one plan. Coalescing would fold a second,
+      # different plan into the first one's session and carry its context.
+      HOOKPROBE_COALESCE_WINDOW_SECONDS: "0"
+      TZ: ${WATCH_TZ:-Asia/Singapore}
+      HOOKPROBE_HOST: 0.0.0.0
+      HOOKPROBE_PORT: 8088
+      HOOKPROBE_WORKDIR: /data
+    volumes:
+      - ../work-data/probe-work:/data
+      # The write credentials, and the entire security boundary of this service.
+      # Its OWN directory: the planner's is read-only by construction and the
+      # two must not be one mount, or "the planner is read-only" stops being
+      # true the day somebody adds a token to the wrong file.
+      - ../work-data/probe-work-secrets:/data/secrets:ro
+      # The planner's case files, READ-ONLY. A plan arrives as text; this is the
+      # investigation that produced it, so the runner can see what was actually
+      # checked rather than only what was concluded. The output, never the
+      # credentials — which is what makes it safe to share.
+      - ../work-data/probe-plan/results:/data/plan-cases:ro
+    ports:
+      - "127.0.0.1:8090:8088"
+
   watch-timer:
     image: hookprobe:work
     container_name: work-watch-timer
