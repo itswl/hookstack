@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import urllib.error
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -38,7 +39,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from hookprobe import __version__, events, library, ops, remediation
+from hookprobe import __version__, events, handoff, library, ops, remediation
 from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
@@ -411,6 +412,33 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         except NoTurnRunningError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"status": "stopping", "sessionKey": run.session_key}
+
+    @app.post("/v1/runs/{session_key}/handoff", dependencies=[Depends(require_token)])
+    async def run_handoff(session_key: str) -> dict[str, Any]:
+        """Hand this run's report to the pipe, for whichever node the operator
+        wired that door to.
+
+        The only human step in a chain that is otherwise automatic, and it is
+        there because the next node has credentials that change things. What the
+        click means is "I have read this plan" — not "I trust this pipeline".
+
+        409 rather than 200 for a run that is still moving or produced nothing:
+        an empty handoff is a paid run started on nothing at all.
+        """
+        run = service.get(session_key)
+        if run is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        try:
+            sent = await asyncio.to_thread(handoff.send, settings.handoff_url, settings.handoff_secret, run, run.text)
+        except handoff.NotConfigured as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from exc
+        except handoff.NotFinished as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (OSError, urllib.error.URLError) as exc:
+            # Named rather than swallowed: the operator pressed a button and is
+            # owed the reason it did not land, in the words the door used.
+            raise HTTPException(status_code=502, detail=f"the pipe refused or was unreachable: {exc}") from exc
+        return {"handed_off": True, "session": session_key, **sent}
 
     @app.get("/v1/remediations", dependencies=[Depends(require_token)])
     async def remediations_list() -> dict[str, Any]:

@@ -139,6 +139,13 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             "agents_config": str(settings.agents_config) if settings.agents_config else None,
             "mcp_config": str(settings.mcp_config) if settings.mcp_config else None,
             "return_url": settings.return_url or None,
+            # The URL, not just a boolean: an operator reading this page
+            # needs to see WHICH door a hand-off would go through, and the
+            # sessions page uses its presence to decide whether to offer
+            # the button at all. Its secret stays a boolean, like the rest.
+            "handoff_url": settings.handoff_url or None,
+            "handoff_secret_set": bool(settings.handoff_secret),
+            "bash_guard": settings.bash_guard,
             "alarm_configured": bool(settings.alarm_url),
             "event_secret_set": bool(settings.event_secret),
             "return_secret_set": bool(settings.return_secret),
