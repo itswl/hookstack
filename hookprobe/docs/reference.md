@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (39)
+## Environment (40)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -50,6 +50,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_SETTING_SOURCES` | `project` | Skill layers |
 | `HOOKPROBE_MCP_TOOLS` | *(empty)* | Which MCP tools this instance may actually call, as a closed set — mcp__chat__chat_search_messages or mcp__chat__* for a whole server |
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
+| `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
 
 ## Routes (47)
 

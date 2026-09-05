@@ -72,19 +72,29 @@ class EngineResult:
     input_changes: tuple[str, ...] = ()
 
 
-async def _bash_guard_hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
-    command = str((input_data.get("tool_input") or {}).get("command") or "")
-    reason = bash_deny_reason(command)
-    if reason is None:
-        return {}
-    logger.warning("bash command denied: %s", command)
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
+def _bash_guard_hook(mode: str) -> Callable[..., Any]:
+    """PreToolUse: refuse a command this runner's posture does not allow.
+
+    Built per instance rather than read from a global, like the MCP guard beside
+    it: which posture a runner takes is a property of that runner, and two of
+    them share this process in the tests.
+    """
+
+    async def hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
+        command = str((input_data.get("tool_input") or {}).get("command") or "")
+        reason = bash_deny_reason(command, mode)
+        if reason is None:
+            return {}
+        logger.warning("bash command denied (%s): %s", mode, command)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
         }
-    }
+
+    return hook
 
 
 def mcp_deny_reason(tool_name: str, allowed: frozenset[str]) -> str | None:
@@ -641,7 +651,7 @@ class ClaudeAgentEngine:
             mcp_servers=_load_mcp_servers(self._settings.mcp_config),
             hooks={
                 "PreToolUse": [
-                    HookMatcher(matcher="Bash", hooks=_hook_list(_bash_guard_hook)),
+                    HookMatcher(matcher="Bash", hooks=_hook_list(_bash_guard_hook(self._settings.bash_guard))),
                     # Matched on every tool, filtered by name inside: the guard
                     # must not depend on how the SDK interprets a matcher
                     # pattern for the one thing it exists to stop.

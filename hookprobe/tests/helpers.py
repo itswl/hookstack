@@ -60,6 +60,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "verdicts": frozenset(),
         "budget_usd": 0.0,
         "budget_window_hours": 24.0,
+        "bash_guard": "readonly",
         "retention_days": 0,
         "alarm_url": "",
         "alarm_min_interval_seconds": 600,

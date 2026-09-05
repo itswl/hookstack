@@ -108,6 +108,17 @@ class Settings:
     # model?, skills?}), the config-file twin of .claude/agents/*.md files.
     agents_config: Path | None
 
+    # Which posture the bash guard takes. `readonly` (default) is the
+    # investigator's: mutating verbs are refused. `danger-only` is for a runner
+    # an operator gave scoped WRITE credentials to — the verbs are allowed and
+    # only the handful no credential scope can undo are not. An unknown value
+    # falls back to readonly, because a typo in the variable that decides
+    # whether a runner may write must fail closed.
+    #
+    # This is not what bounds such a runner. The credentials mounted into it
+    # are; see guard.py for why an allowlist would be the wrong shape here.
+    bash_guard: str
+
     # Loop hygiene (hygiene.py), all advisory — the security boundary stays the
     # bash guard plus read-only credentials.
     #   repeat_reminder_at: after N identical calls, remind the agent to change
@@ -255,6 +266,7 @@ class Settings:
             system_prompt_append=_path_env("HOOKPROBE_SYSTEM_PROMPT_APPEND"),
             agents_config=_path_env("HOOKPROBE_AGENTS_CONFIG"),
             repeat_reminder_at=max(0, _int("HOOKPROBE_REPEAT_REMINDER_AT", 3)),
+            bash_guard=(os.environ.get("HOOKPROBE_BASH_GUARD") or "").strip().lower() or "readonly",
             bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
             bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),
             auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),
