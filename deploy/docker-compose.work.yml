@@ -394,7 +394,13 @@ services:
   # narrower blast radius and a record of what ran, in exchange for having to
   # say in advance what it may reach.
   #
-  # WHAT BOUNDS IT is the secrets directory below, and nothing else pretends to.
+  # WHAT BOUNDS IT is the set of credentials mounted below — its own secrets
+  # directory plus whatever read-only credential is shared beside it — and
+  # nothing else pretends to. The volumes list is the whole answer, in one
+  # place, which is the property worth protecting when the next one is added.
+  # (`/data/aws` sits beside /data/secrets rather than inside it for a dull
+  # reason worth recording: /data/secrets is itself a read-only mount, so
+  # Docker cannot create a sub-mountpoint under it.)
   # HOOKPROBE_BASH_GUARD=danger-only allows the mutating verbs and refuses only
   # what no credential scope could undo (guard.py lists them and says why an
   # allowlist would be the wrong shape for a runner doing delegated work). If
@@ -431,6 +437,9 @@ services:
       HOOKPROBE_RETURN_SECRET: ${WORK_RETURN_SECRET:?set WORK_RETURN_SECRET in .env}
       # The whole reason this container exists as a separate service.
       HOOKPROBE_BASH_GUARD: danger-only
+      AWS_CONFIG_FILE: /data/aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /data/aws/credentials
+      AWS_PROFILE: ${PROBE_PLAN_AWS_PROFILE:-bcpoker-ro}
       # Every plan arrives at `high` from the plan-approved door, so this gate
       # is not doing selection here — it is the backstop that keeps a stray
       # low-level event from starting a write run.
@@ -463,6 +472,33 @@ services:
       # checked rather than only what was concluded. The output, never the
       # credentials — which is what makes it safe to share.
       - ../work-data/probe-plan/results:/data/plan-cases:ro
+      # The SHARED read-only kubeconfig, the same file the planner reads. One
+      # copy on purpose: two would drift, and this credential is read-only for
+      # both of them — verified against the API server rather than assumed from
+      # its name (`kubectl auth can-i` answers no to every delete, create and
+      # patch, and no to pods/exec and pods/portforward, which are the two ways
+      # a read-only credential becomes a write one).
+      #
+      # It is also the demonstration this node exists to make: the guard here is
+      # `danger-only` and would happily run `kubectl delete pod`. The cluster is
+      # what refuses it. That is the boundary the family keeps saying is the
+      # real one, and this is the first place it is load-bearing.
+      #
+      # WHEN THIS NODE GETS A WRITE CREDENTIAL it goes in probe-work-secrets
+      # above and KUBECONFIG points there instead. Never into this directory:
+      # the planner reads it, and 'the planner is read-only' would stop being
+      # true the day somebody put a write kubeconfig in a shared mount.
+      - ../work-data/probe-plan-kube:/data/home/.kube:ro
+      # ONE directory out of the planner's secrets, not the directory. That
+      # kubeconfig authenticates with `aws eks get-token`, so k8s read access
+      # IS AWS read access — mounting the whole of /data/secrets would have
+      # handed this node Jira, GitHub and Grafana as a side effect of wanting
+      # kubectl to work, which is how a scoped credential set stops being one.
+      #
+      # Verified against the provider, not read off the name:
+      # simulate-principal-policy answers `allowed` for Describe/Get and
+      # `implicitDeny` for TerminateInstances, DeleteObject and CreateUser.
+      - ../work-data/probe-plan-secrets/aws:/data/aws:ro
     ports:
       - "127.0.0.1:8090:8088"
 
