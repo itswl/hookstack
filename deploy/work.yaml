@@ -5,6 +5,19 @@
 #                              └──► to-plan ──► probe-plan
 #                                                   │
 #                            to-lark-plan ◄── /hook/plan-notify
+#                                                   │
+#                     the operator reads it and clicks Hand off
+#                                                   │
+#                                          /hook/plan-approved
+#                                                   │
+#                            to-lark-plan ◄── /hook/work-notify ◄── probe-work
+#
+# READ-ONLY ABOVE THE CLICK, NOT BELOW IT. probe-watch and probe-plan hold
+# query-only credentials and need no permission to run; the click is where that
+# stops. Everything the click starts runs with credentials that change things,
+# which is why it is a person and not a `when:` condition — a chat message
+# reaching a cluster through two model rewrites, each making it look more
+# legitimate than the last, is exactly what that hop exists to interrupt.
 #
 # Work signals, not alerts. probe-watch is a Claude Code agent on the operator's
 # own machine — it watches chat and tickets, decides what needs the operator,
@@ -123,6 +136,49 @@ sources:
       # already agree on is the right thing to key on.
       correlation_id: "{meta.event_id}"
 
+  # The one door in this file a MACHINE never posts to.
+  #
+  # Everything else here is a node handing work to the next node. This one is an
+  # operator, on the sessions page, saying "I have read this plan and I want it
+  # acted on" — and the node behind it is the only one with credentials that
+  # change things. That is the entire reason the hop exists; take the human out
+  # and this file describes a chat message reaching a cluster through two model
+  # rewrites, each of which made it look more legitimate than the last.
+  #
+  # `dedup_window_seconds` is doing real work here and is set long on purpose.
+  # The handoff payload is deterministic per plan, so a second click inside the
+  # window is recorded as `duplicate` rather than buying a second run against
+  # the same plan. An hour is longer than any plan stays worth acting on.
+  - name: plan-approved
+    secret: ${PLAN_HANDOFF_SECRET}
+    title: "{title}"
+    body: "{message}"
+    level: high
+    dedup_window_seconds: 3600
+    fields:
+      # The plan's own session key, so the work runner can be pointed at the
+      # case file that produced this — the investigation, not just its verdict.
+      session: "{session}"
+      # `task` picks the how-would-this-be-done prompt at the far door. The work
+      # runner is being asked to DO the thing the plan describes, and the
+      # root-cause framing would have it write an incident report about
+      # something that is not broken.
+      kind: task
+
+  # What the work runner did, coming back to be dressed as a card like any other
+  # report. Signed with its own secret: it is a different node from the planner
+  # and shares no credential with it, which is the point of it being separate.
+  - name: work-notify
+    secret: ${WORK_RETURN_SECRET}
+    title: "{meta.alert_name}"
+    body: "{report.summary}"
+    level: "{meta.importance}"
+    fields:
+      origin: "{meta.source}"
+      session: "{meta.session_key}"
+      cost_usd: "{meta.cost_usd}"
+      correlation_id: "{meta.event_id}"
+
 channels:
   # The signal, as itself. `payload: normalized` (the default, stated anyway):
   # a watch signal is an event, not a judged RESULT, so the card is built from
@@ -142,6 +198,15 @@ channels:
   # probe-plan decides by level whether it is worth a paid run
   # (HOOKPROBE_ESCALATE_LEVELS) — the pipe stays content-blind, and the
   # watcher's `low` signals therefore reach Lark without buying anything.
+  # The write node. Same image as the planner, different credentials and a
+  # different guard posture — see docker-compose.work.yml, where that difference
+  # is the whole security design and is stated in one place.
+  - name: to-work
+    type: generic
+    url: http://probe-work:8088/hooks/event
+    secret: ${WORK_EVENT_SECRET}
+    options: {payload: normalized}
+
   - name: to-plan
     type: generic
     url: http://probe-plan:8088/hooks/event
@@ -200,6 +265,30 @@ routes:
     source: watch
     send_to: [to-lark-watch]
     priority: 90
+    stop: true
+
+  # The operator's click, on its way to the node that can change things. The
+  # only route in this file whose trigger is a person rather than a machine, and
+  # the one place a reader should stop and check the shape: everything upstream
+  # of here is read-only, everything downstream of here is not.
+  #
+  # Fans out to the chat as well as to the runner, so the operator's own record
+  # shows what they set going — a work run that starts silently and reports 90
+  # seconds later reads, in the meantime, exactly like a click that did nothing.
+  - name: act-on-it
+    source: plan-approved
+    send_to: [to-lark-plan, to-work]
+    priority: 100
+    stop: true
+
+  # What the work runner did, to the chat that carried the plan. Terminal: this
+  # is the end of the chain, and a route from here back toward the planner would
+  # be the loop that hands a brain its own output — the hazard /topology warns
+  # about and the reason four comments in two config files used to guard it.
+  - name: work-out
+    source: work-notify
+    send_to: [to-lark-plan]
+    priority: 100
     stop: true
 
   # The timer, on its way to the watcher. Terminal like everything else here.

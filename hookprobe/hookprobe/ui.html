@@ -831,7 +831,7 @@ $("#helpBtn").onclick = () => openHelp();
 $("#q").oninput = () => refreshList();
 
 let handoffReady = false;
-api("/v1/ops").then(async (r) => {
+api("/v1/config").then(async (r) => {
   if (!r.ok) return;
   const ops = await r.json().catch(() => ({}));
   handoffReady = Boolean(ops.handoff_url);
