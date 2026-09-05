@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from hookprobe import automation
+
 
 def _int(name: str, default: int) -> int:
     try:
@@ -195,6 +197,12 @@ class Settings:
     # was a dead end on a deployment where nobody answers, and everything the
     # check objects to still waits for a human.
     memory_auto_apply: bool
+    # The declared ceiling per class of automation — see automation.py. A
+    # class may do at most its tier; defaults preserve today's behaviour, so
+    # this is inert until an operator writes a line. The scattered auto-apply
+    # knobs (memory_auto_apply here, the remediation allowlist, escalate_levels)
+    # operate UNDER it: a knob cannot grant what the tier does not permit.
+    automation_tiers: dict[str, str]
     # Severities that may wake a person, as a comma-separated list.
     escalate_levels: frozenset[str]
     # The closed vocabulary this instance is allowed to CONCLUDE with, so a
@@ -292,6 +300,7 @@ class Settings:
             ruling_url=os.environ.get("HOOKPROBE_RULING_URL", ""),
             ruling_secret=os.environ.get("HOOKPROBE_RULING_SECRET", ""),
             memory_auto_apply=_flag("HOOKPROBE_MEMORY_AUTO_APPLY", True),
+            automation_tiers=automation.parse_tiers(os.environ.get("HOOKPROBE_AUTOMATION_TIERS", "")),
             escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
             verdicts=frozenset(
                 part.strip().lower() for part in os.environ.get("HOOKPROBE_VERDICTS", "").split(",") if part.strip()

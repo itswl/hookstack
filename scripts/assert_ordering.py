@@ -57,6 +57,15 @@ SANCTIONED: dict[str, str] = {
         "run.turns is a transcript; a conversation reads forwards, and a follow-up "
         "is meaningless above the answer it followed"
     ),
+    # The automation record is the same case as /v1/audit above: a JSONL read in
+    # append order because the thing that consumes it — stats() — needs chronology
+    # to take the last window and let the last decision on a proposal win. It is
+    # not a list a person reads; the page (`/v1/automation`) serves a per-class
+    # summary, not these rows. Turning it around would break the window, not a UI.
+    "hookprobe/hookprobe/automation.py:oldest first": (
+        "the record is a JSONL consumed by stats() in chronological order; the "
+        "reader-facing view is review(), which is per-class, not these rows"
+    ),
 }
 
 # Files that talk about ordering for reasons unrelated to a reader: a sort key in

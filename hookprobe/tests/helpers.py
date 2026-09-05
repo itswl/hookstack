@@ -50,6 +50,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         # behaviour, and a default that quietly applied half their fixtures to
         # CLAUDE.md would make them pass for the wrong reason.
         "memory_auto_apply": False,
+        "automation_tiers": {},
         "return_secret": "",
         "escalate_levels": frozenset({"critical", "high"}),
         # Closed, like production: a test that wants an MCP tool names it.

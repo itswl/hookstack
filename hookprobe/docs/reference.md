@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (42)
+## Environment (43)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -42,6 +42,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_RULING_REVERIFY_DAYS` | `7` | A ruled-useless condition still gets a REAL investigation this often — the evidence behind a ruling goes stale, and a gate that never re-checks would keep citing last month's case… |
 | `HOOKPROBE_COALESCE_WINDOW_SECONDS` | `1800` | Storm coalescing at the event door: a re-fire of the same alert (same source + title, new event id) within this many seconds continues the existing investigation instead of funding… |
 | `HOOKPROBE_CONSOLIDATE_AT` | `5` | Consolidation: at this many accumulated cases, a runbook triggers one agent run that drafts a curated procedure from the case pile |
+| `HOOKPROBE_AUTOMATION_TIERS` | *(empty)* | The declared ceiling per class of automation — see automation.py |
 | `HOOKPROBE_BUDGET_USD` | `0.0` | The budget breaker, guarding the only path that spends money without a human asking: once the window's recorded spend reaches budget_usd, the event door refuses NEW investigations… |
 | `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24.0` | Window the spend ceiling is measured over |
 | `HOOKPROBE_RETENTION_DAYS` | `0` | Volume retention (days): case files and engine transcripts older than this are pruned daily |
@@ -54,7 +55,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
 | `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
 
-## Routes (48)
+## Routes (50)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -73,6 +74,8 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/v1/agents/{name}` | One role's definition, whole |
 | PUT | `/v1/agents/{name}` | Create or replace a role definition, size-checked and atomic |
 | GET | `/v1/audit` | The flight recorder, newest FIRST |
+| GET | `/v1/automation` | Each class of automation, its declared ceiling, its record, and whether the two agree — plus the tier the record WOULD support |
+| POST | `/v1/automation/{cls}/{item_id}/regret` | A sampling review, after the fact, saying an auto-applied action was wrong |
 | GET | `/v1/budget` | The breaker's arithmetic: window spend, ceiling, cache ratio and the worth line |
 | GET | `/v1/config` | The operational knobs, redacted: secret VALUES never appear — booleans say whether they are set |
 | GET | `/v1/live` | The session list's wake-up line, the same shape the other two boards use |
