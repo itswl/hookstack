@@ -42,6 +42,10 @@ services:
       HOOKRELAY_WORKER_INTERVAL: "0.5"
       WW_RELAY_SECRET: ${WW_RELAY_SECRET:?mirror FORWARD_RELAY_SECRET into .env}
       SHADOW_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
+      # The silent-audit sample rate for quiet-wake-no (work.yaml equivalent
+      # is off). 0 = off, the shipping default; hookrelay's own ${...} has no
+      # default syntax, so it must be passed or the door reads it as empty.
+      QUIET_SAMPLE_PCT: ${QUIET_SAMPLE_PCT:-0}
       # Read by shadow.yaml's to-probe-action channel, so the pipe can sign a
       # card press for the investigator's door. Empty means that channel is
       # unsigned, which the config guard refuses — so the button is simply

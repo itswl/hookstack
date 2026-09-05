@@ -232,3 +232,86 @@ async def test_wake_no_quiets_and_everything_else_fails_open(store):
 
     unanswered = await handle_hook(store, cfg, source, verdict("", "legacy verdict"), now=1002.0)
     assert unanswered["outcome"] == "routed", "'' must fail open into a card, never into silence"
+
+
+def _sampling_cfg(pct: int, banner: str = "") -> Config:
+    """The quiet-wake-no stage with a silent-audit sample turned on."""
+    stage = {
+        "type": "filter",
+        "name": "quiet-wake-no",
+        "when": {"source": "judge-notify", "wake": "no"},
+        "skip_code": "wake_no",
+        "sample_pct": pct,
+    }
+    if banner:
+        stage["sample_banner"] = banner
+    return Config.from_dict(
+        {
+            "sources": [
+                {
+                    "name": "judge-notify",
+                    "secret": "",
+                    "title": "{meta.alert_name}",
+                    "body": "{analysis.summary}",
+                    "fields": {"wake": "{meta.wake_someone}"},
+                }
+            ],
+            "channels": [{"name": "to-me", "type": "feishu", "url": "http://bridge:9000/send"}],
+            "routes": [{"name": "verdict-to-me", "source": "judge-notify", "send_to": ["to-me"]}],
+            "pipeline": [stage, "routes"],
+        }
+    )
+
+
+def _verdict(name: str) -> dict:
+    return {"meta": {"alert_name": name, "wake_someone": "no"}, "analysis": {"summary": "the summary"}}
+
+
+async def test_a_sampled_wake_no_card_is_delivered_not_dropped(store):
+    """The whole point: the thing the filter swallows can occasionally be looked
+    at. At 100% every matched card passes instead of dropping — and it delivers,
+    so a person can finally press it."""
+    cfg = _sampling_cfg(100)
+    source = cfg.sources["judge-notify"]
+    out = await handle_hook(store, cfg, source, _verdict("top-up over 500"), now=1000.0)
+    assert out["outcome"] == "routed" and out["channels"] == ["to-me"]
+
+
+async def test_sampling_off_by_default_still_drops(store):
+    """0 percent is off, and off is exactly today's behaviour — a quiet that
+    turned itself partly on by default would be the opposite of opt-in."""
+    cfg = _sampling_cfg(0)
+    source = cfg.sources["judge-notify"]
+    out = await handle_hook(store, cfg, source, _verdict("top-up over 500"), now=1000.0)
+    assert out["outcome"] == "skipped" and out["skip_code"] == "wake_no"
+
+
+async def test_the_same_condition_is_sampled_consistently_not_per_fire(store):
+    """Deterministic by identity: a condition is either always sampled or never,
+    so a storm's Nth restatement is not delivered while its first was dropped —
+    which would read as the dedup breaking. Two fires of one condition agree."""
+    cfg = _sampling_cfg(100)  # deterministic regardless of pct; 100 makes the fate readable
+    source = cfg.sources["judge-notify"]
+    a = await handle_hook(store, cfg, source, _verdict("top-up over 500"), now=1000.0)
+    b = await handle_hook(store, cfg, source, _verdict("top-up over 500"), now=2000.0)
+    assert a["outcome"] == b["outcome"], "same condition, same fate"
+
+
+async def test_a_sampled_card_is_marked_so_the_ledger_and_the_reader_can_tell(store):
+    """It carries a banner (so a person knows they were NOT going to be paged)
+    and a field (so the ledger separates it from a real wake=yes). Without the
+    banner a silent-audit sample is indistinguishable from a real page, which is
+    the one thing this must never be."""
+    cfg = _sampling_cfg(100, banner="AUDIT — you were not going to be paged")
+    source = cfg.sources["judge-notify"]
+    out = await handle_hook(store, cfg, source, _verdict("top-up over 500"), now=1000.0)
+    row = (await store.recent_events(1))[0]
+    assert row["fields"].get("audit_sample") == "wake_no", "the ledger can find sampled cards"
+    # The banner is in the event BODY, which /trace serves and recent_events does
+    # not — read it straight so the assertion is about the bytes a card is built
+    # from, not about the summary row.
+    cursor = await store.read.execute("SELECT body FROM events WHERE id = ?", (row["id"],))
+    body = (await cursor.fetchone())["body"]
+    assert body.startswith("AUDIT"), "the banner leads the card so a reader sees it first"
+    assert "the summary" in body, "and the real summary still follows it"
+    assert out["outcome"] == "routed"
