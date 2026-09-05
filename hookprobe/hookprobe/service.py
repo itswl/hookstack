@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Protocol
 
-from hookprobe import actions, distill_loop, remediation, rulings, run_rulings, suggestions
+from hookprobe import actions, automation, distill_loop, remediation, rulings, run_rulings, suggestions
 from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult
 from hookprobe.notify import ReturnDelivery
@@ -788,7 +788,14 @@ class RunService:
                     self._settings.workdir,
                     run.session_key,
                     facts,
-                    apply_safe=self._settings.memory_auto_apply,
+                    # Capped by the tier: the knob may be on, but memory's
+                    # ceiling is what finally decides, so an operator can
+                    # halt auto-apply in one config line without hunting the
+                    # knob down. Default ceiling is auto_apply, so unchanged.
+                    apply_safe=(
+                        self._settings.memory_auto_apply
+                        and automation.permits(self._settings.automation_tiers, "memory", "auto_apply")
+                    ),
                 )
                 if memory["queued"]:
                     run.meta["memory_suggestions"] = memory["queued"]

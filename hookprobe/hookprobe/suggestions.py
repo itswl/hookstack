@@ -25,6 +25,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from hookprobe import automation
 from hookprobe.files import atomic_write, locked
 
 logger = logging.getLogger("hookprobe.suggestions")
@@ -161,6 +162,12 @@ def append(workdir: Path, session_key: str, facts: list[str], *, apply_safe: boo
             reason = unsafe_reason(fact)
             if reason is None:
                 _write_memory(workdir / "CLAUDE.md", fact, heading=HEADING_UNVERIFIED)
+                # Recorded auto_applied, not proposed-then-approved: no human saw
+                # it, so it counts as the automation acting on its own. That is
+                # exactly the row a sampling review later turns into an approval
+                # or a regret, which is what makes memory's record real evidence
+                # rather than a tally of what shape-safety let through.
+                automation.record(workdir, "memory", uuid.uuid4().hex[:10], "auto_applied", line=fact[:200])
                 applied += 1
             else:
                 logger.info("memory suggestion queued for a human: %s", reason)
@@ -179,10 +186,11 @@ def append(workdir: Path, session_key: str, facts: list[str], *, apply_safe: boo
             for fact in facts:
                 if open_now + queued >= _QUEUE_CAP:
                     break
+                item_id = uuid.uuid4().hex[:10]
                 handle.write(
                     json.dumps(
                         {
-                            "id": uuid.uuid4().hex[:10],
+                            "id": item_id,
                             "ts": round(time.time(), 3),
                             "session_key": session_key,
                             "line": fact,
@@ -192,6 +200,9 @@ def append(workdir: Path, session_key: str, facts: list[str], *, apply_safe: boo
                     )
                     + "\n"
                 )
+                # Same id in the record as in the queue, so a later accept/dismiss
+                # on this suggestion matches back to the proposal that made it.
+                automation.record(workdir, "memory", item_id, "proposed", line=fact[:200])
                 queued += 1
     return {"applied": applied, "queued": queued}
 
@@ -232,6 +243,9 @@ def resolve(workdir: Path, suggestion_id: str, *, accept: bool) -> dict[str, Any
         target["status"] = "accepted" if accept else "dismissed"
         target["resolved_at"] = round(time.time(), 3)
         atomic_write(path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows).encode("utf-8"))
+    # The label this whole record is built from: a human pressed a button. Keyed
+    # by the suggestion's id so it lands against the proposal in the ledger.
+    automation.record(workdir, "memory", suggestion_id, "approved" if accept else "dismissed")
     if accept:
         memory = workdir / "CLAUDE.md"
         # A second lock, on the memory file: this is another read-append-write,

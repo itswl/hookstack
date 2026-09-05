@@ -39,7 +39,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from hookprobe import __version__, events, handoff, library, ops, remediation
+from hookprobe import __version__, automation, events, handoff, library, ops, remediation
 from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
@@ -439,6 +439,33 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             # owed the reason it did not land, in the words the door used.
             raise HTTPException(status_code=502, detail=f"the pipe refused or was unreachable: {exc}") from exc
         return {"handed_off": True, "session": session_key, **sent}
+
+    @app.get("/v1/automation", dependencies=[Depends(require_token)])
+    async def automation_review(cls: str | None = None) -> dict[str, Any]:
+        """Each class of automation, its declared ceiling, its record, and
+        whether the two agree — plus the tier the record WOULD support.
+
+        Counters, not agreement rates: every number traces to a human press or a
+        sampling review. The page an operator reads before deciding whether a
+        class has earned a step up, and the same view the sampling patrol reads.
+        """
+        return automation.review(settings.workdir, cls, tiers=settings.automation_tiers)
+
+    @app.post("/v1/automation/{cls}/{item_id}/regret", dependencies=[Depends(require_token)])
+    async def automation_regret(cls: str, item_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """A sampling review, after the fact, saying an auto-applied action was
+        wrong. This is how an unattended deployment gets its human-in-the-loop
+        back — asynchronously, because nobody here answers in real time — and the
+        one event that resets a class's argument for a higher tier.
+
+        Deliberately write-gated to the operator token, not reachable by any run:
+        a regret is a label, and a label the automation could write about itself
+        is not a label. The agent's subprocess holds no token.
+        """
+        automation.record(
+            settings.workdir, cls, item_id, "regretted", note=str((payload or {}).get("note") or "")[:300]
+        )
+        return {"recorded": True, "class": cls, "id": item_id}
 
     @app.get("/v1/remediations", dependencies=[Depends(require_token)])
     async def remediations_list() -> dict[str, Any]:

@@ -49,6 +49,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from hookprobe import automation
 from hookprobe.files import atomic_write
 
 logger = logging.getLogger("hookprobe.remediation")
@@ -113,6 +114,7 @@ def propose(workdir: Path, session_key: str, steps: list[dict[str, Any]]) -> str
             "results": [],
         },
     )
+    automation.record(workdir, "remediation", proposal_id, "proposed", steps=len(steps))
     return proposal_id
 
 
@@ -267,6 +269,7 @@ def approve(workdir: Path, proposal_id: str, *, allowlist: Path | None, note: st
     row["approved_at"] = round(time.time(), 3)
     row["approved_note"] = note[:300]
     save(workdir, row)
+    automation.record(workdir, "remediation", proposal_id, "approved")
     return row
 
 
@@ -279,6 +282,7 @@ def reject(workdir: Path, proposal_id: str) -> dict[str, Any]:
     row["status"] = "rejected"
     row["resolved_at"] = round(time.time(), 3)
     save(workdir, row)
+    automation.record(workdir, "remediation", proposal_id, "dismissed")
     return row
 
 
