@@ -1,6 +1,6 @@
 ---
 title: Sample a fraction of quiet-wake-no cards so regret is measured, not assumed
-status: proposed
+status: implemented
 date: 2026-09-02
 scope: stack
 ---
@@ -55,3 +55,32 @@ the 64% is 64% of noise or is burying something.
 - Rejected alternative: deliver ALL wake=no as "FYI, muted". That is just
   turning the quiet off, which the whole design is against — the point is a
   measured fraction, not a firehose.
+
+## Built (2026-09-06)
+
+The `filter` processor gained `sample_pct` (default 0, off), `sample_by`
+(default `title`) and `sample_banner`. When a filter matches, a deterministic
+fraction of the CONDITIONS — sha256 of the sample key, so it survives a restart
+and one condition is always sampled or never — PASSES instead of dropping. The
+sampled event carries the banner prepended to its body and `fields.audit_sample`
+holding the code it dodged, so the ledger separates it from a real delivery.
+
+The whole change is in hookrelay. The judge side needed NOTHING: a sampled
+wake=no card is a wake=no row that is now deliverable, so a press of "actually
+mattered" flows through the existing `/feedback` → `record_mattered` →
+`quiet_regrets` counter that was already there and reading 0 for want of a
+signal. That is the shape the note predicted — "the judge's attention block
+already counts a sampled card a person marks mattered as exactly a
+quiet_regret".
+
+Wired into shadow.yaml at `${QUIET_SAMPLE_PCT}`, default 0 through the compose
+file. Off until an operator sets a rate, and the note's own caveat stands: worth
+nothing on a channel nobody can press, so it stays off where the lark-bridge is
+absent (the work deployment does not sample at all).
+
+This is the symmetric other half of the automation-graduation record shipped the
+same day: that one measures whether an auto-APPLIED action was wrong; this one
+measures whether a SILENCED one should not have been. Both turn a regret counter
+from a hope into a measurement, and both are sampling reviews rather than
+firehoses — a measured fraction, looked at after the fact, because nobody here
+answers in real time.

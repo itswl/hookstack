@@ -155,6 +155,8 @@ pipeline whose enrichment cannot be enumerated — an `http` brain, or a plugin
 processor — is not judged at all: refusing honest config is worse than missing
 a typo.
 
+**A filter may keep a silent-audit sample.** A `filter` drops what it matches; set `sample_pct` and a deterministic fraction PASSES instead, delivered and banner-marked, so the thing a filter quietly swallows can occasionally be looked at. The case it was built for: the judge drops ~64% of cards on `wake=no`, and the regret counter that would say whether that was right reads 0 because a card never delivered cannot be pressed — a number nothing can move is not a measurement. `sample_by` is the STABLE key (default `title`), so one condition is always sampled or never; sampling per fire would deliver a storm's Nth restatement and look like dedup broke. sha256, so the sample survives a restart. A sampled card carries `fields.audit_sample` so the ledger separates it from a real delivery, and the banner so a person knows they were NOT going to be paged. Off by default, and worth nothing on a channel nobody can press.
+
 The single-shape inline form (`title:`/`body:`/`level:` directly on the source)
 stays valid forever; it becomes a one-entry list called `inline`.
 
@@ -198,6 +200,9 @@ pipeline:
     name: mute-low
     when: {level: [low]}
     skip_code: low_muted
+    sample_pct: 0                      # 5 = deterministic 1-in-20 PASS instead of drop
+    sample_by: title                   #   the STABLE key to sample on
+    sample_banner: "audit — not paged"  #   prepended to the card so a reader knows
   - routes
 ```
 

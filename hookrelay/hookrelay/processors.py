@@ -30,6 +30,7 @@ plugin processor that touches anything outside the context owes the same check.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -151,15 +152,60 @@ class SetProcessor:
         return PASS
 
 
+def _sampled(key: str, pct: int) -> bool:
+    """Is this identity in the sampled fraction? Deterministic, never a coin flip.
+
+    A random per-event draw would sample a storm's Nth restatement and look like
+    dedup broke; hashing the identity means the SAME condition is either always
+    sampled or never, so the fraction is a fraction of CONDITIONS. sha256, not
+    Python's hash(), because hash() is salted per process and the sample would
+    reshuffle on every restart — a stable audit has to survive a deploy.
+    """
+    if pct <= 0:
+        return False
+    if pct >= 100:
+        return True
+    bucket = int(hashlib.sha256(key.encode("utf-8")).hexdigest(), 16) % 100
+    return bucket < pct
+
+
 @registry.processor("filter")
 class FilterProcessor:
-    """Named drop: {when: {level: [low]}, skip_code: low_filtered}."""
+    """Named drop: {when: {level: [low]}, skip_code: low_filtered}.
+
+    A drop may keep a SAMPLE. `sample_pct` (default 0, off) lets a deterministic
+    fraction of the matched events PASS instead — a silent-audit sample, so the
+    thing a filter quietly swallows can occasionally be looked at. The
+    motivating case: the judge drops ~64% of cards on wake=no, and the regret
+    counter that would say whether that was right reads 0 because nobody can
+    press a card that was never delivered. A number nothing can move is not a
+    measurement. A sampled card carries a banner saying it is one, so a person
+    reading it knows the system is NOT claiming they needed it, and a press of
+    "actually mattered" feeds the existing quiet-regret counter with no change
+    on the judge side.
+    """
 
     async def run(self, rt: Runtime, ctx: EventContext, options: dict[str, Any]) -> Verdict:
         when: dict[str, Any] = options.get("when") or {}
         context = ctx.routing_context()
         if when and all(_condition_matches(cond, context.get(key, "")) for key, cond in when.items()):
             code = str(options.get("skip_code") or "filtered")
+            pct = int(options.get("sample_pct") or 0)
+            # Sample on a STABLE key — the condition, not the instance. Default
+            # title, because two fires of one alert differ in their summary body
+            # but name the same condition, and sampling by body would flicker.
+            key = context.get(str(options.get("sample_by") or "title"), "")
+            if pct and key and _sampled(key, pct):
+                banner = str(options.get("sample_banner") or "").strip()
+                if banner:
+                    ctx.extracted["body"] = f"{banner}\n\n{ctx.extracted.get('body', '')}".strip()
+                # A field, not a skip_code: the event ROUTES rather than skips, so
+                # it has no skip_code — but the ledger must still separate it from
+                # a real wake=yes. `audit_sample` carries the code it dodged, so a
+                # query can find "cards delivered only because they were sampled".
+                ctx.extracted.setdefault("fields", {})["audit_sample"] = code
+                ctx.steps.append({"gate": options["_name"], "result": "sampled", "skip_code": code})
+                return PASS
             ctx.steps.append({"gate": options["_name"], "result": "dropped", "skip_code": code})
             return ("skip", code)
         ctx.steps.append({"gate": options["_name"], "result": "pass"})

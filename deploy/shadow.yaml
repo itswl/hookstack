@@ -292,6 +292,19 @@ pipeline:
     type: filter
     when: {source: "judge-notify", wake: "no"}
     skip_code: wake_no
+    # A silent-audit sample, OFF by default. The judge drops ~64% of cards here
+    # on wake=no, and the regret counter that would say whether that was right
+    # reads 0 — not because nothing was mis-quieted, but because a card that was
+    # never delivered cannot be pressed. A number nothing can move is not a
+    # measurement. Set sample_pct to, say, 5 and a deterministic 1-in-20 of the
+    # quieted CONDITIONS (by title, so a storm's restatements share one fate)
+    # deliver anyway, banner-marked, and a press of "actually mattered" feeds the
+    # existing quiet_regret counter with no change on the judge side. It spends a
+    # little attention to measure attention, which is why it is opt-in and small
+    # — and worth nothing on a channel nobody can press, so leave it off there.
+    sample_pct: ${QUIET_SAMPLE_PCT}
+    sample_by: title
+    sample_banner: "🔇 静默抽查 · 系统本不会为这条叫醒你，只想请你回头看一眼它判得对不对"
   - silence
   - routes
 
