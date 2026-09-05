@@ -108,6 +108,15 @@ class Settings:
     # model?, skills?}), the config-file twin of .claude/agents/*.md files.
     agents_config: Path | None
 
+    # Where a finished run's report goes when an operator clicks "hand off",
+    # and the credential for that one door. Both empty = the button is not
+    # offered, which is the shipping default. It points at a PIPE door, never at
+    # another node: see handoff.py for why one hop shorter would cost the whole
+    # record of the handover.
+    handoff_url: str
+    # Signs that one delivery, timestamped, exactly like every other hop here.
+    handoff_secret: str
+
     # Which posture the bash guard takes. `readonly` (default) is the
     # investigator's: mutating verbs are refused. `danger-only` is for a runner
     # an operator gave scoped WRITE credentials to — the verbs are allowed and
@@ -266,6 +275,8 @@ class Settings:
             system_prompt_append=_path_env("HOOKPROBE_SYSTEM_PROMPT_APPEND"),
             agents_config=_path_env("HOOKPROBE_AGENTS_CONFIG"),
             repeat_reminder_at=max(0, _int("HOOKPROBE_REPEAT_REMINDER_AT", 3)),
+            handoff_url=(os.environ.get("HOOKPROBE_HANDOFF_URL") or "").strip(),
+            handoff_secret=os.environ.get("HOOKPROBE_HANDOFF_SECRET") or "",
             bash_guard=(os.environ.get("HOOKPROBE_BASH_GUARD") or "").strip().lower() or "readonly",
             bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
             bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),

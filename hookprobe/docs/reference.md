@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (40)
+## Environment (42)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -34,6 +34,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_MAX_TIMEOUT_SECONDS` | `1800` | Ceiling on what a caller may ask for |
 | `HOOKPROBE_WORKDIR` | `/data` | Workspace: one persistent volume |
 | `HOOKPROBE_REPEAT_REMINDER_AT` | `3` | Loop hygiene (hygiene.py), all advisory — the security boundary stays the bash guard plus read-only credentials |
+| `HOOKPROBE_HANDOFF_SECRET` | *(empty)* | Signs that one delivery, timestamped, exactly like every other hop here |
 | `HOOKPROBE_BASH_TIMEOUT_MS` | `120000` | Default timeout for one shell command the engine runs |
 | `HOOKPROBE_BASH_MAX_TIMEOUT_MS` | `600000` | Ceiling on what a single command may ask for |
 | `HOOKPROBE_AUTO_DISTILL_MAX` | `0` | Auto-distill: how many runbooks a finished run may leave behind for the next one, written by the service (never by the agent — see hookprobe.inputs) |
@@ -48,11 +49,12 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_RETURN_URL` | *(empty)* | The one door findings go back to |
 | `HOOKPROBE_ALARM_URL` | *(empty)* | Direct self-alarm for report returns that exhaust their retries: the pipe is the broken link at that moment, so this posts straight to a bot/collector URL, touching nothing on the… |
 | `HOOKPROBE_SETTING_SOURCES` | `project` | Skill layers |
+| `HOOKPROBE_HANDOFF_URL` | *(empty)* | Where a finished run's report goes when an operator clicks "hand off", and the credential for that one door |
 | `HOOKPROBE_MCP_TOOLS` | *(empty)* | Which MCP tools this instance may actually call, as a closed set — mcp__chat__chat_search_messages or mcp__chat__* for a whole server |
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
 | `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
 
-## Routes (47)
+## Routes (48)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -87,6 +89,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/v1/runs/rulings` | File verdicts on several investigations at once — was this RUN worth it |
 | GET | `/v1/runs/{session_key}` | One run whole: turns, meta, ruling, cost |
 | POST | `/v1/runs/{session_key}/distill` | A skill draft for what this run learned — returned, never saved |
+| POST | `/v1/runs/{session_key}/handoff` | Hand this run's report to the pipe, for whichever node the operator wired that door to |
 | GET | `/v1/runs/{session_key}/stream` | The open session's steps, pushed as they happen (NDJSON, one per line) |
 | GET | `/v1/skills` | Every runbook with its review state and case count, newest first |
 | GET | `/v1/skills/export` | Runbooks packaged to LEAVE this deployment — see hookprobe.export |
