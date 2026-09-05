@@ -152,7 +152,23 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # LIKE escaping. The code got smaller; every added line is the record of a
     # promise the schema and the helper names had been making and not keeping.
     # No doctrine question applies, so this entry is short on purpose.
-    "hookrelay": (5200, Path("hookrelay/README.md")),
+    # 5200 -> 5300 on 2026-09-06. Split: +35 source, **+19 code** — so the
+    # doctrine question applies. A door with a cadence may now declare WHEN
+    # (`expect_hours` / `expect_days`), and the absence sweep respects it.
+    #
+    # Measured, not theorised, the first evening after absence alarming
+    # shipped: the timer stopped at 19:40 as configured, and at 20:05 the pipe
+    # said "watch-due has said nothing for 25 minutes". It would have said so
+    # every weekday evening, and an alarm with a nightly false positive is one
+    # that gets switched off — taking the only detector for the one failure
+    # nothing else can see with it.
+    #
+    # A pipe property, not a judgment: "when is this door expected to speak" is
+    # a fact about the door that the pipe cannot learn any other way, and the
+    # node behind the door cannot report its own absence. Same class as
+    # expect_every_seconds itself, which is where the 4900 -> 5100 entry above
+    # already argued the door's cadence into the pipe.
+    "hookrelay": (5300, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -102,6 +103,15 @@ class Source:
     # is no failed delivery to retry and no dead letter to raise, because the
     # event that would have carried the failure is the event that never arrived.
     expect_every_seconds: int = 0
+    # WHEN it is expected, for a door whose cadence has a schedule. Same shape
+    # as a patrol timer's PATROL_HOURS / PATROL_DAYS ("9-19", "1-5"; 1 = Mon),
+    # read in the process's local zone, so the relay must run in the operator's
+    # TZ — the timer does. Empty = always. Without this the first evening after
+    # absence alarming shipped raised "watch-due has said nothing for 25
+    # minutes" at 20:05, about a timer that had correctly stopped at 19:40, and
+    # would have again every weekday evening until somebody switched it off.
+    expect_hours: str = ""
+    expect_days: str = ""
     # Storm fuse (volume, not content — see hookrelay/fuse.py). 0 = no fuse.
     # Mandatory reading: a brain-paired deploy may rely on the brain's own
     # backpressure, but a relay in front of something WITHOUT backpressure
@@ -115,6 +125,28 @@ class Source:
     max_skew_seconds: int = 300
     # Free-form bag for custom adapters (the core never reads it).
     options: dict[str, Any] = field(default_factory=dict)
+
+    def expected_now(self, now: float) -> bool:
+        """Inside the declared schedule, and past its opening grace.
+
+        The grace is the second half of the fix: at 09:00 Monday the door has
+        been silent since Friday, and a sweep that only asked "inside the
+        window?" would alarm one second before the first tick landed. So the
+        window has to have been open for at least one expected interval.
+        """
+        t = time.localtime(now)
+        if self.expect_days:
+            lo, _, hi = self.expect_days.partition("-")
+            if not int(lo) <= t.tm_wday + 1 <= int(hi or lo):
+                return False
+        if self.expect_hours:
+            lo, _, hi = self.expect_hours.partition("-")
+            if not int(lo) <= t.tm_hour <= int(hi or lo):
+                return False
+            opened = now - ((t.tm_hour - int(lo)) * 3600 + t.tm_min * 60 + t.tm_sec)
+            if now - opened < self.expect_every_seconds:
+                return False
+        return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,6 +379,10 @@ class Config:
                 fingerprint_fields=tuple(str(name) for name in (item.get("fingerprint_fields") or ())),
                 dedup_window_seconds=int(item.get("dedup_window_seconds", 120)),
                 expect_every_seconds=max(0, int(item.get("expect_every_seconds", 0))),
+                # _resolve, like secret/url above: these come from the same
+                # variables the timer uses, so they arrive as ${WATCH_HOURS}.
+                expect_hours=str(_resolve(item.get("expect_hours", "")) or "").strip(),
+                expect_days=str(_resolve(item.get("expect_days", "")) or "").strip(),
                 storm_threshold=max(0, int(item.get("storm_threshold", 0))),
                 storm_window_seconds=max(1, int(item.get("storm_window_seconds", 60))),
                 require_timestamp=bool(item.get("require_timestamp", False)),

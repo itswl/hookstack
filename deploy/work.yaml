@@ -87,6 +87,12 @@ sources:
     # It cost two rounds on 2026-09-04 to learn that, and they were found by a
     # person asking about something else.
     expect_every_seconds: 1500
+    # The SAME variables the timer's PATROL_HOURS / PATROL_DAYS come from, so
+    # the door's idea of when to expect a tick and the clock's idea of when
+    # to send one cannot drift apart. Requires the relay to run in the same
+    # TZ as the timer, which the compose file sets.
+    expect_hours: ${WATCH_HOURS}
+    expect_days: ${WATCH_DAYS}
     title: "{title}"
     body: "{message}"
     level: "{state}"
