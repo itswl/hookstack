@@ -173,6 +173,9 @@ button.danger{color:var(--red);border-color:var(--red)}
 .ev-todos .todo-active{color:var(--amber)}
 #stopBtn{border-color:var(--red);color:var(--red)}
 #handoffBtn{border-color:var(--accent);color:var(--accent)}
+.rule-bar{padding:6px 16px;font-size:12px;color:var(--dim);display:flex;gap:6px;align-items:center}
+.rule{font-size:12px;padding:2px 8px;cursor:pointer}
+.rule.on{border-color:var(--accent);color:var(--accent)}
 #memEdit{width:100%;min-height:420px;background:var(--panel);border:1px solid var(--line);border-radius:8px;
   color:var(--text);font-family:var(--mono);font-size:12.5px;padding:12px;resize:vertical;box-sizing:border-box}
 #memEdit:focus{outline:none;border-color:var(--accent)}
@@ -772,6 +775,18 @@ async function renderDetail(startPolling) {
   // saving it is the operator's click, because an investigator that writes its
   // own future instructions is one nobody reviewed.
   if (run.status === "completed" && (run.turns || []).length) {
+    // Was this worth its bill? The only ruling surface that needs no chat bridge,
+    // so on a laptop deployment it is the only one at all. Pressing here reports
+    // what the ruling DID — a useless that withdraws a runbook says so — because
+    // record_ruling runs in-process and can answer synchronously.
+    const r = run.ruling || "";
+    parts.push(
+      `<div class="rule-bar">was this worth it? ` +
+      `<button class="rule ${r === "useful" ? "on" : ""}" data-rule="useful">found the cause</button>` +
+      `<button class="rule ${r === "useless" ? "on" : ""}" data-rule="useless">missed it</button>` +
+      (r ? `<button class="rule clear" data-rule="clear">clear</button>` : "") +
+      `<span id="ruleStatus" class="dim"></span></div>`,
+    );
     parts.push(
       `<div class="mem-bar"><button id="distill">distill into a runbook draft</button>` +
       `<span id="distillStatus" class="dim"></span></div>`,
@@ -789,6 +804,22 @@ async function renderDetail(startPolling) {
         stopWatching();
         editSkill(draft.name, draft.content);
       } catch (e) { $("#distillStatus").textContent = e.message; }
+    };
+  }
+  for (const btn of document.querySelectorAll(".rule")) {
+    btn.onclick = async () => {
+      const ruling = btn.dataset.rule;
+      $("#ruleStatus").textContent = "recording…";
+      try {
+        const resp = await api("/v1/runs/" + encodeURIComponent(sel) + "/ruling",
+          { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ruling }) });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) { $("#ruleStatus").textContent = body.detail || ("HTTP " + resp.status); return; }
+        // The payoff, shown: a plain "recorded" is what made the button not
+        // worth pressing. When the ruling did something to the library, say it.
+        $("#ruleStatus").textContent = body.consequence ? ("recorded — " + body.consequence) : "recorded";
+        await renderDetail(false);
+      } catch (e) { $("#ruleStatus").textContent = e.message; }
     };
   }
   $("#turns").scrollTop = $("#turns").scrollHeight;

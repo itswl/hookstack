@@ -149,3 +149,56 @@ def test_a_useful_press_touches_no_runbook(tmp_path):
 
     service.record_ruling("probe:judge:8", "useful")
     assert (book / "SKILL.md").exists(), "a useful ruling leaves the library alone"
+
+
+def test_the_page_can_rule_a_run_and_is_told_what_it_did(tmp_path):
+    """The whole reason this surface exists: rule from the page (no chat bridge
+    needed, so the only surface a laptop deployment has) and see the payoff. A
+    useless that withdraws a runbook says so — a plain "recorded" is what made
+    the button not worth pressing."""
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import COMPLETED, Run, RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    settings = make_settings(tmp_path)
+    store = RunStore(tmp_path / "results")
+    client = TestClient(create_app(settings, RunService(settings, FakeEngine(), store)))
+    headers = {"Authorization": f"Bearer {settings.token}"}
+
+    run = Run(session_key="probe:judge:1", run_id="r1", status=COMPLETED)
+    store.create(run)
+    _runbook(tmp_path / ".claude" / "skills", "bad-method", ["probe:judge:1"])
+
+    resp = client.post("/v1/runs/probe:judge:1/ruling", headers=headers, json={"ruling": "useless"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ruling"] == "useless"
+    assert "withdrew" in body["consequence"] and "bad-method" in body["consequence"]
+    assert not (tmp_path / ".claude" / "skills" / "bad-method" / "SKILL.md").exists()
+
+
+def test_a_useful_ruling_from_the_page_reports_no_library_consequence(tmp_path):
+    """Only a useless reconsiders the library, so a useful press has no
+    consequence sentence — "recorded" is the honest whole of it."""
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import COMPLETED, Run, RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    settings = make_settings(tmp_path)
+    store = RunStore(tmp_path / "results")
+    client = TestClient(create_app(settings, RunService(settings, FakeEngine(), store)))
+    run = Run(session_key="probe:judge:2", run_id="r1", status=COMPLETED)
+    store.create(run)
+
+    resp = client.post(
+        "/v1/runs/probe:judge:2/ruling",
+        headers={"Authorization": f"Bearer {settings.token}"},
+        json={"ruling": "useful"},
+    )
+    assert resp.status_code == 200 and resp.json()["consequence"] == ""

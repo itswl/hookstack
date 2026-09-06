@@ -496,7 +496,9 @@ class RunService:
         cutoff = time.time() - self._settings.budget_window_hours * 3600
         return self._store.rulings_since(cutoff)
 
-    def record_ruling(self, session_key: str, ruling: str, *, actor: str = "", why: str = "") -> Run:
+    def record_ruling(
+        self, session_key: str, ruling: str, *, actor: str = "", why: str = ""
+    ) -> tuple[Run, list[dict[str, Any]]]:
         """Write down whether this investigation was worth its bill.
 
         The cost of an investigation has always been countable and its worth was
@@ -527,11 +529,10 @@ class RunService:
         self._store.annotate(run)
         self._board_changed()
         logger.info("ruling recorded session=%s ruling=%s by=%s", run.session_key, ruling or "(cleared)", actor or "-")
-        if ruling == "useless":
-            self._reconsider_runbooks(session_key)
-        return run
+        reconsidered = self._reconsider_runbooks(session_key) if ruling == "useless" else []
+        return run, reconsidered
 
-    def _reconsider_runbooks(self, session_key: str) -> None:
+    def _reconsider_runbooks(self, session_key: str) -> list[dict[str, Any]]:
         """A useless ruling withdraws or flags the runbooks that run distilled.
 
         The wire the learning loop was missing: auto_distill refuses to write
@@ -551,7 +552,8 @@ class RunService:
             other = self._store.get(sk)
             return (other.ruling or "") if other else ""
 
-        for outcome in distill.reconsider_after_useless(skills_dir, session_key, ruling_of, at=time.time()):
+        outcomes = distill.reconsider_after_useless(skills_dir, session_key, ruling_of, at=time.time())
+        for outcome in outcomes:
             logger.info("runbook %s: %s (%s)", outcome["runbook"], outcome["action"], outcome)
             if outcome["action"] == "withdrawn":
                 automation.record(
@@ -561,6 +563,7 @@ class RunService:
                     "regretted",
                     note="every case was ruled useless",
                 )
+        return outcomes
 
     def window_unpriced(self) -> int:
         """How many turns in the window spent money nobody could count.

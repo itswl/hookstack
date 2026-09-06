@@ -279,6 +279,30 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             runs = [run for run in runs if not run.ruling and run.status != RUNNING]
         return [_summary(run) for run in runs]
 
+    @app.post("/v1/runs/{session_key}/ruling", dependencies=[Depends(require_token)])
+    async def rule_one_run(session_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """One run, ruled from the sessions page — and told what the ruling DID.
+
+        The card buttons were the only way to rule, and on a deployment with no
+        chat bridge there are no cards, so the loops that feed on a ruling could
+        not be fed at all. This is the same ruling from the surface an operator
+        actually reviews on: the page, reachable on the laptop with no inbound
+        path. `record_ruling` runs in-process here, so unlike the card path it
+        can report the CONSEQUENCE synchronously — "withdrew the runbook this run
+        taught" — which is the payoff that makes pressing worth the click.
+
+        `{ruling: "useful"|"useless"|"clear"}`.
+        """
+        want = str(payload.get("ruling") or "")
+        by = str(payload.get("by") or "operator")
+        try:
+            _run, reconsidered = service.record_ruling(session_key, "" if want == "clear" else want, actor=by)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"ruling": want, "consequence": events._consequence(reconsidered)}
+
     @app.post("/v1/runs/rulings", dependencies=[Depends(require_token)])
     async def file_run_rulings(payload: dict[str, Any]) -> dict[str, Any]:
         """File verdicts on several investigations at once — was this RUN worth it.

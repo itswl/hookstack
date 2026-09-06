@@ -360,8 +360,26 @@ def _approve(service: RunService, params: dict[str, Any], *, actor: str, correla
 
 def _rule(service: RunService, run: Run, kind: str, *, actor: str) -> dict[str, Any]:
     """The human's ruling on the report — the half of the bill nothing measured."""
-    ruled = service.record_ruling(run.session_key, kind, actor=actor)
-    return {"status": "recorded", "kind": kind, "sessionKey": ruled.session_key, "ruling": ruled.ruling}
+    ruled, reconsidered = service.record_ruling(run.session_key, kind, actor=actor)
+    out = {"status": "recorded", "kind": kind, "sessionKey": ruled.session_key, "ruling": ruled.ruling}
+    # What the press ACCOMPLISHED, not just that it was recorded — a withdrawal is
+    # the visible payoff that makes a "useless" worth pressing.
+    consequence = _consequence(reconsidered)
+    if consequence:
+        out["consequence"] = consequence
+    return out
+
+
+def _consequence(reconsidered: list[dict[str, Any]]) -> str:
+    """One human line for what a useless ruling did to the library, or ''."""
+    withdrawn = [o["runbook"] for o in reconsidered if o["action"] == "withdrawn"]
+    flagged = [o["runbook"] for o in reconsidered if o["action"] == "flagged"]
+    parts = []
+    if withdrawn:
+        parts.append(f"withdrew {'runbook' if len(withdrawn) == 1 else 'runbooks'} {', '.join(withdrawn)}")
+    if flagged:
+        parts.append(f"flagged {', '.join(flagged)} for review")
+    return "; ".join(parts)
 
 
 def _dispatch(
