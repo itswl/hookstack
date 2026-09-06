@@ -213,7 +213,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             wake_someone=str(row["wake_someone"] or ""),
             route=str(row["route"]),
         )
-        payload = Outgoing(incoming=event, verdict=verdict).payload()
+        payload = Outgoing(incoming=event, verdict=verdict, burst_id=str(row["burst_id"] or "")).payload()
         body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
         headers = {"content-type": "application/json"}
         if app_settings.return_secret:

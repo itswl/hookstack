@@ -66,8 +66,15 @@ def _cost(row: dict[str, Any]) -> float:
 def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
     """Chronological chains, newest first, with what each one spent."""
     chains: dict[str, list[dict[str, Any]]] = {}
+    # Which burst a chain belongs to, when a hop carried one. The judge groups N
+    # alerts from one origin into a burst and now sends `fields.burst_id` back;
+    # the pipe reads it, never computes it — that grouping is a judgement about
+    # content, and the pipe is content-blind. A chain inherits the burst_id of
+    # any hop that has one (the return hop from the judge does).
+    chain_burst: dict[str, str] = {}
     for row in rows:
-        chains.setdefault(_chain_key(row), []).append(
+        key = _chain_key(row)
+        chains.setdefault(key, []).append(
             {
                 "id": row.get("id"),
                 "at": row.get("received_at"),
@@ -80,6 +87,9 @@ def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
                 "cost_usd": _cost(row) or None,
             }
         )
+        burst = str((row.get("fields") or {}).get("burst_id") or "")
+        if burst:
+            chain_burst[key] = burst
 
     out = []
     for key, hops in chains.items():
@@ -102,6 +112,7 @@ def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
 
     return {
         "chains": out,
+        "incidents": _incidents(out, chain_burst),
         "totals": {
             "chains": len(out),
             "hops": sum(len(c["hops"]) for c in out),
@@ -109,3 +120,42 @@ def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
             "unpriced_hops": sum(len(c["hops"]) - c["priced_hops"] for c in out),
         },
     }
+
+
+def _incidents(chains: list[dict[str, Any]], chain_burst: dict[str, str]) -> list[dict[str, Any]]:
+    """Chains that share a burst are one incident — the operator's unit.
+
+    A chain is one alert and its round trip. An incident is what a person works
+    on: five SES alerts crossing five thresholds are one reputation problem, and
+    the number that matters is not how many chains there were but how many times
+    ONE incident interrupted somebody. That is `interruptions` here, and it is
+    the honest version of a noise metric — five cards for one root cause is the
+    noise, and until burst_id travelled back nothing could see it was one cause.
+
+    A chain with no burst stands alone, an incident of one, which is honest: most
+    alerts really are unrelated, and grouping them would invent a story. Grouped
+    only, never named — the pipe reports the shape (these chains share a burst)
+    and leaves the meaning to whoever reads it.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for chain in chains:
+        # Its own chain key when no burst — an incident of one keeps a stable id.
+        key = chain_burst.get(chain["chain"], f"solo:{chain['chain']}")
+        groups.setdefault(key, []).append(chain)
+    incidents = []
+    for key, members in groups.items():
+        titles = [h["title"] for c in members for h in c["hops"] if h.get("title")]
+        incidents.append(
+            {
+                "incident": key,
+                "chains": [c["chain"] for c in members],
+                # What the operator wants driven down: cards for one root cause.
+                "interruptions": len(members),
+                "started_at": min(float(c["started_at"] or 0) for c in members),
+                "cost_usd": round(sum(c["cost_usd"] for c in members), 6),
+                # One example title, so a burst id is legible without opening it.
+                "example": titles[0] if titles else "",
+            }
+        )
+    incidents.sort(key=lambda i: i["started_at"], reverse=True)
+    return incidents

@@ -168,7 +168,17 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # node behind the door cannot report its own absence. Same class as
     # expect_every_seconds itself, which is where the 4900 -> 5100 entry above
     # already argued the door's cadence into the pipe.
-    "hookrelay": (5300, Path("hookrelay/README.md")),
+    # 5300 -> 5400 on 2026-09-06, for the incident grouping in /timeline. Split:
+    # +50 source, **+26 code**, so the doctrine question applies. A pipe property,
+    # and a careful one: the pipe does not COMPUTE which alerts are one incident —
+    # that is a judgement about content and it stays content-blind. hookjudge
+    # groups a burst and now sends `fields.burst_id` back; the pipe only READS it
+    # and groups chains that share it, the same class of act as routing on a
+    # field the judge set. It is the operator's unit — five cards for one root
+    # cause counted as one interruption — which no per-event component could see,
+    # and it is a projection of what the ledger already holds, asking nothing new
+    # of any node beyond the burst the judge already computed.
+    "hookrelay": (5400, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

@@ -478,30 +478,42 @@ class Outgoing:
     incoming: Incoming
     verdict: Verdict
     brain: str = "hookjudge"
+    # The burst this judgement belongs to, when the store grouped it with peers
+    # from the same origin in the window. It travels back so the pipe can see
+    # that N alerts were ONE incident — the meaning the pipe is forbidden to
+    # compute itself, because it is content-blind and this is a judgement about
+    # content. '' when the judgement stood alone (most do), and omitted from meta
+    # then rather than sent empty: a burst_id is a claim that other alerts exist,
+    # and an empty one would be a claim about a group of one.
+    burst_id: str = ""
 
     def payload(self) -> dict[str, Any]:
+        meta: dict[str, Any] = {
+            "brain": self.brain,
+            # The CONDITION's name, with any "it ended" decoration removed.
+            # State travels separately in is_recovery, and the pipe renders
+            # it ("✅ Resolved · <name>"). Sending the raw title made the
+            # recovery card say so twice: "✅ Resolved · [RESOLVED] Payment…".
+            # One fact, one field.
+            "alert_name": condition_title(self.incoming.title),
+            "source": self.incoming.source,
+            "importance": self.verdict.importance,
+            "correlation_id": self.incoming.correlation_id,
+            "is_recovery": self.incoming.is_recovery,
+            "timestamp": self.incoming.received_at,
+            "route": self.verdict.route,
+            # The second axis travels with the verdict so the pipe can ROUTE
+            # on it — a "nobody needs to act now" that only ever reached a
+            # board was an answer this service paid for and nothing used.
+            # '' when unanswered, and the pipe must treat '' as deliverable:
+            # fail open, never quiet on a parse failure.
+            "wake_someone": self.verdict.wake_someone,
+        }
+        # Only when it names a real group. See the field's note above.
+        if self.burst_id:
+            meta["burst_id"] = self.burst_id
         return {
-            "meta": {
-                "brain": self.brain,
-                # The CONDITION's name, with any "it ended" decoration removed.
-                # State travels separately in is_recovery, and the pipe renders
-                # it ("✅ Resolved · <name>"). Sending the raw title made the
-                # recovery card say so twice: "✅ Resolved · [RESOLVED] Payment…".
-                # One fact, one field.
-                "alert_name": condition_title(self.incoming.title),
-                "source": self.incoming.source,
-                "importance": self.verdict.importance,
-                "correlation_id": self.incoming.correlation_id,
-                "is_recovery": self.incoming.is_recovery,
-                "timestamp": self.incoming.received_at,
-                "route": self.verdict.route,
-                # The second axis travels with the verdict so the pipe can ROUTE
-                # on it — a "nobody needs to act now" that only ever reached a
-                # board was an answer this service paid for and nothing used.
-                # '' when unanswered, and the pipe must treat '' as deliverable:
-                # fail open, never quiet on a parse failure.
-                "wake_someone": self.verdict.wake_someone,
-            },
+            "meta": meta,
             "analysis": {
                 "summary": self.verdict.summary,
                 "event_type": self.verdict.event_type,

@@ -1517,3 +1517,21 @@ async def test_the_return_leg_rebuild_carries_the_wake_answer(app_client, monkey
 
     meta = sink.received[0]["body"]["meta"]
     assert meta["wake_someone"] == "no", "the row said no; the wire must say no"
+
+
+def test_the_return_carries_the_burst_so_the_pipe_can_group(app_client):
+    """The other end of the incident wire. The judge groups alerts from one
+    origin into a burst; unless that burst travels back, the pipe — which is
+    content-blind and cannot compute it — can never see that N cards were one
+    incident. So a returned judgement carries meta.burst_id when it has one, and
+    omits it when it stood alone rather than sending an empty group-of-one."""
+    from hookjudge.contract import Incoming, Outgoing, Verdict
+
+    inc = Incoming(
+        title="SES bounce", body="b", source="ww", level="high", fields={}, correlation_id="hr-1", received_at=1.0
+    )
+    v = Verdict(
+        summary="s", importance="high", event_type="infrastructure", impact_scope="x", wake_someone="no", route="ai"
+    )
+    assert "burst_id" not in Outgoing(inc, v).payload()["meta"], "a group of one is not a burst"
+    assert Outgoing(inc, v, burst_id="burst-7").payload()["meta"]["burst_id"] == "burst-7"

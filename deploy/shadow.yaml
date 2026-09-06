@@ -108,6 +108,12 @@ sources:
       # for both shipped a template that resolved to empty and was dropped —
       # visible only as a card whose chain never formed.
       correlation_id: "{meta.correlation_id}"
+      # The incident this verdict belongs to, when the judge grouped it with
+      # other alerts from the same origin in the window. `/timeline` groups
+      # chains that share it into one incident, which is how N cards for one
+      # root cause become countable as one interruption. Absent when the
+      # judgement stood alone; the judge omits it rather than sending empty.
+      burst_id: "{meta.burst_id}"
 
   # The investigator's report, coming back to be dressed as a card. Unsigned for
   # the same reason as the door above: a loopback hop inside hookstack_net.

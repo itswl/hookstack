@@ -186,3 +186,124 @@ async def test_the_endpoint_is_read_gated(client) -> None:
     answer = await client.get("/timeline", headers={"X-Read-Token": "read-t"})
     assert answer.status_code == 200
     assert {"chains", "totals"} <= answer.json().keys()
+
+
+def test_chains_that_share_a_burst_are_one_incident() -> None:
+    """The operator's unit, not the pipe's. Five SES alerts crossing five
+    thresholds are one reputation problem; the number that matters is how many
+    times ONE incident interrupted somebody, not how many chains there were.
+
+    The pipe reads the burst the judge sent — it never computes it, because
+    which alerts are one incident is a judgement about content and the pipe is
+    content-blind."""
+    rows = [
+        {
+            "id": 1,
+            "received_at": 100.0,
+            "source": "ww",
+            "title": "SES 5%",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": None,
+        },
+        {
+            "id": 2,
+            "received_at": 101.0,
+            "source": "judge-notify",
+            "title": "SES 5%",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {"burst_id": "burst-9"},
+            "correlation_id": "hr-1",
+        },
+        {
+            "id": 3,
+            "received_at": 200.0,
+            "source": "ww",
+            "title": "SES 10%",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": None,
+        },
+        {
+            "id": 4,
+            "received_at": 201.0,
+            "source": "judge-notify",
+            "title": "SES 10%",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {"burst_id": "burst-9"},
+            "correlation_id": "hr-3",
+        },
+    ]
+    incidents = {i["incident"]: i for i in render(rows)["incidents"]}
+    assert set(incidents) == {"burst-9"}, "two chains, one burst, one incident"
+    assert incidents["burst-9"]["interruptions"] == 2, "the noise metric: two cards, one root cause"
+    assert set(incidents["burst-9"]["chains"]) == {"1", "3"}
+
+
+def test_an_unburst_chain_is_an_incident_of_one() -> None:
+    """Honest rather than tidy: most alerts are unrelated, and a chain the judge
+    did not group stands alone rather than being folded into a story."""
+    incidents = render(ROWS)["incidents"]
+    assert all(i["interruptions"] == 1 for i in incidents), "no bursts in ROWS, so every incident is N=1"
+    assert len(incidents) == 2, "one per standalone chain"
+
+
+def test_incident_cost_sums_its_chains() -> None:
+    """What a whole incident spent, not what one card of it did — the figure a
+    postmortem opens with."""
+    rows = [
+        {
+            "id": 1,
+            "received_at": 100.0,
+            "source": "ww",
+            "title": "a",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": None,
+        },
+        {
+            "id": 2,
+            "received_at": 101.0,
+            "source": "probe-notify",
+            "title": "a",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {"burst_id": "b1", "cost_usd": "0.40"},
+            "correlation_id": "hr-1",
+        },
+        {
+            "id": 3,
+            "received_at": 200.0,
+            "source": "ww",
+            "title": "b",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": None,
+        },
+        {
+            "id": 4,
+            "received_at": 201.0,
+            "source": "probe-notify",
+            "title": "b",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {"burst_id": "b1", "cost_usd": "0.60"},
+            "correlation_id": "hr-3",
+        },
+    ]
+    incident = {i["incident"]: i for i in render(rows)["incidents"]}["b1"]
+    assert incident["cost_usd"] == 1.0, "0.40 + 0.60 across the incident's two chains"
