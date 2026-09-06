@@ -5,6 +5,24 @@ to tell is to run the same alerts through both versions. This directory holds
 that: a labelled set, a runner that scores it, and the results to compare
 against.
 
+## Two kinds of eval, two questions
+
+`dataset.jsonl` is the **golden set**: real production alerts a human labelled.
+It runs through the actual model (`scripts/eval.py --gate`, at deploy time, needs
+a provider key) and answers *does the model agree with human judgement on real
+traffic*. This is where a prompt change is proven better or worse.
+
+`scenarios.jsonl` is the **safety floor**: constructed edge cases that pin what
+must hold when the model is unavailable or the alert carries an injection — the
+deterministic `rule` route, answered with no provider. It answers *does the
+scaffolding around the prompt still hold*, and it is checked in the offline gate
+(`scripts/assert_prompt_contract.py`). Its header records the prompt version and
+a sha256 of the prompt string, so a prompt edited without re-reviewing these
+scenarios fails on the hash. That is the forcing function: the prompt is the one
+asset that changes behaviour without changing logic, and this is what stops it
+changing unreviewed. Bump `_SYSTEM_PROMPT_VERSION`, re-read the scenarios, and
+update the header's `prompt_version` and `prompt_sha256` together.
+
 ## The number that matters
 
 Not accuracy. Calling a low alert `high` costs someone a glance; calling a

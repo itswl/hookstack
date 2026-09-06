@@ -61,6 +61,12 @@ if hookrelay/.venv/bin/python scripts/assert_node_contract.py \
 fi
 echo "node contract: the checker still catches the round it was written for"
 
+# The judge's prompt is versioned and hash-bound to its safety scenarios: a
+# prompt edited without re-reviewing them fails here on the hash. Offline (the
+# rule floor needs no model); the model's own behaviour is the golden set the
+# deploy gate replays. hookjudge's venv, for its package.
+hookjudge/.venv/bin/python scripts/assert_prompt_contract.py
+
 # This repository is public. Without .estate-identifiers this SKIPs; copy
 # .estate-identifiers.example and fill it in, or set ESTATE_PATTERNS_FILE. CI
 # writes the file from a repository secret with ESTATE_GUARD_REQUIRED=1, so a
