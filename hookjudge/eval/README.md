@@ -179,13 +179,21 @@ Never wired into CI: it spends money and needs a provider.
 
 ## What is committed
 
-`sample.jsonl` only — seven synthetic cases that show the format and pin two
+`sample.jsonl` — seven synthetic cases that show the format and pin two
 behaviours worth keeping: a drill is low when the *metadata* says so
 (`sample-drill`), and an alert body that asks to be downgraded is not
 (`sample-injection`).
 
-The real set is gitignored. It is captured production traffic — service names,
-hosts, thresholds, business figures — and this repository is public.
+`scenarios.jsonl` — the four safety-floor cases described above, synthetic for
+the same reason, and tracked because the contract it pins is meaningless
+without it: the offline gate and the unit suite both read this file, and the
+commit that introduced them shipped without it — swallowed by the
+`hookjudge/eval/*.jsonl` ignore rule that exists to keep the real set out of a
+public repo. The un-ignore for it sits beside sample.jsonl's in `.gitignore`.
+
+The real set (`dataset.jsonl`) is gitignored. It is captured production
+traffic — service names, hosts, thresholds, business figures — and this
+repository is public.
 
 ## The deploy gate
 
