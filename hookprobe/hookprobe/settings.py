@@ -239,6 +239,21 @@ class Settings:
     # would keep citing last month's case files at this month's incident.
     ruling_reverify_days: int
 
+    # How long a condition whose last REAL investigation a person ruled USEFUL
+    # may answer a re-fire from that runbook instead of paying for a cold-start,
+    # 0 = off (the default). The other side of ruling_ttl_days: that one answers
+    # conditions ruled NOT worth investigating; this answers ones that WERE and
+    # whose runbook a person vouched for by pressing useful. It never silences —
+    # the re-fire still delivers a card, marked answered-from-runbook and $0,
+    # with the procedure and a note to force a real run if it looks different —
+    # so it trades an automatic re-investigation for a known answer, visibly and
+    # reversibly. A useless ruling withdraws the runbook (its SKILL.md is gone),
+    # so a condition that stopped being understood stops being answered this way;
+    # once the window lapses a real run reverifies and, if ruled useful again,
+    # refreshes it. Off by default because answering a worth-it condition from a
+    # runbook is a stronger claim than declining a not-worth-it one.
+    runbook_answer_days: int
+
     # Volume retention (days): case files and engine transcripts older than
     # this are pruned daily. 0 keeps everything — the case files are the
     # agent's episodic memory, so deletion is a choice, never a surprise.
@@ -291,6 +306,7 @@ class Settings:
             auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),
             ruling_ttl_days=max(0, _int("HOOKPROBE_RULING_TTL_DAYS", 14)),
             ruling_reverify_days=max(1, _int("HOOKPROBE_RULING_REVERIFY_DAYS", 7)),
+            runbook_answer_days=max(0, _int("HOOKPROBE_RUNBOOK_ANSWER_DAYS", 0)),
             coalesce_window_seconds=max(0, _int("HOOKPROBE_COALESCE_WINDOW_SECONDS", 1800)),
             consolidate_at=max(0, _int("HOOKPROBE_CONSOLIDATE_AT", 5)),
             remediation_allowlist=_path_env("HOOKPROBE_REMEDIATION_ALLOWLIST"),

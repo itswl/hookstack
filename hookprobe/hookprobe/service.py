@@ -169,7 +169,7 @@ class RunService:
                 run.meta["meta_derived"] = "prompt"
         self._store.create(run)
         self._board_changed()
-        answer = None if payload.get("force") else self._runbook_answer(run)
+        answer = None if payload.get("force") else (self._runbook_answer(run) or self._runbook_answer_verified(run))
         if answer is not None:
             self._finish_without_engine(run, answer)
             return run
@@ -228,6 +228,69 @@ class RunService:
                 "runbook": procedure[:2500],
                 "answered_from_runbook": True,
                 "how_to_reinvestigate": 'POST /hooks/agent with {"force": true}; full runs also recur',
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def _runbook_answer_verified(self, run: Run) -> str | None:
+        """Answer a re-fire of a WORTH-IT condition from the runbook a person
+        vouched for, instead of paying for a cold-start.
+
+        The mirror of _runbook_answer, and the safer half is the gate: not a
+        "not worth it" ruling but a USEFUL one on the condition's most recent
+        REAL investigation. A person pressing useful is a person saying the
+        method in that runbook works, which is exactly the licence to reuse it;
+        a useless press withdraws the runbook (its SKILL.md is removed), so a
+        condition that stopped being understood stops being answered this way.
+
+        Never a silence. This returns a report that DELIVERS like any other —
+        marked answered-from-runbook and $0, carrying the procedure and how to
+        force a real run — so the operator still sees the re-fire and loses only
+        the automatic re-investigation, reversibly. And never off a run that was
+        itself answered from a runbook: only a REAL useful run vouches, or a
+        chain of runbook-answers would keep citing itself.
+        """
+        days = self._settings.runbook_answer_days
+        title = str(run.meta.get("title") or "").strip()
+        if days <= 0 or not title or run.meta.get("patrol") or run.meta.get("consolidates"):
+            return None
+        manifest = self._settings.workdir / ".claude" / "skills" / slug(title) / "SKILL.md"
+        try:
+            procedure = manifest.read_text(encoding="utf-8").split(CASES_MARKER, 1)[0].strip()
+        except OSError:
+            return None  # no runbook, or it was withdrawn — a cold start reverifies
+        cutoff = time.time() - days * 86400
+        vouched = max(
+            (
+                other
+                for other in self._store.list_runs(limit=200)
+                if str(other.meta.get("title") or "") == title
+                and other.ruling == "useful"
+                and not other.meta.get("answered_from_runbook")
+                and other.session_key != run.session_key
+                and (other.ruled_at or 0) >= cutoff
+            ),
+            key=lambda r: r.ruled_at or 0.0,
+            default=None,
+        )
+        if vouched is None:
+            return None  # nobody has vouched recently; a real run earns the licence
+        age_days = int((time.time() - float(vouched.ruled_at or 0)) / 86400)
+        return json.dumps(
+            {
+                "summary": (
+                    f"已按 runbook 直接作答，未启动引擎（$0）。该条件最近一次调查在 {age_days} 天前被裁定 "
+                    f"useful，方法见下；看着不对就用 force 重跑一次真查。"
+                ),
+                "root_cause": f"已知条件，按 {age_days} 天前裁定 useful 的 runbook 作答（$0，未重新调查）。",
+                "verdict": "known_condition",
+                "vouched_days_ago": age_days,
+                "runbook": procedure[:2500],
+                "answered_from_runbook": True,
+                "how_to_reinvestigate": (
+                    'POST /hooks/agent with {"force": true}; a real run also recurs once the window lapses'
+                ),
             },
             ensure_ascii=False,
             indent=2,

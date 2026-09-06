@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (43)
+## Environment (44)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -40,6 +40,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_AUTO_DISTILL_MAX` | `0` | Auto-distill: how many runbooks a finished run may leave behind for the next one, written by the service (never by the agent — see hookprobe.inputs) |
 | `HOOKPROBE_RULING_TTL_DAYS` | `14` | How long a standing not_worth_it ruling may keep answering a condition from its runbook instead of starting a paid engine run |
 | `HOOKPROBE_RULING_REVERIFY_DAYS` | `7` | A ruled-useless condition still gets a REAL investigation this often — the evidence behind a ruling goes stale, and a gate that never re-checks would keep citing last month's case… |
+| `HOOKPROBE_RUNBOOK_ANSWER_DAYS` | `0` | How long a condition whose last REAL investigation a person ruled USEFUL may answer a re-fire from that runbook instead of paying for a cold-start, 0 = off (the default) |
 | `HOOKPROBE_COALESCE_WINDOW_SECONDS` | `1800` | Storm coalescing at the event door: a re-fire of the same alert (same source + title, new event id) within this many seconds continues the existing investigation instead of funding… |
 | `HOOKPROBE_CONSOLIDATE_AT` | `5` | Consolidation: at this many accumulated cases, a runbook triggers one agent run that drafts a curated procedure from the case pile |
 | `HOOKPROBE_AUTOMATION_TIERS` | *(empty)* | The declared ceiling per class of automation — see automation.py |

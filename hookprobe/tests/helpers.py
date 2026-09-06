@@ -29,6 +29,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "budget_gates_agent_door": False,
         "ruling_ttl_days": 14,
         "ruling_reverify_days": 7,
+        "runbook_answer_days": 0,
         "bash_timeout_ms": 120000,
         "bash_max_timeout_ms": 600000,
         # Off by default here too: a test that wants the loop must say so, so
