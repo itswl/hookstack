@@ -55,6 +55,21 @@ class SelfAlarm:
             now,
         )
 
+    async def degraded_provider(self, client: httpx.AsyncClient, *, category: str, error: str, now: float) -> None:
+        """The model call is failing for a reason a PERSON must fix — a dead key,
+        no credit, a hard quota — so every verdict is now the keyword floor until
+        they do. Worth an alarm precisely because it is otherwise silent: the
+        ledger fills with `degraded` reasons nobody reads, and importance looks
+        answered while it is being guessed. Rate-limited like the rest, because a
+        dead key means every alert would try to raise this at once.
+        """
+        await self._send(
+            client,
+            f"[hookjudge] model calls are FAILING ({category}) — every verdict is the keyword floor "
+            f"until this is fixed\nreason: {error[:200]}",
+            now,
+        )
+
     async def _send(self, client: httpx.AsyncClient, text: str, now: float) -> None:
         """The three disciplines in one place, so a second alarm cannot keep two
         of them and quietly drop the third."""

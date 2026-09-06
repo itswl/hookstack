@@ -68,6 +68,57 @@ def _retryable_transport(error: BaseException) -> bool:
     return isinstance(error, (httpx.TimeoutException, httpx.TransportError))
 
 
+# Why a model call failed, at the granularity that changes what to do about it.
+# Borrowed from Larkin's provider-error classifier: lumping every failure into
+# "degraded" was the gap — a dead key (auth) and a rate limit both fell to the
+# rule floor with the same opaque reason, and neither said anything, so a bad
+# key silently judged every alert by keywords until somebody read the ledger.
+PROVIDER_ERROR_AUTH = "auth"  # 401/403: the key is wrong or lacks scope
+PROVIDER_ERROR_BILLING = "billing"  # 402 / "insufficient", "credit": no money
+PROVIDER_ERROR_QUOTA = "quota"  # a hard usage ceiling, distinct from a rate limit
+PROVIDER_ERROR_RATE_LIMIT = "rate_limit"  # 429: transient, backs off
+PROVIDER_ERROR_CONTEXT = "context_window"  # the input is too big; fix is size, not retry
+PROVIDER_ERROR_PROVIDER = "provider"  # 5xx / unknown upstream fault: transient
+PROVIDER_ERROR_TRANSPORT = "transport"  # never reached the provider
+
+# The ones a PERSON must act on: they do not pass on their own, and until they
+# are fixed every verdict is the rule floor. These alarm (rate-limited); the
+# transient ones do not, because an alarm that cries on a blip gets muted.
+PROVIDER_ERROR_MUST_ACT = frozenset({PROVIDER_ERROR_AUTH, PROVIDER_ERROR_BILLING, PROVIDER_ERROR_QUOTA})
+
+_BILLING_HINTS = ("insufficient", "credit", "balance", "billing", "payment", "arrears", "欠费", "余额")
+_QUOTA_HINTS = ("quota", "exceeded your current", "usage limit", "monthly limit")
+_CONTEXT_HINTS = ("context window", "context length", "maximum context", "too long", "reduce the length")
+
+
+def classify_provider_error(status: int | None, body: str, exc: BaseException | None = None) -> str:
+    """Which kind of failure this is. Body hints first for the families a status
+    code cannot separate (billing behind a 403, quota vs a plain 429), then the
+    status for the rest."""
+    if exc is not None and isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return PROVIDER_ERROR_TRANSPORT
+    text = (body or "").lower()
+    # Body hints BEFORE the bare status: some providers 403 on no-credit, and a
+    # "余额不足" behind a 403 is billing, not a scope problem. The message names
+    # the family the code cannot.
+    if status == 402 or any(h in text for h in _BILLING_HINTS):
+        return PROVIDER_ERROR_BILLING
+    if any(h in text for h in _CONTEXT_HINTS):
+        return PROVIDER_ERROR_CONTEXT
+    if status in (401, 403):
+        return PROVIDER_ERROR_AUTH
+    if status == 429:
+        # A 429 can be a soft rate limit or a hard monthly quota; the body is
+        # the only thing that says which, and they want opposite responses —
+        # wait vs tell somebody.
+        return PROVIDER_ERROR_QUOTA if any(h in text for h in _QUOTA_HINTS) else PROVIDER_ERROR_RATE_LIMIT
+    if any(h in text for h in _QUOTA_HINTS):
+        return PROVIDER_ERROR_QUOTA
+    if status is not None and status >= 500:
+        return PROVIDER_ERROR_PROVIDER
+    return PROVIDER_ERROR_PROVIDER
+
+
 _SYSTEM_PROMPT = """You judge operations alerts. Read one alert and answer with strict JSON only,
 no prose around it.
 
@@ -236,7 +287,7 @@ _TYPE_HINTS = (
 )
 
 
-def rule_verdict(event: Incoming, *, degraded_reason: str = "") -> Verdict:
+def rule_verdict(event: Incoming, *, degraded_reason: str = "", degraded_category: str = "") -> Verdict:
     """Keyword judgement — the floor under every other route.
 
     Deliberately crude: its job is to be a defensible answer when the model
@@ -269,6 +320,7 @@ def rule_verdict(event: Incoming, *, degraded_reason: str = "") -> Verdict:
         impact_scope="unknown (rule verdict)",
         route=ROUTE_RULE,
         degraded_reason=degraded_reason,
+        degraded_category=degraded_category,
     ).normalized()
 
 
@@ -516,7 +568,12 @@ async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) 
                 attempt += 1
                 await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
                 continue
-            return rule_verdict(event, degraded_reason=f"AI call failed: {error.__class__.__name__}")
+            category = classify_provider_error(None, "", error)
+            return rule_verdict(
+                event,
+                degraded_reason=f"AI call failed ({category}): {error.__class__.__name__}",
+                degraded_category=category,
+            )
         if response.status_code >= 500 and attempt < _RETRY_ATTEMPTS:
             logger.info("AI call http %s, retrying once", response.status_code)
             attempt += 1
@@ -537,7 +594,12 @@ async def ai_verdict(client: httpx.AsyncClient, settings: Any, event: Incoming) 
             response.raise_for_status()
             body = response.json()
         except Exception as error:  # noqa: BLE001
-            return rule_verdict(event, degraded_reason=f"AI call failed: {error.__class__.__name__}")
+            category = classify_provider_error(response.status_code, response.text or "", error)
+            return rule_verdict(
+                event,
+                degraded_reason=f"AI call failed ({category}): http {response.status_code}",
+                degraded_category=category,
+            )
         break
     _dialect_for_model[settings.ai_model] = (dialect, time.time())
 

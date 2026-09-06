@@ -397,6 +397,12 @@ class Verdict:
     cost: float = 0.0
     model: str = ""
     degraded_reason: str = ""
+    # WHY the model call failed, when it did — one of judge.PROVIDER_ERROR_*.
+    # In-process only (not persisted): the caller reads it to decide whether this
+    # is a failure a person must act on (a dead key degrades every verdict until
+    # they do) or a transient one that will pass. degraded_reason carries the
+    # human sentence for the ledger; this carries the category for the decision.
+    degraded_category: str = ""
 
     def normalized(self) -> Verdict:
         importance = self.importance.strip().lower()
@@ -416,6 +422,7 @@ class Verdict:
             cost=self.cost,
             model=self.model,
             degraded_reason=self.degraded_reason,
+            degraded_category=self.degraded_category,
         )
 
 

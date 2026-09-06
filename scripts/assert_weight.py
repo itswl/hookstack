@@ -213,7 +213,17 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # and there is nowhere else that knows a dialect was stepped down. An hour
     # is one 400 an hour against a provider that genuinely cannot, and no
     # operator needed against one that recovers.
-    "hookjudge": (3250, Path("hookjudge/README.md")),
+    # 3250 -> 3350 on 2026-09-06, for a provider-error classifier (borrowed from
+    # Larkin) and the alarm it enables. Split: +45 code — the doctrine question
+    # applies and the answer is that this is a JUDGE property, not a pipe one:
+    # WHY a model call failed, at the granularity that decides whether a person
+    # must act. Every failure used to fall to the keyword floor with one opaque
+    # reason, so a dead key silently judged every alert by keywords until someone
+    # read the ledger. Now auth/billing/quota — the ones that do not pass on
+    # their own — raise one rate-limited alarm, and the transient ones still just
+    # degrade. It belongs in the judge because the judge is the component that
+    # makes the model call and owns what to do when it fails.
+    "hookjudge": (3350, Path("hookjudge/README.md")),
 }
 UNCAPPED = ("hookprobe",)
 

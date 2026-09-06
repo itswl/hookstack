@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Str
 
 from hookjudge.alarm import SelfAlarm
 from hookjudge.contract import ACTION_KINDS, ACTION_SILENCE, ACTION_USEFUL, IMPORTANCE, Incoming, Outgoing
-from hookjudge.judge import ai_verdict, reuse_verdict, rule_reuse_verdict, rule_verdict
+from hookjudge.judge import PROVIDER_ERROR_MUST_ACT, ai_verdict, reuse_verdict, rule_reuse_verdict, rule_verdict
 from hookjudge.live import Live
 from hookjudge.settings import Settings
 from hookjudge.store import Store, now_ts
@@ -139,6 +139,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     verdict = rule_reuse_verdict(by_rule, event)
                 else:
                     verdict = await ai_verdict(client, app_settings, event)
+            # A model failure a PERSON must fix (dead key, no credit, hard quota)
+            # degrades this verdict AND every one after it to the keyword floor,
+            # silently. Alarm on it — rate-limited, so a dead key raises one
+            # alarm, not one per alert — so the operator learns now rather than
+            # from a week of quietly-degraded verdicts. Transient categories
+            # (rate limit, provider blip) are not alarmed: they pass on their own.
+            if verdict.degraded_category in PROVIDER_ERROR_MUST_ACT:
+                await alarm.degraded_provider(
+                    client, category=verdict.degraded_category, error=verdict.degraded_reason, now=now_ts()
+                )
             latency_ms = int((time.monotonic() - started) * 1000)
             return await store.record(event, verdict, latency_ms)
         except Exception as exc:  # noqa: BLE001 — the promise in the docstring, kept
