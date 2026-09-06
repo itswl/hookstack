@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Protocol
 
-from hookprobe import actions, automation, distill_loop, remediation, rulings, run_rulings, suggestions
+from hookprobe import actions, automation, distill, distill_loop, remediation, rulings, run_rulings, suggestions
 from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult
 from hookprobe.notify import ReturnDelivery
@@ -527,7 +527,40 @@ class RunService:
         self._store.annotate(run)
         self._board_changed()
         logger.info("ruling recorded session=%s ruling=%s by=%s", run.session_key, ruling or "(cleared)", actor or "-")
+        if ruling == "useless":
+            self._reconsider_runbooks(session_key)
         return run
+
+    def _reconsider_runbooks(self, session_key: str) -> None:
+        """A useless ruling withdraws or flags the runbooks that run distilled.
+
+        The wire the learning loop was missing: auto_distill refuses to write
+        from a run that failed or produced nothing, but "later judged useless"
+        arrived after the write and nothing acted on it — so runbooks whose every
+        case came from a worthless run were loaded into every later run as method
+        to copy. This closes it at the moment the ruling lands.
+
+        A withdrawal is a `distill` regret and is recorded as one: it is the
+        after-the-fact signal that an auto-applied runbook was wrong, which is
+        exactly what keeps the distill class honestly below auto_apply in the
+        graduation record.
+        """
+        skills_dir = self._settings.workdir / ".claude" / "skills"
+
+        def ruling_of(sk: str) -> str:
+            other = self._store.get(sk)
+            return (other.ruling or "") if other else ""
+
+        for outcome in distill.reconsider_after_useless(skills_dir, session_key, ruling_of, at=time.time()):
+            logger.info("runbook %s: %s (%s)", outcome["runbook"], outcome["action"], outcome)
+            if outcome["action"] == "withdrawn":
+                automation.record(
+                    self._settings.workdir,
+                    "distill",
+                    outcome["runbook"],
+                    "regretted",
+                    note="every case was ruled useless",
+                )
 
     def window_unpriced(self) -> int:
         """How many turns in the window spent money nobody could count.

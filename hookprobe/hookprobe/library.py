@@ -300,8 +300,10 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
         manifest = skill_dir / "SKILL.md"
         if not path.is_file():
             raise HTTPException(status_code=404, detail="no such version")
-        if not manifest.is_file():
-            raise HTTPException(status_code=404, detail="no such runbook")
+        # A MISSING manifest is not "no such runbook" — it is a WITHDRAWN one, and
+        # restoring it is exactly the undo a withdrawal owes. The guard used to
+        # refuse that, which made the useless-withdrawal irreversible; the history
+        # is right here. Snapshot only when there is something to displace.
         snapshot(skill_dir, manifest)
         atomic_write(manifest, path.read_bytes())
         record_revision(

@@ -32,7 +32,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from hookprobe import distill
+from hookprobe import automation, distill
 from hookprobe.engine import EngineResult
 from hookprobe.files import atomic_write
 from hookprobe.runs import Run, RunStore
@@ -67,6 +67,14 @@ def auto_distill(run: Run, result: EngineResult, settings: Settings) -> None:
     else:
         verb, name = next(iter(outcome.items()))
         logger.info("auto-distill %s session=%s runbook=%s", verb, run.session_key, name)
+        # A newly INSTALLED runbook is the distill class acting on its own — the
+        # auto_applied event that gives that class a record. Only on install, so
+        # the runbook is one row, not one per case appended; its later
+        # withdrawal (a useless ruling) is the matching regret, and the two make
+        # the distill class's graduation record honest. An update is not a new
+        # act, so it is not counted again.
+        if verb == "installed":
+            automation.record(settings.workdir, "distill", name, "auto_applied", session=run.session_key)
 
 
 ATTEMPT_FILE = "consolidation-attempt.json"

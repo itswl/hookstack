@@ -59,6 +59,7 @@ import hashlib
 import json
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -477,6 +478,89 @@ line. No commentary, no code fences."""
 
 def case_count(manifest_text: str) -> int:
     return manifest_text.count("<!-- case:start")
+
+
+# The session key stamped into each case block by case_block(). It is the wire
+# between a runbook and the investigations it was distilled from — the only
+# thing that lets a ruling on a run reach the knowledge that run taught.
+_SESSION_RE = re.compile(r"·\s*session\s*`([^`]+)`")
+
+
+def case_sessions(manifest_text: str) -> list[str]:
+    """The session keys of the investigations a runbook holds cases for."""
+    return [s for s in _SESSION_RE.findall(manifest_text or "") if s and s != "?"]
+
+
+def reconsider_after_useless(
+    skills_dir: Path,
+    session_key: str,
+    ruling_of: Callable[[str], str],
+    *,
+    at: float,
+) -> list[dict[str, Any]]:
+    """A run was ruled useless. Withdraw or flag the runbooks its cases fed.
+
+    The defect this closes, found on the live deployment: auto_distill refuses to
+    write from a run that failed, changed its inputs, or produced no report —
+    "was later judged useless" is the same class of fact, arriving AFTER the
+    write, and nothing acted on it. Five runbooks were being loaded into every
+    later run as "what previous investigations checked", and every case in them
+    came from a run a person had ruled worthless. The loop was teaching a method
+    already judged to have taught nothing.
+
+    `ruling_of(session_key)` returns that run's current ruling — "useless",
+    "useful", or "" when unruled — and is passed in rather than reached for, so
+    this stays a pure function of the files plus a lookup and the store never
+    leaks into the module that owns runbook shape.
+
+    Two fates, from the note's own words ("flagged for review at minimum, removed
+    when every case came from useless runs"):
+
+      withdrawn — every case is from a useless run. Snapshotted to history, then
+        the SKILL.md removed so it stops being loaded. Reversible: the history
+        restore recreates it, which is why removing the manifest is safe.
+      flagged — some cases are still useful or unruled. The runbook holds
+        knowledge that may be good, so nothing is removed; it is marked
+        unreviewed with the reason, which surfaces it on the skills page for a
+        person. Editing individual cases out is too surgical to do unwatched.
+    """
+    if not skills_dir.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for entry in sorted(skills_dir.iterdir()):
+        manifest = entry / "SKILL.md"
+        if not (entry.is_dir() and manifest.is_file()):
+            continue
+        try:
+            text = manifest.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        sessions = case_sessions(text)
+        if session_key not in sessions:
+            continue
+        rulings = [ruling_of(s) for s in sessions]
+        useless = sum(1 for r in rulings if r == "useless")
+        if sessions and all(r == "useless" for r in rulings):
+            snapshot(entry, manifest)
+            manifest.unlink(missing_ok=True)
+            record_revision(
+                entry,
+                by="service:useless-withdrawal",
+                reviewed=False,
+                at=at,
+                detail={"withdrawn": "every case was from a run ruled useless", "cases": len(sessions)},
+            )
+            out.append({"runbook": entry.name, "action": "withdrawn", "cases": len(sessions)})
+        else:
+            record_revision(
+                entry,
+                by="service:useless-flag",
+                reviewed=False,
+                at=at,
+                detail={"flagged": f"a case (session {session_key}) was ruled useless", "useless": useless},
+            )
+            out.append({"runbook": entry.name, "action": "flagged", "useless": useless, "cases": len(sessions)})
+    return out
 
 
 def valid_consolidation(text: str, name: str) -> str:

@@ -1,7 +1,7 @@
 ---
 title: A ruling of "useless" should withdraw the runbook that run distilled
-status: proposed
-date: 2026-08-31
+status: implemented
+date: 2026-09-06
 scope: hookprobe
 ---
 
@@ -54,3 +54,33 @@ argument for the wire, not a substitute for it.
   questions (Grafana rule UIDs, AWS notices) because those it can reach. That
   is a tool-access decision, not a model-quality one, and no runbook hygiene
   fixes it.
+
+## Built (2026-09-06)
+
+The wire is `distill.reconsider_after_useless(skills_dir, session_key, ruling_of)`,
+called from `service.record_ruling` the moment a ruling of "useless" lands. It
+reads each runbook's cases for the session keys `case_block` stamps in them —
+the provenance that was already on disk and unused — and:
+
+- withdraws a runbook whose EVERY case is from a useless run: snapshot to
+  history, then remove SKILL.md so it stops being loaded. `ruling_of` is passed
+  in, so the module stays a pure function of the files plus a lookup and the
+  store never leaks into it.
+- flags one that still holds a useful or unruled case: marked unreviewed with
+  the reason, nothing removed, because a runbook that got four incidents right
+  should not be deleted for one it got wrong.
+
+Reversibility came with a fix it exposed: `skill_history_restore` refused to act
+when SKILL.md was absent, which is exactly the state a withdrawal leaves and
+exactly when a restore is wanted. It now recreates a withdrawn manifest from
+history, so the removal is a true undo rather than a delete.
+
+Tied into the graduation record shipped the same week: a withdrawal is a
+`distill`-class regret, and auto_distill now records an `auto_applied` on each
+INSTALL (not on updates, so a runbook is one row). Written = auto_applied,
+withdrawn = regretted, and the distill class's record is honest for the first
+time — an auto-writing class that keeps producing worthless runbooks accumulates
+the regrets that hold it below auto_apply.
+
+The manual cleanup that motivated this (seven runbooks removed by hand, 19->12)
+stays the argument for the wire, not a thing to repeat.

@@ -1,7 +1,7 @@
 ---
 title: Sample a fraction of quiet-wake-no cards so regret is measured, not assumed
 status: implemented
-date: 2026-09-02
+date: 2026-09-06
 scope: stack
 ---
 
