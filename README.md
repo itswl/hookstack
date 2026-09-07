@@ -25,6 +25,8 @@ Narrative overview with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 
 ![hookrelay's ledger: every message accounted for, every delivery with an outcome](docs/img/hookrelay-ledger.png)
 
+![hookrelay's timeline: one chain per alert — signal, verdict, report — with costs, one incident grouped, and an audit record opened](docs/img/hookrelay-timeline.png)
+
 ![hookjudge's status page: verdicts with their routes and what each cost](docs/img/hookjudge-status.png)
 
 Screenshots are from one local Docker run started from nothing, not mockups — [OVERVIEW.md](OVERVIEW.md) has the rest of them.

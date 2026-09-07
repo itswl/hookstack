@@ -40,6 +40,40 @@ MIT licensed. Narrative overview with screenshots: [OVERVIEW.md](https://github.
 
 ---
 
+## The three services
+
+| Component | Role | Deliberately does NOT |
+| --- | --- | --- |
+| **hookrelay** | the pipe — adapts every upstream dialect in and every channel format out, and accounts for all of it | understand content, or judge |
+| **hookjudge** | the judge — one event in, one verdict out, five routes ordered by cost | render cards, or know channels |
+| **hookprobe** | the investigator — one agent run per event that earns it, read-only by default, answering *what broke* for an alert and *how would this be done* for a work item | receive alerts, or send notifications |
+
+```
+upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
+      │
+      ▼
+  hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ──► Feishu / DingTalk / WeCom
+  (pipe: adapt+route+ledger) │ (judge: verdict+cost)   (formats and delivers)
+                             │
+                             └──► hookprobe :8088 ──► hookrelay ──► the same channels
+                                  (investigator: read-only by default)  /hook/probe-notify
+
+a source that already judged its own signal takes a terminal route instead:
+
+  your source ──► hookrelay ──┬──► the channel you named   (no judge: it is decided)
+  (signed door)               └──► hookprobe :8088         (only if it says so)
+```
+
+![hookrelay's ledger: every message accounted for, every delivery with an outcome](img/hookrelay-ledger.png)
+
+![hookrelay's timeline: one chain per alert — signal, verdict, report — with costs, one incident grouped, and an audit record opened](img/hookrelay-timeline.png)
+
+![hookjudge's status page: fifteen verdicts, every free route exercised, 53% paid](img/hookjudge-status.png)
+
+Every screenshot above comes from one local Docker run started from nothing — not mockups.
+
+---
+
 ## hookprobe: an agent run behind an HTTP contract
 
 You POST a task. hookprobe runs a single tool-using agent session (Claude Agent SDK: bash, MCP servers, web search, `SKILL.md` skills) and serves the report to whoever polls for it. No channels, no device pairing, no chat history.
@@ -68,7 +102,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 
 ![The sessions console](img/hookprobe-sessions.png)
 
-![Every tool call of an investigation, as it happens](img/hookprobe-live-feed.png)
+![Every tool call of every run, on the audit page](img/hookprobe-audit.png)
 
 ![The diagnostic runbook a run distilled for itself](img/hookprobe-skills.png)
 
@@ -110,38 +144,6 @@ The repository runs two deployments that share every line of service code. One c
 2.  **SRE-specific RLHF (Self-Evolution):** Capturing card clicks ("Actually mattered", "Snooze") to automatically assemble a localized reinforcement learning dataset. This dataset is fed into automated prompt-tuning loops or local model fine-tuning.
 3.  **Local Model Validation (vLLM/Ollama):** The judge already speaks to any OpenAI-compatible base, so a zero-cost, fully offline Qwen/Llama brain is configuration today ([how](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)). What is not yet done is the measurement: the golden set has never been run against a 7B model, and `missed` / `false_quiet` on one are the numbers an air-gapped deployment needs before it trusts it.
 4.  **Dual-Brain Shadow Audit Views:** Running multiple decision prompts or model comparison arms in parallel, allowing SRE teams to audit model decision drift at production scales before promoting changes to production.
-
----
-
-## The whole family
-
-| Component | Role | Deliberately does NOT |
-| --- | --- | --- |
-| **hookrelay** | the pipe — adapts every upstream dialect in and every channel format out, and accounts for all of it | understand content, or judge |
-| **hookjudge** | the judge — one event in, one verdict out, five routes ordered by cost | render cards, or know channels |
-| **hookprobe** | the investigator — one agent run per event that earns it, read-only by default, answering *what broke* for an alert and *how would this be done* for a work item | receive alerts, or send notifications |
-
-```
-upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
-      │
-      ▼
-  hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ──► Feishu / DingTalk / WeCom
-  (pipe: adapt+route+ledger) │ (judge: verdict+cost)   (formats and delivers)
-                             │
-                             └──► hookprobe :8088 ──► hookrelay ──► the same channels
-                                  (investigator: read-only by default)  /hook/probe-notify
-
-a source that already judged its own signal takes a terminal route instead:
-
-  your source ──► hookrelay ──┬──► the channel you named   (no judge: it is decided)
-  (signed door)               └──► hookprobe :8088         (only if it says so)
-```
-
-![hookrelay's ledger: every message accounted for, every delivery with an outcome](img/hookrelay-ledger.png)
-
-![hookjudge's status page: four verdicts with their routes](img/hookjudge-status.png)
-
-Every screenshot above comes from one local Docker run started from nothing — not mockups.
 
 ---
 
@@ -190,5 +192,5 @@ A custom bot can only *send*, so the buttons on its cards have nowhere to call b
 
 *   [Full narrative overview](https://github.com/itswl/hookstack/blob/main/OVERVIEW.md)
 *   [hookprobe reference](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md)
-*   [Running the whole family](https://github.com/itswl/hookstack/blob/main/STACK.md)
+*   [Running all of hookstack](https://github.com/itswl/hookstack/blob/main/STACK.md)
 *   [WebhookWise](https://github.com/itswl/WebhookWise) — the self-hosted alerting platform these grew out of

@@ -42,6 +42,16 @@ sources:
     title: "{meta.alert_name}"
     body: "{analysis.summary}"
     level: "{meta.importance}"
+    recovery: "{meta.is_recovery}"
+    # What closes the round trip on the board: the judge echoes the pipe's
+    # correlation id, so its verdict lands in the chain of the alert it judged
+    # (one chain per alert on /timeline), and chains that share a judge burst
+    # are grouped into one incident. Same shape as the production config.
+    fields:
+      origin: "{meta.source}"
+      wake: "{meta.wake_someone}"
+      correlation_id: "{meta.correlation_id}"
+      burst_id: "{meta.burst_id}"
 
   # The investigator's return door: hookprobe posts its finished report here.
   # The summary is the card; the full report stays on the probe's session.
@@ -57,6 +67,9 @@ sources:
       session: "{meta.session_key}"
       probe_status: "{meta.status}"
       cost_usd: "{meta.cost_usd}"
+      # hookprobe never sees the pipe's correlation id; it echoes the event id
+      # it was handed, which is what puts the report in the alert's chain.
+      correlation_id: "{meta.event_id}"
 
 channels:
   - name: to-judge

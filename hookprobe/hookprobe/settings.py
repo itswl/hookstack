@@ -180,7 +180,7 @@ class Settings:
     # of a condition the previous session had already mapped. 0 disables.
     coalesce_window_seconds: int
 
-    # The family loop. event_secret verifies what the pipe delivers to
+    # The hookstack loop. event_secret verifies what the pipe delivers to
     # /hooks/event; return_url is where finished investigations from that
     # door report back (the pipe's probe-notify front door), signed with
     # return_secret. escalate_levels is the only judgement the investigator
@@ -222,7 +222,7 @@ class Settings:
     # The budget breaker, guarding the only path that spends money without a
     # human asking: once the window's recorded spend reaches budget_usd, the
     # event door refuses NEW investigations (each refusal still reports
-    # itself through the family loop). 0 disables. Operator-driven doors
+    # itself through the hookstack loop). 0 disables. Operator-driven doors
     # (/hooks/agent, continue, the UI) are never gated.
     budget_usd: float
     # Window the spend ceiling is measured over.

@@ -12,7 +12,7 @@ at all. If you have no alert stream, read "alert" as "signal" throughout and
 almost nothing else needs translating; the two deployments are compared in
 [docs/deployments.md](docs/deployments.md).
 
-The family's design philosophy is one job per component.
+hookstack's design philosophy is one job per component.
 **hookrelay** is the pipe — it adapts every monitoring dialect in and every
 channel format out. **hookjudge** is the judge — one event, one verdict, one
 line in the ledger. **hookprobe** is the investigator — one tool-using
@@ -21,14 +21,17 @@ three live in this repository, each entirely self-contained (its own package,
 tests, gate, Dockerfile and CI), and together they form a complete alert
 handling pipeline.
 
-Every screenshot below comes from one local Docker run on 2026-08-13, started
-from nothing (`docker compose down -v`, then the family up with
-`--profile probe`) — not mockups: four demo alerts came in the front door, and
-four verdicts plus three deep investigations landed in the same ledger. The
-investigator ran against DeepSeek's Anthropic-dialect endpoint — the engine is
-not provider-locked; one `ANTHROPIC_BASE_URL` plus a few model alias mappings
-is the whole switch. Steps are in [STACK.md](STACK.md) (that run book
-documents the self-contained pair; this run added `--profile probe` on top).
+Every screenshot below comes from one local Docker run on 2026-09-07, started
+from nothing (`docker compose down -v`, then hookstack up with
+`--profile probe`) — not mockups: fifteen demo alerts came in through two
+doors (a bare webhook and an Alertmanager-shaped one), fifteen verdicts and
+five deep investigations landed in the same ledger, and every report came back
+to the pipe as the third hop of the alert's own chain. The investigator ran a
+GPT-class model (`gpt-5.6-luna`) through a gateway speaking the Anthropic
+dialect — the engine is not provider-locked; one `ANTHROPIC_BASE_URL` plus a
+few model alias mappings is the whole switch. Steps are in [STACK.md](STACK.md)
+(that run book documents the self-contained pair; this run added
+`--profile probe` on top).
 
 ```
 upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
@@ -73,7 +76,7 @@ delivered and dead-lettered are visible at a glance on the ledger page, and
 any event opens into its full decision chain.
 
 The screenshot below is the ledger after the four demo alerts — the whole
-family loop on one page. Each front-door event is routed, in one decision, to
+hookstack loop on one page. Each front-door event is routed, in one decision, to
 both `to-judge` and `to-probe` (#1–#8: four alerts and the four verdicts that
 came back within seconds); minutes later the investigators' reports return
 through `probe-notify`, get dressed as cards, and are delivered to
@@ -88,6 +91,18 @@ bot, around the stack that just failed.
 
 ![hookrelay ledger: every message accounted for, every delivery with an outcome](docs/img/hookrelay-ledger.png)
 
+The timeline tab reads the same ledger as operations. A chain is everything
+that quoted one origin's id — here the alert, the verdict that came back a
+second later, and the report that came back a minute or two after that — with
+what each hop cost; chains that share a judge burst are grouped into one
+incident (five interruptions, one root cause, $2.9); and every chain opens
+into an audit record: payload digests per hop, what was sent where and how
+many bytes, the human actions, and the end-to-end time. Bodies are digests
+here and bytes under trace, because the record is for arguing about
+afterwards, not for reading alerts.
+
+![hookrelay timeline: one chain per alert, three hops each, one incident grouped, one audit record opened](docs/img/hookrelay-timeline.png)
+
 ## hookjudge: the judge
 
 The judge does exactly one thing: take a normalized event, produce a verdict
@@ -98,17 +113,21 @@ same condition restated re-serves the last AI verdict, free) → **ai** (a real,
 paid model call) → **rule** (the keyword floor). The saving does not come from
 a cheaper model; it comes from most events never reaching `ai` at all.
 
-Below is the verdict ledger for those four alerts, and this run judged them
-with a real model (DeepSeek) rather than the stub: the payment gateway 5xx paid
-for `ai` the first time and hit `reuse` for free when the same condition was
-restated; the disk alert paid for `ai`, and its recovery took `recovery` for
-free, inheriting the firing's `high` — 4 verdicts, 50% paid, $0.000414 total,
-zero failed returns. The stub run in [STACK.md](STACK.md) produces the same
-shape for $0.000524, which is the point: the cost policy is structural, not a
-property of one model. If a verdict's return dies for good, the self-alarm
-carries the news.
+Below is the verdict ledger for those fifteen alerts, judged by the stub model
+so the shape reproduces with no key: the payment-gateway alert paid for `ai`
+the first time and took `reuse` for free when the same condition was restated;
+six instances of one Alertmanager rule cost one `ai` call and four
+`rule-reuse` answers, the rule's last AI verdict answering again; the recovery
+took `recovery` for free, inheriting its firing's verdict — 15 verdicts, 8
+paid, zero failed returns. The stub prices its tokens like a real model, so
+the ledger's $0.0021 is the shape of the bill rather than the bill; the point
+is that the saving is structural, not a property of one model. The page also
+shows what the judge disagrees with: every gateway alert arrived `high` from
+the platform and left `critical` from the judge, and the review strip puts the
+ten disagreements in one place with an export for labelling. If a verdict's
+return dies for good, the self-alarm carries the news.
 
-![hookjudge status page: four verdicts with their routes, 50% paid](docs/img/hookjudge-status.png)
+![hookjudge status page: fifteen verdicts, every free route exercised, 53% paid](docs/img/hookjudge-status.png)
 
 ## hookprobe: the investigator
 
@@ -154,49 +173,50 @@ duration. Select a finished session and the box at the bottom is a follow-up:
 the same engine session resumes, with the first round's tool output, evidence
 and dead ends all still there. A running turn can be stopped at any time.
 
-Below is the session page after the disk investigation finished: the report
-rendered as Markdown with its conclusion first, the process folded above it,
-and a bill line reading deepseek-v4-pro[1m] (with its auxiliary
-deepseek-v4-flash) · in 39.7k · out 3.2k · $0.3291 · 49.5s. What the report
-says is the part worth reading. The agent established that node-3 is
-unreachable from the container and that this Prometheus scrapes only itself, so
-no filesystem metric exists to confirm the alert — and then refused to invent
-one: **"Undetermined — no data source reaches node-3 … the alert is firing from
-a telemetry blind spot."** It still produced ranked remediation, and put the
-gap first: restore node metrics before treating the symptom, because the alert
-is currently un-triageable. It even caught an inconsistency in the alert itself
-— a rule named `DiskWillFill` is a forecast, yet the title asserts a
-threshold-crossing at 93%. An investigation that reports an observability gap
-instead of a fabricated root cause is the behaviour the environment memory
-asks for, and every inference in it is labelled as one.
+Below is the session page after the last investigation finished: five sessions
+on the left with their costs, and on the right the report for the eighth
+gateway instance, rendered as Markdown with a bill line reading gpt-5.6-luna ·
+in 1.4k · out 1.1k · cache 35.2kr/43.2kw · $0.3334 · 20.7s. What the report
+says is the part worth reading. The agent names the likely cause (upstream
+latency or connectivity), then says what it could not distinguish and why:
+the container holds no production credentials and no cluster or cloud access,
+so logs, traces and deployment state could not be verified. It compares its
+case with the sibling investigations already in `/data/results` — gateway-7
+and gateway-2 reached the same conclusion — ranks the remediation, and then
+refuses to write a command block: *the runtime interface and failing
+dependency are unconfirmed, so kubectl, cloud CLI or service-manager commands
+would be speculative*. Under the report sit the two rulings a person can
+press — found the cause, missed it — and the button that distils the run into
+a runbook draft. An investigation that states its evidence limits instead of
+a fabricated root cause is the behaviour the environment memory asks for, and
+every inference in it is labelled as one.
 
 ![hookprobe sessions console](docs/img/hookprobe-sessions.png)
 
-The investigation is visible while it happens: under the running turn, every
-step scrolls in live — blue for a tool call (with a one-line summary), italic
-for the agent's narration between tools, and the plan checklist (TodoWrite)
-rendered as a to-do list. When it finishes the whole thing folds into
-`process · N steps`, openable forever after. The shot below catches the disk
-investigation halfway: it opens with `Grep DiskWillFill|disk usage|node-3|/var`
-across the case files — the episodic-memory instruction doing its job — then
-reads the three case files it found, resolves node-3, and queries the
-Prometheus targets and metric names to see what is actually scrapeable. The
-other two investigations on the left have already finished with their costs.
+The investigation is visible while it happens and after: under a running turn,
+every step scrolls in live — a tool call with a one-line summary, the agent's
+narration between tools, the plan checklist as a to-do list — and when it
+finishes the whole thing folds into `process · N steps`, openable forever
+after. The audit view below is the same record across runs, newest first:
+every tool call of every run, subagents included, written by the service as
+one line per call to a flight recorder the agent cannot edit. The five runs
+read each other's case files (`Read /data/results/probe:…json`), grep for the
+alert's own terms across the workdir, and one shells out to parse the engine's
+transcript — all of it here, with the session it belongs to.
 
-![live process feed: every tool call of an investigation, as it happens](docs/img/hookprobe-live-feed.png)
+![audit view: every tool call in every run, subagents included, newest first](docs/img/hookprobe-audit.png)
 
 Everything the agent accumulates is manageable from the page. The skills view
 lists every runbook (frontmatter description, files, modification time) and
-renders one in full when opened. Both entries in the shot below are real:
-`gateway-5xx-triage` is a product of this very run — after the payment-gateway
-investigation finished, one follow-up ("distil the diagnostic path you
-verified into a skill") had the agent write down the lookups it had actually
-used, and its own description now tells the next run to open prior case files
-first and to state reachability honestly. `victoriametrics-metrics` came from
-the OpenOcta marketplace unchanged: the SKILL.md format is shared across the
-whole OpenClaw lineage, so a downloaded package is installed by unzipping it
-into `.claude/skills/`. Later alerts start with both in hand — the
-investigator gets smarter with use, and can borrow.
+renders one in full when opened. The runbook in the shot below is a product of
+this very run: after the disk investigation finished, one press of *distil
+into a runbook draft* had the service — never the agent — write down the
+lookups the run actually made, twenty-two of them, as a case under the alert's
+name, with provenance and a revision history; the next disk alert opens with
+it loaded. The SKILL.md format is shared across the whole OpenClaw lineage, so
+a downloaded package installs by unzipping it into `.claude/skills/` and sits
+beside the distilled one — the investigator gets smarter with use, and can
+borrow.
 
 ![skills browser: the diagnostic runbook this run distilled](docs/img/hookprobe-skills.png)
 
@@ -235,15 +255,15 @@ page — secrets as set/unset, never values.
 
 ![system view: the whole runtime, from model and budget to MCP servers and health](docs/img/hookprobe-system.png)
 
-## The family loop: escalation in, report out
+## The hookstack loop: escalation in, report out
 
-The investigator is wired into the family's own alert flow: the pipe's
+The investigator is wired into hookstack's own alert flow: the pipe's
 escalation routes copy every front-door event to `/hooks/event`, and whether an
 investigation is worth paying for is the probe's own call by level (critical
 and high by default, idempotent per source + event_id — a redelivery of the
 same event funds one investigation, not N; a restatement carrying a new event
 id is a new investigation, which is what the budget breaker is for). When it finishes, the report returns to the pipe's
-`probe-notify` front door, signed with the family's timestamped HMAC, and the
+`probe-notify` front door, signed with hookstack's timestamped HMAC, and the
 pipe dresses it as a card for the same channels as the verdict. The pipe stays
 content-blind, the judge was not touched at all, and a failed investigation
 completes the loop the same way a successful one does.
@@ -276,7 +296,7 @@ reported that the verdict agreed, flagging only that disk usage had doubled
 while staying inside its threshold.
 
 That comparing-against-last-time is what turns patrol mode from a scheduled
-health check into the family's answer to two questions no single alert can
+health check into hookstack's answer to two questions no single alert can
 answer. Both ship as briefs and crontab lines in
 [`hookprobe/examples/patrols/`](hookprobe/examples/patrols/README.md), and
 both are prompts rather than code: **"is the noise going up or down"** reads
@@ -285,7 +305,7 @@ window was already a query parameter), opens last week's edition of itself and
 reports the direction of cards-per-condition against what it cost;
 **"propose a scheduled silence"** looks for the condition that fires in
 the same hour every night and that a human ruled not worth it, and proposes
-quieting it. Proposing, not doing — the family's established shape, the same
+quieting it. Proposing, not doing — hookstack's established shape, the same
 one memory suggestions and remediation already take.
 
 The briefs are written to be honest about what they cannot see, which is the
@@ -303,7 +323,7 @@ the smallest brain is on file in
 ## Running it locally
 
 The pipe-plus-judge demo is self-contained (the stub model and the sink both
-live in the repository), so one command starts the family; the investigator
+live in the repository), so one command starts hookstack; the investigator
 needs real model credentials and is therefore an opt-in tier. Each service's
 gate is an exact local replica of its CI job — gate before pushing, CI
 confirms after, and that is the fixed discipline of this repository.
@@ -379,7 +399,7 @@ every claim of savings has a counter somebody can check.
 ## Where this sits in an AI-native SDLC
 
 Anthropic's [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
-names the stage this family is built for — **Maintain**: cheap deterministic
+names the stage hookstack is built for — **Maintain**: cheap deterministic
 answers before a model is paid, an investigator only for the alerts that
 earned one, remediation proposed rather than applied, every decision in a
 ledger a person can audit later. That posture is enforced here rather than

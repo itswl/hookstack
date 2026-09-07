@@ -66,6 +66,10 @@ services:
       HOOKJUDGE_RETURN_URL: http://hookrelay:8100/hook/judge-notify
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
       HOOKJUDGE_REUSE_WINDOW_SECONDS: "3600"
+      # The third free route: an alert RULE's last AI verdict answers its next
+      # instances for an hour (needs a rule identity — the alertmanager door's
+      # `alertname`). Off (0) unless set; on here so the demo shows the route.
+      HOOKJUDGE_RULE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_RULE_REUSE_WINDOW_SECONDS:-3600}
       # Defaults to the stub. Leaving these empty instead would send every
       # event to the rule floor, and `reuse` — which only ever follows an ai
       # verdict — would never happen, hiding half the cost policy.

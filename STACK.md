@@ -1,4 +1,4 @@
-# Running the whole hookstack family
+# Running all of hookstack
 
 The pipe and the brain, plus a downstream you can read and a stub model, in
 one command. Every step and every expected output below was re-verified from a
@@ -112,7 +112,7 @@ that are worth keeping apart:
   `/status`: judged counts, the ai/reuse/recovery split, priced tokens,
   identity, recovery inheritance. Properties of one implementation.
 
-That split is what makes the family's own acceptance test runnable rather than
+That split is what makes hookstack's own acceptance test runnable rather than
 aspirational:
 
 ```bash

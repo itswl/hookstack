@@ -1,6 +1,6 @@
 # hookprobe — what a run costs, and what it reports about the cost
 
-An agent run is the expensive part of this family, so the levers on that cost
+An agent run is the expensive part of hookstack, so the levers on that cost
 and the record of having spent it are one subject. Nothing here is required to
 operate the service; all of it is required to argue about the bill.
 

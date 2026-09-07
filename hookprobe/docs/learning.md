@@ -104,7 +104,7 @@ runbook. The trust boundary above applies double to third-party skills:
 read them before installing — they will be instructing an agent that holds
 your read-only credentials.
 
-## The family loop
+## The hookstack loop
 
 Inside hookstack the investigator is wired into the alert flow itself: the
 pipe's escalation routes copy every front-door event to `/hooks/event`, the
@@ -163,7 +163,7 @@ the failures. Declaring is a request, not a guarantee: the pipe drops kinds it
 is not configured to accept, and only channels that have callbacks render any of
 them.
 
-The division of labour is the family's usual one. This side judges *which*
+The division of labour is hookstack's usual one. This side judges *which*
 actions a report earns; hookrelay mints the signed card token and owns the IM
 callback, because a card token is channel edge — nothing here names a channel or
 signs a button. A press comes back to `POST /hooks/action`, signed exactly like

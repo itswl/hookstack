@@ -7,7 +7,7 @@ comes back through `probe-notify` onto the same channels. Nothing in any
 service knows what a patrol is — see *Patrol mode* in
 [hookprobe's README](../../README.md) for the mechanism.
 
-The patrols live in this directory. Each answers a question the family could
+The patrols live in this directory. Each answers a question hookstack could
 not answer before, and none needed a line of service code (the row count here
 once said "two" while the table held five — a number in prose is a promise,
 so the sentence no longer carries one):
@@ -213,7 +213,7 @@ environment that cron does not.
 
 ## How the request is signed
 
-The front door verifies a per-source timestamped HMAC — the family's scheme,
+The front door verifies a per-source timestamped HMAC — hookstack's scheme,
 `hookrelay/hookrelay/security.py`:
 
 ```

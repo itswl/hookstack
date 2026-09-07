@@ -6,8 +6,8 @@ The sixty-second version is in the [README](../README.md); this is the rest.
 ## Run it
 
 Four composes, four shapes: the repo-root stack compose runs the demo
-family and includes this service behind `--profile probe`; the repo-root
-`deploy/docker-compose.yml` runs the real family (pipe + brain +
+stack and includes this service behind `--profile probe`; the repo-root
+`deploy/docker-compose.yml` runs the real stack (pipe + brain +
 investigator, no demo containers); `deploy/docker-compose.yml` here runs
 the investigator standalone; `deploy/docker-compose.prod.yml` is the
 production shape — joined to the docker network of the platform it serves,
@@ -37,7 +37,7 @@ networks:                                   # network opts out of the others
 The other way round — this service joining the caller's network — is what
 `deploy/docker-compose.prod.yml` does, and there it is correct: that file is one
 installation's deployment, pinned to the platform it was written for. Do not put
-it in the demo family's compose or a local override. A service that cannot start
+it in the demo stack's compose or a local override. A service that cannot start
 until its consumer is running has the dependency backwards.
 
 Either way, declare it. `docker network connect` does the job once and survives a

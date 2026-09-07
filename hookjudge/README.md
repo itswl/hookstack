@@ -267,7 +267,7 @@ instead — an unconfigured mutating endpoint disables itself rather than openin
 because otherwise the most locked-down deployment (no token set, nothing meant
 to be exposed) is the one that lets whoever finds the port rewrite the labels the
 eval set is built from and download every alert body in the ledger. hookrelay's
-`security.py` states the split for the family: dev mode for read, endpoint
+`security.py` states the split for hookstack: dev mode for read, endpoint
 disabled for admin, and the caller decides which applies. `/feedback` is in
 neither category — it is signature-authenticated like `/events`.
 

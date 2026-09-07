@@ -38,6 +38,40 @@ MIT 协议。带截图的叙述性总览：[OVERVIEW.md](https://github.com/itsw
 
 ---
 
+## 完整的三件套
+
+| 组件 | 职责 | 刻意不做 |
+| --- | --- | --- |
+| **hookrelay** | 管道 —— 把每种上游方言适配进来、每种通道格式渲染出去，并且全程记账 | 理解内容，或做判断 |
+| **hookjudge** | 判官 —— 一个事件进,一个判定出,五条按成本排序的路径 | 渲染卡片,或了解通道 |
+| **hookprobe** | 调查员 —— 对值得的事件跑一次默认只读的 agent 运行：告警问「哪里坏了」,工作项问「具体怎么做」 | 接收告警,或发送通知 |
+
+```
+上游告警源（Grafana / Alertmanager / 云监控 …）
+      │
+      ▼
+  hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ──► 飞书 / 钉钉 / 企微
+  （管道:适配+路由+账本） │ （判官:判定+成本）     （格式化并投递）
+                          │
+                          └──► hookprobe :8088 ──► hookrelay ──► 同样的通道
+                               （调查员:默认只读）  /hook/probe-notify
+
+已经自己判过的源走终端路由，不再进判官：
+
+  你的源 ──► hookrelay ──┬──► 你指定的通道   （不判:它已经定了）
+  （签名的门）            └──► hookprobe :8088 （它说要查才查）
+```
+
+![hookrelay 的账本](../img/hookrelay-ledger.png)
+
+![hookrelay 的时间线：每条告警一条链 —— 信号、判定、报告 —— 带成本，一个事件归组，一份审计记录打开](../img/hookrelay-timeline.png)
+
+![hookjudge 的状态页](../img/hookjudge-status.png)
+
+上面每一张截图都取自一次从零开始的本地 Docker 运行 —— 不是效果图。
+
+---
+
 ## hookprobe：一次 Agent 运行，包在一个 HTTP 契约里 {#hookprobe}
 
 你 POST 一个任务。hookprobe 跑一次带工具的 agent 会话（Claude Agent SDK：bash、MCP 服务器、联网搜索、`SKILL.md` 技能），然后把报告交给来轮询的人。没有消息通道，没有设备配对，没有聊天历史。
@@ -66,7 +100,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 
 ![会话控制台](../img/hookprobe-sessions.png)
 
-![一次调查的每一个工具调用，实时](../img/hookprobe-live-feed.png)
+![每一次运行的每一个工具调用，在审计页上](../img/hookprobe-audit.png)
 
 ![一次运行为自己蒸馏出的诊断 runbook](../img/hookprobe-skills.png)
 
@@ -100,38 +134,6 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 2.  **SRE 专属的 RLHF（自我进化）：** 捕获人类在卡片上点击“其实不重要”、“确认恢复”的反馈，自动转换为标准 JSONL 数据集。该数据集自动输入本地模型 SFT 循环或 Prompt 微调，让大脑随使用时间的增加而越来越懂企业的业务。
 3.  **本地轻量级模型（vLLM/Ollama）验证：** 判官本来就对任何 OpenAI 兼容端点说话，所以“零 API 成本、完全离线”的 Qwen/Llama 决策脑今天就是一份配置（[怎么配](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)）。还没做的是**测量**：黄金集从未在 7B 模型上跑过，而 `missed` / `false_quiet` 这两个数字，是离线部署在信任它之前必须先看到的。
 4.  **影子对比审计视图（Shadow Brain Audit）：** 支持多个 Prompt 版本或模型分支并行评测，并在 Web 控制台上进行可视化分歧度对比审计，在无生产风险前提下测试最佳决策质量。
-
----
-
-## 完整的三件套
-
-| 组件 | 职责 | 刻意不做 |
-| --- | --- | --- |
-| **hookrelay** | 管道 —— 把每种上游方言适配进来、每种通道格式渲染出去，并且全程记账 | 理解内容，或做判断 |
-| **hookjudge** | 判官 —— 一个事件进,一个判定出,五条按成本排序的路径 | 渲染卡片,或了解通道 |
-| **hookprobe** | 调查员 —— 对值得的事件跑一次默认只读的 agent 运行：告警问「哪里坏了」,工作项问「具体怎么做」 | 接收告警,或发送通知 |
-
-```
-上游告警源（Grafana / Alertmanager / 云监控 …）
-      │
-      ▼
-  hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ──► 飞书 / 钉钉 / 企微
-  （管道:适配+路由+账本） │ （判官:判定+成本）     （格式化并投递）
-                          │
-                          └──► hookprobe :8088 ──► hookrelay ──► 同样的通道
-                               （调查员:默认只读）  /hook/probe-notify
-
-已经自己判过的源走终端路由，不再进判官：
-
-  你的源 ──► hookrelay ──┬──► 你指定的通道   （不判:它已经定了）
-  （签名的门）            └──► hookprobe :8088 （它说要查才查）
-```
-
-![hookrelay 的账本](../img/hookrelay-ledger.png)
-
-![hookjudge 的状态页](../img/hookjudge-status.png)
-
-上面每一张截图都取自一次从零开始的本地 Docker 运行 —— 不是效果图。
 
 ---
 

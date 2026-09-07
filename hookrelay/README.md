@@ -41,7 +41,7 @@ GRAFANA_HOOK_SECRET=xxx FEISHU_WEBHOOK_URL=https://... \
   .venv/bin/python -m hookrelay      # listens on 127.0.0.1:8100
 ```
 
-Or run the whole family — pipe, brain, a readable downstream and a stub model
+Or run all of hookstack — pipe, brain, a readable downstream and a stub model
 — with `docker compose up -d --build`. See [STACK.md](../STACK.md).
 
 ## Send something

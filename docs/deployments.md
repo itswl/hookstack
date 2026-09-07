@@ -1,4 +1,4 @@
-# Two deployments, one family
+# Two deployments, one codebase
 
 This repository runs two deployments that share every line of service code and
 agree on almost nothing else. They are the clearest answer to what hookstack

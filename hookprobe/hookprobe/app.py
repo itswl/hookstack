@@ -1,8 +1,8 @@
-"""HTTP surface: an OpenClaw-compatible contract, plus the family's own doors.
+"""HTTP surface: an OpenClaw-compatible contract, plus hookstack's own doors.
 
 POST /hooks/agent               -> {"runId": ...}                  (trigger)
-POST /hooks/event               -> the pipe's escalation door      (family)
-POST /hooks/action              -> a button pressed on the card    (family)
+POST /hooks/event               -> the pipe's escalation door      (hookstack)
+POST /hooks/action              -> a button pressed on the card    (hookstack)
 GET  /sessions/{key}/final      -> 200 isFinal:true / 202 / 404    (poll)
 POST /sessions/{key}/continue   -> follow-up turn, same session    (explore)
 GET  /v1/runs                   -> session list, newest first      (UI)

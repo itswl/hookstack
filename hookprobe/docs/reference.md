@@ -18,7 +18,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_SYSTEM_PROMPT_APPEND` | *(empty)* | Operator methodology appended to the engine's own system prompt, read fresh at every run (hot-editable) |
 | `HOOKPROBE_AGENTS_CONFIG` | *(empty)* | Named subagent roles (JSON: name -> {description, prompt, tools?, model?, skills?}), the config-file twin of .claude/agents/*.md files |
 | `HOOKPROBE_REMEDIATION_ALLOWLIST` | *(empty)* | Remediation executor gate: a file of full-match regexes, one per line, hot-read at execution time |
-| `HOOKPROBE_EVENT_SECRET` | *(empty)* | The family loop |
+| `HOOKPROBE_EVENT_SECRET` | *(empty)* | The hookstack loop |
 | `HOOKPROBE_RETURN_SECRET` | *(empty)* | Outbound HMAC secret; signs the finding on its way back |
 | `HOOKPROBE_RULING_URL` | *(empty)* | Where a retrospective condition ruling goes, and the credential for that ONE door |
 | `HOOKPROBE_RULING_SECRET` | *(empty)* | Signs the rulings this service posts to the judge |
