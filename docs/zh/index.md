@@ -79,7 +79,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 
 1.  **提案型自愈（Remediation Loops）：** 从“只读诊断”走向“提案自愈”。Agent 排查故障后，自动生成修复脚本并以 Feishu 卡片形式呈现。卡片上附带 `action_secret` 加密签名的 `[批准执行]` 按钮，必须经人类确认并调用该合法签名，安全自愈 Runner 才会执行相应动作，完美兼顾速度与安全。
 2.  **SRE 专属的 RLHF（自我进化）：** 捕获人类在卡片上点击“其实不重要”、“确认恢复”的反馈，自动转换为标准 JSONL 数据集。该数据集自动输入本地模型 SFT 循环或 Prompt 微调，让大脑随使用时间的增加而越来越懂企业的业务。
-3.  **本地轻量级模型（vLLM/Ollama）集成：** 支持 Qwen/Llama 等 7B/8B 量级本地模型接入。在此类特定分类任务上，微调后的本地小模型可提供“零 API 成本、完全离线、低时延”的顶级大脑。
+3.  **本地轻量级模型（vLLM/Ollama）验证：** 判官本来就对任何 OpenAI 兼容端点说话，所以“零 API 成本、完全离线”的 Qwen/Llama 决策脑今天就是一份配置（[怎么配](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)）。还没做的是**测量**：黄金集从未在 7B 模型上跑过，而 `missed` / `false_quiet` 这两个数字，是离线部署在信任它之前必须先看到的。
 4.  **影子对比审计视图（Shadow Brain Audit）：** 支持多个 Prompt 版本或模型分支并行评测，并在 Web 控制台上进行可视化分歧度对比审计，在无生产风险前提下测试最佳决策质量。
 
 ---

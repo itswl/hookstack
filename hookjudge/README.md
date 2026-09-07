@@ -325,6 +325,37 @@ no balance) is not mistaken for one and degrades normally.
 Pin it with `HOOKJUDGE_AI_STRUCTURED_OUTPUT` when you already know what your
 provider does; a pinned dialect is never negotiated away.
 
+## Local and self-hosted models
+
+Nothing here knows which company answers the model call. `HOOKJUDGE_AI_BASE_URL`
+is any OpenAI-compatible base — a cloud provider, a gateway, or a model on your
+own hardware — and the judge speaks the same `/chat/completions` to all of them.
+So an air-gapped or zero-bill deployment is configuration, not a feature:
+
+```bash
+HOOKJUDGE_AI_BASE_URL=http://ollama:11434/v1     # or vLLM / llama.cpp: <host>/v1
+HOOKJUDGE_AI_MODEL=qwen2.5:7b-instruct           # whatever name the server serves it as
+HOOKJUDGE_AI_API_KEY=local                       # REQUIRED to be non-empty; the server may ignore it
+HOOKJUDGE_AI_PRICE_IN_PER_1K=0                   # so the ledger prices these verdicts at 0
+HOOKJUDGE_AI_PRICE_OUT_PER_1K=0
+```
+
+Three things to know before trusting one:
+
+- **The key must be set even if the server ignores it.** An empty key is read as
+  "AI not configured" and every verdict takes the rule floor, silently by
+  design — see the first line of `ai_verdict`.
+- **Small models often refuse `schema`.** The dialect negotiation above steps
+  down to `tools` and then `object` on its own; if you already know your server
+  only does plain JSON, pin `HOOKJUDGE_AI_STRUCTURED_OUTPUT=object` and skip the
+  first two rejections.
+- **Measure it against the golden set before it judges anything real.** The
+  question is never "does it answer" but "does it miss": run
+  `scripts/eval.py --route ai --gate --votes 3` with the local base in the
+  environment and read `missed` and `false_quiet` beside the rule floor's. No
+  number for a 7B model has been recorded here yet; the floor is the backstop
+  either way, and a degraded verdict still says it degraded.
+
 ## Cost tiers
 
 Five routes, cheapest first, and only one of them pays:

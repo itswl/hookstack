@@ -87,7 +87,7 @@ The repository runs two deployments that share every line of service code. One c
 
 1.  **Proposal-based Auto-healing (Remediation Loops):** Moving from read-only diagnostics to "propose-and-execute" remediation. The agent proposes a self-healing script, rendered as an interactive card with cryptographically signed `[Approve]` / `[Reject]` buttons. Executive action only fires when a human authorizes the signed token.
 2.  **SRE-specific RLHF (Self-Evolution):** Capturing card clicks ("Actually mattered", "Snooze") to automatically assemble a localized reinforcement learning dataset. This dataset is fed into automated prompt-tuning loops or local model fine-tuning.
-3.  **Local Model (vLLM/Ollama) Integration:** Providing zero-cost, 100% offline Qwen/Llama decision brains that run entirely inside air-gapped corporate environments.
+3.  **Local Model Validation (vLLM/Ollama):** The judge already speaks to any OpenAI-compatible base, so a zero-cost, fully offline Qwen/Llama brain is configuration today ([how](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)). What is not yet done is the measurement: the golden set has never been run against a 7B model, and `missed` / `false_quiet` on one are the numbers an air-gapped deployment needs before it trusts it.
 4.  **Dual-Brain Shadow Audit Views:** Running multiple decision prompts or model comparison arms in parallel, allowing SRE teams to audit model decision drift at production scales before promoting changes to production.
 
 ---
