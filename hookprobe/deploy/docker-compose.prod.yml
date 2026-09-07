@@ -205,6 +205,14 @@ services:
       # rules gets its markers stripped and nothing is sent.
       HOOKPROBE_RULING_URL: ${HOOKPROBE_RULING_URL:-}
       HOOKPROBE_RULING_SECRET: ${HOOKPROBE_RULING_SECRET:-}
+      # The judge's read token, so the patrol briefs can read its ledger. The
+      # judge has required one since 2026-08-21 (SHADOW_READ_TOKEN); the briefs
+      # send it as X-Read-Token; this container never had it — so every weekly
+      # attention review, loop review and nightly silence proposal on production
+      # curled /status, got a 401, and wrote "the judge ledger could not be
+      # read" for weeks while looking like a finished report. The README of the
+      # patrols says this one line is the requirement; this is that line.
+      HOOKJUDGE_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
       # MCP servers config (three dialects accepted; env values are
       # secrets — keep the file mounted ro or on the volume):
       HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-}
