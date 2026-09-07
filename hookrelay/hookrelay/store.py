@@ -325,6 +325,14 @@ class Store:
         delivery_columns = {str(row["name"]) for row in await cursor.fetchall()}
         if "sent_body" not in delivery_columns:
             await db.execute("ALTER TABLE deliveries ADD COLUMN sent_body TEXT")
+        if "platform_message_id" not in delivery_columns:
+            # The id the IM platform gave the card we sent. It is the only handle a
+            # person's reply in that card's thread carries, so without it a thread
+            # is a string of text and the chain it belongs to is unknowable.
+            await db.execute("ALTER TABLE deliveries ADD COLUMN platform_message_id TEXT")
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS ix_deliveries_platform_message ON deliveries (platform_message_id)"
+            )
         if "escalated_at" not in columns:
             await db.execute("ALTER TABLE events ADD COLUMN escalated_at REAL")
 
@@ -481,12 +489,54 @@ class Store:
         async with self._write():
             await self.db.execute("UPDATE deliveries SET next_attempt_at = ? WHERE id = ?", (until, delivery_id))
 
-    async def mark_sent(self, delivery_id: int, now: float, sent_body: str | None = None) -> None:
+    async def mark_sent(
+        self, delivery_id: int, now: float, sent_body: str | None = None, platform_message_id: str | None = None
+    ) -> None:
         async with self._write():
             await self.db.execute(
-                "UPDATE deliveries SET status = 'sent', sent_at = ?, last_error = NULL, sent_body = ? WHERE id = ?",
-                (now, sent_body, delivery_id),
+                "UPDATE deliveries SET status = 'sent', sent_at = ?, last_error = NULL, sent_body = ?,"
+                " platform_message_id = COALESCE(?, platform_message_id) WHERE id = ?",
+                (now, sent_body, platform_message_id or None, delivery_id),
             )
+
+    async def thread_context(self, platform_message_id: str) -> dict[str, Any] | None:
+        """What a reply under a card we sent is about: the chain, and the
+        investigation session in it, if any.
+
+        The card's platform id names one delivery; the delivery names the event
+        it carried; that event sits somewhere in an operation's chain — it may be
+        the verdict card or the report card, a person replies under whichever
+        they are looking at. Walk to the chain's origin the way /trace does, then
+        find the newest return that carried a session: that is the investigation
+        a follow-up continues. `quote` is what the follow-up event must carry as
+        its correlation to land in the same chain.
+        """
+        if not platform_message_id:
+            return None
+        cursor = await self.read.execute(
+            "SELECT event_id, channel FROM deliveries WHERE platform_message_id = ? ORDER BY id DESC LIMIT 1",
+            (platform_message_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        trip = await self.round_trip(int(row["event_id"]))
+        if trip is None:
+            return None
+        session = ""
+        for item in sorted(trip["returns"], key=lambda r: float(r.get("received_at") or 0.0), reverse=True):
+            candidate = str((item.get("fields") or {}).get("session") or "")
+            if candidate:
+                session = candidate
+                break
+        return {
+            "card_event_id": int(row["event_id"]),
+            "channel": str(row["channel"]),
+            "origin_event_id": int(trip["origin"]["id"]),
+            "quote": f"hr-{int(row['event_id'])}",
+            "session": session,
+            "title": str(trip["origin"].get("title") or ""),
+        }
 
     async def mark_failed(
         self, delivery_id: int, attempts: int, error: str, next_at: float | None, sent_body: str | None = None

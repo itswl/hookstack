@@ -100,6 +100,10 @@ services:
       # are unaffected.
       HOOKPROBE_RETURN_URL: ${HOOKPROBE_RETURN_URL:-http://hookrelay:8100/hook/probe-notify}
       HOOKPROBE_ESCALATE_LEVELS: ${HOOKPROBE_ESCALATE_LEVELS:-critical,high}
+      # Who may continue an investigation by replying in its chat thread: sender
+      # ids (ou_…), or `*` for anyone the bridge forwards from the group. Empty =
+      # nobody, which is the default until an operator decides.
+      HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
       # Production wants a ceiling: window spend >= budget refuses new
       # escalations, each refusal reporting itself to the channels. 0 = off.
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}

@@ -228,6 +228,81 @@ def _fenced_fields(fields: Any) -> str:
     return f"{text[:_FIELDS_MAX]}\n… truncated: {len(text)} characters of fields, {_FIELDS_MAX} shown"
 
 
+_FOLLOW_UP_MESSAGE = """Someone replied in this investigation's chat thread and asked:
+
+{text}
+
+Answer the question directly, in a few lines, from what this investigation has \
+already gathered; run tools only if the answer needs something not yet looked at. \
+Read-only, as before. Lead with the answer."""
+_FOLLOW_UP_TEXT_MAX = 4000
+_MAX_FOLLOW_UPS_PER_RUN = 20
+
+
+def _follow_up(
+    service: RunService, settings: Settings, event: dict[str, Any], fields: dict[str, Any]
+) -> dict[str, Any]:
+    """A person's reply under one of this investigation's cards, forwarded by the
+    pipe with the session it resolved (`fields.session`) and the thread to answer
+    in (`fields.thread_root`). Every refusal is a 200 with a reason: the pipe
+    records it, and a retry would only repeat the decision.
+
+    Four gates, in order of cost: the sender must be allowed to spend (a reply
+    in a group is a paid turn anyone in the group could start); the session
+    must exist here; the message must not have been answered already (the
+    platform redelivers); and the budget breaker applies as it does to an
+    alert. The turn itself is `continue_run`: the same engine session, so the
+    answer comes from what the investigation already found, under the same
+    read-only posture, and returns through the same door as the report — with
+    `thread_root` in its meta so the pipe posts it as a reply, not a new card.
+    """
+    sender = str(fields.get("sender") or "").strip()[:_ACTOR_MAX]
+    allowed = settings.follow_up_senders
+    if not allowed or not (sender and ("*" in allowed or sender in allowed)):
+        return {"status": "skipped", "reason": "sender not allowed to continue investigations from chat"}
+    session_key = str(fields.get("session") or "").strip()[: _EVENT_ID_MAX + 80]
+    run = service.get(session_key) if session_key else None
+    if run is None:
+        return {"status": "skipped", "reason": "no investigation behind this thread"}
+    message_id = str(fields.get("message_id") or "").strip()[:_EVENT_ID_MAX]
+    raw_handled = run.meta.get("follow_ups")
+    handled: list[str] = [str(x) for x in raw_handled] if isinstance(raw_handled, list) else []
+    if message_id and message_id in handled:
+        return {"status": "already_done", "sessionKey": run.session_key}
+    if len(handled) >= _MAX_FOLLOW_UPS_PER_RUN:
+        return {"status": "skipped", "reason": "this investigation has answered enough follow-ups"}
+    text = str(event.get("body") or event.get("title") or "").strip()[:_FOLLOW_UP_TEXT_MAX]
+    if not text:
+        return {"status": "skipped", "reason": "empty question"}
+    state = service.budget_state()
+    if state is not None and state[0] >= state[1]:
+        return {
+            "status": "skipped",
+            "reason": "budget exhausted; the previous report stands",
+            "sessionKey": run.session_key,
+        }
+    try:
+        run = service.continue_run(run.session_key, {"message": _FOLLOW_UP_MESSAGE.format(text=text)})
+    except RunBusyError:
+        return {
+            "status": "busy",
+            "reason": "a turn is already running; ask again when it answers",
+            "sessionKey": run.session_key,
+        }
+    except NotResumableError:
+        return {
+            "status": "skipped",
+            "reason": "this investigation left no session to continue",
+            "sessionKey": run.session_key,
+        }
+    run.meta["follow_ups"] = [*handled, message_id] if message_id else handled
+    run.meta["follow_up_by"] = sender
+    root = str(fields.get("thread_root") or "").strip()[:120]
+    if root:
+        run.meta["thread_root"] = root
+    return {"status": "accepted", "sessionKey": run.session_key, "runId": run.run_id}
+
+
 async def _signed_object(request: Request, secret: str, max_bytes: int) -> dict[str, Any]:
     """This delivery's JSON body, bounded and signature-checked.
 
@@ -455,6 +530,11 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
         coalesces into one already running, or is declined by level, budget or
         a standing ruling — every decline says why."""
         event = await _signed_object(request, settings.event_secret, _EVENT_MAX_BYTES)
+
+        raw_fields = event.get("fields")
+        fields = raw_fields if isinstance(raw_fields, dict) else {}
+        if str(fields.get("kind") or "").strip().lower() == "follow_up":
+            return _follow_up(service, settings, event, fields)
 
         level = str(event.get("level") or "").lower()[:_LEVEL_MAX]
         title = str(event.get("title") or "").strip()[:_TITLE_MAX]

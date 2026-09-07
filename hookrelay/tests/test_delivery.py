@@ -117,7 +117,7 @@ async def test_send_returns_the_exact_bytes_posted(cfg):
         "received_at": 0.0,
         "payload": {"raw": True},
     }
-    ok, detail, body = await channels.send(Client(), cfg.channels["mirror"], message)
+    ok, detail, body, _ = await channels.send(Client(), cfg.channels["mirror"], message)
     assert ok, detail
     assert isinstance(captured["content"], bytes)
     assert body == captured["content"]
@@ -217,7 +217,7 @@ async def test_one_channels_failure_does_not_abandon_its_siblings(store, cfg, se
     doomed = next(row["id"] for row in await store.due_deliveries(now=1001.0) if row["channel"] == "mirror")
     original_mark_sent = store.mark_sent
 
-    async def flaky_mark_sent(delivery_id, now, sent_body=None):
+    async def flaky_mark_sent(delivery_id, now, sent_body=None, platform_message_id=None):
         if delivery_id == doomed:
             raise RuntimeError("database is locked")
         await original_mark_sent(delivery_id, now, sent_body)

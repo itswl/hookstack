@@ -67,6 +67,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "bash_guard": "readonly",
         "posture_check": "off",
         "telemetry_receiver": "on",
+        "follow_up_senders": frozenset(),
         "retention_days": 0,
         "alarm_url": "",
         "alarm_min_interval_seconds": 600,

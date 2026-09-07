@@ -186,7 +186,15 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # content — bodies leave as digests — and asks nothing new of any node. What
     # it adds is the artifact a person can be held to, which is the one thing
     # the FinSec positioning is actually sold on.
-    "hookrelay": (5500, Path("hookrelay/README.md")),
+    # 5500 -> 5700 on 2026-09-08, for the thread's way back in: the ledger keeps
+    # the id the IM platform gave each card (one column), a stage resolves a
+    # reply under that card to its chain and session (thread_lookup), and the
+    # Feishu channel can ask the bridge to post in-thread. Split: +~110 source,
+    # +~70 code. Doctrine: every line is about accounting for a hop and
+    # carrying a field — the pipe learns WHICH card a reply is under (that is
+    # the ledger's own row) and passes the text on unread, exactly as it does an
+    # alert body. The bridge stays stateless because this lives here.
+    "hookrelay": (5700, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

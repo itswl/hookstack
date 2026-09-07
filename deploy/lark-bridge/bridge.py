@@ -45,6 +45,12 @@ CHAT_ID = os.environ["LARK_CHAT_ID"]
 RELAY_ACTION_URL = os.environ.get(
     "RELAY_ACTION_URL", "http://hookrelay:8100/card-action"
 )
+# A person's reply under one of the pipe's cards, forwarded to the pipe's
+# `lark-thread` door — signed with that door's secret, the pipe's own scheme
+# (X-Hook-Timestamp + X-Hook-Signature over "{ts}.{body}"). Unset = the bridge
+# does not listen for messages at all, which is the previous behaviour.
+RELAY_THREAD_URL = os.environ.get("RELAY_THREAD_URL", "")
+THREAD_SECRET = os.environ.get("THREAD_SECRET", "")
 LISTEN_PORT = int(os.environ.get("BRIDGE_PORT", "9100"))
 # Max bytes accepted from the pipe. A card is a few KB; anything near this is a
 # misconfiguration, not a notification.
@@ -104,14 +110,17 @@ def _lark(
     )
 
 
-def send_card(card: dict) -> tuple[bool, str]:
-    """Post one interactive card to the private chat, as the application."""
+def send_card(card: dict, reply_to: str = "") -> tuple[bool, str]:
+    """Post one interactive card to the private chat, as the application — or,
+    when the pipe says which message it answers, as a reply in that message's
+    thread, so a follow-up's answer lands under the question."""
+    if reply_to:
+        args = ["im", "+messages-reply", "--message-id", reply_to, "--reply-in-thread"]
+    else:
+        args = ["im", "+messages-send", "--chat-id", CHAT_ID]
     result = _lark(
         [
-            "im",
-            "+messages-send",
-            "--chat-id",
-            CHAT_ID,
+            *args,
             "--msg-type",
             "interactive",
             "--content",
@@ -173,9 +182,16 @@ class Handler(BaseHTTPRequestHandler):
                 400, {"ok": False, "error": "expected an interactive card payload"}
             )
             return
-        ok, detail = send_card(card)
+        # `reply_to` is the pipe's request to answer inside a thread (see
+        # hookrelay's feishu channel, `thread_replies`). Read here, never sent on.
+        reply_to = str(payload.get("reply_to") or "")[:120]
+        ok, detail = send_card(card, reply_to)
         if ok:
-            logger.info("card delivered message_id=%s", detail)
+            logger.info(
+                "card delivered message_id=%s%s",
+                detail,
+                " (in thread)" if reply_to else "",
+            )
             self._reply(200, {"ok": True, "message_id": detail})
         else:
             logger.error("card rejected by Lark: %s", detail)
@@ -340,6 +356,70 @@ def forward_press(event: dict) -> None:
         )
 
 
+def _sign(secret: str, body: bytes, ts: str) -> str:
+    return hmac.new(
+        secret.encode(), f"{ts}.".encode() + body, hashlib.sha256
+    ).hexdigest()
+
+
+def forward_message(event: dict) -> None:
+    """A message in the chat, handed to the pipe only when it is a reply under
+    something — the pipe decides whether that something was one of its cards.
+
+    The bridge keeps no map of message ids to alerts on purpose: the ledger has
+    that, and a stateless bridge is one that can be restarted without losing a
+    thread. What it does refuse here is cheap and structural: messages from
+    other chats, from bots (the pipe's own replies included, or a loop starts),
+    and top-level messages that reply to nothing.
+    """
+    if not RELAY_THREAD_URL:
+        return
+    if str(event.get("chat_id") or "") != CHAT_ID:
+        return
+    if str(event.get("sender_type") or "user") != "user":
+        return
+    root = str(event.get("root_id") or event.get("reply_to") or "")
+    if not root:
+        return
+    text = str(event.get("content") or "").strip()
+    # Lark renders mentions as @_user_N placeholders in `content`; the bot being
+    # addressed is not part of the question.
+    for mention in event.get("mentions") or []:
+        key = str((mention or {}).get("key") or "")
+        if key:
+            text = text.replace(key, "").strip()
+    if not text:
+        return
+    body = json.dumps(
+        {
+            "root_message_id": root,
+            "message_id": str(event.get("message_id") or event.get("id") or ""),
+            "sender": str(event.get("sender_id") or ""),
+            "chat_id": CHAT_ID,
+            "text": text[:4000],
+        },
+        ensure_ascii=False,
+    ).encode()
+    ts = str(int(time.time()))
+    headers = {"content-type": "application/json", "X-Hook-Timestamp": ts}
+    if THREAD_SECRET:
+        headers["X-Hook-Signature"] = _sign(THREAD_SECRET, body, ts)
+    request = urllib.request.Request(  # nosec B310 — a fixed http:// URL from env, not user input
+        RELAY_THREAD_URL, data=body, headers=headers, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310
+            answer = response.read(300).decode("utf-8", "replace")
+            logger.info("thread reply forwarded: %s %s", response.status, answer[:160])
+    except Exception:  # a lost message must not kill the consumer
+        logger.exception("forwarding the thread reply failed")
+
+
+def consume_messages() -> None:
+    """Stream im.message.receive_v1 forever; every reply goes to forward_message."""
+    consume("im.message.receive_v1", forward_message)
+
+
 def consume_presses() -> None:
     """Stream card.action.trigger forever, restarting if the stream drops.
 
@@ -349,11 +429,15 @@ def consume_presses() -> None:
     stopped listening after the first blip would look exactly like nobody
     pressing anything.
     """
+    consume("card.action.trigger", forward_press)
+
+
+def consume(event_key: str, handler) -> None:
     backoff = 2
     while True:
-        logger.info("connecting the event stream")
+        logger.info("connecting the event stream for %s", event_key)
         process = subprocess.Popen(  # nosec B603 — fixed argv, no shell
-            ["lark-cli", "event", "consume", "card.action.trigger", "--as", "bot"],
+            ["lark-cli", "event", "consume", event_key, "--as", "bot"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             # A PIPE on stdin that stays OPEN, and this is load-bearing: lark-cli
@@ -376,12 +460,15 @@ def consume_presses() -> None:
                 event = json.loads(line)
             except ValueError:
                 continue
-            if event.get("type") == "card.action.trigger":
-                forward_press(event)
+            if event.get("type") in (event_key, None) or event_key.startswith(
+                "im.message"
+            ):
+                handler(event)
                 backoff = 2  # a working stream resets the penalty
         process.wait()
         logger.warning(
-            "event stream ended (rc=%s); reconnecting in %ss",
+            "event stream %s ended (rc=%s); reconnecting in %ss",
+            event_key,
             process.returncode,
             backoff,
         )
@@ -394,6 +481,8 @@ def main() -> None:
         "bridge up: chat=%s relay=%s port=%s", CHAT_ID, RELAY_ACTION_URL, LISTEN_PORT
     )
     threading.Thread(target=consume_presses, daemon=True).start()
+    if RELAY_THREAD_URL:
+        threading.Thread(target=consume_messages, daemon=True).start()
     # 0.0.0.0 inside a container network with no published port: only the pipe
     # beside it can reach this.
     server = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), Handler)  # nosec B104

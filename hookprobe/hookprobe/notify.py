@@ -69,6 +69,10 @@ class ReturnDelivery:
                     "timestamp": time.time(),
                     # The loop's own facts, for the pipe's fields and ledger:
                     "session_key": run.session_key,
+                    # The chat thread this report belongs in, when a person's
+                    # reply started the turn; "" for a first report. The pipe
+                    # carries it to a channel that can reply in-thread.
+                    "thread_root": str(run.meta.get("thread_root") or ""),
                     "status": run.status,
                     "cost_usd": run.cost_usd,
                     "error": run.error,

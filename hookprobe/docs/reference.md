@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (46)
+## Environment (47)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -53,6 +53,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_SETTING_SOURCES` | `project` | Skill layers |
 | `HOOKPROBE_HANDOFF_URL` | *(empty)* | Where a finished run's report goes when an operator clicks "hand off", and the credential for that one door |
 | `HOOKPROBE_MCP_TOOLS` | *(empty)* | Which MCP tools this instance may actually call, as a closed set — mcp__chat__chat_search_messages or mcp__chat__* for a whole server |
+| `HOOKPROBE_FOLLOW_UP_SENDERS` | *(empty)* | Who may continue an investigation by replying in its chat thread (events.py, kind: follow_up): platform sender ids, * for anyone the bridge forwards, empty for nobody — the default… |
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
 | `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
 | `HOOKPROBE_POSTURE_CHECK` | *(empty)* | Whether the credentials are checked against that declaration at startup (posture.py): enforce refuses to start a runner declared readonly whose kubeconfig or AWS identity can mutat… |

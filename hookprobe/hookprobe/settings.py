@@ -142,6 +142,12 @@ class Settings:
     # when one is set on the service; `off` leaves the CLI's exporter alone, as
     # before — telemetry goes wherever the container's OTEL_* say, or nowhere.
     telemetry_receiver: str
+    # Who may continue an investigation by replying in its chat thread
+    # (events.py, `kind: follow_up`): platform sender ids, `*` for anyone the
+    # bridge forwards, empty for nobody — the default, because a reply in a
+    # group is a paid turn anyone in the group can start, and that is a
+    # decision an operator makes, not one a deployment drifts into.
+    follow_up_senders: frozenset[str]
 
     # Loop hygiene (hygiene.py), all advisory — the security boundary stays the
     # bash guard plus read-only credentials.
@@ -316,6 +322,9 @@ class Settings:
             bash_guard=(os.environ.get("HOOKPROBE_BASH_GUARD") or "").strip().lower() or "readonly",
             posture_check=(os.environ.get("HOOKPROBE_POSTURE_CHECK") or "").strip().lower() or "enforce",
             telemetry_receiver=(os.environ.get("HOOKPROBE_TELEMETRY_RECEIVER") or "").strip().lower() or "on",
+            follow_up_senders=frozenset(
+                part.strip() for part in os.environ.get("HOOKPROBE_FOLLOW_UP_SENDERS", "").split(",") if part.strip()
+            ),
             bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
             bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),
             auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),

@@ -169,6 +169,59 @@ def _sampled(key: str, pct: int) -> bool:
     return bucket < pct
 
 
+@registry.processor("thread_lookup")
+class ThreadLookupProcessor:
+    """A person's reply under a card we sent, resolved to the operation it is
+    about: {type: thread_lookup, from: root_message_id, when: {source: lark-thread},
+    skip_code: unknown_thread}.
+
+    The event arrives from an IM bridge with the platform id of the card the
+    person replied under. The ledger knows which delivery that was, which chain
+    it belongs to and which investigation session the chain carries — so this
+    stage writes `fields.session`, `fields.thread_root` and a correlation quote
+    onto the event, and the event lands in the same chain as a fourth hop. A
+    reply under a card nobody here sent is skipped with a name, never routed:
+    that is the whole filter between "someone typed in the group" and "a paid
+    turn starts", and it is the ledger's, not the bridge's, so the bridge stays
+    stateless. Content-blind throughout — the text is carried, not read.
+    """
+
+    async def run(self, rt: Runtime, ctx: EventContext, options: dict[str, Any]) -> Verdict:
+        name = options["_name"]
+        when: dict[str, Any] = options.get("when") or {}
+        context = ctx.routing_context()
+        if when and any(not _condition_matches(cond, context.get(key, "")) for key, cond in when.items()):
+            ctx.steps.append({"gate": name, "result": "not_applied"})
+            return PASS
+        field = str(options.get("from") or "root_message_id")
+        root = str(ctx.extracted["fields"].get(field) or "").strip()
+        found = await rt.store.thread_context(root) if root else None
+        if found is None:
+            code = str(options.get("skip_code") or "unknown_thread")
+            ctx.steps.append({"gate": name, "result": "dropped", "skip_code": code, "root": root[:80]})
+            return ("skip", code)
+        ctx.extracted["fields"].update(
+            {
+                "thread_root": root,
+                "session": found["session"],
+                "correlation_id": found["quote"],
+                "kind": str(ctx.extracted["fields"].get("kind") or "follow_up"),
+            }
+        )
+        # The pipeline adopts a quoted correlation before the stages run; this
+        # one is learned inside a stage, so it is adopted here.
+        ctx.correlation_id = found["quote"]
+        ctx.steps.append(
+            {
+                "gate": name,
+                "result": "resolved",
+                "origin_event_id": found["origin_event_id"],
+                "session": found["session"] or None,
+            }
+        )
+        return PASS
+
+
 @registry.processor("filter")
 class FilterProcessor:
     """Named drop: {when: {level: [low]}, skip_code: low_filtered}.

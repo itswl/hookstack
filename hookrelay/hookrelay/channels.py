@@ -280,13 +280,46 @@ def build_request(channel: Channel, message: dict[str, Any], now: float | None =
     return builder(channel, message, now if now is not None else time.time())
 
 
-async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, Any]) -> tuple[bool, str, bytes | None]:
-    """Deliver one message. Returns (ok, detail, body) — never raises: a
-    delivery failure is a scheduling event for the caller, not an exception.
+def _platform_message_id(data: Any) -> str:
+    """The id the platform gave what we just sent, if it said. The bridge answers
+    `{ok, message_id}`; Lark's own API answers `{code, data: {message_id}}`."""
+    if not isinstance(data, dict):
+        return ""
+    direct = data.get("message_id")
+    if isinstance(direct, str) and direct:
+        return direct[:120]
+    inner = data.get("data")
+    if isinstance(inner, dict) and isinstance(inner.get("message_id"), str):
+        return str(inner["message_id"])[:120]
+    return ""
+
+
+def _thread_reply(channel: Channel, message: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Ask the receiver to post this as a reply in a thread, when the event says
+    which and the channel can (`options: {thread_replies: true}` — a bridge that
+    sends as an application; a custom-bot webhook has no reply API and would
+    only be confused by the key). `thread_root` is a field like any other: the
+    pipe carries it, does not read it."""
+    if not channel.options.get("thread_replies"):
+        return payload
+    root = str((message.get("fields") or {}).get("thread_root") or "").strip()
+    if root:
+        payload = {**payload, "reply_to": root[:120]}
+    return payload
+
+
+async def send(
+    client: httpx.AsyncClient, channel: Channel, message: dict[str, Any]
+) -> tuple[bool, str, bytes | None, str]:
+    """Deliver one message. Returns (ok, detail, body, platform_message_id) —
+    never raises: a delivery failure is a scheduling event for the caller, not
+    an exception.
 
     `body` is the exact octets posted (None when the builder refused), so the
     ledger can keep what actually left the socket. The body only, never the
-    headers — headers carry signatures and tokens.
+    headers — headers carry signatures and tokens. `platform_message_id` is what
+    the platform called the message, "" when it did not say; it is the handle a
+    reply in the card's thread will quote.
     """
     try:
         url, payload, headers = build_request(channel, message)
@@ -297,7 +330,9 @@ async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, A
         # AttributeError is here too: a processed payload whose meta/analysis is
         # the wrong type reaches an accessor as a poison pill, and a row that
         # raises instead of failing is retried every tick forever.
-        return False, f"build: {error.__class__.__name__}: {error}", None
+        return False, f"build: {error.__class__.__name__}: {error}", None, ""
+    if isinstance(payload, dict):
+        payload = _thread_reply(channel, message, payload)
     # Headers, never body: a receiver that dedupes needs a stable key, and a
     # brain that will hand work BACK to us needs something to quote so the two
     # halves of a round trip can be found together. Neither may perturb the
@@ -323,21 +358,22 @@ async def send(client: httpx.AsyncClient, channel: Channel, message: dict[str, A
     try:
         response = await client.post(url, content=payload, headers=headers)
     except httpx.HTTPError as error:
-        return False, f"transport: {error.__class__.__name__}: {error}", payload
+        return False, f"transport: {error.__class__.__name__}: {error}", payload, ""
     if response.status_code >= 300:
-        return False, f"http {response.status_code}: {response.text[:200]}", payload
+        return False, f"http {response.status_code}: {response.text[:200]}", payload, ""
     # Feishu/DingTalk/WeCom answer 200 with an in-body error code — a 200 that
     # says "invalid sign" is still a failure, and pretending otherwise is how
     # dead webhooks stay invisible for weeks.
     try:
         data = response.json()
     except ValueError:
-        return True, f"http {response.status_code}", payload
+        return True, f"http {response.status_code}", payload, ""
     for key in ("code", "errcode"):
         if isinstance(data, dict) and data.get(key) not in (None, 0):
             return (
                 False,
                 f"remote {key}={data.get(key)}: {str(data.get('msg') or data.get('errmsg'))[:200]}",
                 payload,
+                "",
             )
-    return True, f"http {response.status_code}", payload
+    return True, f"http {response.status_code}", payload, _platform_message_id(data)

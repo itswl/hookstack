@@ -8,12 +8,12 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 5,500 source lines, five dependencies) that takes JSON
+A pluggable router (under 5,700 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
 to Feishu / DingTalk / WeCom / generic HTTP — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 5,500 source lines is the
+Both numbers are **budgets, not descriptions**. 5,700 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
@@ -111,6 +111,32 @@ pipeline:
 
 Order is the point: dedup **before** the brain dedups on raw titles; dedup
 **after** it dedups on rewrites. Every stage appends its step to the trace.
+
+### The `thread_lookup` processor
+
+A person replies under a card the pipe sent; an IM bridge forwards the reply
+through a signed door with the platform id of that card. This stage asks the
+ledger which delivery had that id, which chain it belongs to and which
+investigation session the chain carries, and writes `fields.session`,
+`fields.thread_root`, `fields.kind: follow_up` and a correlation quote onto the
+event — so the reply lands in the same chain and a route can hand it to the
+investigator addressed. A reply under a card nobody here sent is skipped with
+`skip_code` (default `unknown_thread`), recorded, never routed. The text is
+carried, not read.
+
+```yaml
+  - type: thread_lookup
+    name: thread-lookup
+    when: {source: lark-thread}
+    from: root_message_id        # the field holding the platform id of the card replied under
+    skip_code: unknown_thread
+```
+
+The other half is on the channel: `options: {thread_replies: true}` on a `feishu`
+channel that sends through the bridge makes a delivery whose event carries
+`fields.thread_root` go out as a reply in that thread (`reply_to` in the body
+the bridge reads). The ledger keeps the platform's message id of every sent
+delivery (`platform_message_id`) for exactly this lookup.
 
 ### The `http` processor contract
 

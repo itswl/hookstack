@@ -110,6 +110,25 @@ list of zeros; the day a write credential is mounted, that list is what an
 operator reads before approving a handoff. The alert deployment's investigator
 has no credentials mounted at all and says so (`no-credentials`).
 
+**Follow-ups from the chat thread: alert deployment only, since 2026-09-08.**
+A person who replies under a verdict or report card in the group continues
+that alert's investigation: the bridge forwards the reply, signed, to the
+pipe's `lark-thread` door; the `thread_lookup` stage resolves the card's
+platform id against the ledger to the chain and its investigation session
+(a reply under a card the pipe never sent is skipped as `unknown_thread`);
+the investigator continues its own engine session under the same read-only
+posture and answers back through `probe-notify` with `thread_root`, which the
+`to-me` channel turns into an in-thread reply. Three things have to be true
+on the host for this to work, none of them in this repository: the Lark app
+must be allowed to receive group messages (`im:message.group_msg:readonly` or
+`im:message:readonly`, plus `im:message.p2p_msg:readonly`, which the CLI lists
+as the event's requirement) and send as a bot, the `im.message.receive_v1`
+event must be enabled in the developer console, and the bot must be a member
+of the group. Then `.env`: `LARK_THREAD_SECRET` (the door and the bridge share
+it) and `HOOKPROBE_FOLLOW_UP_SENDERS` (who may spend a turn from chat; empty
+refuses everyone). The work deployment has no chat return path yet: its
+watcher posts to a custom-bot webhook, which cannot receive.
+
 **Timer: host crontab, or a container.** The work deployment ships its own,
 after the host version could not read its own brief: macOS keeps `~/Documents`
 behind TCC and `cron` is not allowed through, so every fire logged `Operation

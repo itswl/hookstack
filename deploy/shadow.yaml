@@ -155,6 +155,26 @@ sources:
       # hookprobe deliberately never sees the pipe's correlation id and echoes
       # back the id it was handed — see _resolve_run in hookprobe/events.py.
       correlation_id: "{meta.event_id}"
+      # The chat thread this report answers into, when a person's reply started
+      # the turn ("" for a first report). The `to-me` channel turns it into an
+      # in-thread reply; the pipe carries it and does not read it.
+      thread_root: "{meta.thread_root}"
+  # A person's reply under one of our cards, forwarded by lark-bridge. The only
+  # thing the pipe reads is the id of the card replied under (`root_message_id`):
+  # the thread-lookup stage resolves it against the ledger to the chain and the
+  # investigation session, or skips the event with a name when the card was not
+  # ours. The text is carried to the investigator unread. Its own secret: the
+  # bridge is the only sender, and a forged reply here would be a paid turn.
+  - name: lark-thread
+    secret: ${LARK_THREAD_SECRET}
+    title: "{text}"
+    body: "{text}"
+    level: info
+    fields:
+      root_message_id: "{root_message_id}"
+      message_id: "{message_id}"
+      sender: "{sender}"
+      chat_id: "{chat_id}"
 
 channels:
   - name: to-judge
@@ -247,7 +267,10 @@ channels:
     # .env line is set on both sides.
     secret: ${LARK_BRIDGE_SECRET}
     url: http://lark-bridge:9100/
-    options: {payload: processed}
+    # thread_replies: a report carrying `fields.thread_root` is posted as a reply
+    # in that thread (the bridge sends as the application, which can). A custom
+    # bot webhook could not, and is not asked to.
+    options: {payload: processed, thread_replies: true}
 
 routes:
   # Both brains, every event: the fan-out IS the experiment. Their ledgers
@@ -277,6 +300,14 @@ routes:
   - name: report-to-me
     source: probe-notify
     send_to: [to-me]
+    priority: 100
+    stop: true
+  # A reply that resolved to one of our chains goes to the investigator, which
+  # continues that investigation's own session and answers back into the thread
+  # through probe-notify. Nothing unresolved reaches this route: the stage skips it.
+  - name: thread-to-probe
+    source: lark-thread
+    send_to: [to-probe]
     priority: 100
     stop: true
 
@@ -326,6 +357,15 @@ pipeline:
     sample_by: title
     sample_banner: "🔇 静默抽查 · 系统本不会为这条叫醒你，只想请你回头看一眼它判得对不对"
   - silence
+  # Which card was this reply under, and which chain and investigation is that?
+  # Answered from the ledger (the platform id of every card we sent is on its
+  # delivery row); a reply under a card that is not ours is skipped, recorded,
+  # and never reaches a paid turn.
+  - type: thread_lookup
+    name: thread-lookup
+    when: {source: lark-thread}
+    from: root_message_id
+    skip_code: unknown_thread
   - routes
 
 # The buttons a card carries. hookjudge DECLARES which ones a verdict deserves

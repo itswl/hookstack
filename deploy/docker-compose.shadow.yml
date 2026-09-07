@@ -55,6 +55,7 @@ services:
       # with the same values (HOOKJUDGE_RETURN_SECRET / HOOKPROBE_RETURN_SECRET).
       SHADOW_RETURN_SECRET: ${SHADOW_RETURN_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
+      LARK_THREAD_SECRET: ${LARK_THREAD_SECRET:-}
       # Signs the token inside a card button. Without it the buttons render
       # and do nothing — `_mint_card_actions` returns early and every button
       # ships with an empty value. That was the state of this deployment for
@@ -259,6 +260,12 @@ services:
       # set both to close the shared-network hole where a neighbour could post a
       # card into the operator's chat as the app.
       BRIDGE_INBOUND_SECRET: ${LARK_BRIDGE_SECRET:-}
+      # A person's reply under one of the pipe's cards goes to this door, signed
+      # with LARK_THREAD_SECRET (the value the door in shadow.yaml verifies).
+      # Needs the app to receive group messages (im.message.receive_v1) — see
+      # docs/deployments.md. Unset RELAY_THREAD_URL and the bridge does not listen.
+      RELAY_THREAD_URL: ${RELAY_THREAD_URL:-http://hookrelay:8100/hook/lark-thread}
+      THREAD_SECRET: ${LARK_THREAD_SECRET:-}
     volumes:
       # lark-cli's credential file and event cursor. A named volume rather than
       # a bind: nothing in here is worth reading from the host, and the

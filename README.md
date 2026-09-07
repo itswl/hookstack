@@ -108,7 +108,7 @@ A custom bot can only *send*, so the buttons on its cards have nowhere to call b
 
 ## Developer & Verification Docs
 
-*   [`docs/containment.md`](docs/containment.md) — Fourteen structural security boundaries, and exactly what each does **not** stop.
+*   [`docs/containment.md`](docs/containment.md) — Fifteen structural security boundaries, and exactly what each does **not** stop.
 *   [`docs/deployments.md`](docs/deployments.md) — Two deployments sharing every line of code but agreeing on nothing: alerts vs work timers.
 *   [`STACK.md`](STACK.md) — Local runbook to drive the whole cost-saving pipeline step-by-step.
 *   [`CONTRIBUTING.md`](CONTRIBUTING.md) — Per-service gates, AST copy validations, and general SDLC workflows.

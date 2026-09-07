@@ -211,11 +211,15 @@ async def _drain_channel(
         # builder gets a message and never the settings.
         if settings.public_url:
             message["_action_base"] = settings.public_url
-        ok, detail, body = await channels.send(client, channel, message)
+        outcome = await channels.send(client, channel, message)
+        # (ok, detail, body[, platform_message_id]) — the fourth arrived on
+        # 2026-09-08 and a sender that predates it still delivers.
+        ok, detail, body = outcome[0], outcome[1], outcome[2]
+        platform_id = str(outcome[3]) if len(outcome) > 3 and outcome[3] else ""
         sent_body = channels.redact_for_ledger(body)
         processed += 1
         if ok:
-            await store.mark_sent(row["id"], now, sent_body)
+            await store.mark_sent(row["id"], now, sent_body, platform_id or None)
             metrics.record_delivery(channel.name, "sent")
             if breaker is not None:
                 breaker.record_success(channel.name)

@@ -92,7 +92,7 @@ async def test_raw_with_missing_path_fails_into_the_ledger():
     channel = Channel(
         name="x", type="generic", url="https://x.example", options={"payload": "raw", "payload_path": "nope"}
     )
-    ok, detail, body = await channels_mod.send(object(), channel, _msg({"there": 1}))
+    ok, detail, body, _ = await channels_mod.send(object(), channel, _msg({"there": 1}))
     assert ok is False and "yielded nothing" in detail
     assert body is None  # nothing was built, so there are no bytes to keep
 
