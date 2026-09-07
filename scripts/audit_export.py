@@ -30,13 +30,18 @@ import urllib.parse
 import urllib.request
 
 
-def _get(url: str, token: str) -> dict | None:
+MISSING = "missing"  # the far end answered 404: no such run — not an error, not a hop of the investigator
+
+
+def _get(url: str, token: str) -> dict | str | None:
     req = urllib.request.Request(
         url, headers={"X-Read-Token": token, "Authorization": f"Bearer {token}"}
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as res:
             return json.load(res)
+    except urllib.error.HTTPError as exc:
+        return MISSING if exc.code == 404 else None
     except (urllib.error.URLError, json.JSONDecodeError, OSError):
         return None
 
@@ -123,25 +128,33 @@ def render(record: dict, runs: dict[str, dict | None]) -> str:
         out.append("Nobody pressed anything on this operation.")
     out += ["", "## What the investigator did", ""]
     any_run = False
+    by_run: dict[str, list[int]] = {}
     for h in hops:
         key = _run_key(h, record)
-        if not key:
-            continue
+        if key and runs.get(key) != MISSING:
+            by_run.setdefault(key, []).append(int(h.get("id")))
+    for key, hop_ids in by_run.items():
         any_run = True
         run = runs.get(key)
-        out.append(f"### Run `{key}` (hop #{h.get('id')})")
+        out.append(f"### Run `{key}` — hops {', '.join('#' + str(i) for i in hop_ids)}")
         if run is None:
             out += [
                 "",
-                "_Not read: no investigator URL/token given, or the run is gone from its retention window._",
+                "_Not read: no investigator URL/token given, or the investigator could not be reached._",
                 "",
             ]
             continue
-        posture = run.get("posture") or {}
+        assert isinstance(run, dict)
+        posture = run.get("posture")
+        posture_line = (
+            f"bash guard `{posture.get('bash_guard')}`, MCP tools allowed: {len(posture.get('mcp_tools') or [])}"
+            if isinstance(posture, dict)
+            else "not recorded — this run predates posture stamping (2026-09-07)"
+        )
         out += [
             "",
-            f"- **Status**: {run.get('status')} · **Model**: `{run.get('model')}` · **Cost**: {_money(run.get('cost_usd'))}",
-            f"- **Posture**: bash guard `{posture.get('bash_guard', '?')}`, MCP tools allowed: {len(posture.get('mcp_tools') or [])}",
+            f"- **Status**: {run.get('status')} · **Model**: `{run.get('model')}` · **Run record cost**: {_money(run.get('cost_usd'))} (the pipe's per-hop costs above are what was billed)",
+            f"- **Posture**: {posture_line}",
             f"- **Ruling**: {(run.get('ruling') or {}).get('verdict') or 'none'}",
             f"- **Tool calls**: {len(run.get('tool_calls') or [])} · **Refused by the guards**: {len(run.get('denied') or [])}",
         ]
@@ -158,7 +171,14 @@ def render(record: dict, runs: dict[str, dict | None]) -> str:
             ]
         out.append("")
     if not any_run:
-        out.append("No investigator run is part of this operation.")
+        out.append(
+            "No investigator run is part of this operation"
+            + (
+                " (or none could be read: pass --probe and HOOKPROBE_TOKEN)."
+                if not runs
+                else "."
+            )
+        )
     return "\n".join(out).rstrip() + "\n"
 
 
