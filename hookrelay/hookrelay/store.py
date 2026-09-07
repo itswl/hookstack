@@ -371,13 +371,22 @@ class Store:
         is a context manager and not a helper somebody must remember to call.
         """
         async with self._write_lock:
+            before = self.db.total_changes
             try:
                 yield
             except BaseException:
                 await self.db.rollback()
                 raise
             await self.db.commit()
-        self._announce()
+        # An announcement is a claim that the ledger MOVED, so a commit that
+        # changed no row makes none. The absence sweep runs every worker tick and
+        # clears a source's absence whether or not one was recorded — a DELETE of
+        # zero rows, committed, once per expected door per second. Each one woke
+        # every open board: two doors, two refetches a second, and a reader's
+        # expanded rows collapsing under them. Measured before this line existed:
+        # 13 `changed` in six seconds against a data_version that never moved.
+        if self.db.total_changes != before:
+            self._announce()
 
     @contextlib.asynccontextmanager
     async def transaction(self) -> AsyncIterator[Transaction]:
@@ -399,6 +408,7 @@ class Store:
         network, no user code — so nothing waits long on it.
         """
         async with self._write_lock:
+            before = self.db.total_changes
             try:
                 yield Transaction(self.db)
             except BaseException:
@@ -409,8 +419,10 @@ class Store:
                 raise
             await self.db.commit()
         # One announcement for the unit, not one per row: the boards want to know
-        # the ledger moved, not how many statements it took.
-        self._announce()
+        # the ledger moved, not how many statements it took — and none at all
+        # when it did not move (see _write).
+        if self.db.total_changes != before:
+            self._announce()
 
     # ── events & decisions ────────────────────────────────────────────────
 

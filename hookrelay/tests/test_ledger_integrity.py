@@ -117,3 +117,24 @@ async def test_the_purge_never_deletes_an_event_with_a_promise_still_queued(stor
     assert purged["events"] == 1
     assert [r["id"] for r in await store.recent_events(50)] == [keep]
     assert drop not in [r["id"] for r in await store.recent_events(50)]
+
+
+async def test_a_commit_that_changes_nothing_does_not_announce(store) -> None:
+    """The other half of "an announcement is a claim that the ledger MOVED": a
+    write block that touched no row must stay silent. The absence sweep clears
+    every expected door's absence once a second whether one was recorded or
+    not; each zero-row DELETE announced, and every open board refetched twice a
+    second — measured as 13 `changed` in six seconds while data_version never
+    moved, and felt as expanded rows collapsing under the reader."""
+    woke: list[int] = []
+    store.on_change = lambda: woke.append(1)
+
+    await store.clear_absence("a-door-that-was-never-quiet")
+    assert not woke, "a DELETE of zero rows is not a change"
+
+    async with store.transaction() as tx:
+        await tx.recent_duplicate("nothing", 60, 0.0)  # a transaction that only reads
+    assert not woke, "neither is a transaction that only read"
+
+    await store.add_silence("*", 9999.0, "", 0.0)
+    assert woke, "and a real change still wakes the boards"

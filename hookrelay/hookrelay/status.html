@@ -303,6 +303,31 @@
     return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
   }
 
+  // A repaint must not close what the reader opened. Both lists are rebuilt
+  // from scratch on every change (simple, and correct for the data), which
+  // used to throw away every open <details> and every expanded round trip —
+  // so the board looked like it "kept refreshing" whenever anything moved.
+  // Remember by key, repaint, restore; and skip the repaint entirely when the
+  // data is byte-identical, which is most visibility/reconnect refreshes.
+  function rememberOpen(container) {
+    var open = {}, traces = {};
+    container.querySelectorAll("details[data-key][open]").forEach(function (d) { open[d.getAttribute("data-key")] = true; });
+    container.querySelectorAll(".compare").forEach(function (b) {
+      if (b.style.display !== "none" && b.innerHTML) traces[b.id] = b.innerHTML;
+    });
+    return { open: open, traces: traces };
+  }
+  function restoreOpen(container, saved) {
+    container.querySelectorAll("details[data-key]").forEach(function (d) {
+      if (saved.open[d.getAttribute("data-key")]) d.open = true;
+    });
+    Object.keys(saved.traces).forEach(function (id) {
+      var b = document.getElementById(id);
+      if (b) { b.style.display = "block"; b.innerHTML = saved.traces[id]; }
+    });
+  }
+  var lastEventsSig = "", lastTimelineSig = "";
+
   function render(data) {
     document.getElementById("cQueued").textContent = data.queue.queued;
     document.getElementById("cSent").textContent = data.queue.sent;
@@ -326,7 +351,12 @@
       return;
     }
     document.getElementById("loadMore").style.display = events.length >= filters.limit ? "" : "none";
-    document.getElementById("events").innerHTML = events.map(function (e) {
+    var evBox = document.getElementById("events");
+    var evSig = JSON.stringify(events);
+    if (evSig === lastEventsSig) return;
+    lastEventsSig = evSig;
+    var evSaved = rememberOpen(evBox);
+    evBox.innerHTML = events.map(function (e) {
       var badge = e.outcome === "routed"
         ? '<span class="badge routed">routed → ' + esc((e.channels || []).join(", ")) + "</span>"
         : '<span class="badge skipped">skipped · ' + esc(e.skip_code || "?") + "</span>";
@@ -338,7 +368,7 @@
         return '<span class="chip ' + esc(d.status) + '"' + extra + ">" +
           esc(d.channel) + " · " + esc(d.status) + (d.attempts ? " ×" + esc(d.attempts) : "") + "</span>" + retryBtn;
       }).join("");
-      return '<details class="event">' +
+      return '<details class="event" data-key="ev-' + esc(e.id) + '">' +
         '<summary>' +
           '<span class="dot ' + esc(e.level) + '"></span>' +
           '<span class="eid">#' + esc(e.id) + "</span>" +
@@ -352,6 +382,7 @@
         '<pre class="trace">' + esc(JSON.stringify(e.steps || [], null, 2)) + "</pre>" +
       "</details>";
     }).join("");
+    restoreOpen(evBox, evSaved);
   }
 
   var filters = { q: "", source: "", outcome: "", limit: 50 };
@@ -440,9 +471,13 @@
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (tl) {
         if (!tl) { box.innerHTML = '<div class="empty">timeline unavailable — read token required</div>'; return; }
+        var sig = JSON.stringify(tl);
+        if (sig === lastTimelineSig) return;   // nothing moved: leave the reader's page alone
+        lastTimelineSig = sig;
         renderIncidents(tl.incidents || []);
         var chains = tl.chains || [];
         if (!chains.length) { box.innerHTML = '<div class="empty">no chains yet</div>'; return; }
+        var saved = rememberOpen(box);
         box.innerHTML = chains.map(function (c) {
           var hops = c.hops || [];
           var first = hops[0] || {}, last = hops[hops.length - 1] || {};
@@ -462,7 +497,7 @@
               '<button class="btn tiny" data-tl-trace="' + esc(h.id) + '">trace</button>' +
               '</div><div class="compare" id="tl-cmp-' + esc(h.id) + '" style="display:none"></div>';
           }).join("");
-          return '<details class="event">' +
+          return '<details class="event" data-key="chain-' + esc(c.chain) + '">' +
             '<summary>' +
               '<span class="dot ' + esc(first.level) + '"></span>' +
               '<span class="eid">chain ' + esc(c.chain) + "</span>" +
@@ -474,6 +509,7 @@
             '<div class="hops">' + rows + "</div>" +
           "</details>";
         }).join("");
+        restoreOpen(box, saved);
       })
       .catch(function () { box.innerHTML = '<div class="empty">timeline unavailable</div>'; });
   }
