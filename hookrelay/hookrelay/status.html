@@ -69,6 +69,10 @@
   .badge.skipped { color: var(--muted); }
   .etime { margin-left: auto; color: var(--muted); font-size: 12px; font-family: var(--mono); }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 14px 10px; }
+  .hops { padding: 0 14px 10px; }
+  .hop { display: grid; grid-template-columns: 120px 56px 120px 1fr 72px auto; gap: 10px; align-items: center;
+         padding: 6px 0; border-top: 1px solid var(--border-soft); font-size: 13px; }
+  .hop .hopto { overflow-wrap: anywhere; color: var(--muted); }
   .chip { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 6px;
           border: 1px solid var(--border); color: var(--muted); }
   .chip.sent { color: var(--ok); }
@@ -154,6 +158,7 @@
 
   <div class="tabs">
     <button class="tab active" data-tab="events">events</button>
+    <button class="tab" data-tab="timeline">timeline</button>
     <button class="tab" data-tab="config">config</button>
     <button class="tab" data-tab="help">help</button>
   </div>
@@ -182,6 +187,13 @@
   <div id="events"><div class="empty">…</div></div>
   <div class="row"><button class="btn" id="loadMore" style="display:none">load earlier</button></div>
   </div><!-- /panel-events -->
+
+  <div id="panel-timeline" style="display:none">
+    <h2>Operations · one chain per operation, every hop it paid for</h2>
+    <div class="hint" style="margin:-6px 0 12px">A chain is everything that quoted one origin's id: the signal, the verdict or plan that came back, the click, the work, the result. Open a hop for its round trip.</div>
+    <div id="incidents"></div>
+    <div id="chains"><div class="empty">…</div></div>
+  </div><!-- /panel-timeline -->
 
   <div id="panel-config" style="display:none">
     <div class="row">
@@ -405,15 +417,93 @@
       document.querySelectorAll(".tab").forEach(function (t) { t.classList.toggle("active", t === tab); });
       var which = tab.getAttribute("data-tab");
       document.getElementById("panel-events").style.display = which === "events" ? "" : "none";
+      document.getElementById("panel-timeline").style.display = which === "timeline" ? "" : "none";
       document.getElementById("panel-config").style.display = which === "config" ? "" : "none";
       document.getElementById("panel-help").style.display = which === "help" ? "" : "none";
       if (which === "config") loadConfig();
+      if (which === "timeline") loadTimeline();
     });
   });
 
   if (location.hash === "#help") {
     document.querySelector('.tab[data-tab="help"]').click();
   }
+  if (location.hash === "#timeline") {
+    document.querySelector('.tab[data-tab="timeline"]').click();
+  }
+
+  // ── timeline: /timeline rendered as chains, one per operation ──
+  function money(v) { return v == null ? "" : "$" + Number(v).toFixed(v >= 1 ? 2 : 4).replace(/\.?0+$/, ""); }
+  function loadTimeline() {
+    var box = document.getElementById("chains");
+    fetch("/timeline?limit=50", { headers: readHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (tl) {
+        if (!tl) { box.innerHTML = '<div class="empty">timeline unavailable — read token required</div>'; return; }
+        renderIncidents(tl.incidents || []);
+        var chains = tl.chains || [];
+        if (!chains.length) { box.innerHTML = '<div class="empty">no chains yet</div>'; return; }
+        box.innerHTML = chains.map(function (c) {
+          var hops = c.hops || [];
+          var first = hops[0] || {}, last = hops[hops.length - 1] || {};
+          var span = hops.length > 1 ? " → " + esc(fmtTime(last.at).slice(6)) : "";
+          var doors = (c.doors || []).map(function (d) { return '<span class="chip">' + esc(d) + "</span>"; }).join(" ");
+          var cost = c.cost_usd ? '<span class="badge routed">' + esc(money(c.cost_usd)) + "</span>" : '<span class="badge skipped">unpriced</span>';
+          var rows = hops.map(function (h) {
+            var to = h.outcome === "routed"
+              ? "→ " + esc((h.to || []).join(", "))
+              : '<span class="badge skipped">skipped · ' + esc(h.skip_code || "?") + "</span>";
+            return '<div class="hop">' +
+              '<span class="etime" style="margin-left:0">' + esc(fmtTime(h.at)) + "</span>" +
+              '<span class="eid">#' + esc(h.id) + "</span>" +
+              '<span class="esrc">' + esc(h.door) + "</span>" +
+              '<span class="hopto">' + to + "</span>" +
+              '<span class="eid">' + esc(h.cost_usd ? money(h.cost_usd) : "") + "</span>" +
+              '<button class="btn tiny" data-tl-trace="' + esc(h.id) + '">trace</button>' +
+              '</div><div class="compare" id="tl-cmp-' + esc(h.id) + '" style="display:none"></div>';
+          }).join("");
+          return '<details class="event">' +
+            '<summary>' +
+              '<span class="dot ' + esc(first.level) + '"></span>' +
+              '<span class="eid">chain ' + esc(c.chain) + "</span>" +
+              '<span class="etitle">' + esc(first.title || "(untitled)") + "</span>" +
+              '<span class="esrc">' + esc(hops.length) + (hops.length === 1 ? " hop" : " hops") + "</span>" + cost +
+              '<span class="etime">' + esc(fmtTime(c.started_at)) + span + "</span>" +
+            "</summary>" +
+            '<div class="chips">' + doors + "</div>" +
+            '<div class="hops">' + rows + "</div>" +
+          "</details>";
+        }).join("");
+      })
+      .catch(function () { box.innerHTML = '<div class="empty">timeline unavailable</div>'; });
+  }
+  function renderIncidents(incidents) {
+    var multi = incidents.filter(function (i) { return i.interruptions > 1; });
+    document.getElementById("incidents").innerHTML = multi.length
+      ? "<h2>Incidents · one root cause, several cards</h2>" + multi.map(function (i) {
+          return '<div class="silence">' + esc(i.incident) + " · <b>" + esc(i.interruptions) + " interruptions</b> · " +
+            esc(i.chains.length) + " chains · " + esc(money(i.cost_usd) || "$0") +
+            (i.example ? ' · <span class="note">' + esc(i.example) + "</span>" : "") + "</div>";
+        }).join("")
+      : "";
+  }
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-tl-trace]");
+    if (!t) return;
+    e.preventDefault();
+    var id = t.getAttribute("data-tl-trace");
+    var box = document.getElementById("tl-cmp-" + id);
+    if (box.style.display !== "none") { box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.innerHTML = '<span class="hint">loading…</span>';
+    fetch("/trace/" + id, { headers: readHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (trip) {
+        if (!trip) { box.innerHTML = '<span class="hint">round trip unavailable</span>'; return; }
+        renderRoundTrip(box, trip);
+      });
+  });
+  // ── end timeline ──
 
   function readHeaders() {
     var headers = {};
@@ -665,6 +755,7 @@
   wireLiveControl("/live", readHeaders, function () {
     refresh();
     if (document.querySelector('.tab[data-tab="config"]').classList.contains("active")) loadConfig();
+    if (document.querySelector('.tab[data-tab="timeline"]').classList.contains("active")) loadTimeline();
   });
 })();
 </script>

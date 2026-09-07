@@ -674,15 +674,22 @@ class Store:
         # return, gather around its origin instead so the view is the same from
         # either end.
         anchor_id = event_id
+        # Two brains, two spellings of the same id — see timeline._chain_key.
+        # hookjudge echoes the `hr-<n>` the pipe stamped on egress; hookprobe
+        # never sees that and returns the bare `<n>` it was handed. This reader
+        # only knew the first, so every investigator return (plan-notify,
+        # probe-notify, work-notify) gathered NOWHERE: /trace/111 said "no
+        # processing system has returned yet" while the plan sat one row below.
         quoted = str(origin.get("correlation_id") or "")
-        if quoted.startswith("hr-") and quoted[3:].isdigit():
-            anchor = await self._event_row(int(quoted[3:]))
+        quoted_id = quoted[3:] if quoted.startswith("hr-") else quoted
+        if quoted_id.isdigit():
+            anchor = await self._event_row(int(quoted_id))
             if anchor is not None:
-                origin, anchor_id = anchor, int(quoted[3:])
+                origin, anchor_id = anchor, int(quoted_id)
 
         cursor = await self.read.execute(
-            "SELECT id FROM events WHERE correlation_id = ? ORDER BY id",
-            (f"hr-{anchor_id}",),
+            "SELECT id FROM events WHERE correlation_id IN (?, ?) ORDER BY id",
+            (f"hr-{anchor_id}", str(anchor_id)),
         )
         returns = [await self._event_row(int(row["id"])) for row in await cursor.fetchall()]
         for item in returns:
@@ -692,8 +699,8 @@ class Store:
         # always here; a morning review opens with the other half.
         cursor = await self.read.execute(
             "SELECT kind, actor, outcome, pressed_at FROM card_actions "
-            "WHERE correlation_id = ? OR event_id = ? ORDER BY pressed_at",
-            (f"hr-{anchor_id}", anchor_id),
+            "WHERE correlation_id IN (?, ?) OR event_id = ? ORDER BY pressed_at",
+            (f"hr-{anchor_id}", str(anchor_id), anchor_id),
         )
         human = [dict(row) for row in await cursor.fetchall()]
         for act in human:

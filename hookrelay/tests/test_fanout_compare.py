@@ -209,3 +209,27 @@ async def test_migration_adds_the_column_to_an_existing_ledger(tmp_path):
         assert [e["title"] for e in preserved] == ["legacy"], "the upgrade keeps the history"
     finally:
         await store.close()
+
+
+async def test_a_return_quoting_the_bare_id_gathers_too(store):
+    """hookprobe returns the bare id it was handed, not the `hr-` form the judge
+    echoes. Both are the same correlation, and a trace that only knew one
+    spelling reported every investigator return as "nothing came back" while
+    the plan sat one row below the origin."""
+    cfg = Config.from_dict(FANOUT)
+    origin = await handle_hook(store, cfg, cfg.sources["inbound"], ALERT, now=1000.0)
+    bare = str(origin["event_id"])  # no "hr-" prefix: the investigator's spelling
+    ret = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["ww-notify"],
+        _return_payload(brain="investigator", importance="high", summary="the plan", correlation=bare),
+        now=1073.0,
+    )
+
+    trip = await store.round_trip(origin["event_id"])
+    assert trip is not None and [r["id"] for r in trip["returns"]] == [ret["event_id"]]
+    assert trip["returns"][0]["latency_seconds"] == 73.0
+    # And from the return's end, the same group.
+    from_return = await store.round_trip(ret["event_id"])
+    assert from_return is not None and from_return["origin"]["id"] == origin["event_id"]
