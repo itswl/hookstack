@@ -208,6 +208,9 @@ def test_the_waterfall_puts_model_and_tool_calls_on_one_axis(tmp_path) -> None:
     s = body["summary"]
     assert s["model_calls"] == 2 and s["model_ms"] == 3800 + 1260 and s["tool_calls"] == 1 and s["tool_ms"] == 900
     assert s["api_errors"] == 1
+    # The failed call (2.74–4.0 s) overlaps the retry that follows it (3.5–5.5 s)
+    # in this fixture, so the wait is the union: the sum less the 0.5 s overlap.
+    assert s["model_busy_ms"] == 3800 + 1260 - 500
     assert s["cost_usd"] == 0.2 and s["models"]["gpt-5.6-luna"]["calls"] == 2
     assert s["span_s"] == round((NOW + 5.5) - (NOW + 2.0 - 1.8), 3)
     assert (
@@ -350,3 +353,17 @@ def test_retention_prunes_old_telemetry(tmp_path) -> None:
     assert prune(workdir, home, 7) == 1
     assert not telemetry.path_for(workdir, "probe:old:1").exists()
     assert telemetry.path_for(workdir, "probe:new:2").exists()
+
+
+def test_concurrent_model_calls_are_counted_once_in_the_wait() -> None:
+    # The CLI runs a helper call beside the main one; a person waited for the
+    # union of the two, not for their sum.
+    lines = [
+        {"kind": "event", "name": "api_request", "ts": NOW + 4.0, "attrs": {"model": "main", "duration_ms": 4000}},
+        {"kind": "event", "name": "api_request", "ts": NOW + 3.0, "attrs": {"model": "helper", "duration_ms": 2000}},
+        {"kind": "event", "name": "api_request", "ts": NOW + 9.0, "attrs": {"model": "main", "duration_ms": 1000}},
+    ]
+    s = telemetry.summarize(lines)["summary"]
+    assert s["model_ms"] == 7000, "the bill still adds up every call"
+    assert s["model_busy_ms"] == 5000, "0–4s once, then 8–9s"
+    assert s["span_s"] == 9.0

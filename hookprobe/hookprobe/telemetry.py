@@ -424,6 +424,21 @@ def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
             tool_ms += duration_ms
     items.sort(key=lambda i: (i["start"], i["end"]))
     span = (max(i["end"] for i in items) - min(i["start"] for i in items)) if items else 0.0
+    # Model calls overlap — the CLI runs its helpers beside the main call — so
+    # the sum of their durations can exceed the run. The time a person spent
+    # waiting on *some* model is the union of the intervals, not the sum.
+    busy_ms = 0
+    cursor: float | None = None
+    for item in items:
+        if item["kind"] != "model":
+            continue
+        start, end = item["start"], item["end"]
+        if cursor is None or start >= cursor:
+            busy_ms += int(round((end - start) * 1000))
+            cursor = end
+        elif end > cursor:
+            busy_ms += int(round((end - cursor) * 1000))
+            cursor = end
     errors = sum(1 for line in lines if line.get("kind") == "event" and line.get("name") == "api_error")
     return {
         "waterfall": items,
@@ -431,6 +446,7 @@ def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
             # Calls that were answered; the failed ones are counted beside them.
             "model_calls": sum(1 for i in items if i["kind"] == "model" and i.get("success") is not False),
             "model_ms": model_ms,
+            "model_busy_ms": busy_ms,
             "tool_calls": sum(1 for i in items if i["kind"] == "tool"),
             "tool_ms": tool_ms,
             "api_errors": errors,

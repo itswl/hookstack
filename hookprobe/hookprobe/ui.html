@@ -677,7 +677,7 @@ function waterfallHtml(w) {
   const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
   const head = `waterfall · ${n(s.model_calls || 0, "model call", "model calls")} · ` +
     `${n(s.tool_calls || 0, "tool call", "tool calls")} · ` +
-    `${fmtMs(Math.round(s.model_ms || 0))} of ${fmtMs(Math.round((s.span_s || 0) * 1000))} waiting on the model` +
+    `${fmtMs(Math.round(s.model_busy_ms != null ? s.model_busy_ms : s.model_ms || 0))} of ${fmtMs(Math.round((s.span_s || 0) * 1000))} waiting on the model` +
     (s.api_errors ? ` · ${n(s.api_errors, "api error", "api errors")}` : "");
   const models = Object.entries(s.models || {}).map(([m, v]) => `${m}: ${v.calls} calls, ${fmtMs(v.ms)}, $${Number(v.cost_usd || 0).toFixed(4)}`);
   return `<details class="proc-past" open><summary>${esc(head)}</summary><div class="wf">${rows.join("")}</div>` +
