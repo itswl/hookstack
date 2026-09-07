@@ -46,7 +46,7 @@ upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
 | Component | Role | In one line | Deliberately does NOT |
 | --- | --- | --- | --- |
 | [`hookrelay/`](hookrelay) | the pipe | Adapts every upstream dialect into one normalized event, routes it to the brains, renders verdicts and reports into each channel's format, and accounts for all of it | Understand content, or judge |
-| [`hookjudge/`](hookjudge) | the judge | One event in, one verdict out. Four routes ordered by cost: recovery, reuse, ai, rule | Render cards, or know channels |
+| [`hookjudge/`](hookjudge) | the judge | One event in, one verdict out. Five routes ordered by cost: recovery, reuse, rule-reuse, ai, rule | Render cards, or know channels |
 | [`hookprobe/`](hookprobe) | the investigator | Runs one read-only tool-using agent investigation per important alert and returns a root-cause report; sessions can be asked follow-ups, and experience accumulates | Receive alerts, or send notifications |
 
 The reason for the split: a brain that renders Feishu cards has to know

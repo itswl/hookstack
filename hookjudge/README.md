@@ -104,7 +104,7 @@ Which ones a verdict deserves comes from the verdict:
   policy, and who owns noise when a verdict is reused is a decision that is
   deliberately still open.
 
-## Four routes, and the order is the cost policy
+## Five routes, and the order is the cost policy
 
 Every judged event has exactly one route, and it is the first question anyone
 asks about the bill — what did we actually pay for?
@@ -113,6 +113,7 @@ asks about the bill — what did we actually pay for?
 | ---------- | ----------------------------------------------- | ---- |
 | `recovery` | the condition ENDED; reuse what its firing said  | 0    |
 | `reuse`    | same identity judged inside the window           | 0    |
+| `rule-reuse` | the same alert RULE's last AI verdict answers again | 0  |
 | `ai`       | a model read it                                  | paid |
 | `rule`     | the model was unavailable, slow, or unusable     | 0    |
 
@@ -326,7 +327,7 @@ provider does; a pinned dialect is never negotiated away.
 
 ## Cost tiers
 
-Four routes, cheapest first, and only one of them pays:
+Five routes, cheapest first, and only one of them pays:
 
 | route | cost | when |
 | --- | --- | --- |

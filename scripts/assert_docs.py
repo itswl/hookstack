@@ -71,13 +71,86 @@ ROUTES_UNWRITTEN: dict[str, str] = {
 # duplicated on purpose, so pinned. "Five kinds exist" over a tuple of six is
 # what this line exists to prevent.
 ENUMERATED = (
-    ("card action kinds", "hookrelay/hookrelay/actions.py", "KINDS", Path("hookrelay/docs/configuration.md")),
+    (
+        "card action kinds",
+        "hookrelay/hookrelay/actions.py",
+        "KINDS",
+        Path("hookrelay/docs/configuration.md"),
+    ),
     # Moved with the table that states it, when hookprobe's README stopped being
     # its own reference. Still a hand-written document, which is what makes this
     # check mean something — pointing it at a GENERATED file would be asking the
     # generator whether it generated.
-    ("ruling verdicts", "hookprobe/hookprobe/rulings.py", "VERDICTS", Path("hookprobe/docs/configuration.md")),
+    (
+        "ruling verdicts",
+        "hookprobe/hookprobe/rulings.py",
+        "VERDICTS",
+        Path("hookprobe/docs/configuration.md"),
+    ),
 )
+
+# A fourth class, found by an external audit repeating an error it had read
+# here: a prose COUNT. "Four routes" sat in judge.py's own header, hookjudge's
+# README (twice — once above a table that already had five rows), OVERVIEW.md
+# and both front pages, for weeks after rule-reuse made it five. ENUMERATED
+# checks that every member is listed; it cannot see a sentence that miscounts
+# them. This reads the number out of every "N routes" / "N条…路由" in the files
+# pinned below and compares it with the ROUTE_* constants that define the set.
+# Pinned files rather than the whole tree, so an unrelated "two routes" in some
+# other document cannot trip it — every match in these files IS about the
+# judge's cost routes, verified when the check was written.
+_ROUTE_CONST = re.compile(r'^ROUTE_[A-Z_]+ = "', re.MULTILINE)
+ROUTE_CONSTANTS = Path("hookjudge/hookjudge/contract.py")
+ROUTE_COUNT_STATED = (
+    Path("README.md"),
+    Path("OVERVIEW.md"),
+    Path("docs/index.md"),
+    Path("docs/zh/index.md"),
+    Path("hookjudge/README.md"),
+    Path("hookjudge/hookjudge/judge.py"),
+)
+_COUNT_EN = re.compile(
+    r"\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+routes\b",
+    re.IGNORECASE,
+)
+_COUNT_ZH = re.compile(r"([一二三四五六七八九十]|\d+)条[^。\n]{0,12}?(?:路由|路径)")
+_NUMBER_WORDS = {
+    **{
+        w: i
+        for i, w in enumerate(
+            (
+                "one",
+                "two",
+                "three",
+                "four",
+                "five",
+                "six",
+                "seven",
+                "eight",
+                "nine",
+                "ten",
+            ),
+            1,
+        )
+    },
+    **{w: i for i, w in enumerate("一二三四五六七八九十", 1)},
+}
+
+
+def _stated_counts(text: str) -> list[tuple[int, int]]:
+    """Every (line number, stated count) in the text, both languages."""
+    out = []
+    for pattern in (_COUNT_EN, _COUNT_ZH):
+        for m in pattern.finditer(text):
+            word = m.group(1).lower()
+            out.append(
+                (
+                    text.count("\n", 0, m.start()) + 1,
+                    _NUMBER_WORDS.get(word) or int(word),
+                )
+            )
+    return out
+
 
 _PLACEHOLDER = re.compile(r"\{[^}]+\}")
 _ROUTE = re.compile(r'@app\.(?:get|post|put|delete)\("([^"]+)"')
@@ -94,7 +167,9 @@ _ROUTE = re.compile(r'@app\.(?:get|post|put|delete)\("([^"]+)"')
 # thing that makes a key user-facing, and a dataclass field with no loader line
 # is internal state that nobody can set.
 _YAML_KEY = re.compile(r'item\.get\(\s*"([a-z][a-z0-9_]*)"')
-CONFIG_LOADERS = ((Path("hookrelay/hookrelay/config.py"), Path("hookrelay/docs/configuration.md")),)
+CONFIG_LOADERS = (
+    (Path("hookrelay/hookrelay/config.py"), Path("hookrelay/docs/configuration.md")),
+)
 # Keys that are deliberately not in the reference, with the reason.
 KEYS_UNWRITTEN = {
     "name": "every section has one; naming it as a key would be noise",
@@ -119,16 +194,21 @@ def _corpus() -> str:
     docs = [
         p
         for p in Path().rglob("*.md")
-        if ".venv" not in str(p) and GENERATED not in p.read_text(encoding="utf-8", errors="ignore")[:400]
+        if ".venv" not in str(p)
+        and GENERATED not in p.read_text(encoding="utf-8", errors="ignore")[:400]
     ]
-    return _normalised("\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in [*docs, *PAGES]))
+    return _normalised(
+        "\n".join(
+            p.read_text(encoding="utf-8", errors="ignore") for p in [*docs, *PAGES]
+        )
+    )
 
 
 def _tuple_members(path: str, name: str) -> list[str]:
     """The strings in a module-level tuple, read as text — importing three
     services into one process is a worse dependency than a regex."""
     src = Path(path).read_text(encoding="utf-8")
-    match = re.search(rf"^{name}\s*=\s*\((.*?)\)", src, re.S | re.M)
+    match = re.search(rf"^{name}\s*=\s*\((.*?)\)", src, re.DOTALL | re.MULTILINE)
     return re.findall(r'"([^"]+)"', match.group(1)) if match else []
 
 
@@ -137,18 +217,24 @@ def main() -> int:
     problems: list[str] = []
 
     for service in SERVICES:
-        source = "\n".join(f.read_text(encoding="utf-8") for f in Path(service, service).glob("*.py"))
+        source = "\n".join(
+            f.read_text(encoding="utf-8") for f in Path(service, service).glob("*.py")
+        )
         for route in sorted(set(_ROUTE.findall(source))):
             if _normalised(route) in corpus or route in ROUTES_UNWRITTEN:
                 continue
-            problems.append(f"{service}: route {route} appears in no document and is not in ROUTES_UNWRITTEN")
+            problems.append(
+                f"{service}: route {route} appears in no document and is not in ROUTES_UNWRITTEN"
+            )
 
     for loader, doc in CONFIG_LOADERS:
         text = doc.read_text(encoding="utf-8")
         for key in sorted(set(_YAML_KEY.findall(loader.read_text(encoding="utf-8")))):
             if key in KEYS_UNWRITTEN or f"`{key}`" in text or f"{key}:" in text:
                 continue
-            problems.append(f"{loader.parent.parent.name}: config key `{key}` appears in no document")
+            problems.append(
+                f"{loader.parent.parent.name}: config key `{key}` appears in no document"
+            )
 
     for label, module, name, doc in ENUMERATED:
         members = _tuple_members(module, name)
@@ -158,7 +244,19 @@ def main() -> int:
         text = doc.read_text(encoding="utf-8")
         absent = [m for m in members if f"`{m}`" not in text]
         if absent:
-            problems.append(f"{label}: {doc} does not list {absent} (the tuple has {len(members)})")
+            problems.append(
+                f"{label}: {doc} does not list {absent} (the tuple has {len(members)})"
+            )
+
+    defined = len(_ROUTE_CONST.findall(ROUTE_CONSTANTS.read_text(encoding="utf-8")))
+    stated = 0
+    for doc in ROUTE_COUNT_STATED:
+        for line, count in _stated_counts(doc.read_text(encoding="utf-8")):
+            stated += 1
+            if count != defined:
+                problems.append(
+                    f"{doc}:{line} says {count} routes, but {ROUTE_CONSTANTS} defines {defined} ROUTE_* constants"
+                )
 
     if problems:
         print("docs have fallen behind:", file=sys.stderr)
@@ -177,7 +275,8 @@ def main() -> int:
 
     print(
         f"docs: every route, knob and config key across {len(SERVICES)} services is written up or named as not, "
-        f"{len(ENUMERATED)} enumerated sets match their tuples"
+        f"{len(ENUMERATED)} enumerated sets match their tuples, "
+        f"{stated} stated route counts all equal the {defined} defined"
     )
     return 0
 
