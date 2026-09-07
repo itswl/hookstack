@@ -7,15 +7,34 @@ description: 把 agent 放进生产,并且事后算得清账 —— 每一跳都
 
 **把 AI Agent 放进生产，并且事后算得清账（具备财务可审计性与结构化安全围栏）。**
 
-形状总是同一个：**某个东西产出信号，一条管道搬运它并且为每一跳记账，专职节点做判断或做调查，活下来的那些抵达一个人。** 三个各做一件事的服务填进这个形状 —— 内容无关的管道、判官、默认只读的调查器 —— 完全用配置文件而不是代码连起来。
+hookstack 把一条嘈杂的信号流，变成少数几次计了价、签了名、事后能审计的打扰。把告警源指过来 —— Alertmanager、Grafana、任何 webhook。一个便宜的判官先决定"这个人现在需要马上处理吗"；值得的事件交给 agent 去调查；活下来的那些以卡片落进飞书、钉钉或企微，卡片上的按钮让人可以裁定。每一跳都签名、记账，每次模型调用都计价，每周一页说清机器花了多少、省了多少 —— 数字都有人能去核对。
 
-让它不止是一个路由器的，是每次交接周围的东西：每一跳都密码学签名、重试、指数退避调度、可回放，每个 agent 都跑在一份凭证、一个预算上限、和一张写死了"它能做什么"的闭集清单后面。
+给想把 AI Agent 放上告警流、又不想把钥匙交出去的 SRE 和平台团队：agent 默认只读，跑在收窄的凭证、预算上限和一张闭集工具清单后面。告警是它被打磨出来的地方，但不是形状本身：同一条管道、同一份代码，也搬运操作者自己的工作信号 —— 聊天和工单 —— 交给一个规划器，再经人批准交接（[两套部署，一份代码](https://github.com/itswl/hookstack/blob/main/docs/deployments.md)）。
 
-**告警是它被磨出来的那个实例**，下面大部分例子说的也是那口方言。但告警不是这个形状本身 —— 这个仓库里的第二套部署搬的是操作者自己的工作信号（聊天和工单，经过一个盯守器和一个规划器，进两个不同的群），**和第一套共享每一行代码**（[docs/deployments.md](../deployments.md)）。你的信号如果来自完全别的地方，管道是设计上内容无关的，它不会注意到区别。
+## 你得到什么
+
+- **打扰更少，而且是对的那些。** 判官只回答一个问题 —— **这个人现在需要马上处理吗？** —— 告警风暴、同一条件的重述、恢复事件都不会再买第二次判定。在 795 条生产告警上实测，29 条告警规则里有 28 条每次答案完全相同，所以 `rule-reuse` 不用调模型就能答。
+- **一张人可以裁定的卡片。** 值得、不值得、静默、批准 —— 每个按钮在卡片发出前就签了名，每次点击都记录在案，每个裁定都回流到 runbook 和每周那一页。
+- **调查会留下东西。** 跑完的运行把自己蒸馏成 runbook；同一条件再次出现是追加一个 case；被人裁定为"不值得"的条件，之后的重复触发直接由 runbook 以 $0 回答。对一次进行中的调查追问，成本约为重新跑一次的十分之一，实测。
+- **修复，人在环里。** 调查员提出方案；一次签名的批准才会逐步对照允许清单执行，以 argv 而非 shell 运行，落在一个凭证就是全部爆炸半径的节点上。
+- **每次判定都计价，每周都算账。** 一页读三份账本，把实测和反事实并排放：路由省掉了什么、runbook 答掉了什么、线上臂和影子臂比起来如何 —— 量不出来的，用文字说明。
+- **每个事件一页。** `/audit/{event_id}` 列出每一跳的摘要、决策步骤、投递和人的动作；`/trace/{id}` 回放正文；`/timeline` 把链条归成事件。
+- **关得住的 agent。** 默认只读并在启动时实测、工具闭集清单、会出声拒绝的预算上限，以及十四条结构性边界，每一条都写明它**挡不住**什么（[containment](https://github.com/itswl/hookstack/blob/main/docs/containment.md)）。
+- **你的模型，你的群。** 调查员接任何 Anthropic 方言的端点，判官接任何 OpenAI 兼容的端点，包括本地模型；影子臂在真实流量上对比 prompt 或模型，再决定是否上线。卡片投到飞书、钉钉、企微或普通 webhook；OpenTelemetry 默认开启，按节点、按运行带身份。
+
+## 十分钟，不要 key，不花钱
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
+docker compose -f docker-compose.quickstart.yml up -d   # 管道 + 判官 + 桩模型 + 可读的接收端
+bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
+```
+
+不用 checkout、不用构建：全部来自已发布的镜像，桩模型和接收端都在镜像里。想改代码就 clone 后 `docker compose up -d --build` —— 那份文件从源码构建，也是 gate 测的那份。`.env` 里放真实凭证后，桩模型自动让位；`--profile probe` 加上调查员。
 
 那个 [agent runner](#hookprobe) 本身就有用，无论你关不关心告警。
 
-MIT 协议，`docker compose up`。→ **[github.com/itswl/hookstack](https://github.com/itswl/hookstack)**
+MIT 协议。带截图的叙述性总览：[OVERVIEW.md](https://github.com/itswl/hookstack/blob/main/OVERVIEW.md)（英文）。→ **[github.com/itswl/hookstack](https://github.com/itswl/hookstack)**
 
 ---
 
@@ -77,7 +96,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 
 ## 产品演进蓝图与高级模式
 
-1.  **提案型自愈（Remediation Loops）—— 第一版已落地。** 调查员提出方案；卡片带 `action_secret` 签名的 `[批准执行]` / `[拒绝]` 按钮；批准后逐步对照允许清单执行，以 argv 而非 shell 运行，落在一个姿态为 `danger-only`、凭证就是全部爆炸半径的节点上 —— 启动时的姿态检查把它读回来（[怎么做](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md#security-model)）。还没做的是凭证：目前没有任何已部署节点持有写主体，所以这条闭环是用只读凭证端到端演练过的 —— 仪式验证了，效果还没有。
+1.  **提案型自愈（Remediation Loops）—— 第一版已落地。** 调查员提出方案；卡片带 `action_secret` 签名的 `[批准执行]` / `[拒绝]` 按钮；批准后逐步对照允许清单执行，以 argv 而非 shell 运行，落在一个姿态为 `danger-only`、凭证就是全部爆炸半径的节点上 —— 启动时的姿态检查把它读回来（[怎么做](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md#security-model)）。还没做的是凭证：目前没有任何已部署节点持有写主体，所以这条闭环是用只读凭证端到端演练过的 —— 批准这条路端到端验证过了，对真实系统的效果还没有。
 2.  **SRE 专属的 RLHF（自我进化）：** 捕获人类在卡片上点击“其实不重要”、“确认恢复”的反馈，自动转换为标准 JSONL 数据集。该数据集自动输入本地模型 SFT 循环或 Prompt 微调，让大脑随使用时间的增加而越来越懂企业的业务。
 3.  **本地轻量级模型（vLLM/Ollama）验证：** 判官本来就对任何 OpenAI 兼容端点说话，所以“零 API 成本、完全离线”的 Qwen/Llama 决策脑今天就是一份配置（[怎么配](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)）。还没做的是**测量**：黄金集从未在 7B 模型上跑过，而 `missed` / `false_quiet` 这两个数字，是离线部署在信任它之前必须先看到的。
 4.  **影子对比审计视图（Shadow Brain Audit）：** 支持多个 Prompt 版本或模型分支并行评测，并在 Web 控制台上进行可视化分歧度对比审计，在无生产风险前提下测试最佳决策质量。
@@ -153,7 +172,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 
 ### lark-bridge —— 管道拒绝长成的那个边车
 
-自建 bot 只能**发**，它卡片上的按钮无处回调。bridge 就是为这条回程而存在的：它向飞书**主动拨出**一条长连接来接收按钮按压，再把每一次按压转给 hookrelay 的签名卡片动作门。因为连接是出方向的，告警网络不需要开任何入站端口 —— hookrelay 的公网前门是刻意关掉的，这里也不会把它重新打开。做成边车而不是管道插件，是因为 IM 平台的鉴权、token 刷新和 websocket 方言不属于管道的四根柱子里的任何一根，而管道给自己的体积设了上限。
+自建 bot 只能**发**，它卡片上的按钮无处回调。bridge 就是为这条回程而存在的：它向飞书**主动拨出**一条长连接来接收按钮按压，再把每一次按压转给 hookrelay 的签名卡片动作门。因为连接是出方向的，告警网络不需要开任何入站端口 —— hookrelay 的公网前门是刻意关掉的，这里也不会把它重新打开。做成边车而不是管道插件，是因为 IM 平台的鉴权、token 刷新和 websocket 方言不属于管道的四件事 —— 接收、路由、投递、记账 —— 里的任何一件，而管道给自己的体积设了上限。
 
 ---
 

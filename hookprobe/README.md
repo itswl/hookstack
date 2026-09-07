@@ -51,7 +51,7 @@ second investigation of the same condition adds a case rather than replacing
 what was there, and every write, by a run or by a person, snapshots what it
 displaced first. See [docs/learning.md](docs/learning.md).
 
-## The hook\* family
+## The hookstack family
 
 hookprobe stands alone. It is also the third member of a family that splits one
 job three ways — carrying a signal, judging it, and investigating what earns it:

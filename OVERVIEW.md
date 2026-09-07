@@ -1,6 +1,6 @@
-# The hook\* alerting family — an overview
+# hookstack — an overview
 
-A set of small services grown around one question: how does an alert get
+hookstack is a set of small services grown around one question: how does an alert get
 handled?
 
 That question is this document's whole vocabulary, and it is worth saying once

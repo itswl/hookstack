@@ -1,5 +1,6 @@
 title: hookstack
 description: >-
-  Three services that split alert handling — plus a read-only agent runner
-  you can use entirely on its own.
+  Turn a noisy stream of signals into a few priced, signed, auditable
+  interruptions — a content-blind pipe, a cheap judge, and an agent
+  investigator (read-only by default) you can also run on its own.
 theme: jekyll-theme-cayman

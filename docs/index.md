@@ -5,17 +5,38 @@ description: Run agents in production and account for them afterwards — a sign
 
 **English** · [中文](zh/)
 
-Run agents in production with absolute financial accountability and structural containment.
+**Run AI agents in production with absolute financial accountability and structural containment.**
 
-The architecture is content-blind and decoupled: **something produces signals, a pipe carries them and accounts for every hop, specialized nodes decide or investigate, and what survives reaches a person.** Three services fill it — a content-blind pipe, a judge, and a read-only investigator — wired entirely by configuration rather than by code.
+hookstack turns a noisy stream of signals into a few priced, signed, auditable interruptions. Point your alert sources at it — Alertmanager, Grafana, any webhook. A cheap judge decides whether a person needs to act *now*; an agent investigates the events that earn it; what survives lands as a card in Feishu/Lark, DingTalk or WeCom, with buttons a person can rule with. Every hop is signed and accounted for, every model call is priced, and a weekly page says what the machines spent and what they saved — in numbers somebody can check.
 
-Every handover is cryptographically signed, retried, backoff-scheduled, and replayable. Every agent runs with restricted credentials, budget ceilings, and a closed list of permitted actions.
+Built for SRE and platform teams who want AI agents on the alert stream without handing them the keys: agents run read-only by default, behind scoped credentials, budget ceilings and a closed list of tools. Alerts are where it was built and hardened, but they are not the shape. The same pipe, on the same code, carries an operator's own work signals — chat and tickets — to a planner and a human-approved handoff ([two deployments, one codebase](https://github.com/itswl/hookstack/blob/main/docs/deployments.md)).
 
-**Alerts are the instance this was worn in on**, and most examples below speak that dialect. They are not the shape — the second deployment in this repository carries an operator's own work signals, chat and tickets, through a watcher and a planner, on the same code.
+## What you get
+
+- **Fewer interruptions, and the right ones.** The judge answers one question — *does a person need to act now?* — and a storm, a restatement or a recovery never buys a second verdict. Measured on 795 production alerts, 28 of 29 alert rules answered identically every time, so `rule-reuse` answers them without a model call.
+- **A card a person can rule with.** Worth it, not worth it, silence, approve — each button signed before the card leaves, each click recorded, and every ruling fed back into the runbooks and the weekly page.
+- **Investigations that leave something behind.** A finished run distils its own runbook; the next occurrence of the same condition adds a case, and a condition a person ruled *not worth it* answers its re-fires from that runbook for $0. A follow-up question on an open investigation costs about a tenth of a fresh run, measured.
+- **Remediation with a person in the loop.** The investigator proposes; a signed approve runs each step against an allowlist, as an argv and never through a shell, on a node whose credential is the whole blast radius.
+- **Every verdict priced, every week accounted for.** One page reads the three ledgers and puts measured beside counterfactual — what the routes avoided, what runbooks answered, how the live arm compared with its shadows — and says in words what it could not measure.
+- **One page per event.** `/audit/{event_id}` shows every hop with digests, decision steps, deliveries and human actions; `/trace/{id}` replays the bodies; `/timeline` groups chains into incidents.
+- **Agents you can contain.** Read-only by default and measured at startup, a closed tool allowlist, budget ceilings that refuse out loud, and fourteen structural boundaries each documented with what it does **not** stop ([containment](https://github.com/itswl/hookstack/blob/main/docs/containment.md)).
+- **Your model, your chat.** The investigator takes any Anthropic-dialect endpoint, the judge any OpenAI-compatible base including local models; shadow arms compare prompts or models on live traffic before anything is promoted. Cards go to Feishu/Lark, DingTalk, WeCom or a plain webhook; OpenTelemetry is on by default, with identity per node and per run.
+
+## Ten minutes, no keys, no bill
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
+docker compose -f docker-compose.quickstart.yml up -d   # pipe + judge + stub model + readable sink
+bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
+```
+
+No checkout and no build: everything runs from published images, and the stub model and the sink ship inside them. To hack on it instead, clone and `docker compose up -d --build` — that file builds from source and is the one the gate tests.
+
+Real credentials in `.env` make the stub step aside, and `--profile probe` adds the investigator.
 
 The agent runner ([hookprobe](#hookprobe-an-agent-run-behind-an-http-contract)) is useful entirely on its own, whether or not you care about alerts.
 
-MIT licensed. `docker compose up`. → **[github.com/itswl/hookstack](https://github.com/itswl/hookstack)**
+MIT licensed. Narrative overview with screenshots: [OVERVIEW.md](https://github.com/itswl/hookstack/blob/main/OVERVIEW.md). → **[github.com/itswl/hookstack](https://github.com/itswl/hookstack)**
 
 ---
 
@@ -75,7 +96,7 @@ The judge earns its keep on alerts — severity, recovery, flapping, the five ro
 
 So a route may be terminal: a signed door of your own, straight to the channel you named, past the judge. It still gets the pipe's ledger, retries and dead letters — the parts that are about delivery rather than about content.
 
-The investigator is still reachable from there, and asks a different question when the event is work rather than a fault: what exists now, what is missing, the steps, how the result would be verified — and what it could not see, named rather than guessed at. It proposes nothing for execution either way.
+The investigator is still reachable from there, and asks a different question when the event is work rather than a fault: what exists now, what is missing, the steps, how the result would be verified — and what it could not see, named rather than guessed at. Either way it executes nothing itself: a remediation it proposes waits for a person's signed approval.
 
 ### One codebase, two very different graphs
 
@@ -85,7 +106,7 @@ The repository runs two deployments that share every line of service code. One c
 
 ## Product Roadmap & Advanced Patterns
 
-1.  **Proposal-based Auto-healing (Remediation Loops) — shipped in its first form.** The investigator proposes; the card carries cryptographically signed `[Approve]` / `[Reject]` buttons; an approve runs each step against an allowlist, as an argv and never through a shell, on a node whose posture is `danger-only` and whose credential is the whole blast radius — read back by the startup posture check ([how](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md#security-model)). What is still open is the credential: no deployed node holds a write principal yet, so the loop has been rehearsed end to end with read-only credentials — the ceremony is proven, the effect is not.
+1.  **Proposal-based Auto-healing (Remediation Loops) — shipped in its first form.** The investigator proposes; the card carries cryptographically signed `[Approve]` / `[Reject]` buttons; an approve runs each step against an allowlist, as an argv and never through a shell, on a node whose posture is `danger-only` and whose credential is the whole blast radius — read back by the startup posture check ([how](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md#security-model)). What is still open is the credential: no deployed node holds a write principal yet, so the loop has been rehearsed end to end with read-only credentials — the approval path is proven end to end, its effect on a live system is not yet.
 2.  **SRE-specific RLHF (Self-Evolution):** Capturing card clicks ("Actually mattered", "Snooze") to automatically assemble a localized reinforcement learning dataset. This dataset is fed into automated prompt-tuning loops or local model fine-tuning.
 3.  **Local Model Validation (vLLM/Ollama):** The judge already speaks to any OpenAI-compatible base, so a zero-cost, fully offline Qwen/Llama brain is configuration today ([how](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)). What is not yet done is the measurement: the golden set has never been run against a 7B model, and `missed` / `false_quiet` on one are the numbers an air-gapped deployment needs before it trusts it.
 4.  **Dual-Brain Shadow Audit Views:** Running multiple decision prompts or model comparison arms in parallel, allowing SRE teams to audit model decision drift at production scales before promoting changes to production.
@@ -161,7 +182,7 @@ When a verdict earns it (critical/high), the pipe hands a copy of the event to h
 
 ### lark-bridge — the sidecar the pipe would not become
 
-A custom bot can only *send*, so the buttons on its cards have nowhere to call back. The bridge exists for that return path: it **dials out** to Lark over a long connection to receive button presses and forwards each to hookrelay's signed card-action door. Because the connection is outbound, the alerting network opens no inbound port — hookrelay's public front door was deliberately rolled back, and this does not reopen it. A sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four pillars, and the pipe caps its own size.
+A custom bot can only *send*, so the buttons on its cards have nowhere to call back. The bridge exists for that return path: it **dials out** to Lark over a long connection to receive button presses and forwards each to hookrelay's signed card-action door. Because the connection is outbound, the alerting network opens no inbound port — hookrelay's public front door was deliberately rolled back, and this does not reopen it. A sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four jobs — receive, route, deliver, account — and the pipe caps its own size.
 
 ---
 

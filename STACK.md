@@ -1,4 +1,4 @@
-# Running the whole family
+# Running the whole hookstack family
 
 The pipe and the brain, plus a downstream you can read and a stub model, in
 one command. Every step and every expected output below was re-verified from a

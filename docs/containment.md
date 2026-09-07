@@ -1,6 +1,6 @@
 # Containment
 
-An agent in this family is treated as an untrusted network service that costs
+An agent in hookstack is treated as an untrusted network service that costs
 money, reads text an attacker may have written, and holds credentials. Every
 boundary below exists because one of those three is true.
 

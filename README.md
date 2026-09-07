@@ -4,23 +4,30 @@
 [![ci-hookjudge](https://github.com/itswl/hookstack/actions/workflows/ci-hookjudge.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookjudge.yml)
 [![ci-hookprobe](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml)
 
-Run AI agents in production with absolute financial accountability and structural containment.
+**Run AI agents in production with absolute financial accountability and structural containment.**
 
-The architecture is content-blind and decoupled: **something produces signals, a pipe carries them and accounts for every hop, specialized nodes decide or investigate, and what survives reaches a person.** Wired entirely by configuration rather than code.
+hookstack turns a noisy stream of signals into a few priced, signed, auditable interruptions. Point your alert sources at it — Alertmanager, Grafana, any webhook. A cheap judge decides whether a person needs to act *now*; an agent investigates the events that earn it; what survives lands as a card in Feishu/Lark, DingTalk or WeCom, with buttons a person can rule with. Every hop is signed and accounted for, every model call is priced, and a weekly page says what the machines spent and what they saved — in numbers somebody can check.
 
-Every handover is cryptographically signed, retried, backoff-scheduled, and replayable. Every agent runs with restricted credentials, budget ceilings, and a closed list of permitted actions.
-
-**Alerts are the instance this was worn in on**, and most examples speak that dialect. They are not the shape. The second deployment in this repository carries an operator's own work signals — chat and tickets, through a watcher and a planner, into two different chats — and shares every line of the same code with the first ([docs/deployments.md](docs/deployments.md)).
+Built for SRE and platform teams who want AI agents on the alert stream without handing them the keys: agents run read-only by default, behind scoped credentials, budget ceilings and a closed list of tools. Alerts are where it was built and hardened, but they are not the shape. The same pipe, on the same code, carries an operator's own work signals — chat and tickets — to a planner and a human-approved handoff ([two deployments, one codebase](docs/deployments.md)).
 
 Narrative overview with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 
-## Core Value Proposition
+## What you get
 
-Hookstack optimizes two scarce resources a stream of signals actually spends: **a person's attention** and **the LLM model bill**.
+- **Fewer interruptions, and the right ones.** The judge answers one question — *does a person need to act now?* — and a storm, a restatement or a recovery never buys a second verdict. Measured on 795 production alerts, 28 of 29 alert rules answered identically every time, so `rule-reuse` answers them without a model call.
+- **A card a person can rule with.** Worth it, not worth it, silence, approve — each button signed before the card leaves, each click recorded, and every ruling fed back into the runbooks and the weekly page.
+- **Investigations that leave something behind.** A finished run distils its own runbook; the next occurrence of the same condition adds a case, and a condition a person ruled *not worth it* answers its re-fires from that runbook for $0. A follow-up question on an open investigation costs about a tenth of a fresh run, measured.
+- **Remediation with a person in the loop.** The investigator proposes; a signed approve runs each step against an allowlist, as an argv and never through a shell, on a node whose credential is the whole blast radius.
+- **Every verdict priced, every week accounted for.** One page reads the three ledgers and puts measured beside counterfactual — what the routes avoided, what runbooks answered, how the live arm compared with its shadows — and says in words what it could not measure.
+- **One page per event.** `/audit/{event_id}` shows every hop with digests, decision steps, deliveries and human actions; `/trace/{id}` replays the bodies; `/timeline` groups chains into incidents.
+- **Agents you can contain.** Read-only by default and measured at startup, a closed tool allowlist, budget ceilings that refuse out loud, and fourteen structural boundaries each documented with what it does **not** stop ([containment](docs/containment.md)).
+- **Your model, your chat.** The investigator takes any Anthropic-dialect endpoint, the judge any OpenAI-compatible base including local models; shadow arms compare prompts or models on live traffic before anything is promoted. Cards go to Feishu/Lark, DingTalk, WeCom or a plain webhook; OpenTelemetry is on by default, with identity per node and per run.
 
-*   **Cost Minimization Policy:** A verdict answers *does a person need to act now*. High-priority verdicts are cached and re-served to absorb alert storms; recovery events inherit prior firing states for free instead of querying a model again.
-*   **Defense-in-Depth Agent Security:** Agents spend money, read text an attacker may have written, and hold keys. Hookstack treats them as untrusted. Mutating verbs are refused before they run; directory-fingerprinting stops indirect prompt injections from hijacking standing instructions; and public-facing routes are rolled back in favor of outbound sidecars.
-*   **Programmatic Design Enforcement:** A suite of AST-based and graph-based checks in `gate.sh` ensures that duplication doesn't drift, code sizes stay within strict README budgets, and routing configs contain no feedback loops or dead-ends.
+![hookrelay's ledger: every message accounted for, every delivery with an outcome](docs/img/hookrelay-ledger.png)
+
+![hookjudge's status page: verdicts with their routes and what each cost](docs/img/hookjudge-status.png)
+
+Screenshots are from one local Docker run started from nothing, not mockups — [OVERVIEW.md](OVERVIEW.md) has the rest of them.
 
 ## Ten minutes, no keys, no bill
 
@@ -36,6 +43,8 @@ Real credentials in `.env` make the stub step aside, and `--profile probe` adds 
 
 ## The Three Services
 
+One shape, wired by configuration rather than code: **something produces signals, a pipe carries them and accounts for every hop, specialized nodes decide or investigate, and what survives reaches a person.**
+
 ```
 upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► lark / dingtalk / wecom / webhook
               (adapts)  │   (judges)     (formats)
@@ -43,11 +52,11 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
                             (investigates critical/high; opt-in, see STACK.md)
 ```
 
-| Service | Stated Line Budget | Role & Architectural Purpose | Deliberately does NOT |
-| --- | --- | --- | --- |
-| [`hookrelay/`](hookrelay) | **5,400 lines** (actual: ~5,300) | **The Pipe.** Adapts upstream webhooks, handles backoff retries, implements circuit breakers / storm fuses, replaces button values with signed action tokens, and hosts the SQLite ledger. | Understand message content, or make autonomous judgments. |
-| [`hookjudge/`](hookjudge) | **3,350 lines** (actual: ~3,280) | **The Judge.** One event in, one verdict out. Implements the cost policy as five routes tried in cost order: `recovery` ──► `reuse` ──► `rule-reuse` ──► `ai` ──► `rule` (keyword floor). | Render platform-specific cards, or hold channel credentials. |
-| [`hookprobe/`](hookprobe) | **Uncapped** (actual: ~8,400) | **The Investigator.** Runs a single Claude Agent SDK run per deep-analysis task — read-only by default, and measured so at startup; a `danger-only` posture exists for the one node a person hands work to. Exposes an OpenClaw-compatible triggers endpoint. | Receive raw alerts directly, or send downstream messages. |
+| Service | What it does | Deliberately does NOT |
+| --- | --- | --- |
+| [`hookrelay/`](hookrelay) | **The Pipe.** Adapts upstream webhooks, handles backoff retries, implements circuit breakers / storm fuses, replaces button values with signed action tokens, and hosts the SQLite ledger. | Understand message content, or make autonomous judgments. |
+| [`hookjudge/`](hookjudge) | **The Judge.** One event in, one verdict out. Implements the cost policy as five routes tried in cost order: `recovery` ──► `reuse` ──► `rule-reuse` ──► `ai` ──► `rule` (keyword floor). | Render platform-specific cards, or hold channel credentials. |
+| [`hookprobe/`](hookprobe) | **The Investigator.** Runs a single Claude Agent SDK run per deep-analysis task — read-only by default, and measured so at startup; a `danger-only` posture exists for the one node a person hands work to. Exposes an OpenClaw-compatible triggers endpoint. | Receive raw alerts directly, or send downstream messages. |
 
 ## How each piece works
 
@@ -86,11 +95,11 @@ When a verdict earns it (critical/high), the pipe hands a copy of the event to h
 
 ### lark-bridge — the sidecar the pipe would not become
 
-A custom bot can only *send*, so the buttons on its cards have nowhere to call back. The bridge exists for that return path: it **dials out** to Lark over a long connection to receive button presses and forwards each to hookrelay's signed card-action door. Because the connection is outbound, the alerting network opens no inbound port — hookrelay's public front door was deliberately rolled back, and this does not reopen it. A sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four pillars, and the pipe caps its own size.
+A custom bot can only *send*, so the buttons on its cards have nowhere to call back. The bridge exists for that return path: it **dials out** to Lark over a long connection to receive button presses and forwards each to hookrelay's signed card-action door. Because the connection is outbound, the alerting network opens no inbound port — hookrelay's public front door was deliberately rolled back, and this does not reopen it. A sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four jobs — receive, route, deliver, account — and the pipe caps its own size.
 
 ## Product Roadmap & Advanced Patterns
 
-1.  **Proposal-based Auto-healing (Remediation Loops) — shipped in its first form.** The investigator proposes; the card carries cryptographically signed `[Approve]` / `[Reject]` buttons; an approve runs each step against an allowlist, as an argv and never through a shell, on a node whose posture is `danger-only` and whose credential is the whole blast radius — read back by the startup posture check ([how](hookprobe/README.md#security-model)). What is still open is the credential: no deployed node holds a write principal yet, so the loop has been rehearsed end to end with read-only credentials — the ceremony is proven, the effect is not.
+1.  **Proposal-based Auto-healing (Remediation Loops) — shipped in its first form.** The investigator proposes; the card carries cryptographically signed `[Approve]` / `[Reject]` buttons; an approve runs each step against an allowlist, as an argv and never through a shell, on a node whose posture is `danger-only` and whose credential is the whole blast radius — read back by the startup posture check ([how](hookprobe/README.md#security-model)). What is still open is the credential: no deployed node holds a write principal yet, so the loop has been rehearsed end to end with read-only credentials — the approval path is proven end to end, its effect on a live system is not yet.
 2.  **SRE-specific RLHF (Self-Evolution):** Capturing card clicks ("Actually mattered", "Snooze") to automatically assemble a localized reinforcement learning dataset. This dataset is fed into automated prompt-tuning loops or local model fine-tuning.
 3.  **Local Model Validation (vLLM/Ollama):** The judge already speaks to any OpenAI-compatible base, so a zero-cost, fully offline Qwen/Llama brain is configuration today ([how](hookjudge/README.md#local-and-self-hosted-models)). What is not yet done is the measurement: the golden set has never been run against a 7B model, and `missed` / `false_quiet` on one are the numbers an air-gapped deployment needs before it trusts it.
 4.  **Dual-Brain Shadow Audit Views:** Running multiple decision prompts or model comparison arms in parallel, allowing SRE teams to audit model decision drift at production scales before promoting changes to production.
@@ -101,5 +110,7 @@ A custom bot can only *send*, so the buttons on its cards have nowhere to call b
 *   [`docs/deployments.md`](docs/deployments.md) — Two deployments sharing every line of code but agreeing on nothing: alerts vs work timers.
 *   [`STACK.md`](STACK.md) — Local runbook to drive the whole cost-saving pipeline step-by-step.
 *   [`CONTRIBUTING.md`](CONTRIBUTING.md) — Per-service gates, AST copy validations, and general SDLC workflows.
+
+The pipe caps itself at 5,500 source lines and the judge at 3,350; the investigator is uncapped by design. `scripts/assert_weight.py` enforces both ceilings, and the rest of `gate.sh` is AST- and graph-based: pinned copies stay identical, routing configs have no dead ends or feedback loops, and the docs state the same counts the code defines.
 
 Each service has its own gate, Dockerfile and CI workflow. For a change that touches more than one, `bash scripts/gate.sh` runs all of them plus the stack checks. Always read its verdict; never chain it.

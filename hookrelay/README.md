@@ -8,7 +8,7 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 5,100 source lines, five dependencies) that takes JSON
+A pluggable router (under 5,500 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
 to Feishu / DingTalk / WeCom / generic HTTP — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
