@@ -46,8 +46,46 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 | Service | Stated Line Budget | Role & Architectural Purpose | Deliberately does NOT |
 | --- | --- | --- | --- |
 | [`hookrelay/`](hookrelay) | **5,400 lines** (actual: ~5,300) | **The Pipe.** Adapts upstream webhooks, handles backoff retries, implements circuit breakers / storm fuses, replaces button values with signed action tokens, and hosts the SQLite ledger. | Understand message content, or make autonomous judgments. |
-| [`hookjudge/`](hookjudge) | **3,350 lines** (actual: ~3,280) | **The Judge.** One event in, one verdict out. Emplements the cost-saving path: `recovery` ──► `reuse` ──► `ai` ──► `rule` (keyword backup). | Render platform-specific cards, or hold channel credentials. |
+| [`hookjudge/`](hookjudge) | **3,350 lines** (actual: ~3,280) | **The Judge.** One event in, one verdict out. Implements the cost policy as five routes tried in cost order: `recovery` ──► `reuse` ──► `rule-reuse` ──► `ai` ──► `rule` (keyword floor). | Render platform-specific cards, or hold channel credentials. |
 | [`hookprobe/`](hookprobe) | **Uncapped** (actual: ~8,400) | **The Investigator.** Runs a single, read-only Claude Agent SDK run per deep-analysis task. Exposes an OpenClaw-compatible triggers endpoint. | Receive raw alerts directly, or send downstream messages. |
+
+## How each piece works
+
+One shape — **pipe, brain, investigator** — and each component has exactly one job. What is inside each, and why.
+
+### hookrelay — the pipe
+
+- **Adapters.** Declarative per-source config lifts `title`, `body`, `level` and fields out of any upstream payload (Alertmanager, Grafana, a bare webhook) and normalizes the level, so nothing downstream learns a vendor's dialect.
+- **A storm fuse at every door.** Per-source volume protection in two stages: past the threshold an event is still *recorded* (`skipped · storm_suppressed`, count in its trace) but walks no pipeline and reaches no channel or paid brain; past 10× it is refused with a 429 before touching storage, because at that volume the ledger itself is what needs protecting. Process-local on purpose: a fuse protects, a ledger accounts.
+- **A per-channel circuit breaker.** When a channel is wholly down (Feishu unreachable, a bot revoked), the breaker opens after consecutive failures and *defers* every delivery for it rather than burning their attempt budgets against a wall; after a cooldown exactly one probe delivery goes through, and its result closes or re-opens the breaker.
+- **A delivery worker built around rate limits.** Parallel *across* channels so one hung endpoint cannot head-of-line block the rest; serial *within* a channel so the per-minute limit counts what was actually sent. Failures back off from 30 s, doubling to a 600 s cap, then dead-letter — with the ledger saying why.
+- **Signed card actions.** A button's payload is HMAC-signed with `action_secret` before the card leaves; a press is accepted back through the door only if the signature verifies, so nothing on the network can forge a person's click.
+
+### hookjudge — the brain
+
+It answers one question — *does a person need to act on this now?* — and knows nothing about cards or channels. Five routes, tried in cost order, and the order **is** the cost policy:
+
+| route | cost | when |
+| --- | --- | --- |
+| `recovery` | free | the condition ended: inherit the verdict its firing was given, never re-analyse the past |
+| `reuse` | free | the same identity was judged inside the window — a storm is one condition restated |
+| `rule-reuse` | free | this alert *rule*'s last AI verdict answers again (measured: 28 of 29 rules answered identically every time) |
+| `ai` | paid | a model reads it, under a versioned prompt that must return strict JSON |
+| `rule` | free | the model was unavailable, over budget or answered unusably: bilingual keyword rules decide, and the verdict *says so* in `degraded_reason` — a hidden downgrade is worse than a missing verdict |
+
+When the model fails for a reason a person must fix — a dead key, no credit, a hard quota — the judge raises one rate-limited alarm instead of silently judging everything by keywords until somebody reads the ledger.
+
+### hookprobe — the investigator
+
+When a verdict earns it (critical/high), the pipe hands a copy of the event to hookprobe, which runs **one read-only agent session** on the Claude Agent SDK (bash, MCP servers, `SKILL.md` skills) and serves the report to whoever polls — an OpenClaw-compatible contract, so a client already pointed at that gateway switches by changing a URL. Read-only is *constructed*, in three layers that fail differently:
+
+1. **Credentials are the real boundary.** The kubeconfig and cloud keys mounted into the container are read-only principals. If every other layer failed, the cluster and the cloud would still refuse.
+2. **A bash guard refuses mutating verbs before they run.** A PreToolUse hook denies `kubectl delete/apply`, `helm` changes, `systemctl` writes and their kin. For `aws`, whose CLI is too large to blacklist, the list is *inverted*: anything that is not a known read verb (`describe`, `get`, `list`, …) is refused, so a new mutating API cannot slip through by being new.
+3. **The input surface is fingerprinted.** An alert body may carry an indirect injection telling the agent to edit `.claude/`, a skill or `CLAUDE.md` so the instruction outlives the run. Every steering file is hashed before and after each run; any change the operator did not make is reported as `input_changes`, and the hook refuses the write in the first place — two mechanisms, because they fail differently.
+
+### lark-bridge — the sidecar the pipe would not become
+
+A custom bot can only *send*, so the buttons on its cards have nowhere to call back. The bridge exists for that return path: it **dials out** to Lark over a long connection to receive button presses and forwards each to hookrelay's signed card-action door. Because the connection is outbound, the alerting network opens no inbound port — hookrelay's public front door was deliberately rolled back, and this does not reopen it. A sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four pillars, and the pipe caps its own size.
 
 ## Product Roadmap & Advanced Patterns
 

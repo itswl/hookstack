@@ -1,18 +1,21 @@
 """The judgement itself — the only thing this service is for.
 
-Four routes, tried in this order, and the order is the cost policy:
+Five routes, tried in this order, and the order is the cost policy:
 
-  recovery — the condition ENDED. Reuse what its firing was judged to be; a
-             recovery is not a new problem to analyse, and re-analysing it
-             both costs a call and risks contradicting the original.
-  reuse    — the same identity was judged inside the window. Alert storms are
-             the same condition restated, so paying per restatement is paying
-             for the same answer repeatedly.
-  ai       — a model reads it.
-  rule     — the model was unavailable, slow, or answered unusably. Keyword
-             rules decide, and the verdict says so (degraded_reason), because
-             a downgraded judgement that hides its downgrade is worse than a
-             missing one.
+  recovery   — the condition ENDED. Reuse what its firing was judged to be; a
+               recovery is not a new problem to analyse, and re-analysing it
+               both costs a call and risks contradicting the original.
+  reuse      — the same identity was judged inside the window. Alert storms are
+               the same condition restated, so paying per restatement is paying
+               for the same answer repeatedly.
+  rule-reuse — this alert RULE's last AI verdict answers again. Measured on 795
+               alerts, 28 of 29 rules answered identically every time, so the
+               second firing of a rule is usually a question already paid for.
+  ai         — a model reads it.
+  rule       — the model was unavailable, slow, or answered unusably. Keyword
+               rules decide, and the verdict says so (degraded_reason), because
+               a downgraded judgement that hides its downgrade is worse than a
+               missing one.
 
 Everything this service emits is English. The keyword sets below are the one
 exception and not display copy at all: they are patterns matched against
