@@ -29,8 +29,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 COMPOSE_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*|:\?[^}]*)?\}")
 SENSITIVE = re.compile(r"_(SECRET|TOKEN)$")
@@ -50,24 +48,61 @@ def load_env(path: Path) -> dict[str, str]:
     return env
 
 
+def pipe_doors(text: str) -> list[tuple[str, str | None]]:
+    """(name, secret) for every door under `sources:`, read from the text.
+
+    Line-based on purpose: the host's python has no yaml, the file is ours and
+    flat, and a check that needs a dependency the deploy host lacks is a check
+    that gets skipped. A door with no `secret:` line reports None.
+    """
+    doors: list[tuple[str, str | None]] = []
+    in_sources = False
+    name: str | None = None
+    secret: str | None = None
+    for raw in text.splitlines():
+        stripped = (
+            raw.split("#", 1)[0].rstrip() if not raw.lstrip().startswith("#") else ""
+        )
+        if not stripped:
+            continue
+        if re.match(r"^[A-Za-z_]+:\s*$", stripped):  # a top-level section
+            if name is not None:
+                doors.append((name, secret))
+                name, secret = None, None
+            in_sources = stripped.startswith("sources:")
+            continue
+        if not in_sources:
+            continue
+        item = re.match(r"^\s*-\s*name:\s*(.+)$", stripped)
+        if item:
+            if name is not None:
+                doors.append((name, secret))
+            name, secret = item.group(1).strip().strip("'\""), None
+            continue
+        sec = re.match(r"^\s+secret:\s*(.*)$", stripped)
+        if sec and name is not None:
+            secret = sec.group(1).strip().strip("'\"")
+    if name is not None:
+        doors.append((name, secret))
+    return doors
+
+
 def check_pipe_config(path: Path, env: dict[str, str], allow: set[str]) -> list[str]:
     problems: list[str] = []
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError) as exc:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
         return [f"{path}: unreadable — {exc}"]
-    for source in raw.get("sources") or []:
-        name, secret = source.get("name"), source.get("secret")
+    for name, secret in pipe_doors(text):
         if secret is None:
             problems.append(f"door {name!r}: no secret key at all")
             continue
-        text = str(secret).strip()
-        if text == "":
+        if secret == "":
             problems.append(
                 f"door {name!r}: secret is a literal empty string — an unsigned door on a shared network"
             )
             continue
-        match = ENV_REF.match(text)
+        match = ENV_REF.match(secret)
         if not match:
             problems.append(f"door {name!r}: secret is not a ${{NAME}} reference")
             continue

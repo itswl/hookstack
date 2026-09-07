@@ -370,7 +370,7 @@ def main() -> int:
     now = time.time()
     judge = (
         _get(
-            f"{args.judge.rstrip('/')}/status?window_hours={int(args.hours)}",
+            f"{args.judge.rstrip('/')}/status?window_hours={int(args.hours)}&limit=500",
             os.environ.get("HOOKJUDGE_READ_TOKEN", ""),
         )
         if args.judge
@@ -422,6 +422,8 @@ def main() -> int:
         hours=args.hours,
         now=now,
     )
+    if arms is not None:
+        report["arms"] = arms
     sys.stdout.write(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n"
         if args.json
