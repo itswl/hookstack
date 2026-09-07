@@ -32,6 +32,16 @@ if [ "${DEPLOY_NO_PULL:-}" != "1" ]; then
 fi
 echo "deploying $(git log --oneline -1)"
 
+# Before building anything: would this .env bring a door up unsigned? The
+# composes default most secrets to empty so a laptop can boot with nothing;
+# here that default is a hazard, and the return doors were once explicitly
+# empty. Refuses with every finding listed; DEPLOY_ALLOW_EMPTY=NAME records an
+# exception where the deploy reads it. Needs yaml — hookrelay's image has it,
+# the host may not, so it runs in the image about to ship.
+docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml \
+  run --rm --no-deps -v "$ROOT:/preflight:ro" -w /preflight hookrelay \
+  python scripts/deploy_preflight.py /preflight
+
 # Both projects, exactly as first created (docker inspect the containers if in
 # doubt — the compose labels are the authority these names were read from).
 docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml build

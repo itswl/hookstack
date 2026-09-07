@@ -137,3 +137,36 @@ def test_a_capped_listing_only_counts_as_truncated_when_the_window_might_extend_
         for i in range(200)
     ]
     assert cost_report.compute(None, None, None, fresh, hours=168, now=NOW)["investigator"]["listing_truncated"] is True
+
+
+def test_arms_are_compared_on_the_alert_both_saw_and_the_quiet_cell_is_named() -> None:
+    live = [
+        {"correlation_id": "hr-1", "importance": "low", "wake_someone": "no", "summary": "disk 71%"},
+        {"correlation_id": "hr-2", "importance": "high", "wake_someone": "yes", "summary": "payments down"},
+        {
+            "correlation_id": "hr-3",
+            "importance": "medium",
+            "wake_someone": "no",
+            "summary": "queue lag",
+            "is_recovery": True,
+        },
+        {"correlation_id": "", "importance": "low", "wake_someone": "no"},
+    ]
+    shadow = [
+        {"correlation_id": "hr-1", "importance": "high", "wake_someone": "yes"},  # live quieter: the cell with teeth
+        {"correlation_id": "hr-2", "importance": "high", "wake_someone": "no"},  # live louder
+        {
+            "correlation_id": "hr-3",
+            "importance": "high",
+            "wake_someone": "yes",
+            "is_recovery": True,
+        },  # recoveries excluded
+        {"correlation_id": "hr-9", "importance": "low", "wake_someone": "no"},  # not seen by live: not compared
+    ]
+    out = cost_report.compare_arms(live, [("http://b", shadow), ("http://c", None)])
+    b, c = out["arms"]
+    assert (b["compared"], b["importance_differs"], b["live_quieter"], b["live_louder"]) == (2, 1, 1, 1)
+    assert b["live_quieter_examples"] == ["disk 71%"]
+    assert c["unavailable"] is True
+    page = cost_report.render({**cost_report.compute(None, None, None, None, hours=168, now=NOW), "arms": out})
+    assert "live quieter than the shadow: 1" in page and "disk 71%" in page and "`http://c`: _not read_" in page

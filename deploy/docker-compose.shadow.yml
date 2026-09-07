@@ -51,6 +51,10 @@ services:
       # unsigned, which the config guard refuses — so the button is simply
       # not configured until this is set.
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
+      # The return doors verify with these; the judge and the investigator sign
+      # with the same values (HOOKJUDGE_RETURN_SECRET / HOOKPROBE_RETURN_SECRET).
+      SHADOW_RETURN_SECRET: ${SHADOW_RETURN_SECRET:-}
+      HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
       # Signs the token inside a card button. Without it the buttons render
       # and do nothing — `_mint_card_actions` returns early and every button
       # ships with an empty value. That was the state of this deployment for
@@ -116,6 +120,7 @@ services:
       # signs for /rulings/ai only, and its holder is the investigator.
       # Unset means the ruling door stays shut, which is the safe default.
       HOOKJUDGE_RULING_SECRET: ${SHADOW_RULING_SECRET:-}
+      HOOKJUDGE_RETURN_SECRET: ${SHADOW_RETURN_SECRET:-}
       # Brain A returns; brain B stays ledger-only. The asymmetry is the point:
       # a verdict has to reach a human for anyone to rule on it, and two brains
       # both returning would put two cards in the chat for one alert. B's
@@ -165,6 +170,7 @@ services:
       # signs for /rulings/ai only, and its holder is the investigator.
       # Unset means the ruling door stays shut, which is the safe default.
       HOOKJUDGE_RULING_SECRET: ${SHADOW_RULING_SECRET:-}
+      HOOKJUDGE_RETURN_SECRET: ${SHADOW_RETURN_SECRET:-}
       HOOKJUDGE_RETURN_URL: "none"
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
       HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
@@ -207,6 +213,7 @@ services:
       HOOKJUDGE_DB: /data/hookjudge.db
       HOOKJUDGE_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
       HOOKJUDGE_RULING_SECRET: ${SHADOW_RULING_SECRET:-}
+      HOOKJUDGE_RETURN_SECRET: ${SHADOW_RETURN_SECRET:-}
       # Ledger-only, like B: only brain A returns a verdict to a human.
       HOOKJUDGE_RETURN_URL: "none"
       HOOKJUDGE_WORKER_INTERVAL: "0.5"

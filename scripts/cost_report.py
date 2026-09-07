@@ -167,6 +167,69 @@ def compute(
     return report
 
 
+def compare_arms(
+    live_rows: list | None, shadows: list[tuple[str, list | None]]
+) -> dict[str, Any]:
+    """The live judge against each shadow arm, joined on the alert they both saw.
+
+    Not an accuracy number — nobody knows which arm is right — but the shape of
+    their disagreement, and the one cell with teeth: the live judge said
+    wake=no where a shadow said wake=yes. Those are the alerts a person never
+    saw that another model would have shown them. Pure; the fetch is elsewhere.
+    """
+    out: dict[str, Any] = {"arms": []}
+    if not isinstance(live_rows, list):
+        out["unavailable"] = True
+        return out
+    live = {
+        str(r.get("correlation_id") or ""): r
+        for r in live_rows
+        if r.get("correlation_id") and not r.get("is_recovery")
+    }
+    for url, rows in shadows:
+        if not isinstance(rows, list):
+            out["arms"].append({"url": url, "unavailable": True})
+            continue
+        compared = importance_differs = live_quieter = live_louder = 0
+        quieter_examples: list[str] = []
+        for r in rows:
+            key = str(r.get("correlation_id") or "")
+            base = live.get(key)
+            if not base or r.get("is_recovery"):
+                continue
+            compared += 1
+            if (base.get("importance") or "") != (r.get("importance") or ""):
+                importance_differs += 1
+            lw, sw = (
+                str(base.get("wake_someone") or "").lower(),
+                str(r.get("wake_someone") or "").lower(),
+            )
+            if lw == "no" and sw == "yes":
+                live_quieter += 1
+                if len(quieter_examples) < 3:
+                    quieter_examples.append(
+                        str(base.get("summary") or base.get("title") or key)[:70]
+                    )
+            elif lw == "yes" and sw == "no":
+                live_louder += 1
+        out["arms"].append(
+            {
+                "url": url,
+                "compared": compared,
+                "importance_differs": importance_differs,
+                "importance_differs_pct": round(
+                    100.0 * importance_differs / compared, 1
+                )
+                if compared
+                else None,
+                "live_quieter": live_quieter,
+                "live_louder": live_louder,
+                "live_quieter_examples": quieter_examples,
+            }
+        )
+    return out
+
+
 def render(r: dict[str, Any]) -> str:
     days = r["hours"] / 24
     out = [
@@ -254,6 +317,26 @@ def render(r: dict[str, Any]) -> str:
                 for i in top
             ]
 
+    arms = r.get("arms")
+    if arms is not None:
+        out += ["", "## Shadow arms", ""]
+        if arms.get("unavailable"):
+            out.append("_The live judge's rows could not be read; no comparison._")
+        for a2 in arms.get("arms") or []:
+            if a2.get("unavailable"):
+                out.append(f"- `{a2['url']}`: _not read_")
+                continue
+            out.append(
+                f"- `{a2['url']}`: {a2['compared']} alerts both judged · importance differs on {a2['importance_differs']} ({a2['importance_differs_pct']}%) · "
+                f"**live quieter than the shadow: {a2['live_quieter']}** (would have woken somebody) · live louder: {a2['live_louder']}"
+            )
+            for ex in a2.get("live_quieter_examples") or []:
+                out.append(f"  - {ex}")
+        out.append("")
+        out.append(
+            "_Disagreement is not error — nobody knows which arm is right — but the 'live quieter' cell is the one to read first._"
+        )
+
     total = (j or {}).get("cost", 0.0) + (inv or {}).get("cost", 0.0)
     avoided = (j or {}).get("avoided_cost", 0.0) + (inv or {}).get("avoided_cost", 0.0)
     out += [
@@ -275,6 +358,12 @@ def main() -> int:
     ap.add_argument("--relay", default=os.environ.get("HOOKRELAY_URL", ""))
     ap.add_argument("--judge", default=os.environ.get("HOOKJUDGE_URL", ""))
     ap.add_argument("--probe", default=os.environ.get("HOOKPROBE_URL", ""))
+    ap.add_argument(
+        "--shadow-judge",
+        action="append",
+        default=[],
+        help="a shadow arm's URL; repeatable",
+    )
     ap.add_argument("--hours", type=float, default=168.0)
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
@@ -312,6 +401,19 @@ def main() -> int:
     )
     if isinstance(runs, dict):
         runs = runs.get("runs")
+    arms = None
+    if args.judge and args.shadow_judge:
+        jt = os.environ.get("HOOKJUDGE_READ_TOKEN", "")
+        live_rows = (judge or {}).get("recent") if isinstance(judge, dict) else None
+        shadow_rows = []
+        for url in args.shadow_judge:
+            body = _get(
+                f"{url.rstrip('/')}/status?window_hours={int(args.hours)}&limit=500", jt
+            )
+            shadow_rows.append(
+                (url, (body or {}).get("recent") if isinstance(body, dict) else None)
+            )
+        arms = compare_arms(live_rows, shadow_rows)
     report = compute(
         judge if isinstance(judge, dict) else None,
         timeline if isinstance(timeline, dict) else None,

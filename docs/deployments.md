@@ -81,10 +81,15 @@ true. In the work shape nothing else counts: the watcher dedups by TOPIC in its
 own state, which is a different question from "is this the identical signal
 again" — a crashed watcher re-running replays what it already sent.
 
-**Return doors: unsigned on a server, signed on a laptop.** Same words, different
-threat model. "An in-network hop between two containers of one deployment" means
-a private server network in one case and *every process on this machine* in the
-other, any of which could otherwise post a fabricated card into somebody's chat.
+**Return doors: signed on both, since 2026-09-07.** They used to differ — unsigned
+on the server as "an in-network hop between two containers of one deployment",
+signed on the laptop where *every process on this machine* could otherwise post a
+fabricated card into somebody's chat. The server's premise stopped holding the
+day the compose network started carrying the platform's observability containers
+(Prometheus scraping, Alloy collecting): "in-network" no longer meant "ours". Both
+return doors now verify the same secret their brain signs with, and
+`scripts/deploy_preflight.py` refuses a deploy whose .env would leave any door
+unsigned — the baseline the compose comments described is enforced, not remembered.
 
 **Escalation gating: level alone, or level and kind.** The investigator gates on
 level and uses `fields.kind` only to pick which prompt it runs. So a work

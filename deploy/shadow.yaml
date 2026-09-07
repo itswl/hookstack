@@ -86,7 +86,12 @@ sources:
   # and the platform's own door above is the one that faces outward. Give it a
   # secret the day this deployment stops being a single compose file.
   - name: judge-notify
-    secret: ""
+    # Signed since 2026-09-07. This door was unsigned as "an in-network hop" while
+    # hookstack_net held only this deployment; it now also carries the platform's
+    # observability containers, and any of them could otherwise post a fabricated
+    # report that the operator would read as the judge's. Same variable on
+    # both ends, so the judge signs and this door verifies.
+    secret: ${SHADOW_RETURN_SECRET}
     title: "{meta.alert_name}"
     body: "{analysis.summary}"
     level: "{meta.importance}"
@@ -123,7 +128,12 @@ sources:
   # investigations it starts and never needed the return. A patrol has nobody
   # polling it, so its report reached a JSON file on the volume and stopped.
   - name: probe-notify
-    secret: ""
+    # Signed since 2026-09-07. This door was unsigned as "an in-network hop" while
+    # hookstack_net held only this deployment; it now also carries the platform's
+    # observability containers, and any of them could otherwise post a fabricated
+    # report that the operator would read as the investigator's. Same variable on
+    # both ends, so the investigator signs and this door verifies.
+    secret: ${HOOKPROBE_RETURN_SECRET}
     title: "{meta.alert_name}"
     body: "{report.summary}"
     level: "{meta.importance}"

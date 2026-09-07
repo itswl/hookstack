@@ -151,7 +151,11 @@ def main(argv: list[str]) -> int:
     # For a Feishu custom bot specifically the URL is the whole credential, so
     # signing is a second factor worth turning on where the receiver supports
     # it — recommended, not enforced.
-    internal_hops = {"judge-notify", "probe-notify", "to-me"}
+    # Narrowed again on 2026-09-07: the two return doors left this set the day
+    # hookstack_net started carrying the platform's observability containers.
+    # "In-network" stopped meaning "ours"; the doors are signed now, and an
+    # empty one is a finding. `to-me` is a channel and judged by direction.
+    internal_hops = {"to-me"}
     for kind in ("sources", "channels"):
         for item in raw.get(kind) or []:
             name = item.get("name")
