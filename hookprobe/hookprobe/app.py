@@ -106,6 +106,9 @@ def _summary(run: Run) -> dict[str, Any]:
         "engine_session_id": run.engine_session_id,
         "title": title[:120],
         "origin": run.origin,
+        # A re-fire answered from a runbook cost $0 and ran no engine; the weekly
+        # cost report counts these as what the runbook loop avoided.
+        "answered_from_runbook": bool(run.meta.get("answered_from_runbook")),
         "return_status": run.return_status,
         # What the run left for the next one: {"installed": name} or
         # {"skipped": reason}, empty when the loop is off.

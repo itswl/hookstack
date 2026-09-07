@@ -88,6 +88,16 @@ file that only held the harness's already-truncated copy while claiming to hold
 everything — see
 [the rejected note](../../.agents/notes/rejected/2026-08-14-tool-output-spill-in-hookprobe.md).
 
+## The week on one page
+
+`scripts/cost_report.py` joins the three services' read APIs into a governance
+page: what the judge billed and what its free routes avoided, what the
+investigator billed, how many re-fires a runbook answered for $0, what people
+ruled and what they have not, the budget, and the pipe's priced chains and
+incidents. Every avoided figure is a count times this week's average paid call
+and is labelled a counterfactual; a service that was not read gets a sentence,
+not a zero. Deterministic — no model is paid to do arithmetic on a ledger.
+
 ## Model-call telemetry (on by default, no backend assumed)
 
 Every run's totals are already on its record — cost, tokens, per-model

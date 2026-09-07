@@ -92,6 +92,25 @@ there (`_BODY_MAX` in `hookprobe/hookprobe/events.py`) and notes in the prompt
 where it cut, which for a task brief means the last instruction quietly never
 arrived. `patrol.sh` refuses to send an oversized brief instead.
 
+## The weekly cost page is not a patrol
+
+`scripts/cost_report.py` prints the week's bill and attention — the judge's
+routes and what the free ones avoided, the investigator's runs, runbook answers,
+rulings and budget, the pipe's priced chains and incidents — from the three read
+APIs, deterministically, for $0. It is the one document where an approximate
+figure is worse than none, so no model is paid to summarise a ledger. Run it
+beside the patrols, and deliver the page however you deliver anything else —
+through a door of the pipe, so it is accounted for like the rest:
+
+```
+# Monday 01:00 UTC: the week's cost & attention page, posted as a note
+0 1 * * 1 . $HOME/.hookstack-patrol.env; cd /opt/hookstack && \
+  page=$(HOOKRELAY_URL=http://127.0.0.1:8100 HOOKJUDGE_URL=http://127.0.0.1:8200 HOOKPROBE_URL=http://127.0.0.1:8088 \
+         python3 scripts/cost_report.py) && \
+  printf '%s' "$page" | python3 -c 'import json,sys; print(json.dumps({"title":"Weekly cost & attention","detail":sys.stdin.read()[:3800],"level":"low","kind":"note","origin":"cost-report"}))' \
+  | python3 scripts/post_watch_signal.py
+```
+
 ## The clock: a crontab, or a container that carries one
 
 `patrol.sh` fires one patrol. What decides *when* is either the host's crontab
