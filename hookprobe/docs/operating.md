@@ -132,7 +132,7 @@ docker compose exec hookprobe sh -c 'cd /data && claude -r <engine_session_id>'
 #   (engine_session_id comes from GET /v1/runs/{key})
 ```
 
-Follow-ups run under the same read-only guard and timeout clamps as first
+Follow-ups run under the same guard posture and timeout clamps as first
 passes. A failed follow-up never erases the original answer — earlier finals
 are kept on the run record (`previous_texts`).
 

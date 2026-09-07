@@ -1,13 +1,13 @@
 ---
 title: hookstack
-description: 把 agent 放进生产,并且事后算得清账 —— 每一跳都签名、计价、可回放的交接总线,外加一个完全可以单独使用的只读 agent runner。
+description: 把 agent 放进生产,并且事后算得清账 —— 每一跳都签名、计价、可回放的交接总线,外加一个完全可以单独使用、默认只读的 agent runner。
 ---
 
 [English](../) · **中文**
 
 **把 AI Agent 放进生产，并且事后算得清账（具备财务可审计性与结构化安全围栏）。**
 
-形状总是同一个：**某个东西产出信号，一条管道搬运它并且为每一跳记账，专职节点做判断或做调查，活下来的那些抵达一个人。** 三个各做一件事的服务填进这个形状 —— 内容无关的管道、判官、只读调查器 —— 完全用配置文件而不是代码连起来。
+形状总是同一个：**某个东西产出信号，一条管道搬运它并且为每一跳记账，专职节点做判断或做调查，活下来的那些抵达一个人。** 三个各做一件事的服务填进这个形状 —— 内容无关的管道、判官、默认只读的调查器 —— 完全用配置文件而不是代码连起来。
 
 让它不止是一个路由器的，是每次交接周围的东西：每一跳都密码学签名、重试、指数退避调度、可回放，每个 agent 都跑在一份凭证、一个预算上限、和一张写死了"它能做什么"的闭集清单后面。
 
@@ -62,7 +62,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 | **交接带签名** | 每道门校验带时间戳的 HMAC；每个节点有自己的密钥、预算和守卫 |
 | **能做什么是一张闭集清单** | `HOOKPROBE_MCP_TOOLS` 列出这个实例可以调用的 MCP 工具，**留空则一个都不许调**。挂载一个 server 不等于授予它的工具 —— 没有哪个 server 因为你希望它只读就真的只读，一个聊天 server 会把 `send_message` 和 `search_messages` 放在一起 |
 | **能得出什么结论也是闭集** | 一个能左右路由的裁决，只能从操作者声明过的词表里挑，不能自由书写 |
-| **只读是构造出来的** | 写操作动词在执行前被拒（`aws` 命令**除非是读否则拒绝**）、只读凭证才是真正的边界、还有一个安全钩子拦住 "一次运行改写自己下一次的指令" |
+| **只读是构造出来的** | 写操作动词在执行前被拒（`aws` 命令**除非是读否则拒绝**）、只读凭证才是真正的边界、还有一个安全钩子拦住 "一次运行改写自己下一次的指令"。姿态按节点声明（`HOOKPROBE_BASH_GUARD`），启动时对照挂载的凭证实测，只在有意为之时才放宽 —— 人把计划交给的那个工作节点跑 `danger-only`，那里凭证就是全部的爆炸半径 |
 | **花销有硬性上限** | 窗口内花超了就拒绝新的自主运行，而且**每次拒绝都自己报出来**，不会静默 |
 | **改路由之前先看清图** | `GET /topology` 只凭配置渲染出门、阶段落点、出口，并点出这个形状隐含的风险：没有路由能到的门、没有东西喂的出口、以及会把 brain 自己的输出喂回给它的回环 |
 | **事后能翻旧账** | `GET /trace/{id}` 回放每一跳的双向字节 —— 只存 body 从不存 headers，因为 headers 带签名和令牌 |
@@ -77,7 +77,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 
 ## 产品演进蓝图与高级模式
 
-1.  **提案型自愈（Remediation Loops）：** 从“只读诊断”走向“提案自愈”。Agent 排查故障后，自动生成修复脚本并以 Feishu 卡片形式呈现。卡片上附带 `action_secret` 加密签名的 `[批准执行]` 按钮，必须经人类确认并调用该合法签名，安全自愈 Runner 才会执行相应动作，完美兼顾速度与安全。
+1.  **提案型自愈（Remediation Loops）—— 第一版已落地。** 调查员提出方案；卡片带 `action_secret` 签名的 `[批准执行]` / `[拒绝]` 按钮；批准后逐步对照允许清单执行，以 argv 而非 shell 运行，落在一个姿态为 `danger-only`、凭证就是全部爆炸半径的节点上 —— 启动时的姿态检查把它读回来（[怎么做](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md#security-model)）。还没做的是凭证：目前没有任何已部署节点持有写主体，所以这条闭环是用只读凭证端到端演练过的 —— 仪式验证了，效果还没有。
 2.  **SRE 专属的 RLHF（自我进化）：** 捕获人类在卡片上点击“其实不重要”、“确认恢复”的反馈，自动转换为标准 JSONL 数据集。该数据集自动输入本地模型 SFT 循环或 Prompt 微调，让大脑随使用时间的增加而越来越懂企业的业务。
 3.  **本地轻量级模型（vLLM/Ollama）验证：** 判官本来就对任何 OpenAI 兼容端点说话，所以“零 API 成本、完全离线”的 Qwen/Llama 决策脑今天就是一份配置（[怎么配](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)）。还没做的是**测量**：黄金集从未在 7B 模型上跑过，而 `missed` / `false_quiet` 这两个数字，是离线部署在信任它之前必须先看到的。
 4.  **影子对比审计视图（Shadow Brain Audit）：** 支持多个 Prompt 版本或模型分支并行评测，并在 Web 控制台上进行可视化分歧度对比审计，在无生产风险前提下测试最佳决策质量。
@@ -90,7 +90,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 | --- | --- | --- |
 | **hookrelay** | 管道 —— 把每种上游方言适配进来、每种通道格式渲染出去，并且全程记账 | 理解内容，或做判断 |
 | **hookjudge** | 判官 —— 一个事件进,一个判定出,五条按成本排序的路径 | 渲染卡片,或了解通道 |
-| **hookprobe** | 调查员 —— 对值得的事件跑一次只读 agent 运行：告警问「哪里坏了」,工作项问「具体怎么做」 | 接收告警,或发送通知 |
+| **hookprobe** | 调查员 —— 对值得的事件跑一次默认只读的 agent 运行：告警问「哪里坏了」,工作项问「具体怎么做」 | 接收告警,或发送通知 |
 
 ```
 上游告警源（Grafana / Alertmanager / 云监控 …）
@@ -100,7 +100,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
   （管道:适配+路由+账本） │ （判官:判定+成本）     （格式化并投递）
                           │
                           └──► hookprobe :8088 ──► hookrelay ──► 同样的通道
-                               （调查员:只读）      /hook/probe-notify
+                               （调查员:默认只读）  /hook/probe-notify
 
 已经自己判过的源走终端路由，不再进判官：
 
@@ -144,11 +144,12 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 
 ### hookprobe —— 调查员
 
-当判定值得（critical/high），管道把事件复制一份交给 hookprobe，它在 Claude Agent SDK 上跑**一次只读的 agent 会话**（bash、MCP 服务器、`SKILL.md` 技能），把报告交给来轮询的人 —— 一份 OpenClaw 兼容的契约，已经指向那个 gateway 的客户端改个 URL 就能切过来。只读是**构造出来的**，三层、各自的失效方式不同：
+当判定值得（critical/high），管道把事件复制一份交给 hookprobe，它在 Claude Agent SDK 上跑**一次默认只读的 agent 会话**（bash、MCP 服务器、`SKILL.md` 技能），把报告交给来轮询的人 —— 一份 OpenClaw 兼容的契约，已经指向那个 gateway 的客户端改个 URL 就能切过来。只读是**构造出来的**，几层、各自的失效方式不同；也是**测量出来的**，因为一条活在挂载凭证里的边界，可以不留 diff 地漂移：
 
 1. **凭证才是真正的边界。** 挂进容器的 kubeconfig 和云 key 都是只读主体。就算其它每一层都失效，集群和云本身仍然会拒绝。
 2. **Bash 守卫在执行前拒绝写操作动词。** 一个 PreToolUse 钩子拒绝 `kubectl delete/apply`、`helm` 变更、`systemctl` 写入及其同类。对 `aws` 这种大到无法列黑名单的 CLI，清单是**反向**的：不在已知读动词（`describe`、`get`、`list`……）之列的一律拒绝 —— 一个新出的写操作 API 不能因为"新"就溜进来。
 3. **输入表面做指纹校验。** 告警正文可能携带间接注入，指使 agent 去改 `.claude/`、某个 skill 或 `CLAUDE.md`，让指令活过这一次运行。每个会左右下次运行的文件在运行前后都做哈希；任何不是操作者做出的改动都作为 `input_changes` 上报 —— 而钩子本来就会拒绝那次写入。两套机制，因为它们的失效方式不同。
+4. **姿态先声明、再测量，只在有意为之时放宽。** `HOOKPROBE_BASH_GUARD` 说明一个节点是干什么的 —— 面向事件门的一律 `readonly`，人把活儿交给的那一个节点才是 `danger-only`。启动时服务问挂载的凭证到底能做什么，再和声明比对：比声明更宽的节点拒绝启动，`danger-only` 节点把爆炸半径记录下来，结论放在每次运行审计的最上面。`danger-only` 下守卫只留下凭证范围无法挽回的那几条（`rm -rf`、`mkfs`、`terraform destroy`、整个命名空间的 `kubectl delete`）；其余交给凭证去约束，而且没有一次签名点击，什么都到不了那个节点 —— 卡片上交接出去的计划，或逐步对照允许清单批准的修复。
 
 ### lark-bridge —— 管道拒绝长成的那个边车
 

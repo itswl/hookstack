@@ -15,8 +15,8 @@ almost nothing else needs translating; the two deployments are compared in
 The family's design philosophy is one job per component.
 **hookrelay** is the pipe — it adapts every monitoring dialect in and every
 channel format out. **hookjudge** is the judge — one event, one verdict, one
-line in the ledger. **hookprobe** is the investigator — one read-only,
-tool-using agent run for the alerts that deserve more than a verdict. All
+line in the ledger. **hookprobe** is the investigator — one tool-using
+agent run, read-only by default, for the alerts that deserve more than a verdict. All
 three live in this repository, each entirely self-contained (its own package,
 tests, gate, Dockerfile and CI), and together they form a complete alert
 handling pipeline.
@@ -38,7 +38,7 @@ upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
   (pipe: adapt+route+ledger) │ (judge: verdict+cost)   (formats and delivers)
                              │
                              └──► hookprobe :8088 ──► hookrelay ──► the same channels
-                                  (investigator: read-only)  /hook/probe-notify
+                                  (investigator: read-only by default)  /hook/probe-notify
 ```
 
 ## Who does what
@@ -47,7 +47,7 @@ upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
 | --- | --- | --- | --- |
 | [`hookrelay/`](hookrelay) | the pipe | Adapts every upstream dialect into one normalized event, routes it to the brains, renders verdicts and reports into each channel's format, and accounts for all of it | Understand content, or judge |
 | [`hookjudge/`](hookjudge) | the judge | One event in, one verdict out. Five routes ordered by cost: recovery, reuse, rule-reuse, ai, rule | Render cards, or know channels |
-| [`hookprobe/`](hookprobe) | the investigator | Runs one read-only tool-using agent investigation per important alert and returns a root-cause report; sessions can be asked follow-ups, and experience accumulates | Receive alerts, or send notifications |
+| [`hookprobe/`](hookprobe) | the investigator | Runs one tool-using agent investigation per important alert, read-only by default and measured so at startup, and returns a root-cause report; sessions can be asked follow-ups, and experience accumulates | Receive alerts, or send notifications |
 
 The reason for the split: a brain that renders Feishu cards has to know
 Feishu's card schema, then WeCom's, then DingTalk's — and that work belongs to
@@ -123,12 +123,22 @@ integrated with that dialect switches by changing a URL. The engine is the
 Claude Agent SDK — the agent loop, built-in tools, MCP client and SKILL.md
 loading all come from there; hookprobe owns no agent-framework code at all.
 
-Read-only is enforced in three layers, strongest first: the real boundary is
-the read-only credentials mounted into the container (a read-only kubeconfig,
-query-grade tokens); second is the bash guard, which denies the mutating verbs
-of kubectl, helm, systemctl and terraform plus ssh/scp before the tool runs —
-verified to bind parallel subagents too; third is the container itself,
-non-root and disposable. Failure is accounted for as well: a crash, a timeout
+Read-only is the default posture, constructed in layers, strongest first: the
+real boundary is the read-only credentials mounted into the container (a
+read-only kubeconfig, query-grade tokens); second is the bash guard, which
+denies the mutating verbs of kubectl, helm, systemctl and terraform plus
+ssh/scp before the tool runs — verified to bind parallel subagents too; third
+is the container itself, non-root and disposable; fourth is the input guard,
+which stops a run editing what steers the next one. The posture is declared
+per node (`HOOKPROBE_BASH_GUARD`) and measured at startup against what the
+credentials can actually do — a node whose credentials are wider than it
+declared refuses to start. The one node meant to change things, the work
+deployment's `probe-work`, runs the same code under `danger-only`: the guard
+then refuses only what no credential scope can undo (`rm -rf`, `mkfs`, `dd`
+onto a device, container runtimes, `terraform destroy`, namespace-wide
+`kubectl delete`), the mounted credential is the whole blast radius, and
+nothing reaches that node without a person's signed click — a plan handed off
+from a card, or a remediation approved step by step against an allowlist. Failure is accounted for as well: a crash, a timeout
 or an operator's Stop all settle as `isFinal: true` with a well-formed report
 naming the runner failure, so the caller sees it on the next poll instead of
 waiting out its own timeout window.
@@ -379,7 +389,8 @@ golden incident does not deploy.
 
 [How Anthropic secures its own AI-native SDLC](https://claude.com/blog/how-anthropic-secures-its-ai-native-software-development-lifecycle)
 treats agents as monitored actors rather than trusted authors. Same side
-taken here, for the same reason: the investigator runs read-only, cannot edit
+taken here, for the same reason: the investigator runs read-only by default
+and proves it at startup, cannot edit
 what steers its next run, its runbooks are written by the service and never
 through its own tools — and a red-team run drives injections at the memory
 path on the deploy host before an operator is asked to trust it.

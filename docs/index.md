@@ -1,6 +1,6 @@
 ---
 title: hookstack
-description: Run agents in production and account for them afterwards — a signed, priced, replayable bus for agent handovers, plus a read-only agent runner you can use entirely on its own.
+description: Run agents in production and account for them afterwards — a signed, priced, replayable bus for agent handovers, plus an agent runner, read-only by default, that you can use entirely on its own.
 ---
 
 **English** · [中文](zh/)
@@ -62,7 +62,7 @@ An agent here is an untrusted network service that spends money, reads text an a
 | **Signed Handovers** | Every door verifies a timestamped HMAC; every node has its own secret, budget and guards |
 | **Closed Tool Allowlist** | `HOOKPROBE_MCP_TOOLS` names the MCP tools an instance may call, and **empty denies all of them**. Mounting a server does not grant its tools — no server is read-only just because you wanted it to be, and a chat server ships `send_message` beside `search_messages` |
 | **Closed Verdict Vocabulary** | A verdict that can steer a route is picked from a set the operator declared, never written free-hand into one |
-| **Constructed Read-Only** | Mutating verbs refused before they run (`aws` is refused unless the command *reads*), read-only credentials as the real boundary, and a hook that stops a run editing what steers the next one |
+| **Constructed Read-Only** | Mutating verbs refused before they run (`aws` is refused unless the command *reads*), read-only credentials as the real boundary, and a hook that stops a run editing what steers the next one. Declared per node (`HOOKPROBE_BASH_GUARD`), measured against the mounted credentials at startup, and widened only on purpose — the work node that a person hands a plan to runs `danger-only`, where the credential is the whole blast radius |
 | **Financial Ceilings** | Past the budget, new autonomous runs are refused — and each refusal reports itself instead of going quiet |
 | **Graph Verifier** | `GET /topology` renders doors, stages and exits from config alone, and names the hazards the shape implies: a door nothing can reach, an exit nothing feeds, a return door that can fall through to a wildcard and hand a brain its own output |
 | **Replay Ledger** | `GET /trace/{id}` replays both directions of every hop — bodies only, never headers, because headers carry signatures and tokens |
@@ -85,7 +85,7 @@ The repository runs two deployments that share every line of service code. One c
 
 ## Product Roadmap & Advanced Patterns
 
-1.  **Proposal-based Auto-healing (Remediation Loops):** Moving from read-only diagnostics to "propose-and-execute" remediation. The agent proposes a self-healing script, rendered as an interactive card with cryptographically signed `[Approve]` / `[Reject]` buttons. Executive action only fires when a human authorizes the signed token.
+1.  **Proposal-based Auto-healing (Remediation Loops) — shipped in its first form.** The investigator proposes; the card carries cryptographically signed `[Approve]` / `[Reject]` buttons; an approve runs each step against an allowlist, as an argv and never through a shell, on a node whose posture is `danger-only` and whose credential is the whole blast radius — read back by the startup posture check ([how](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md#security-model)). What is still open is the credential: no deployed node holds a write principal yet, so the loop has been rehearsed end to end with read-only credentials — the ceremony is proven, the effect is not.
 2.  **SRE-specific RLHF (Self-Evolution):** Capturing card clicks ("Actually mattered", "Snooze") to automatically assemble a localized reinforcement learning dataset. This dataset is fed into automated prompt-tuning loops or local model fine-tuning.
 3.  **Local Model Validation (vLLM/Ollama):** The judge already speaks to any OpenAI-compatible base, so a zero-cost, fully offline Qwen/Llama brain is configuration today ([how](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)). What is not yet done is the measurement: the golden set has never been run against a 7B model, and `missed` / `false_quiet` on one are the numbers an air-gapped deployment needs before it trusts it.
 4.  **Dual-Brain Shadow Audit Views:** Running multiple decision prompts or model comparison arms in parallel, allowing SRE teams to audit model decision drift at production scales before promoting changes to production.
@@ -98,7 +98,7 @@ The repository runs two deployments that share every line of service code. One c
 | --- | --- | --- |
 | **hookrelay** | the pipe — adapts every upstream dialect in and every channel format out, and accounts for all of it | understand content, or judge |
 | **hookjudge** | the judge — one event in, one verdict out, five routes ordered by cost | render cards, or know channels |
-| **hookprobe** | the investigator — one read-only agent run per event that earns it, answering *what broke* for an alert and *how would this be done* for a work item | receive alerts, or send notifications |
+| **hookprobe** | the investigator — one agent run per event that earns it, read-only by default, answering *what broke* for an alert and *how would this be done* for a work item | receive alerts, or send notifications |
 
 ```
 upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
@@ -108,7 +108,7 @@ upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
   (pipe: adapt+route+ledger) │ (judge: verdict+cost)   (formats and delivers)
                              │
                              └──► hookprobe :8088 ──► hookrelay ──► the same channels
-                                  (investigator: read-only)  /hook/probe-notify
+                                  (investigator: read-only by default)  /hook/probe-notify
 
 a source that already judged its own signal takes a terminal route instead:
 
@@ -152,11 +152,12 @@ When the model fails for a reason a person must fix — a dead key, no credit, a
 
 ### hookprobe — the investigator
 
-When a verdict earns it (critical/high), the pipe hands a copy of the event to hookprobe, which runs **one read-only agent session** on the Claude Agent SDK (bash, MCP servers, `SKILL.md` skills) and serves the report to whoever polls — an OpenClaw-compatible contract, so a client already pointed at that gateway switches by changing a URL. Read-only is *constructed*, in three layers that fail differently:
+When a verdict earns it (critical/high), the pipe hands a copy of the event to hookprobe, which runs **one agent session, read-only by default,** on the Claude Agent SDK (bash, MCP servers, `SKILL.md` skills) and serves the report to whoever polls — an OpenClaw-compatible contract, so a client already pointed at that gateway switches by changing a URL. Read-only is *constructed*, in layers that fail differently, and it is *measured*, because a boundary that lives in a mounted credential can drift without a diff:
 
 1. **Credentials are the real boundary.** The kubeconfig and cloud keys mounted into the container are read-only principals. If every other layer failed, the cluster and the cloud would still refuse.
 2. **A bash guard refuses mutating verbs before they run.** A PreToolUse hook denies `kubectl delete/apply`, `helm` changes, `systemctl` writes and their kin. For `aws`, whose CLI is too large to blacklist, the list is *inverted*: anything that is not a known read verb (`describe`, `get`, `list`, …) is refused, so a new mutating API cannot slip through by being new.
 3. **The input surface is fingerprinted.** An alert body may carry an indirect injection telling the agent to edit `.claude/`, a skill or `CLAUDE.md` so the instruction outlives the run. Every steering file is hashed before and after each run; any change the operator did not make is reported as `input_changes`, and the hook refuses the write in the first place — two mechanisms, because they fail differently.
+4. **The posture is declared, measured, and widened only on purpose.** `HOOKPROBE_BASH_GUARD` says what a node is for — `readonly` for anything that faces an event door, `danger-only` for the one node a person hands work to. At startup the service asks the mounted credentials what they can actually do and compares: a node wider than it declared refuses to start, a `danger-only` node records its blast radius, and the verdict sits at the top of every run's audit. Under `danger-only` the guard keeps only what no credential scope can undo (`rm -rf`, `mkfs`, `terraform destroy`, namespace-wide `kubectl delete`); the credential bounds the rest, and nothing reaches that node without a signed click — a plan handed off from a card, or a remediation approved step by step against an allowlist.
 
 ### lark-bridge — the sidecar the pipe would not become
 

@@ -40,8 +40,8 @@ settings), `CLAUDE.md` and the audit log are closed to it — by a PreToolUse ho
 that refuses the write, and by a digest of every input file compared before and
 after each run, because the two fail differently. Without this, one injected
 line reaching `.claude/skills/` outlives the run that read it and comes back as
-the operator's own runbook. Read-only is enforced in four layers; this is the
-one about the investigator itself, which turns out to be the only target it can
+the operator's own runbook. Read-only is constructed in four layers; this is
+the one about the investigator itself, which turns out to be the only target it can
 always reach. See [Security model](#security-model).
 
 **Finished runs leave runbooks behind.** A completed investigation distills its
@@ -60,11 +60,11 @@ job three ways — carrying a signal, judging it, and investigating what earns i
 |---|---|
 | hookrelay | the pipe — adapts every upstream dialect in and every downstream format out, content-blind |
 | hookjudge | the judge — one cheap verdict per signal |
-| **hookprobe** | **the investigator — one read-only agent run per analysis task** |
+| **hookprobe** | **the investigator — one agent run per analysis task, read-only by default** |
 
 ```
 caller ── POST /hooks/agent ───────────────▶ hookprobe ── Claude Agent SDK
-   ▲                                          │  bash guard (read-only)
+   ▲                                          │  bash guard (readonly | danger-only)
    └───── GET /sessions/{key}/final ◀─────────┘  MCP / WebSearch / skills
             200 {isFinal: true, text}            /data: skills + results
 ```
@@ -152,21 +152,46 @@ reference is a README nobody finishes and a reference nobody trusts.
 
 ## Security model
 
-Read-only is enforced in four layers, strongest first. The first three are
-about the systems under investigation; the fourth is about the investigator
-itself, which turns out to be the one target it can always reach.
+Read-only is the default posture, constructed in four layers, strongest
+first. The first three are about the systems under investigation; the fourth
+is about the investigator itself, which turns out to be the one target it can
+always reach. Two things about the word *default*, before the layers:
+
+- **The posture is declared, then measured.** `HOOKPROBE_BASH_GUARD` names
+  what a node is for — `readonly` (the investigator; the only posture that
+  should face an event door) or `danger-only` (a node a person hands work
+  to). At startup the service asks the mounted credentials what they can
+  actually do (`kubectl auth can-i --list`, `aws iam simulate-principal-policy`
+  over the dangerous actions) and compares the answer with the declaration:
+  `readonly-confirmed`, `wider-than-declared` (refuses to start under the
+  default `HOOKPROBE_POSTURE_CHECK=enforce`), `unverifiable`, `recorded`,
+  `no-credentials`. The verdict is at `GET /v1/posture` and at the top of
+  every run's audit, so "read-only" is a measurement with a date rather than
+  a sentence in this file.
+- **Widening is a decision, and it is signed.** Under `danger-only` the guard
+  keeps only the rules no credential scope can undo — `rm -rf`, `mkfs`/`dd`
+  onto a device, fork bombs, container runtimes, `terraform destroy`,
+  namespace-wide `kubectl delete` — and everything else is bounded by the
+  credential mounted into that node, which the posture check records as the
+  blast radius. Nothing reaches such a node on its own: a plan arrives through
+  `POST /v1/runs/{key}/handoff` behind a signed card click, and a proposed
+  remediation runs only after `POST /v1/remediations/{id}/approve`, each step
+  gate-checked against an allowlist and executed as an argv, never through a
+  shell (a command that needs a shell is refused instead). Both are recorded
+  in the run's audit with the person's action beside them.
 
 1. **Credentials** — mount query-only credentials (read-only kubeconfig,
    Prometheus/Loki endpoints, viewer tokens). This is the real boundary;
-   treat the other two as convenience. It is also the *first* thing to get
+   treat the others as convenience, and let the startup check read it back. It is also the *first* thing to get
    right: an investigator with no credentials mounted can only reason about the
    alert payload, and no amount of tooling in the image changes that. Domain
    CLIs are build args, so adding one is a flag rather than an edit:
    `--build-arg APT_EXTRAS="postgresql-client redis-tools"`,
    `--build-arg KUBECTL_VERSION=v1.31.4`.
-2. **Bash guard** — a PreToolUse hook denies mutating verbs of kubectl, helm,
-   docker/podman, systemctl, terraform, plus ssh/scp and `git push`. It errs
-   toward over-blocking. HTTP verbs are not policed (query APIs POST), and
+2. **Bash guard** — under `readonly`, a PreToolUse hook denies mutating verbs
+   of kubectl, helm, docker/podman, systemctl, terraform, plus ssh/scp and
+   `git push`; under `danger-only` it keeps only the estate-wide destroyers
+   listed above. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
    cloud CLIs are too many to enumerate — scope their credentials instead.
 3. **Container** — non-root, disposable, nothing precious inside, no container
    runtime and no socket (a run cannot start a container, and cannot build a

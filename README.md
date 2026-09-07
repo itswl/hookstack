@@ -47,7 +47,7 @@ upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► 
 | --- | --- | --- | --- |
 | [`hookrelay/`](hookrelay) | **5,400 lines** (actual: ~5,300) | **The Pipe.** Adapts upstream webhooks, handles backoff retries, implements circuit breakers / storm fuses, replaces button values with signed action tokens, and hosts the SQLite ledger. | Understand message content, or make autonomous judgments. |
 | [`hookjudge/`](hookjudge) | **3,350 lines** (actual: ~3,280) | **The Judge.** One event in, one verdict out. Implements the cost policy as five routes tried in cost order: `recovery` ──► `reuse` ──► `rule-reuse` ──► `ai` ──► `rule` (keyword floor). | Render platform-specific cards, or hold channel credentials. |
-| [`hookprobe/`](hookprobe) | **Uncapped** (actual: ~8,400) | **The Investigator.** Runs a single, read-only Claude Agent SDK run per deep-analysis task. Exposes an OpenClaw-compatible triggers endpoint. | Receive raw alerts directly, or send downstream messages. |
+| [`hookprobe/`](hookprobe) | **Uncapped** (actual: ~8,400) | **The Investigator.** Runs a single Claude Agent SDK run per deep-analysis task — read-only by default, and measured so at startup; a `danger-only` posture exists for the one node a person hands work to. Exposes an OpenClaw-compatible triggers endpoint. | Receive raw alerts directly, or send downstream messages. |
 
 ## How each piece works
 
@@ -77,11 +77,12 @@ When the model fails for a reason a person must fix — a dead key, no credit, a
 
 ### hookprobe — the investigator
 
-When a verdict earns it (critical/high), the pipe hands a copy of the event to hookprobe, which runs **one read-only agent session** on the Claude Agent SDK (bash, MCP servers, `SKILL.md` skills) and serves the report to whoever polls — an OpenClaw-compatible contract, so a client already pointed at that gateway switches by changing a URL. Read-only is *constructed*, in three layers that fail differently:
+When a verdict earns it (critical/high), the pipe hands a copy of the event to hookprobe, which runs **one agent session, read-only by default,** on the Claude Agent SDK (bash, MCP servers, `SKILL.md` skills) and serves the report to whoever polls — an OpenClaw-compatible contract, so a client already pointed at that gateway switches by changing a URL. Read-only is *constructed*, in layers that fail differently, and it is *measured*, because a boundary that lives in a mounted credential can drift without a diff:
 
 1. **Credentials are the real boundary.** The kubeconfig and cloud keys mounted into the container are read-only principals. If every other layer failed, the cluster and the cloud would still refuse.
 2. **A bash guard refuses mutating verbs before they run.** A PreToolUse hook denies `kubectl delete/apply`, `helm` changes, `systemctl` writes and their kin. For `aws`, whose CLI is too large to blacklist, the list is *inverted*: anything that is not a known read verb (`describe`, `get`, `list`, …) is refused, so a new mutating API cannot slip through by being new.
 3. **The input surface is fingerprinted.** An alert body may carry an indirect injection telling the agent to edit `.claude/`, a skill or `CLAUDE.md` so the instruction outlives the run. Every steering file is hashed before and after each run; any change the operator did not make is reported as `input_changes`, and the hook refuses the write in the first place — two mechanisms, because they fail differently.
+4. **The posture is declared, measured, and widened only on purpose.** `HOOKPROBE_BASH_GUARD` says what a node is for — `readonly` for anything that faces an event door, `danger-only` for the one node a person hands work to. At startup the service asks the mounted credentials what they can actually do and compares: a node wider than it declared refuses to start, a `danger-only` node records its blast radius, and the verdict sits at the top of every run's audit. Under `danger-only` the guard keeps only what no credential scope can undo (`rm -rf`, `mkfs`, `terraform destroy`, namespace-wide `kubectl delete`); the credential bounds the rest, and nothing reaches that node without a signed click — a plan handed off from a card, or a remediation approved step by step against an allowlist.
 
 ### lark-bridge — the sidecar the pipe would not become
 
@@ -89,14 +90,14 @@ A custom bot can only *send*, so the buttons on its cards have nowhere to call b
 
 ## Product Roadmap & Advanced Patterns
 
-1.  **Proposal-based Auto-healing (Remediation Loops):** Moving from read-only diagnostics to "propose-and-execute" remediation. The agent proposes a self-healing script, rendered as an interactive card with cryptographically signed `[Approve]` / `[Reject]` buttons. Executive action only fires when a human authorizes the signed token.
+1.  **Proposal-based Auto-healing (Remediation Loops) — shipped in its first form.** The investigator proposes; the card carries cryptographically signed `[Approve]` / `[Reject]` buttons; an approve runs each step against an allowlist, as an argv and never through a shell, on a node whose posture is `danger-only` and whose credential is the whole blast radius — read back by the startup posture check ([how](hookprobe/README.md#security-model)). What is still open is the credential: no deployed node holds a write principal yet, so the loop has been rehearsed end to end with read-only credentials — the ceremony is proven, the effect is not.
 2.  **SRE-specific RLHF (Self-Evolution):** Capturing card clicks ("Actually mattered", "Snooze") to automatically assemble a localized reinforcement learning dataset. This dataset is fed into automated prompt-tuning loops or local model fine-tuning.
 3.  **Local Model Validation (vLLM/Ollama):** The judge already speaks to any OpenAI-compatible base, so a zero-cost, fully offline Qwen/Llama brain is configuration today ([how](hookjudge/README.md#local-and-self-hosted-models)). What is not yet done is the measurement: the golden set has never been run against a 7B model, and `missed` / `false_quiet` on one are the numbers an air-gapped deployment needs before it trusts it.
 4.  **Dual-Brain Shadow Audit Views:** Running multiple decision prompts or model comparison arms in parallel, allowing SRE teams to audit model decision drift at production scales before promoting changes to production.
 
 ## Developer & Verification Docs
 
-*   [`docs/containment.md`](docs/containment.md) — Thirteen structural security boundaries, and exactly what each does **not** stop.
+*   [`docs/containment.md`](docs/containment.md) — Fourteen structural security boundaries, and exactly what each does **not** stop.
 *   [`docs/deployments.md`](docs/deployments.md) — Two deployments sharing every line of code but agreeing on nothing: alerts vs work timers.
 *   [`STACK.md`](STACK.md) — Local runbook to drive the whole cost-saving pipeline step-by-step.
 *   [`CONTRIBUTING.md`](CONTRIBUTING.md) — Per-service gates, AST copy validations, and general SDLC workflows.

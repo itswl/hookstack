@@ -97,6 +97,19 @@ deployment whose contract is "task AND high buys a plan" has to express the
 `kind` half in its ROUTE TABLE — left as one fan-out, a `note` at `high` quietly
 funds a plan nobody asked for.
 
+**Posture: read-only on both, plus one `danger-only` node on the work side.**
+Every investigator that faces an event door runs `HOOKPROBE_BASH_GUARD=readonly`
+on both deployments, and since 2026-09-07 each one measures its mounted
+credentials against that declaration at startup and refuses to start when they
+are wider. The work deployment adds a node the alert deployment has no use for:
+`probe-work`, running the same image under `danger-only`, reachable only through
+the handoff a person clicks on a plan card. Its posture check records the
+credentials' blast radius instead of confirming a boundary — today those
+credentials are the same read-only ones the planner has, so the record is a
+list of zeros; the day a write credential is mounted, that list is what an
+operator reads before approving a handoff. The alert deployment's investigator
+has no credentials mounted at all and says so (`no-credentials`).
+
 **Timer: host crontab, or a container.** The work deployment ships its own,
 after the host version could not read its own brief: macOS keeps `~/Documents`
 behind TCC and `cron` is not allowed through, so every fire logged `Operation
