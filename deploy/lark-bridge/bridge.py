@@ -415,9 +415,28 @@ def forward_message(event: dict) -> None:
         logger.exception("forwarding the thread reply failed")
 
 
+def bus_running() -> bool:
+    """Is this container's lark-cli event bus daemon up (holding the app's ONE
+    long connection)? `event status` prints `Bus: running` per app when it is."""
+    try:
+        result = _lark(["event", "status"], timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "Bus: running" in (result.stdout or "")
+
+
 def consume_messages() -> None:
-    """Stream im.message.receive_v1 forever; every reply goes to forward_message."""
-    consume("im.message.receive_v1", forward_message)
+    """Stream im.message.receive_v1 forever; every reply goes to forward_message.
+
+    Lark allows ONE event connection per app, and lark-cli refuses to open a
+    second ("another event bus is already connected"). Two consumers that both
+    try to open it block each other forever: each attempt's short-lived
+    connection is the "remote connection" the other one finds. So this consumer
+    never opens the bus itself — it waits until the presses consumer has it
+    running, then attaches to that daemon, which is what `event consume` does
+    when a bus is already up.
+    """
+    consume("im.message.receive_v1", forward_message, attach_only=True)
 
 
 def consume_presses() -> None:
@@ -432,9 +451,12 @@ def consume_presses() -> None:
     consume("card.action.trigger", forward_press)
 
 
-def consume(event_key: str, handler) -> None:
+def consume(event_key: str, handler, attach_only: bool = False) -> None:
     backoff = 2
     while True:
+        if attach_only:
+            while not bus_running():
+                threading.Event().wait(5)
         logger.info("connecting the event stream for %s", event_key)
         process = subprocess.Popen(  # nosec B603 — fixed argv, no shell
             ["lark-cli", "event", "consume", event_key, "--as", "bot"],
