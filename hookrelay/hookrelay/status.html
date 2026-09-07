@@ -70,7 +70,7 @@
   .etime { margin-left: auto; color: var(--muted); font-size: 12px; font-family: var(--mono); }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 14px 10px; }
   .hops { padding: 0 14px 10px; }
-  .hop { display: grid; grid-template-columns: 120px 56px 120px 1fr 72px auto; gap: 10px; align-items: center;
+  .hop { display: grid; grid-template-columns: 112px 48px 112px 1fr 64px auto; gap: 10px; align-items: center;
          padding: 6px 0; border-top: 1px solid var(--border-soft); font-size: 13px; }
   .hop .hopto { overflow-wrap: anywhere; color: var(--muted); }
   .chip { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 6px;
@@ -119,6 +119,48 @@
   .msg.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
   .msg.err { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
   .hint { color: var(--muted); font-size: 12px; }
+
+  /* ── rows: headline, one line of prose, one line of machine text ── */
+  .ev summary { padding: 11px 14px; display: block; }
+  .ev .h { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .ev .h .etitle { flex: 1 1 auto; font-size: 14px; }
+  .ev .h .etime { margin-left: 8px; }
+  .ev .s { color: var(--muted); font-size: 12.5px; margin-top: 3px; padding-left: 16px; overflow-wrap: anywhere; }
+  .ev .s b { color: var(--text); font-weight: 500; }
+  .ev .m { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-top: 3px; padding-left: 16px; }
+  .ev.quiet { background: transparent; border-color: var(--border-soft); }
+  .ev.quiet .etitle { color: var(--muted); font-weight: 500; }
+  .ev.quiet summary { padding: 7px 14px; }
+  .ev .dot { width: 8px; height: 8px; }
+  .ev .dot.none { visibility: hidden; }
+  .kind { font-size: 10.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border);
+          color: var(--muted); font-family: var(--mono); letter-spacing: .02em; flex: 0 0 auto; }
+  .kind.task, .kind.investigation, .kind.plan, .kind.work { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .kind.absence, .kind.alarm { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .body { padding: 10px 14px 12px; border-top: 1px solid var(--border-soft); }
+  .body h4 { margin: 10px 0 6px; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .body h4:first-child { margin-top: 0; }
+  .steps { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+  .steps li { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; border-top: 1px solid var(--border-soft); }
+  .steps li:first-child { border-top: 0; }
+  .steps .g { font-family: var(--mono); color: var(--muted); font-size: 11px; width: 64px; flex: 0 0 auto; }
+  .steps .ok { color: var(--ok); } .steps .no { color: var(--muted); } .steps .hit { color: var(--text); }
+  .steps .r { color: var(--muted); }
+  .rt { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+  .rt .card { padding: 10px 12px; }
+  .rt .who { font-weight: 600; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+  .rt .who .eid { margin-left: auto; }
+  .rt .v { color: var(--muted); font-size: 12.5px; margin-top: 4px; overflow-wrap: anywhere; }
+  .raw summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 8px; }
+  /* ── timeline: an operation is a headline and a line of hops ── */
+  .mini { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; padding-left: 16px; margin-top: 4px; font-size: 12px; }
+  .mini .seg { font-family: var(--mono); color: var(--muted); }
+  .mini .seg b { color: var(--text); font-weight: 500; }
+  .mini .arrow { color: var(--muted); opacity: .7; }
+  .mini .cost { color: var(--ok); font-family: var(--mono); }
+  .ops-bar { display: flex; align-items: center; gap: 14px; margin: -6px 0 12px; }
+  .ops-bar label { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .hop .rel { font-family: var(--mono); color: var(--muted); font-size: 11px; }
 
   /* ── hookstack token bar · keep this block identical in all three pages ── */
   /* One field per credential the BROWSER sends. Service-to-service secrets
@@ -190,7 +232,11 @@
 
   <div id="panel-timeline" style="display:none">
     <h2>Operations · one chain per operation, every hop it paid for</h2>
-    <div class="hint" style="margin:-6px 0 12px">A chain is everything that quoted one origin's id: the signal, the verdict or plan that came back, the click, the work, the result. Open a hop for its round trip.</div>
+    <div class="hint" style="margin:-6px 0 8px">A chain is everything that quoted one origin's id: the signal, the verdict or plan that came back, the click, the work, the result.</div>
+    <div class="ops-bar">
+      <label><input type="checkbox" id="opsOnly" checked> operations only — chains with more than one hop, a cost, or a human action</label>
+      <span class="hint" id="opsCount"></span>
+    </div>
     <div id="incidents"></div>
     <div id="chains"><div class="empty">…</div></div>
   </div><!-- /panel-timeline -->
@@ -356,33 +402,131 @@
     if (evSig === lastEventsSig) return;
     lastEventsSig = evSig;
     var evSaved = rememberOpen(evBox);
-    evBox.innerHTML = events.map(function (e) {
-      var badge = e.outcome === "routed"
-        ? '<span class="badge routed">routed → ' + esc((e.channels || []).join(", ")) + "</span>"
-        : '<span class="badge skipped">skipped · ' + esc(e.skip_code || "?") + "</span>";
-      var chips = (e.deliveries || []).map(function (d) {
-        var extra = d.status === "dead" || d.last_error
-          ? ' title="' + esc(d.last_error || "") + '"' : "";
-        var retryBtn = d.status === "dead"
-          ? ' <button class="btn tiny" data-retry-delivery="' + esc(d.id) + '">retry</button>' : "";
-        return '<span class="chip ' + esc(d.status) + '"' + extra + ">" +
-          esc(d.channel) + " · " + esc(d.status) + (d.attempts ? " ×" + esc(d.attempts) : "") + "</span>" + retryBtn;
-      }).join("");
-      return '<details class="event" data-key="ev-' + esc(e.id) + '">' +
-        '<summary>' +
-          '<span class="dot ' + esc(e.level) + '"></span>' +
-          '<span class="eid">#' + esc(e.id) + "</span>" +
-          '<span class="etitle">' + esc(e.title) + "</span>" +
-          '<span class="esrc">' + esc(e.source) + "</span>" + badge +
-          '<span class="etime">' + esc(fmtTime(e.received_at)) + "</span>" +
-        "</summary>" +
-        (chips ? '<div class="chips">' + chips + "</div>" : "") +
-        '<div class="chips"><button class="btn tiny" data-compare="' + esc(e.id) + '">round trip · what each system made of it</button></div>' +
-        '<div class="compare" id="cmp-' + esc(e.id) + '" style="display:none"></div>' +
-        '<pre class="trace">' + esc(JSON.stringify(e.steps || [], null, 2)) + "</pre>" +
-      "</details>";
-    }).join("");
+    evBox.innerHTML = events.map(eventRow).join("");
     restoreOpen(evBox, evSaved);
+    wireOpen(evBox);
+  }
+
+  // What kind of thing this event is, from what the pipe already knows: the
+  // door it came through and the `kind` a source may set. Not judgement — a
+  // label the reader can scan by, so a timer tick and an investigation stop
+  // looking like the same row.
+  function kindOf(e) {
+    var f = e.fields || {};
+    if (e.source === "absence" || f.door) return "absence";
+    if (/-notify$/.test(e.source || "")) return e.source.replace(/-notify$/, "") === "judge" ? "verdict" : e.source.replace(/-notify$/, "");
+    if (/-due$/.test(e.source || "")) return "tick";
+    if (f.kind) return String(f.kind);
+    return "alert";
+  }
+  var QUIET_KINDS = { tick: 1, note: 1, brief: 1 };
+
+  function summaryLine(e) {
+    if (e.outcome === "routed") {
+      var to = (e.channels || []).map(function (c) { return "<b>" + esc(c) + "</b>"; }).join(", ");
+      var dl = e.deliveries || [], sent = dl.filter(function (d) { return d.status === "sent"; }).length,
+          dead = dl.filter(function (d) { return d.status === "dead"; }).length, queued = dl.length - sent - dead;
+      var state = dl.length ? (dead ? '<span style="color:var(--bad)">' + dead + " dead</span>" : sent === dl.length ? "delivered" : queued + " queued") : "";
+      return "<b>" + esc(e.source) + "</b> → " + to + (state ? " · " + state : "");
+    }
+    return "<b>" + esc(e.source) + "</b> · skipped · " + esc(e.skip_code || "?");
+  }
+
+  function eventRow(e) {
+    var kind = kindOf(e);
+    var quiet = QUIET_KINDS[kind] || e.outcome !== "routed";
+    var lvl = String(e.level || "").toLowerCase();
+    var dot = (lvl === "high" || lvl === "critical") && !quiet ? lvl : (lvl === "medium" || lvl === "warning") && !quiet ? lvl : "none";
+    return '<details class="event ev' + (quiet ? " quiet" : "") + '" data-key="ev-' + esc(e.id) + '" data-id="' + esc(e.id) + '">' +
+      "<summary>" +
+        '<div class="h"><span class="dot ' + dot + '"></span>' +
+          '<span class="etitle">' + esc(e.title || "(untitled)") + "</span>" +
+          '<span class="kind ' + esc(kind) + '">' + esc(kind) + "</span>" +
+          '<span class="etime">' + esc(fmtTime(e.received_at)) + "</span></div>" +
+        '<div class="s">' + summaryLine(e) + "</div>" +
+        '<div class="m">#' + esc(e.id) + (e.level ? " · " + esc(e.level) : "") + (e.correlation_id ? " · ↩ " + esc(e.correlation_id) : "") + "</div>" +
+      "</summary>" +
+      '<div class="body">' +
+        "<h4>decision</h4>" + stepsList(e.steps || []) +
+        ((e.deliveries || []).length ? "<h4>deliveries</h4>" + deliveryChips(e.deliveries) : "") +
+        '<div class="compare" id="cmp-' + esc(e.id) + '" style="display:block;border:0;padding:0"><span class="hint">round trip loads when opened…</span></div>' +
+        '<details class="raw"><summary>raw steps</summary><pre class="trace">' + esc(JSON.stringify(e.steps || [], null, 2)) + "</pre></details>" +
+      "</div>" +
+    "</details>";
+  }
+
+  function deliveryChips(dl) {
+    return '<div class="chips" style="padding:0">' + dl.map(function (d) {
+      var extra = d.status === "dead" || d.last_error ? ' title="' + esc(d.last_error || "") + '"' : "";
+      var retryBtn = d.status === "dead" ? ' <button class="btn tiny" data-retry-delivery="' + esc(d.id) + '">retry</button>' : "";
+      return '<span class="chip ' + esc(d.status) + '"' + extra + ">" + esc(d.channel) + " · " + esc(d.status) +
+        (d.attempts ? " ×" + esc(d.attempts) : "") + "</span>" + retryBtn;
+    }).join("") + "</div>";
+  }
+
+  // The decision chain as a person reads it: gate by gate, what each said.
+  function stepsList(steps) {
+    if (!steps.length) return '<div class="hint">no steps recorded</div>';
+    return '<ul class="steps">' + steps.map(function (st) {
+      var g = esc(st.gate || "?"), body = "";
+      if (st.gate === "extract") body = '<span class="r">template ' + esc(st.template || "?") + "</span>";
+      else if (st.gate === "routes") {
+        var cons = st.considered || [];
+        body = cons.length ? cons.map(function (c) {
+          return c.matched
+            ? '<span class="hit">' + esc(c.route) + "</span> → " + esc((c.send_to || []).join(", ")) + (c.stop ? ' <span class="r">· stop</span>' : "")
+            : '<span class="no">' + esc(c.route) + " · " + esc(c.reason || "no match") + "</span>";
+        }).join("<br>") : '<span class="no">nothing matched</span>';
+      } else if (st.result === "pass") body = '<span class="ok">pass</span>';
+      else if (st.result) body = '<span class="hit">' + esc(st.result) + "</span>" + (st.reason ? ' <span class="r">· ' + esc(st.reason) + "</span>" : "");
+      else body = '<span class="r">' + esc(JSON.stringify(st).slice(0, 120)) + "</span>";
+      return '<li><span class="g">' + g + "</span><span>" + body + "</span></li>";
+    }).join("") + "</ul>";
+  }
+
+  // Load an event's round trip the first time it is opened — the reader asked
+  // for the whole story by opening the row; a second button was one click too
+  // many, and the answer they wanted most (what came back, what it cost) was
+  // behind it.
+  function wireOpen(container) {
+    container.querySelectorAll("details.ev").forEach(function (d) {
+      if (d.__wired) return; d.__wired = true;
+      d.addEventListener("toggle", function () {
+        if (!d.open) return;
+        var id = d.getAttribute("data-id"), box = document.getElementById("cmp-" + id);
+        if (!box || box.getAttribute("data-loaded")) return;
+        box.setAttribute("data-loaded", "1");
+        fetch("/trace/" + id, { headers: readHeaders() })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (trip) { box.innerHTML = trip ? roundTripInline(trip) : '<span class="hint">round trip unavailable</span>'; });
+      });
+    });
+  }
+
+  function roundTripInline(trip) {
+    var origin = trip.origin || {}, returns = trip.returns || [], human = trip.human_actions || [];
+    var out = "";
+    if (returns.length) {
+      out += "<h4>what came back (" + returns.length + ")</h4><div class=\"rt\">" + returns.map(function (r) {
+        var who = (r.fields && (r.fields.brain || r.source)) || r.source;
+        var cost = r.fields && r.fields.cost_usd ? " · " + money(r.fields.cost_usd) : "";
+        return '<div class="card"><div class="who"><span class="dot ' + esc(r.level) + '"></span>' + esc(who) +
+          '<span class="eid">+' + esc(r.latency_seconds) + "s" + esc(cost) + " · #" + esc(r.id) + "</span></div>" +
+          '<div class="v">' + esc(r.title || "") + "</div>" + (r.body ? '<div class="v">' + esc(String(r.body).slice(0, 400)) + "</div>" : "") + "</div>";
+      }).join("") + "</div>";
+    }
+    if (human.length) {
+      out += "<h4>what a person did</h4>" + human.map(function (h) {
+        return '<div class="s" style="padding-left:0">' + esc(h.kind) + " · " + esc(h.outcome || "") + " · +" + esc(h.latency_seconds) + "s" + (h.actor ? " · " + esc(h.actor) : "") + "</div>";
+      }).join("");
+    }
+    var wire = "";
+    if (origin.payload != null) wire += '<details class="wire"><summary>payload as received</summary><pre class="trace">' + esc(JSON.stringify(origin.payload, null, 2)) + "</pre></details>";
+    (origin.deliveries || []).filter(function (d) { return d.sent_body; }).forEach(function (d) {
+      wire += '<details class="wire"><summary>' + esc(d.channel) + " · body sent</summary><pre class=\"trace\">" + esc(prettyBody(d.sent_body)) + "</pre></details>";
+    });
+    if (!returns.length && !human.length) out += '<div class="hint" style="margin-top:8px">nothing has come back for this one</div>';
+    return out + wire;
   }
 
   var filters = { q: "", source: "", outcome: "", limit: 50 };
@@ -467,51 +611,67 @@
   function money(v) { return v == null ? "" : "$" + Number(v).toFixed(v >= 1 ? 2 : 4).replace(/\.?0+$/, ""); }
   function loadTimeline() {
     var box = document.getElementById("chains");
-    fetch("/timeline?limit=50", { headers: readHeaders() })
+    fetch("/timeline?limit=100", { headers: readHeaders() })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (tl) {
         if (!tl) { box.innerHTML = '<div class="empty">timeline unavailable — read token required</div>'; return; }
-        var sig = JSON.stringify(tl);
+        var opsOnly = document.getElementById("opsOnly").checked;
+        var sig = JSON.stringify(tl) + (opsOnly ? "|ops" : "|all");
         if (sig === lastTimelineSig) return;   // nothing moved: leave the reader's page alone
         lastTimelineSig = sig;
         renderIncidents(tl.incidents || []);
-        var chains = tl.chains || [];
-        if (!chains.length) { box.innerHTML = '<div class="empty">no chains yet</div>'; return; }
+        var all = tl.chains || [];
+        var isOp = function (c) { return (c.hops || []).length > 1 || c.cost_usd > 0; };
+        var chains = opsOnly ? all.filter(isOp) : all;
+        document.getElementById("opsCount").textContent = opsOnly
+          ? chains.length + " of " + all.length + " chains are operations"
+          : all.length + " chains";
+        if (!chains.length) { box.innerHTML = '<div class="empty">' + (opsOnly ? "no operations yet — every chain so far is a single hop" : "no chains yet") + "</div>"; return; }
         var saved = rememberOpen(box);
-        box.innerHTML = chains.map(function (c) {
-          var hops = c.hops || [];
-          var first = hops[0] || {}, last = hops[hops.length - 1] || {};
-          var span = hops.length > 1 ? " → " + esc(fmtTime(last.at).slice(6)) : "";
-          var doors = (c.doors || []).map(function (d) { return '<span class="chip">' + esc(d) + "</span>"; }).join(" ");
-          var cost = c.cost_usd ? '<span class="badge routed">' + esc(money(c.cost_usd)) + "</span>" : '<span class="badge skipped">unpriced</span>';
-          var rows = hops.map(function (h) {
-            var to = h.outcome === "routed"
-              ? "→ " + esc((h.to || []).join(", "))
-              : '<span class="badge skipped">skipped · ' + esc(h.skip_code || "?") + "</span>";
-            return '<div class="hop">' +
-              '<span class="etime" style="margin-left:0">' + esc(fmtTime(h.at)) + "</span>" +
-              '<span class="eid">#' + esc(h.id) + "</span>" +
-              '<span class="esrc">' + esc(h.door) + "</span>" +
-              '<span class="hopto">' + to + "</span>" +
-              '<span class="eid">' + esc(h.cost_usd ? money(h.cost_usd) : "") + "</span>" +
-              '<button class="btn tiny" data-tl-trace="' + esc(h.id) + '">trace</button>' +
-              '</div><div class="compare" id="tl-cmp-' + esc(h.id) + '" style="display:none"></div>';
-          }).join("");
-          return '<details class="event" data-key="chain-' + esc(c.chain) + '">' +
-            '<summary>' +
-              '<span class="dot ' + esc(first.level) + '"></span>' +
-              '<span class="eid">chain ' + esc(c.chain) + "</span>" +
-              '<span class="etitle">' + esc(first.title || "(untitled)") + "</span>" +
-              '<span class="esrc">' + esc(hops.length) + (hops.length === 1 ? " hop" : " hops") + "</span>" + cost +
-              '<span class="etime">' + esc(fmtTime(c.started_at)) + span + "</span>" +
-            "</summary>" +
-            '<div class="chips">' + doors + "</div>" +
-            '<div class="hops">' + rows + "</div>" +
-          "</details>";
-        }).join("");
+        box.innerHTML = chains.map(chainRow).join("");
         restoreOpen(box, saved);
       })
       .catch(function () { box.innerHTML = '<div class="empty">timeline unavailable</div>'; });
+  }
+  document.getElementById("opsOnly").addEventListener("change", function () { lastTimelineSig = ""; loadTimeline(); });
+
+  function rel(t0, t) {
+    var d = Math.round(t - t0);
+    if (d < 60) return "+" + d + "s";
+    if (d < 3600) return "+" + Math.floor(d / 60) + "m" + (d % 60 ? (d % 60) + "s" : "");
+    return "+" + Math.floor(d / 3600) + "h" + (Math.round((d % 3600) / 60) ? Math.round((d % 3600) / 60) + "m" : "");
+  }
+
+  function chainRow(c) {
+    var hops = c.hops || [], first = hops[0] || {}, t0 = first.at || c.started_at;
+    var lvl = String(first.level || "").toLowerCase();
+    var op = hops.length > 1 || c.cost_usd > 0;
+    var dot = (lvl === "high" || lvl === "critical") && op ? lvl : "none";
+    var mini = hops.map(function (h, i) {
+      return (i ? '<span class="arrow">→</span>' : "") + '<span class="seg"><b>' + esc(h.door) + "</b> " + (i ? esc(rel(t0, h.at)) : esc(fmtTime(h.at).slice(6))) +
+        (h.cost_usd ? ' <span class="cost">' + esc(money(h.cost_usd)) + "</span>" : "") + "</span>";
+    }).join("");
+    var rows = hops.map(function (h) {
+      var to = h.outcome === "routed" ? "→ " + esc((h.to || []).join(", ")) : '<span class="badge skipped">skipped · ' + esc(h.skip_code || "?") + "</span>";
+      return '<div class="hop">' +
+        '<span class="etime" style="margin-left:0">' + esc(fmtTime(h.at)) + '</span><span class="rel">' + esc(rel(t0, h.at)) + "</span>" +
+        '<span class="esrc">' + esc(h.door) + "</span>" +
+        '<span class="hopto">' + to + "</span>" +
+        '<span class="eid">' + esc(h.cost_usd ? money(h.cost_usd) : "") + "</span>" +
+        '<button class="btn tiny" data-tl-trace="' + esc(h.id) + '">trace</button>' +
+        '</div><div class="compare" id="tl-cmp-' + esc(h.id) + '" style="display:none"></div>';
+    }).join("");
+    return '<details class="event ev' + (op ? "" : " quiet") + '" data-key="chain-' + esc(c.chain) + '">' +
+      "<summary>" +
+        '<div class="h"><span class="dot ' + dot + '"></span>' +
+          '<span class="etitle">' + esc(first.title || "(untitled)") + "</span>" +
+          (c.cost_usd ? '<span class="badge routed">' + esc(money(c.cost_usd)) + "</span>" : "") +
+          '<span class="etime">' + esc(fmtTime(c.started_at)) + "</span></div>" +
+        '<div class="mini">' + mini + "</div>" +
+        '<div class="m">chain ' + esc(c.chain) + " · " + hops.length + (hops.length === 1 ? " hop" : " hops") + "</div>" +
+      "</summary>" +
+      '<div class="hops" style="padding-top:6px">' + rows + "</div>" +
+    "</details>";
   }
   function renderIncidents(incidents) {
     var multi = incidents.filter(function (i) { return i.interruptions > 1; });
@@ -535,8 +695,7 @@
     fetch("/trace/" + id, { headers: readHeaders() })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (trip) {
-        if (!trip) { box.innerHTML = '<span class="hint">round trip unavailable</span>'; return; }
-        renderRoundTrip(box, trip);
+        box.innerHTML = trip ? roundTripInline(trip) : '<span class="hint">round trip unavailable</span>';
       });
   });
   // ── end timeline ──
