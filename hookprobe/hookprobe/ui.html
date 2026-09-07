@@ -168,6 +168,14 @@ button.danger{color:var(--red);border-color:var(--red)}
   color:var(--text);font-family:var(--mono);font-size:12.5px;padding:12px;line-height:1.55}
 #skillSrc:focus{outline:none;border-color:var(--accent)}
 .ev-todos{font-family:inherit;padding:4px 0}
+/* the run's own telemetry: model and tool calls on one time axis */
+.wf{border-left:2px solid var(--line);margin:6px 0 8px 6px;padding-left:10px}
+.wf-row{display:grid;grid-template-columns:40px minmax(120px,1fr) minmax(200px,42%);gap:10px;align-items:center;padding:2px 0;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.wf-label.model{color:var(--accent)}.wf-label.tool{color:var(--amber)}
+.wf-track{position:relative;height:9px;border-radius:3px;background:rgba(255,255,255,.05)}
+.wf-bar{position:absolute;top:0;bottom:0;border-radius:3px;background:var(--accent);opacity:.85}
+.wf-bar.tool{background:var(--amber)}.wf-bar.failed{background:var(--bad)}
+.wf-text{word-break:break-all}
 .ev-todos div{padding:1px 0;color:var(--text);font-size:12.5px}
 .ev-todos .todo-done{color:var(--dim);text-decoration:line-through}
 .ev-todos .todo-active{color:var(--amber)}
@@ -641,6 +649,39 @@ function turnHtml(t, now) {
   return `<div class="turn">${qHtml(t.message)}${tamperHtml(t.input_changes)}${inputsHtml(t.inputs, now)}${proc}
     <div class="a ${t.error ? "err" : ""}">${answerHtml(t.text)}</div>${statsHtml(t)}</div>`;
 }
+// Where the time went. The CLI reports every model call and tool result with a
+// duration to this service (telemetry.py); drawn on one axis, the gaps between
+// the bars are the part no bill itemises — thinking, queueing, the harness.
+function waterfallHtml(w) {
+  const items = (w && w.waterfall) || [];
+  const s = (w && w.summary) || {};
+  if (!items.length) return "";
+  const t0 = Math.min(...items.map((i) => i.start));
+  const span = Math.max(Math.max(...items.map((i) => i.end)) - t0, 0.001);
+  const rows = items.map((i) => {
+    const left = ((100 * (i.start - t0)) / span).toFixed(2);
+    const width = Math.max((100 * (i.end - i.start)) / span, 0.4).toFixed(2);
+    const text = i.kind === "model"
+      ? `${i.name} · ${fmtMs(i.duration_ms)}` +
+        (i.cost_usd != null ? ` · $${Number(i.cost_usd).toFixed(4)}` : "") +
+        (i.input_tokens != null ? ` · in ${fmtTok(i.input_tokens)}` : "") +
+        (i.output_tokens != null ? ` · out ${fmtTok(i.output_tokens)}` : "") +
+        (i.cache_read_tokens ? ` · cache ${fmtTok(i.cache_read_tokens)}r` : "")
+      : `${i.name} · ${fmtMs(i.duration_ms)}${i.success === false ? " · failed" : ""}`;
+    const cls = i.kind + (i.success === false ? " failed" : "");
+    return `<div class="wf-row"><span class="wf-label ${i.kind}">${i.kind}</span>` +
+      `<div class="wf-track"><div class="wf-bar ${cls}" style="left:${left}%;width:${width}%"></div></div>` +
+      `<span class="wf-text">${esc(text)}</span></div>`;
+  });
+  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  const head = `waterfall · ${n(s.model_calls || 0, "model call", "model calls")} · ` +
+    `${n(s.tool_calls || 0, "tool call", "tool calls")} · ` +
+    `${fmtMs(Math.round(s.model_ms || 0))} of ${fmtMs(Math.round((s.span_s || 0) * 1000))} waiting on the model` +
+    (s.api_errors ? ` · ${n(s.api_errors, "api error", "api errors")}` : "");
+  const models = Object.entries(s.models || {}).map(([m, v]) => `${m}: ${v.calls} calls, ${fmtMs(v.ms)}, $${Number(v.cost_usd || 0).toFixed(4)}`);
+  return `<details class="proc-past" open><summary>${esc(head)}</summary><div class="wf">${rows.join("")}</div>` +
+    (models.length ? `<div class="stats">${esc(models.join("  ·  "))}</div>` : "") + `</details>`;
+}
 
 // The open run's steps, pushed rather than polled. The shared refresh control
 // owns the only clock on this page and defaults to a minute, which is right for
@@ -771,6 +812,15 @@ async function renderDetail(startPolling) {
       `<div class="pending">investigating</div></div>`,
     );
   }
+  // Where the time went, from the run's own telemetry — optional, so a failure
+  // to fetch it costs nothing but the section.
+  try {
+    const tr = await api("/v1/runs/" + encodeURIComponent(sel) + "/telemetry");
+    if (tr.ok) {
+      const wf = waterfallHtml(await tr.json());
+      if (wf) parts.push(wf);
+    }
+  } catch (_) { /* the record above stands on its own */ }
   // What this investigation learned, offered as a runbook draft. Drafted only:
   // saving it is the operator's click, because an investigator that writes its
   // own future instructions is one nobody reviewed.

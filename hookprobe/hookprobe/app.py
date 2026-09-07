@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import urllib.error
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -39,7 +40,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from hookprobe import __version__, automation, events, handoff, library, ops, posture, remediation
+from hookprobe import __version__, automation, events, handoff, library, ops, posture, remediation, telemetry
 from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
@@ -48,6 +49,8 @@ from hookprobe.runs import INFERRED_BY_PREFIX, RUNNING, Run
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
 from hookprobe.wire import constant_time_eq
+
+logger = logging.getLogger("hookprobe.app")
 
 _UI_PAGE = Path(__file__).with_name("ui.html")
 
@@ -408,7 +411,66 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             "inputs": run.inputs,
             "tool_calls": [x for x in lines if not x.get("denied")],
             "denied": [x for x in lines if x.get("denied")],
+            # Where the run's time went, from its own telemetry (telemetry.py).
+            "telemetry": telemetry.summarize(telemetry.read(settings.workdir, session_key))["summary"],
         }
+
+    @app.get("/v1/runs/{session_key}/telemetry", dependencies=[Depends(require_token)])
+    async def run_telemetry(session_key: str) -> dict[str, Any]:
+        """The shape of one run: every model call and tool call on one time axis,
+        with what each cost, from the telemetry the CLI posted to this service.
+        Empty for a run that reported none (receiver off, or an engine that does
+        not emit) — empty, not absent, so the page can say so."""
+        if service.get(session_key) is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        shape = telemetry.summarize(telemetry.read(settings.workdir, session_key))
+        return {"session_key": session_key, **shape}
+
+    @app.post("/otel/v1/{signal}")
+    async def otel_ingest(signal: str, request: Request) -> JSONResponse:
+        """OTLP/http-json receiver for the CLI this service launches — and nothing
+        else: the per-process header is the credential, the run's session-key
+        attribute is the address, and a body for a run this service does not
+        know is dropped and counted. Traces are accepted so an exporter that
+        sends them does not log errors, and kept nowhere: the CLI emits events
+        and counters, and those are what the waterfall is drawn from. When the
+        service itself has a collector named, the untouched body goes on to it
+        on a thread, after the response — a slow collector may not slow a run.
+        """
+        if signal not in telemetry.SIGNALS:
+            raise HTTPException(status_code=404, detail="unknown signal")
+        if not telemetry.authorized(request.headers.get(telemetry.INGEST_HEADER)):
+            raise HTTPException(status_code=401, detail="not the CLI this service launched")
+        raw = await request.body()
+        try:
+            body = json.loads(raw or b"{}")
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="body is not JSON") from exc
+        parsed = (
+            telemetry.parse_logs(body)
+            if signal == "logs"
+            else telemetry.parse_metrics(body)
+            if signal == "metrics"
+            else {}
+        )
+        accepted = dropped = 0
+        for key, lines in parsed.items():
+            if service.get(key) is None:
+                dropped += len(lines)
+                continue
+            accepted += telemetry.append(settings.workdir, key, lines)
+        if dropped:
+            logger.warning("telemetry for %d event(s) dropped: no such run here", dropped)
+        collector = telemetry.collector()
+        if collector:
+            headers = telemetry.collector_headers()
+
+            async def send() -> None:
+                await asyncio.to_thread(telemetry.forward, signal, raw, collector, headers)
+
+            asyncio.get_running_loop().create_task(send())
+        # partialSuccess is what an OTLP exporter expects to find; the counts are ours.
+        return JSONResponse({"partialSuccess": {}, "accepted": accepted, "dropped": dropped})
 
     @app.get("/v1/runs/{session_key}/stream", dependencies=[Depends(require_token)])
     async def run_stream(session_key: str) -> StreamingResponse:

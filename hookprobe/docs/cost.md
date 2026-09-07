@@ -98,7 +98,7 @@ incidents. Every avoided figure is a count times this week's average paid call
 and is labelled a counterfactual; a service that was not read gets a sentence,
 not a zero. Deterministic — no model is paid to do arithmetic on a ledger.
 
-## Model-call telemetry (on by default, no backend assumed)
+## Model-call telemetry (on by default, received here, forwarded if you say where)
 
 Every run's totals are already on its record — cost, tokens, per-model
 breakdown, duration, and the tool steps. What that cannot show is the *shape* of
@@ -107,16 +107,43 @@ that one investigation spent on two different models.
 
 The bundled CLI emits all of that itself over OpenTelemetry, and the SDK merges
 this container's environment into the CLI's, so it is configuration rather than
-code. It is **on by default** because it costs nothing when nobody is listening —
-measured, not assumed: with no endpoint set, a run finishes in the same time,
-retries nothing and logs nothing. The only decision left is where to send it:
+code. It is **on by default**, and since 2026-09-08 the first place it goes is
+this service: the engine points the CLI at `POST /otel/v1/{logs,metrics}` on
+its own port, and the receiver keeps a per-run timing record under
+`{workdir}/telemetry/` — one line per model call, tool result and counter,
+numbers and names only. The sessions page draws it as a **waterfall**: every
+model call and tool call on one time axis with its duration, tokens and cost,
+and the gaps between them, which are the run thinking or waiting on the
+harness — the part no bill itemises. `GET /v1/runs/{key}/telemetry` is the
+same shape as JSON, and the run's `/audit` record carries the totals. Nothing
+has to be deployed beside the service to see it.
+
+Three things about that record. Only the CLI this service launched can write
+it — the subprocess carries a per-process header the receiver checks, and
+events are addressed to a run by the `hookstack.session_key` attribute below,
+so a body for a run this service does not know is dropped and counted. What is
+kept is a timing record, not a transcript: the free-text attributes the CLI
+can attach — prompts, tool content, responses, the account identity it stamps
+on every event — never reach the file, whatever the `OTEL_LOG_*` switches say.
+And it never raises into a run: a malformed body or a full disk is logged and
+the investigation carries on. `HOOKPROBE_TELEMETRY_RECEIVER=off` restores the
+old behaviour, where the CLI's exporter goes wherever the container's `OTEL_*`
+say, or nowhere.
+
+A collector is still where fleet-wide questions get answered, and naming one
+is still the whole setup:
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://your-collector:4317   # that is the whole setup
+OTEL_EXPORTER_OTLP_ENDPOINT=http://your-collector:4318   # that is the whole setup
 ```
 
-No default endpoint, no vendor. Point it at whatever you already run, whenever
-you get to it.
+Set on the service, it is read by the receiver, which forwards every body it
+accepts to `{endpoint}/v1/{signal}` untouched — content switches and all,
+with `OTEL_EXPORTER_OTLP_HEADERS` if you set them — on a thread, after the
+response, so a slow collector cannot slow a run. http/json (the 4318 side of
+a collector) is the one dialect forwarded; the local record and the Grafana
+one are the same events, not two configurations. No default endpoint, no
+vendor. Point it at whatever you already run, whenever you get to it.
 
 One event per model call, `claude_code.api_request`:
 

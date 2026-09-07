@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (45)
+## Environment (46)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -56,8 +56,9 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
 | `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
 | `HOOKPROBE_POSTURE_CHECK` | *(empty)* | Whether the credentials are checked against that declaration at startup (posture.py): enforce refuses to start a runner declared readonly whose kubeconfig or AWS identity can mutat… |
+| `HOOKPROBE_TELEMETRY_RECEIVER` | *(empty)* | Whether this service receives its own runs' OpenTelemetry (telemetry.py): on points the CLI at POST /otel/v1/{logs,metrics} here, keeps a per-run timing record under {workdir}/tele… |
 
-## Routes (53)
+## Routes (55)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -67,6 +68,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/hooks/agent` | Start an investigation from a finished prompt (idempotent per sessionKey) |
 | POST | `/hooks/event` | The pipe's door: a signed alert either starts a paid investigation, coalesces into one already running, or is declined by level, budget or a standing ruling — every decline says wh… |
 | GET | `/metrics` | Prometheus text format, rendered by hand — three gauges are not a client-library dependency |
+| POST | `/otel/v1/{signal}` | OTLP/http-json receiver for the CLI this service launches — and nothing else: the per-process header is the credential, the run's session-key attribute is the address, and a body f… |
 | POST | `/sessions/{session_key}/continue` | Follow-up turn in a finished investigation; poll /final for the answer |
 | GET | `/sessions/{session_key}/final` | Poll for the finished report: 202 while running, then the full text once |
 | POST | `/sessions/{session_key}/stop` | Cancel the in-flight turn; it settles as a failed turn within a poll |
@@ -99,6 +101,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/v1/runs/{session_key}/handoff` | Hand this run's report to the pipe, for whichever node the operator wired that door to |
 | POST | `/v1/runs/{session_key}/ruling` | One run, ruled from the sessions page — and told what the ruling DID |
 | GET | `/v1/runs/{session_key}/stream` | The open session's steps, pushed as they happen (NDJSON, one per line) |
+| GET | `/v1/runs/{session_key}/telemetry` | The shape of one run: every model call and tool call on one time axis, with what each cost, from the telemetry the CLI posted to this service |
 | GET | `/v1/skills` | Every runbook with its review state and case count, newest first |
 | GET | `/v1/skills/export` | Runbooks packaged to LEAVE this deployment — see hookprobe.export |
 | DELETE | `/v1/skills/{name}` | Only the project layer is deletable |

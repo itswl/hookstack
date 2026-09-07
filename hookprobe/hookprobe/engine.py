@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from hookprobe import inputs
+from hookprobe import inputs, telemetry
 from hookprobe.files import system_prompt_path
 from hookprobe.guard import bash_deny_reason
 from hookprobe.hygiene import post_tool_hook
@@ -611,8 +611,14 @@ class ClaudeAgentEngine:
         The container's own attributes (deployment, service, node) are kept in
         front; the SDK REPLACES the inherited variable with this one, so the
         static half has to be carried through here or it would be lost.
+
+        And where that telemetry goes: with the receiver on, the CLI posts to
+        this service (telemetry.py), which keeps the run's timing record and
+        forwards to the operator's collector if one is named — so the run's
+        waterfall is on its own page whether or not anything else is deployed.
         """
         env = self._engine_env()
+        env.update(telemetry.subprocess_env(self._settings))
         for name in self._SECRETS_WITHHELD_FROM_AGENT:
             env[name] = ""
         if session_key:

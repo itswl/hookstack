@@ -26,6 +26,7 @@ def prune(workdir: Path, home: Path, days: int) -> int:
     targets = (
         (workdir / "results", "*.json"),
         (workdir / "audit", "*.jsonl"),
+        (workdir / "telemetry", "*.jsonl"),
         # One row per card button press, kept only so a redelivery of that press
         # can be answered instead of repeated. An IM platform retries within
         # seconds, so a row this old is bookkeeping nobody will read again —

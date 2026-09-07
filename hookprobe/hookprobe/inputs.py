@@ -59,6 +59,10 @@ _PROTECTED = (
     "memory-suggestions.jsonl",
     "remediation",
     "actions",
+    # telemetry/: the run's own timing record — model calls, tool durations,
+    # cost — written by the service from what the CLI reported. A run that
+    # could edit it could bill itself less; same rule as audit/.
+    "telemetry",
 )
 
 # Hashed before and after a run. `audit/` is deliberately absent: the flight

@@ -21,7 +21,7 @@ Narrative overview with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 - **Every verdict priced, every week accounted for.** One page reads the three ledgers and puts measured beside counterfactual — what the routes avoided, what runbooks answered, how the live arm compared with its shadows — and says in words what it could not measure.
 - **One page per event.** `/audit/{event_id}` shows every hop with digests, decision steps, deliveries and human actions; `/trace/{id}` replays the bodies; `/timeline` groups chains into incidents.
 - **Agents you can contain.** Read-only by default and measured at startup, a closed tool allowlist, budget ceilings that refuse out loud, and fourteen structural boundaries each documented with what it does **not** stop ([containment](docs/containment.md)).
-- **Your model, your chat.** The investigator takes any Anthropic-dialect endpoint, the judge any OpenAI-compatible base including local models; shadow arms compare prompts or models on live traffic before anything is promoted. Cards go to Feishu/Lark, DingTalk, WeCom or a plain webhook; OpenTelemetry is on by default, with identity per node and per run.
+- **Your model, your chat.** The investigator takes any Anthropic-dialect endpoint, the judge any OpenAI-compatible base including local models; shadow arms compare prompts or models on live traffic before anything is promoted. Cards go to Feishu/Lark, DingTalk, WeCom or a plain webhook; OpenTelemetry is on by default and received by the investigator itself — every run's waterfall is on its own page with no collector deployed, and forwarded untouched when you name one.
 
 ![hookrelay's ledger: every message accounted for, every delivery with an outcome](docs/img/hookrelay-ledger.png)
 

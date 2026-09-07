@@ -135,6 +135,13 @@ class Settings:
     # skips the check. A declared boundary nobody measures is a README, so the
     # default is enforce; a writing posture (danger-only) is only ever recorded.
     posture_check: str
+    # Whether this service receives its own runs' OpenTelemetry (telemetry.py):
+    # `on` points the CLI at `POST /otel/v1/{logs,metrics}` here, keeps a
+    # per-run timing record under {workdir}/telemetry for the sessions page's
+    # waterfall, and forwards every body untouched to OTEL_EXPORTER_OTLP_ENDPOINT
+    # when one is set on the service; `off` leaves the CLI's exporter alone, as
+    # before — telemetry goes wherever the container's OTEL_* say, or nowhere.
+    telemetry_receiver: str
 
     # Loop hygiene (hygiene.py), all advisory — the security boundary stays the
     # bash guard plus read-only credentials.
@@ -308,6 +315,7 @@ class Settings:
             handoff_secret=os.environ.get("HOOKPROBE_HANDOFF_SECRET") or "",
             bash_guard=(os.environ.get("HOOKPROBE_BASH_GUARD") or "").strip().lower() or "readonly",
             posture_check=(os.environ.get("HOOKPROBE_POSTURE_CHECK") or "").strip().lower() or "enforce",
+            telemetry_receiver=(os.environ.get("HOOKPROBE_TELEMETRY_RECEIVER") or "").strip().lower() or "on",
             bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
             bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),
             auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),
