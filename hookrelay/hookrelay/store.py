@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import time
@@ -738,6 +739,90 @@ class Store:
         for act in human:
             act["latency_seconds"] = round(float(act["pressed_at"]) - float(origin["received_at"]), 3)
         return {"origin": origin, "returns": [r for r in returns if r is not None], "human_actions": human}
+
+    async def audit_record(self, event_id: int) -> dict[str, Any] | None:
+        """One operation as a record somebody can be held to: every hop, every
+        delivery, every return with its cost, every human press — with the
+        bytes replaced by their digests and sizes.
+
+        /trace is the forensic view and carries the payloads; this is the
+        accountability view and deliberately does not. An auditor needs to know
+        that the body which left the socket is the body on file (the digest
+        says so, and /trace holds the bytes), not to read alert payloads in a
+        compliance document. Built on the same transitive group as /trace, so
+        it is the same operation from either end.
+        """
+        trip = await self.round_trip(event_id)
+        if trip is None:
+            return None
+        origin = trip["origin"]
+
+        def digest(text: Any) -> dict[str, Any] | None:
+            if text is None:
+                return None
+            raw = text if isinstance(text, str) else json.dumps(text, ensure_ascii=False, sort_keys=True)
+            data = raw.encode("utf-8")
+            return {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+
+        def hop(ev: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "id": ev["id"],
+                "source": ev["source"],
+                "received_at": ev["received_at"],
+                "title": ev.get("title"),
+                "level": ev.get("level"),
+                "outcome": ev.get("outcome"),
+                "skip_code": ev.get("skip_code"),
+                "quotes": ev.get("correlation_id") or None,
+                "payload": digest(ev.get("payload")),
+                "decision": ev.get("steps") or [],
+                "fields": {
+                    k: v
+                    for k, v in (ev.get("fields") or {}).items()
+                    if k
+                    in (
+                        "brain",
+                        "cost_usd",
+                        "status",
+                        "session_key",
+                        "verdict",
+                        "importance",
+                        "wake_someone",
+                        "burst_id",
+                        "kind",
+                    )
+                },
+                "deliveries": [
+                    {
+                        "channel": d["channel"],
+                        "status": d["status"],
+                        "attempts": d["attempts"],
+                        "sent_at": d.get("sent_at"),
+                        "sent": digest(d.get("sent_body")),
+                    }
+                    for d in ev.get("deliveries") or []
+                ],
+                "latency_seconds": ev.get("latency_seconds", 0.0),
+            }
+
+        hops = [hop(origin)] + [hop(r) for r in trip["returns"]]
+        cost = 0.0
+        for h in hops:
+            with contextlib.suppress(TypeError, ValueError):
+                cost += float(h["fields"].get("cost_usd") or 0)
+        last_at = max([float(h["received_at"]) for h in hops] + [float(a["pressed_at"]) for a in trip["human_actions"]])
+        return {
+            "operation": origin["id"],
+            "generated_at": round(time.time(), 3),
+            "hops": hops,
+            "human_actions": trip["human_actions"],
+            "totals": {
+                "hops": len(hops),
+                "cost_usd": round(cost, 6),
+                "human_actions": len(trip["human_actions"]),
+                "span_seconds": round(last_at - float(origin["received_at"]), 3),
+            },
+        }
 
     async def _event_row(self, event_id: int) -> dict[str, Any] | None:
         cursor = await self.read.execute(

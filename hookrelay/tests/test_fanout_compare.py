@@ -271,3 +271,52 @@ async def test_a_return_of_a_return_joins_the_origin_from_any_end(store):
         trip = await store.round_trip(end)
         assert trip is not None and trip["origin"]["id"] == alert["event_id"], "same group from either end"
         assert [r["id"] for r in trip["returns"]] == [verdict["event_id"], report["event_id"]]
+
+
+async def test_audit_record_is_the_operation_with_digests_instead_of_bytes(client, store):
+    """The document an auditor is handed: every hop of the transitive group,
+    every delivery and return with its cost, every human press — and the bodies
+    replaced by their digests, because a compliance record needs to prove the
+    bytes on file are the bytes that left, not to reprint alert payloads."""
+    assert (await client.get("/audit/1")).status_code == 401
+    assert (await client.get("/audit/999999", headers={"X-Read-Token": "read-t"})).status_code == 404
+
+    cfg = Config.from_dict(FANOUT)
+    alert = await handle_hook(store, cfg, cfg.sources["inbound"], ALERT, now=1000.0)
+    verdict = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["ww-notify"],
+        _return_payload(
+            brain="judge", importance="high", summary="worth a look", correlation=f"hr-{alert['event_id']}"
+        ),
+        now=1005.0,
+    )
+    payload = _return_payload(
+        brain="investigator", importance="high", summary="root cause", correlation=str(verdict["event_id"])
+    )
+    payload["meta"]["cost_usd"] = "0.53"
+    report = await handle_hook(store, cfg, cfg.sources["lite-notify"], payload, now=1090.0)
+    # A person pressed a button on the card, three minutes in.
+    await store.db.execute(
+        "INSERT INTO card_actions (jti, kind, event_id, correlation_id, actor, outcome, pressed_at)"
+        " VALUES (?,?,?,?,?,?,?)",
+        ("j-1", "useful", alert["event_id"], f"hr-{alert['event_id']}", "ou_opaque", "recorded", 1180.0),
+    )
+    await store.db.commit()
+
+    record = await store.audit_record(report["event_id"])  # from the far end, same operation
+    assert record is not None and record["operation"] == alert["event_id"]
+    assert [h["id"] for h in record["hops"]] == [alert["event_id"], verdict["event_id"], report["event_id"]]
+    origin = record["hops"][0]
+    assert set(origin["payload"]) == {"sha256", "bytes"} and "payload" not in json.dumps(record["hops"][0]["decision"])
+    assert all("sent_body" not in json.dumps(h) and "body" not in h for h in record["hops"]), "bytes stay in /trace"
+    assert origin["deliveries"] and set(origin["deliveries"][0]) >= {"channel", "status", "attempts", "sent"}
+    # cost is the sum of what the return doors extracted into fields.cost_usd —
+    # exactly what the pipe knows, no more; the test config extracts what it does.
+    priced = round(sum(float((h["fields"] or {}).get("cost_usd") or 0) for h in record["hops"]), 6)
+    assert record["totals"] == {"hops": 3, "cost_usd": priced, "human_actions": 1, "span_seconds": 180.0}
+    assert record["human_actions"][0]["kind"] == "useful" and record["human_actions"][0]["latency_seconds"] == 180.0
+
+    over_http = await client.get(f"/audit/{alert['event_id']}", headers={"X-Read-Token": "read-t"})
+    assert over_http.status_code == 200 and over_http.json()["totals"]["hops"] == 3

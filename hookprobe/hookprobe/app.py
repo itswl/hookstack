@@ -357,6 +357,42 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         return {**asdict(run), "inputs_now": _prompt_digests_now(settings)}
 
+    @app.get("/v1/runs/{session_key}/audit", dependencies=[Depends(require_token)])
+    async def run_audit(session_key: str) -> dict[str, Any]:
+        """The accountability record of one run: what posture it held, what it
+        cost, every tool call it made and every one the guards refused, and
+        whether its steering inputs changed under it. Assembled from the run
+        record and the flight recorder — the two places that were written at
+        the time — never from today's configuration."""
+        run = service.get(session_key)
+        if run is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        lines: list[dict[str, Any]] = []
+        for day_file in sorted((settings.workdir / "audit").glob("*.jsonl")):
+            try:
+                for raw in day_file.read_text(encoding="utf-8").splitlines():
+                    if raw.strip():
+                        line = json.loads(raw)
+                        if line.get("session") == session_key:
+                            lines.append(line)
+            except (OSError, json.JSONDecodeError):
+                continue
+        return {
+            "session_key": run.session_key,
+            "run_id": run.run_id,
+            "status": run.status,
+            "origin": run.origin,
+            "model": run.model,
+            "finished_at": run.finished_at,
+            "cost_usd": run.cost_usd,
+            "meta": run.meta,
+            "ruling": {"verdict": run.ruling, "by": run.ruled_by, "at": run.ruled_at},
+            "posture": (run.inputs or {}).get("posture"),
+            "inputs": run.inputs,
+            "tool_calls": [x for x in lines if not x.get("denied")],
+            "denied": [x for x in lines if x.get("denied")],
+        }
+
     @app.get("/v1/runs/{session_key}/stream", dependencies=[Depends(require_token)])
     async def run_stream(session_key: str) -> StreamingResponse:
         """The open session's steps, pushed as they happen (NDJSON, one per line).

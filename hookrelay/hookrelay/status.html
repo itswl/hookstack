@@ -670,8 +670,30 @@
         '<div class="mini">' + mini + "</div>" +
         '<div class="m">chain ' + esc(c.chain) + " · " + hops.length + (hops.length === 1 ? " hop" : " hops") + "</div>" +
       "</summary>" +
+      '<div class="chips" style="padding-top:8px"><button class="btn tiny" data-tl-audit="' + esc(c.chain) + '">audit record</button>' +
+      '<a class="btn tiny" href="/audit/' + esc(c.chain) + '" target="_blank" rel="noopener">json</a></div>' +
+      '<div class="compare" id="tl-audit-' + esc(c.chain) + '" style="display:none"></div>' +
       '<div class="hops" style="padding-top:6px">' + rows + "</div>" +
     "</details>";
+  }
+  function renderAudit(rec) {
+    var t = rec.totals || {};
+    var head = "<h4>operation #" + esc(rec.operation) + " · " + esc(t.hops) + " hops · " + esc(money(t.cost_usd) || "$0") +
+      " · " + esc(t.human_actions) + " human action" + (t.human_actions === 1 ? "" : "s") + " · " + esc(Math.round(t.span_seconds || 0)) + "s end to end</h4>";
+    var t0 = (rec.hops[0] || {}).received_at || 0;
+    var rows = (rec.hops || []).map(function (h) {
+      var dl = (h.deliveries || []).map(function (d) { return esc(d.channel) + " " + esc(d.status) + (d.sent ? " · " + esc(d.sent.bytes) + " B · " + esc(String(d.sent.sha256).slice(0, 12)) : ""); }).join("<br>");
+      var f = h.fields || {};
+      return '<li><span class="g">' + esc(rel(t0, h.received_at)) + "</span><span><b>" + esc(h.source) + "</b> #" + esc(h.id) +
+        (h.payload ? ' <span class="r">payload ' + esc(h.payload.bytes) + " B · " + esc(String(h.payload.sha256).slice(0, 12)) + "</span>" : "") +
+        (f.cost_usd ? ' <span class="cost">' + esc(money(f.cost_usd)) + "</span>" : "") + (f.session_key ? ' <span class="r">' + esc(f.session_key) + "</span>" : "") +
+        (dl ? '<div class="r" style="margin-top:2px">' + dl + "</div>" : "") + "</span></li>";
+    }).join("");
+    var human = (rec.human_actions || []).map(function (a) {
+      return '<li><span class="g">' + esc(rel(t0, a.pressed_at)) + '</span><span><b>' + esc(a.kind) + "</b> · " + esc(a.outcome || "") + (a.actor ? ' <span class="r">actor ' + esc(a.actor) + "</span>" : "") + "</span></li>";
+    }).join("");
+    return head + '<ul class="steps">' + rows + "</ul>" + (human ? "<h4>what a person did</h4><ul class=\"steps\">" + human + "</ul>" : "") +
+      '<div class="hint" style="margin-top:8px">bodies are digests here; the bytes are under trace. Markdown: scripts/audit_export.py</div>';
   }
   function renderIncidents(incidents) {
     var multi = incidents.filter(function (i) { return i.interruptions > 1; });
@@ -684,6 +706,17 @@
       : "";
   }
   document.addEventListener("click", function (e) {
+    var a = e.target.closest("[data-tl-audit]");
+    if (a) {
+      e.preventDefault();
+      var aid = a.getAttribute("data-tl-audit"), abox = document.getElementById("tl-audit-" + aid);
+      if (abox.style.display !== "none") { abox.style.display = "none"; return; }
+      abox.style.display = "block"; abox.innerHTML = '<span class="hint">loading…</span>';
+      fetch("/audit/" + aid, { headers: readHeaders() })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (rec) { abox.innerHTML = rec ? renderAudit(rec) : '<span class="hint">audit record unavailable</span>'; });
+      return;
+    }
     var t = e.target.closest("[data-tl-trace]");
     if (!t) return;
     e.preventDefault();

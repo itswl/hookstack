@@ -128,6 +128,10 @@ sources:
     body: "{report.summary}"
     level: "{meta.importance}"
     fields:
+      # The investigator's own run key, so the pipe's audit record can name
+      # the run behind this hop and scripts/audit_export.py can fetch its
+      # flight recorder. Read, never computed: the node says who it was.
+      session_key: "{meta.session_key}"
       origin: "{meta.source}"
       session: "{meta.session_key}"
       # What this hop cost, so the PIPE's ledger can answer it without asking the

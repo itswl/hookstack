@@ -759,6 +759,22 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             raise HTTPException(status_code=404, detail="no such event")
         return trip
 
+    @app.get("/audit/{event_id}")
+    async def audit_record(
+        event_id: int,
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """One operation as an accountability record: every hop, delivery,
+        return, cost and human press, with bodies replaced by digests. The
+        document an auditor is handed; /trace is where the bytes behind each
+        digest live."""
+        _read_guard(x_read_token, authorization)
+        record = await app.state.store.audit_record(event_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no such event")
+        return record
+
     @app.get("/metrics", response_class=PlainTextResponse)
     async def prometheus_metrics(
         x_read_token: str | None = Header(default=None),

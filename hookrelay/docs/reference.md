@@ -31,11 +31,12 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKRELAY_HOST` | `127.0.0.1` | Address the server binds to |
 | `HOOKRELAY_PORT` | `8100` | Port the server listens on |
 
-## Routes (18)
+## Routes (19)
 
 | method | path | what it does |
 | --- | --- | --- |
 | GET | `/` | The operator board — every page this service serves hangs off it |
+| GET | `/audit/{event_id}` | One operation as an accountability record: every hop, delivery, return, cost and human press, with bodies replaced by digests |
 | GET | `/card-action` | Ask before doing |
 | POST | `/card-action` | A human pressed a button on a notification card |
 | GET | `/config` | Admin: the running config file, with inline secret: values redacted |

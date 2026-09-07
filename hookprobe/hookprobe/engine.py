@@ -72,7 +72,7 @@ class EngineResult:
     input_changes: tuple[str, ...] = ()
 
 
-def _bash_guard_hook(mode: str) -> Callable[..., Any]:
+def _bash_guard_hook(mode: str, record: Callable[[dict[str, Any]], None] | None = None) -> Callable[..., Any]:
     """PreToolUse: refuse a command this runner's posture does not allow.
 
     Built per instance rather than read from a global, like the MCP guard beside
@@ -86,6 +86,17 @@ def _bash_guard_hook(mode: str) -> Callable[..., Any]:
         if reason is None:
             return {}
         logger.warning("bash command denied (%s): %s", mode, command)
+        if record is not None:
+            record(
+                {
+                    "tool": "Bash",
+                    "detail": command[:300],
+                    "denied": True,
+                    "guard": "bash",
+                    "mode": mode,
+                    "reason": reason,
+                }
+            )
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -136,7 +147,9 @@ def mcp_deny_reason(tool_name: str, allowed: frozenset[str]) -> str | None:
     )
 
 
-def _mcp_guard_hook(allowed: frozenset[str]) -> Callable[..., Any]:
+def _mcp_guard_hook(
+    allowed: frozenset[str], record: Callable[[dict[str, Any]], None] | None = None
+) -> Callable[..., Any]:
     """PreToolUse: refuse an MCP tool the operator did not name.
 
     A hook rather than `allowed_tools` alone because the engine runs with
@@ -149,6 +162,16 @@ def _mcp_guard_hook(allowed: frozenset[str]) -> Callable[..., Any]:
         if reason is None:
             return {}
         logger.warning("mcp tool denied: %s", input_data.get("tool_name"))
+        if record is not None:
+            record(
+                {
+                    "tool": str(input_data.get("tool_name") or ""),
+                    "detail": "",
+                    "denied": True,
+                    "guard": "mcp",
+                    "reason": reason,
+                }
+            )
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -167,7 +190,9 @@ _WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 _WRITE_PATH_KEYS = ("file_path", "notebook_path", "path")
 
 
-def _input_guard_hook(workdir: Path, home: Path | None) -> Callable[..., Any]:
+def _input_guard_hook(
+    workdir: Path, home: Path | None, record: Callable[[dict[str, Any]], None] | None = None
+) -> Callable[..., Any]:
     """PreToolUse: refuse a write aimed at the files that steer the next run."""
 
     async def hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
@@ -179,6 +204,16 @@ def _input_guard_hook(workdir: Path, home: Path | None) -> Callable[..., Any]:
             reason = inputs.write_deny_reason(str(data.get(key) or ""), workdir=workdir, home=home)
             if reason is not None:
                 logger.warning("input guard denied write: %s", data.get(key))
+                if record is not None:
+                    record(
+                        {
+                            "tool": str(input_data.get("tool_name") or ""),
+                            "detail": str(data.get(key) or "")[:300],
+                            "denied": True,
+                            "guard": "input",
+                            "reason": reason,
+                        }
+                    )
                 return {
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
@@ -330,6 +365,38 @@ def _resource_attributes(inherited: str, session_key: str) -> str:
     return ",".join(parts)
 
 
+def _append_audit(audit_dir: Path, line: dict[str, Any]) -> None:
+    """One JSONL line into today's audit file. Never raises; see _audit_hook."""
+    import time
+
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    day_file = audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")
+    with day_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
+def _audit_recorder(audit_dir: Path, session_key: str) -> Callable[[dict[str, Any]], None]:
+    """What the guards write with when they refuse something.
+
+    The refusals were the strongest evidence this runner has that the agent did
+    not do what it was told — "it tried `kubectl delete`, the guard said no" —
+    and they went to the process log only, which nobody reads and retention
+    does not keep. An audit that lists every tool call but none of the refused
+    ones is a record of what happened with the interesting half missing. Same
+    file, same shape, one extra field: `denied`.
+    """
+
+    def record(extra: dict[str, Any]) -> None:
+        try:
+            import time
+
+            _append_audit(audit_dir, {"ts": round(time.time(), 3), "session": session_key, **extra})
+        except Exception:  # noqa: BLE001 — a refusal must still be a refusal if the recorder fails
+            logger.debug("audit write failed", exc_info=True)
+
+    return record
+
+
 def _audit_hook(audit_dir: Path, session_key: str) -> Callable[..., Any]:
     """PostToolUse flight recorder: one JSONL line per tool call, per day.
 
@@ -349,10 +416,7 @@ def _audit_hook(audit_dir: Path, session_key: str) -> Callable[..., Any]:
                 "detail": _tool_detail(input_data.get("tool_input")),
                 "error": bool(response.get("is_error")) if isinstance(response, dict) else False,
             }
-            audit_dir.mkdir(parents=True, exist_ok=True)
-            day_file = audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")
-            with day_file.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+            _append_audit(audit_dir, line)
         except Exception:  # noqa: BLE001 — the recorder must never break the run
             logger.debug("audit write failed", exc_info=True)
         return {}
@@ -592,6 +656,10 @@ class ClaudeAgentEngine:
             "system_prompt_append": file_fact(system_prompt_path(self._settings)),
             "memory": file_fact(self._workdir / "CLAUDE.md"),
             "mcp_servers": sorted(_load_mcp_servers(self._settings.mcp_config)),
+            # The posture this run held: what its shell could not do and which MCP
+            # tools it could call. Recorded on the run so an audit can say "this
+            # investigation ran read-only" from the record, not from today's config.
+            "posture": {"bash_guard": self._settings.bash_guard, "mcp_tools": sorted(self._settings.mcp_tools)},
             "resumed": bool(resume),
             "hygiene": {
                 "repeat_reminder_at": self._settings.repeat_reminder_at,
@@ -659,6 +727,7 @@ class ClaudeAgentEngine:
             return {}
 
         append = _system_prompt_append(self._settings)
+        recorder = _audit_recorder(self._workdir / "audit", session_key)
         options = ClaudeAgentOptions(
             cwd=str(self._workdir),
             model=self._settings.model,
@@ -692,16 +761,18 @@ class ClaudeAgentEngine:
             mcp_servers=_load_mcp_servers(self._settings.mcp_config),
             hooks={
                 "PreToolUse": [
-                    HookMatcher(matcher="Bash", hooks=_hook_list(_bash_guard_hook(self._settings.bash_guard))),
+                    HookMatcher(
+                        matcher="Bash", hooks=_hook_list(_bash_guard_hook(self._settings.bash_guard, recorder))
+                    ),
                     # Matched on every tool, filtered by name inside: the guard
                     # must not depend on how the SDK interprets a matcher
                     # pattern for the one thing it exists to stop.
-                    HookMatcher(matcher=None, hooks=_hook_list(_input_guard_hook(self._workdir, self._home))),
+                    HookMatcher(matcher=None, hooks=_hook_list(_input_guard_hook(self._workdir, self._home, recorder))),
                     # matcher=None for the same reason as the line above: the
                     # one guard standing between a colleague's chat message and
                     # a tool that can act as the operator must not depend on
                     # how the SDK interprets an `mcp__*` matcher pattern.
-                    HookMatcher(matcher=None, hooks=_hook_list(_mcp_guard_hook(self._settings.mcp_tools))),
+                    HookMatcher(matcher=None, hooks=_hook_list(_mcp_guard_hook(self._settings.mcp_tools, recorder))),
                     HookMatcher(matcher=None, hooks=_hook_list(_step_begin)),
                 ],
                 # The flight recorder: every tool call, every run, one JSONL

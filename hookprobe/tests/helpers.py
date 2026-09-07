@@ -121,7 +121,11 @@ class FakeEngine:
 
     def describe_inputs(self, *, resume: str | None = None) -> dict:
         self.described.append(resume)
-        return {"model": "claude-opus-5", "resumed": bool(resume)}
+        return {
+            "model": "claude-opus-5",
+            "resumed": bool(resume),
+            "posture": {"bash_guard": "readonly", "mcp_tools": []},
+        }
 
     async def stop(self) -> bool:
         """Model the SDK's interrupt: the turn winds down and still reports.
@@ -176,7 +180,11 @@ class GatedEngine:
         self.resumes: list[str | None] = []
 
     def describe_inputs(self, *, resume: str | None = None) -> dict:
-        return {"model": "claude-opus-5", "resumed": bool(resume)}
+        return {
+            "model": "claude-opus-5",
+            "resumed": bool(resume),
+            "posture": {"bash_guard": "readonly", "mcp_tools": []},
+        }
 
     async def run(self, *, message: str, session_key: str, resume: str | None = None, on_event=None) -> EngineResult:
         self.resumes.append(resume)

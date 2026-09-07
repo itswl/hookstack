@@ -56,7 +56,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
 | `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
 
-## Routes (51)
+## Routes (52)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -92,6 +92,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/v1/runs` | Finished runs, newest first |
 | POST | `/v1/runs/rulings` | File verdicts on several investigations at once — was this RUN worth it |
 | GET | `/v1/runs/{session_key}` | One run whole: turns, meta, ruling, cost |
+| GET | `/v1/runs/{session_key}/audit` | The accountability record of one run: what posture it held, what it cost, every tool call it made and every one the guards refused, and whether its steering inputs changed under it |
 | POST | `/v1/runs/{session_key}/distill` | A skill draft for what this run learned — returned, never saved |
 | POST | `/v1/runs/{session_key}/handoff` | Hand this run's report to the pipe, for whichever node the operator wired that door to |
 | POST | `/v1/runs/{session_key}/ruling` | One run, ruled from the sessions page — and told what the ruling DID |

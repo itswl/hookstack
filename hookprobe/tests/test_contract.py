@@ -544,3 +544,43 @@ def test_the_board_can_tell_a_person_from_a_patrol(tmp_path) -> None:
     assert _summary(by_hand)["inferred"] is False
     assert _summary(by_hand)["ruled_by"] == "ou_operator_42"
     assert _summary(unrated)["inferred"] is False and _summary(unrated)["ruling"] == ""
+
+
+def test_the_audit_record_of_a_run(tmp_path) -> None:
+    """One run as something a person can be held to: the posture it held, its
+    cost, every tool call and every refusal — read from what was written at the
+    time, never from today's configuration."""
+    client = make_client(tmp_path, FakeEngine())
+    assert client.get("/v1/runs/x/audit", headers=AUTH).status_code == 404
+    client.post("/hooks/agent", json={"message": "look", "sessionKey": "probe:inbound:9"}, headers=AUTH)
+    poll_until_final(client, "probe:inbound:9")
+    audit = tmp_path / "audit"
+    audit.mkdir(exist_ok=True)
+    (audit / "2026-09-07.jsonl").write_text(
+        json.dumps(
+            {"ts": 1.0, "session": "probe:inbound:9", "tool": "Bash", "detail": "kubectl get pods", "error": False}
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "ts": 2.0,
+                "session": "probe:inbound:9",
+                "tool": "Bash",
+                "detail": "kubectl delete pod x",
+                "denied": True,
+                "guard": "bash",
+                "reason": "r",
+            }
+        )
+        + "\n"
+        + json.dumps({"ts": 3.0, "session": "probe:other:1", "tool": "Bash", "detail": "ls", "error": False})
+        + "\n",
+        encoding="utf-8",
+    )
+    rec = client.get("/v1/runs/probe:inbound:9/audit", headers=AUTH).json()
+    assert rec["session_key"] == "probe:inbound:9" and rec["status"] == "completed"
+    assert rec["posture"] == {"bash_guard": "readonly", "mcp_tools": []}, (
+        "posture recorded on the run, not read from config"
+    )
+    assert [x["detail"] for x in rec["tool_calls"]] == ["kubectl get pods"], "other sessions' lines stay out"
+    assert [x["detail"] for x in rec["denied"]] == ["kubectl delete pod x"]

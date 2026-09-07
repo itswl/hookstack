@@ -178,7 +178,15 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # cause counted as one interruption — which no per-event component could see,
     # and it is a projection of what the ledger already holds, asking nothing new
     # of any node beyond the burst the judge already computed.
-    "hookrelay": (5400, Path("hookrelay/README.md")),
+    # 5400 -> 5500 on 2026-09-07, for the accountability record (/audit). Split:
+    # +~70 source, +~55 code, so the doctrine question applies, and this is the
+    # pipe's own thesis made into a document: "every message accounted for,
+    # every delivery with an outcome". It is a projection of the ledger (the
+    # same transitive group /trace and /timeline read), computes nothing about
+    # content — bodies leave as digests — and asks nothing new of any node. What
+    # it adds is the artifact a person can be held to, which is the one thing
+    # the FinSec positioning is actually sold on.
+    "hookrelay": (5500, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

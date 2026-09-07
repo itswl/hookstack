@@ -13,7 +13,7 @@ webhooks in at one door, walks each event through three named gates, and deliver
 to Feishu / DingTalk / WeCom / generic HTTP — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 5,400 source lines is the
+Both numbers are **budgets, not descriptions**. 5,500 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
@@ -234,6 +234,7 @@ alert goes.
 | `GET /status?q=&source=&outcome=&before_id=&limit=` | the same as JSON (read token) |
 | `GET /live` | the board's wake-up line — NDJSON, one `changed` per burst of ledger writes, so the page needs no clock (read token) |
 | `GET /timeline` | what happened, as one stream — chains gathered by correlation, newest first, with what each chain spent. `/status` answers "recently" and `/trace` answers "this one"; this is the one that answers "what happened", after a review took five endpoints across two machines joined by eye. A projection of the ledger, not a second one: nothing new is asked of any node, because a node here may be somebody else's and a store it had to write to would take the replaceable node with it. Cost appears per hop where a return door extracts `meta.cost_usd` into a field; `unpriced_hops` counts the rest, since a free hop and an unpriced one are different facts. It also groups chains that share a judge-sent `burst_id` into **incidents** — the operator's unit, so five cards for one root cause count as one interruption rather than five chains. The pipe reads that grouping, never computes it: which alerts are one incident is a judgement about content, and the pipe stays content-blind (read token) |
+| `GET /audit/{event_id}` | one operation as an **accountability record**: every hop of the chain (followed to its root), every delivery and return with its cost, every human press — with bodies replaced by sha256 + size, because an auditor needs proof the bytes on file are the bytes that left, not the payloads themselves; `/trace` holds the bytes behind each digest. `scripts/audit_export.py` renders it, with the investigator's own audit, as Markdown (read token) |
 | `GET /trace/{event_id}` | one alert's whole journey — the original payload as received, every delivery with the exact body that left the socket (`sent_body`; body only, never headers), and what each brain sent back (read token) |
 | `GET /metrics` | Prometheus text: events by door/outcome, deliveries by channel/result, outbox depth, fuse and silences (read token) |
 | `POST /explain/{source}` | dry run — what WOULD this payload do; records nothing, delivers nothing, calls no brain (admin token) |

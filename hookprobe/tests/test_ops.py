@@ -493,3 +493,34 @@ def test_gate_matches_ci():
     # on a Friday into a log nobody reads.
     for text, name in ((gate, "gate.sh"), (ci, "ci-hookprobe.yml")):
         assert "bash -n" in text, f"{name} no longer syntax-checks the shipped shell"
+
+
+def test_a_refused_command_is_in_the_audit_not_only_the_log(tmp_path) -> None:
+    """The strongest evidence this runner has that the agent did not do what it
+    was told — "it tried `kubectl delete`, the guard said no" — used to go to the
+    process log only. It is now a line in the same flight recorder as every
+    tool call, with `denied: true`."""
+    import asyncio
+    import json
+
+    from hookprobe.engine import _audit_recorder, _bash_guard_hook, _mcp_guard_hook
+
+    record = _audit_recorder(tmp_path / "audit", "probe:inbound:7")
+    bash = _bash_guard_hook("readonly", record)
+    out = asyncio.run(bash({"tool_name": "Bash", "tool_input": {"command": "kubectl delete pod web-1"}}, None, None))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    mcp = _mcp_guard_hook(frozenset({"mcp__x__read"}), record)
+    asyncio.run(mcp({"tool_name": "mcp__x__send_message", "tool_input": {}}, None, None))
+    asyncio.run(
+        bash({"tool_name": "Bash", "tool_input": {"command": "kubectl get pods"}}, None, None)
+    )  # allowed: no line
+
+    lines = [
+        json.loads(x) for f in (tmp_path / "audit").glob("*.jsonl") for x in f.read_text().splitlines() if x.strip()
+    ]
+    assert [(x["guard"], x["tool"], x["denied"]) for x in lines] == [
+        ("bash", "Bash", True),
+        ("mcp", "mcp__x__send_message", True),
+    ]
+    assert all(x["session"] == "probe:inbound:7" and x["reason"] for x in lines)
+    assert "kubectl delete pod web-1" in lines[0]["detail"]
