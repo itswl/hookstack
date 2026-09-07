@@ -688,31 +688,51 @@ class Store:
         anchor_id = event_id
         # Two brains, two spellings of the same id — see timeline._chain_key.
         # hookjudge echoes the `hr-<n>` the pipe stamped on egress; hookprobe
-        # never sees that and returns the bare `<n>` it was handed. This reader
-        # only knew the first, so every investigator return (plan-notify,
-        # probe-notify, work-notify) gathered NOWHERE: /trace/111 said "no
-        # processing system has returned yet" while the plan sat one row below.
-        quoted = str(origin.get("correlation_id") or "")
-        quoted_id = quoted[3:] if quoted.startswith("hr-") else quoted
-        if quoted_id.isdigit():
+        # never sees that and returns the bare `<n>` it was handed. And the
+        # trail can be more than one hop long: on the alert deployment the
+        # investigator is fed by the judge's return, so its report quotes the
+        # judge-notify event, which quotes the alert. Walk up until an event
+        # that quoted nothing — that is the operation's origin from either end.
+        for _ in range(8):
+            quoted = str(origin.get("correlation_id") or "")
+            quoted_id = quoted[3:] if quoted.startswith("hr-") else quoted
+            if not quoted_id.isdigit() or int(quoted_id) == anchor_id:
+                break
             anchor = await self._event_row(int(quoted_id))
-            if anchor is not None:
-                origin, anchor_id = anchor, int(quoted_id)
+            if anchor is None:
+                break
+            origin, anchor_id = anchor, int(quoted_id)
 
-        cursor = await self.read.execute(
-            "SELECT id FROM events WHERE correlation_id IN (?, ?) ORDER BY id",
-            (f"hr-{anchor_id}", str(anchor_id)),
-        )
-        returns = [await self._event_row(int(row["id"])) for row in await cursor.fetchall()]
+        # Returns, transitively: what quoted the origin, then what quoted THOSE.
+        # A verdict that is itself investigated has a return of its own, and a
+        # view that stopped one level down showed the alert's judge and never
+        # its investigation.
+        group_ids: list[int] = [anchor_id]
+        frontier = [anchor_id]
+        for _ in range(5):
+            if not frontier:
+                break
+            marks = ", ".join("?" for _ in frontier) + ", " + ", ".join("?" for _ in frontier)
+            params = [f"hr-{i}" for i in frontier] + [str(i) for i in frontier]
+            cursor = await self.read.execute(
+                f"SELECT id FROM events WHERE correlation_id IN ({marks}) ORDER BY id",  # nosec B608 — placeholders only
+                params,
+            )
+            found = [int(row["id"]) for row in await cursor.fetchall() if int(row["id"]) not in group_ids]
+            group_ids.extend(found)
+            frontier = found
+        returns = [await self._event_row(i) for i in group_ids[1:]]
         for item in returns:
             if item is not None:
                 item["latency_seconds"] = round(float(item["received_at"]) - float(origin["received_at"]), 3)
-        # And what a PERSON did about it. The machine half of this timeline was
-        # always here; a morning review opens with the other half.
+        # And what a PERSON did about it, anywhere in the group. The machine
+        # half of this timeline was always here; a morning review opens with
+        # the other half.
+        marks = ", ".join("?" for _ in group_ids)
         cursor = await self.read.execute(
             "SELECT kind, actor, outcome, pressed_at FROM card_actions "
-            "WHERE correlation_id IN (?, ?) OR event_id = ? ORDER BY pressed_at",
-            (f"hr-{anchor_id}", str(anchor_id), anchor_id),
+            f"WHERE correlation_id IN ({marks}, {marks}) OR event_id IN ({marks}) ORDER BY pressed_at",  # nosec B608
+            [f"hr-{i}" for i in group_ids] + [str(i) for i in group_ids] + group_ids,
         )
         human = [dict(row) for row in await cursor.fetchall()]
         for act in human:

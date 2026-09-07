@@ -37,10 +37,43 @@ def _chain_key(row: dict[str, Any]) -> str:
     resolves the same prefix for /trace/{id}; the pipe mints it in one place and
     this is the third reader of it.
     """
+    return _quoted_id(row) or str(row.get("id"))
+
+
+def _quoted_id(row: dict[str, Any]) -> str:
+    """The event id this hop quoted, in either spelling, or '' if it quoted nothing."""
     quoted = str(row.get("correlation_id") or "")
     if quoted.startswith("hr-") and quoted[3:].isdigit():
         return quoted[3:]
-    return quoted or str(row.get("id"))
+    return quoted
+
+
+def _chain_keys(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Each hop's chain, following what it quoted all the way to the root.
+
+    One level was enough on the work deployment, where the plan quotes the
+    signal that asked for it. On the alert deployment the investigator is fed
+    by the JUDGE's return, so its report quotes the judge-notify event, which
+    quotes the alert: alert ← verdict ← investigation. Keyed one level deep,
+    every investigation on production sat in a chain of its own beside the
+    alert it was about — measured: six probe-notify chains in the last two
+    hundred, none of them sharing a chain with a `ww` hop. So walk up while
+    the quoted event is in the window; if the trail leaves the window, key to
+    the last id quoted, which is what a single-level reader did.
+    """
+    by_id = {str(r.get("id")): r for r in rows}
+    keys: dict[str, str] = {}
+    for row in rows:
+        seen: set[str] = set()
+        cur = row
+        while True:
+            quoted = _quoted_id(cur)
+            if not quoted or quoted not in by_id or quoted in seen:
+                break
+            seen.add(str(cur.get("id")))
+            cur = by_id[quoted]
+        keys[str(row.get("id"))] = _quoted_id(cur) or str(cur.get("id"))
+    return keys
 
 
 def _cost(row: dict[str, Any]) -> float:
@@ -72,8 +105,9 @@ def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
     # content, and the pipe is content-blind. A chain inherits the burst_id of
     # any hop that has one (the return hop from the judge does).
     chain_burst: dict[str, str] = {}
+    keys = _chain_keys(rows)
     for row in rows:
-        key = _chain_key(row)
+        key = keys[str(row.get("id"))]
         chains.setdefault(key, []).append(
             {
                 "id": row.get("id"),

@@ -307,3 +307,82 @@ def test_incident_cost_sums_its_chains() -> None:
     ]
     incident = {i["incident"]: i for i in render(rows)["incidents"]}["b1"]
     assert incident["cost_usd"] == 1.0, "0.40 + 0.60 across the incident's two chains"
+
+
+def test_a_hop_that_quotes_a_return_joins_the_root_chain() -> None:
+    """alert ← judge-notify (hr-1) ← probe-notify ("2"): one chain of three
+    hops, keyed to the alert. Measured on production before this: six
+    investigation chains in the last two hundred, none sharing a chain with the
+    alert they were about."""
+    rows = [
+        {
+            "id": 1,
+            "received_at": 100.0,
+            "source": "ww",
+            "title": "SES bounce",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": None,
+        },
+        {
+            "id": 2,
+            "received_at": 105.0,
+            "source": "judge-notify",
+            "title": "SES bounce",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": "hr-1",
+        },
+        {
+            "id": 3,
+            "received_at": 190.0,
+            "source": "probe-notify",
+            "title": "SES bounce",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {"cost_usd": "0.7"},
+            "correlation_id": "2",
+        },
+    ]
+    out = render(rows)
+    assert [c["chain"] for c in out["chains"]] == ["1"], "one operation, not three"
+    assert [h["id"] for h in out["chains"][0]["hops"]] == [1, 2, 3]
+    assert out["chains"][0]["cost_usd"] == 0.7
+
+
+def test_a_trail_leaving_the_window_keys_to_the_last_id_quoted() -> None:
+    """A return whose origin scrolled out of the window still keys to that
+    origin's id — the single-level behaviour, so nothing that grouped before
+    stops grouping now."""
+    rows = [
+        {
+            "id": 50,
+            "received_at": 500.0,
+            "source": "judge-notify",
+            "title": "t",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": "hr-7",
+        },
+        {
+            "id": 51,
+            "received_at": 560.0,
+            "source": "probe-notify",
+            "title": "t",
+            "level": "high",
+            "outcome": "routed",
+            "channels": [],
+            "fields": {},
+            "correlation_id": "50",
+        },
+    ]
+    out = render(rows)
+    assert [c["chain"] for c in out["chains"]] == ["7"]
+    assert [h["id"] for h in out["chains"][0]["hops"]] == [50, 51]

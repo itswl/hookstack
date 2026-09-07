@@ -233,3 +233,41 @@ async def test_a_return_quoting_the_bare_id_gathers_too(store):
     # And from the return's end, the same group.
     from_return = await store.round_trip(ret["event_id"])
     assert from_return is not None and from_return["origin"]["id"] == origin["event_id"]
+
+
+async def test_a_return_of_a_return_joins_the_origin_from_any_end(store):
+    """The alert deployment's shape: the investigator is fed by the JUDGE's
+    return, so its report quotes the judge-notify event, which quotes the alert.
+    alert ← verdict ← investigation is one operation, and it must read as one
+    from the alert, from the verdict and from the report — a reader stopping
+    one level down showed the judge and never the investigation."""
+    cfg = Config.from_dict(FANOUT)
+    alert = await handle_hook(store, cfg, cfg.sources["inbound"], ALERT, now=1000.0)
+    verdict = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["ww-notify"],
+        _return_payload(
+            brain="judge", importance="high", summary="worth a look", correlation=f"hr-{alert['event_id']}"
+        ),
+        now=1005.0,
+    )
+    report = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lite-notify"],
+        _return_payload(
+            brain="investigator", importance="high", summary="root cause", correlation=str(verdict["event_id"])
+        ),
+        now=1090.0,
+    )
+
+    from_alert = await store.round_trip(alert["event_id"])
+    assert from_alert is not None
+    assert [r["id"] for r in from_alert["returns"]] == [verdict["event_id"], report["event_id"]]
+    assert [r["latency_seconds"] for r in from_alert["returns"]] == [5.0, 90.0], "both measured from the alert"
+
+    for end in (verdict["event_id"], report["event_id"]):
+        trip = await store.round_trip(end)
+        assert trip is not None and trip["origin"]["id"] == alert["event_id"], "same group from either end"
+        assert [r["id"] for r in trip["returns"]] == [verdict["event_id"], report["event_id"]]
