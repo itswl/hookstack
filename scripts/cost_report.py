@@ -156,7 +156,11 @@ def compute(
             "ruled_useful": sum(1 for r in week if r.get("ruling") == "useful"),
             "ruled_useless": sum(1 for r in week if r.get("ruling") == "useless"),
             "unruled": sum(1 for r in week if not r.get("ruling")),
-            "listing_truncated": len(runs) >= 200,
+            # Only a real risk when the listing hit its cap AND its oldest row is
+            # still inside the window — then older in-window runs may exist unseen.
+            "listing_truncated": len(runs) >= 200
+            and min((float(r.get("finished_at") or now) for r in runs), default=now)
+            >= since,
         }
     if isinstance(budget, dict):
         report["budget"] = budget

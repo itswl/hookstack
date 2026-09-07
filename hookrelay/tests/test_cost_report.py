@@ -121,3 +121,19 @@ def test_the_page_states_what_is_measured_and_what_is_not() -> None:
     assert "166 verdicts answered without a model call" in page
     assert "| burst-1 | 3 |" in page and "solo:9" not in page, "only priced incidents make the table"
     assert "unruled 2" in page
+
+
+def test_a_capped_listing_only_counts_as_truncated_when_the_window_might_extend_past_it() -> None:
+    old_tail = [
+        {"session_key": f"probe:x:{i}", "status": "completed", "finished_at": NOW - 30 * 86400, "cost_usd": 0.1}
+        for i in range(200)
+    ]
+    r = cost_report.compute(None, None, None, old_tail, hours=168, now=NOW)
+    assert r["investigator"]["listing_truncated"] is False, (
+        "200 rows, but the oldest is a month old: the week is fully covered"
+    )
+    fresh = [
+        {"session_key": f"probe:y:{i}", "status": "completed", "finished_at": NOW - 60 * i, "cost_usd": 0.1}
+        for i in range(200)
+    ]
+    assert cost_report.compute(None, None, None, fresh, hours=168, now=NOW)["investigator"]["listing_truncated"] is True
