@@ -663,6 +663,7 @@ function waterfallHtml(w) {
     const width = Math.max((100 * (i.end - i.start)) / span, 0.4).toFixed(2);
     const text = i.kind === "model"
       ? `${i.name} · ${fmtMs(i.duration_ms)}` +
+        (i.success === false ? ` · failed${i.status_code ? " " + i.status_code : ""}` : "") +
         (i.cost_usd != null ? ` · $${Number(i.cost_usd).toFixed(4)}` : "") +
         (i.input_tokens != null ? ` · in ${fmtTok(i.input_tokens)}` : "") +
         (i.output_tokens != null ? ` · out ${fmtTok(i.output_tokens)}` : "") +

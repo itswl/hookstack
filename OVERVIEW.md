@@ -206,6 +206,16 @@ transcript — all of it here, with the session it belongs to.
 
 ![audit view: every tool call in every run, subagents included, newest first](docs/img/hookprobe-audit.png)
 
+And where the time went. The CLI reports every model call and tool result to
+the service itself (nothing else needs deploying), and the run's page draws
+them on one axis: model calls in blue with their duration, tokens and cost,
+tool calls in amber, a failed call in red with its status code. The run below
+spent 48 of its 217 seconds waiting on the model and 172 waiting on a
+subagent it had spawned — and made one call to a model alias the gateway did
+not route, which the waterfall surfaced before anyone read a log.
+
+![the waterfall: model and tool calls of one investigation on one time axis](docs/img/hookprobe-waterfall.png)
+
 Everything the agent accumulates is manageable from the page. The skills view
 lists every runbook (frontmatter description, files, modification time) and
 renders one in full when opened. The runbook in the shot below is a product of

@@ -118,6 +118,8 @@ harness — the part no bill itemises. `GET /v1/runs/{key}/telemetry` is the
 same shape as JSON, and the run's `/audit` record carries the totals. Nothing
 has to be deployed beside the service to see it.
 
+![the waterfall under a finished run: ten model calls, ten tool calls, 48 seconds of 217 waiting on the model, one failed call marked, and a 172-second wait on a subagent](../../docs/img/hookprobe-waterfall.png)
+
 Three things about that record. Only the CLI this service launched can write
 it — the subprocess carries a per-process header the receiver checks, and
 events are addressed to a run by the `hookstack.session_key` attribute below,

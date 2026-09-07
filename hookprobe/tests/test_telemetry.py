@@ -97,13 +97,32 @@ def _run_events(key: str) -> dict[str, Any]:
             "user.email": "someone@example.com",
             "user.id": "u-1",
         },
+        # The CLI reports no duration on tool_result; the decision that allowed the
+        # call, 900 ms earlier under the same tool_use_id, is what the waterfall
+        # measures from.
+        {
+            "ts": NOW + 2.1,
+            "event.name": "tool_decision",
+            "tool_name": "Bash",
+            "tool_use_id": "call_1",
+            "decision": "accept",
+            "source": "config",
+        },
         {
             "ts": NOW + 3.0,
             "event.name": "tool_result",
             "tool_name": "Bash",
-            "duration_ms": 900,
+            "tool_use_id": "call_1",
             "success": "true",
             "tool_result": "root 0.0 ... very long output that must not be kept",
+        },
+        {
+            "ts": NOW + 4.0,
+            "event.name": "api_error",
+            "model": "claude-opus-5[1m]",
+            "duration_ms": 1260,
+            "status_code": 503,
+            "error": "No available channel for model claude-opus-5 under group default",
         },
         {
             "ts": NOW + 5.5,
@@ -133,7 +152,7 @@ def test_the_receiver_takes_nothing_without_the_process_header(tmp_path) -> None
         "the service's bearer token is not the CLI's credential; the two must not be interchangeable"
     )
     ok = client.post("/otel/v1/logs", json=body, headers={telemetry.INGEST_HEADER: telemetry.INGEST_TOKEN})
-    assert ok.status_code == 200 and ok.json()["accepted"] == 4
+    assert ok.status_code == 200 and ok.json()["accepted"] == 6
 
 
 def test_events_are_kept_as_numbers_and_names_never_text(tmp_path) -> None:
@@ -141,13 +160,20 @@ def test_events_are_kept_as_numbers_and_names_never_text(tmp_path) -> None:
     key = _start(client)
     client.post("/otel/v1/logs", json=_run_events(key), headers={telemetry.INGEST_HEADER: telemetry.INGEST_TOKEN})
     lines = telemetry.read(tmp_path, key)
-    assert [line["name"] for line in lines] == ["api_request", "tool_result", "api_request", "user_prompt"]
+    assert [line["name"] for line in lines] == [
+        "api_request",
+        "tool_decision",
+        "tool_result",
+        "api_error",
+        "api_request",
+        "user_prompt",
+    ]
     first = lines[0]["attrs"]
     assert first["model"] == "gpt-5.6-luna" and first["duration_ms"] == 1800 and first["cost_usd"] == 0.12
     assert first["input_tokens"] == 25853 and first["cache_read_tokens"] == 20000
     assert "user.email" not in first and "user.id" not in first, "the account identity is dropped"
-    assert "tool_result" not in lines[1]["attrs"], "tool output is dropped"
-    assert "prompt" not in lines[3]["attrs"] and lines[3]["attrs"]["prompt_length"] == 300, (
+    assert "tool_result" not in lines[2]["attrs"], "tool output is dropped"
+    assert "prompt" not in lines[5]["attrs"] and lines[5]["attrs"]["prompt_length"] == 300, (
         "the prompt text goes, its length stays"
     )
     raw = telemetry.path_for(tmp_path, key).read_text()
@@ -159,7 +185,7 @@ def test_an_unknown_run_gets_no_file(tmp_path) -> None:
     r = client.post(
         "/otel/v1/logs", json=_run_events("probe:forged:999"), headers={telemetry.INGEST_HEADER: telemetry.INGEST_TOKEN}
     )
-    assert r.status_code == 200 and (r.json()["accepted"], r.json()["dropped"]) == (0, 4)
+    assert r.status_code == 200 and (r.json()["accepted"], r.json()["dropped"]) == (0, 6)
     assert not telemetry.path_for(tmp_path, "probe:forged:999").exists()
     assert not telemetry.telemetry_dir(tmp_path).exists() or not any(telemetry.telemetry_dir(tmp_path).iterdir())
 
@@ -172,11 +198,16 @@ def test_the_waterfall_puts_model_and_tool_calls_on_one_axis(tmp_path) -> None:
     assert r.status_code == 200
     body = r.json()
     items = body["waterfall"]
-    assert [i["kind"] for i in items] == ["model", "tool", "model"]
+    assert [i["kind"] for i in items] == ["model", "tool", "model", "model"]
     assert items[0]["start"] == round(NOW + 2.0 - 1.8, 3) and items[0]["end"] == NOW + 2.0
     assert items[1]["name"] == "Bash" and items[1]["success"] is True
+    assert items[1]["duration_ms"] == 900 and items[1]["start"] == round(NOW + 2.1, 3), (
+        "a tool's wall time is decision → result, since the CLI reports no duration on the result"
+    )
+    assert items[2]["success"] is False and items[2]["status_code"] == 503 and items[2]["name"] == "claude-opus-5[1m]"
     s = body["summary"]
-    assert s["model_calls"] == 2 and s["model_ms"] == 3800 and s["tool_calls"] == 1 and s["tool_ms"] == 900
+    assert s["model_calls"] == 2 and s["model_ms"] == 3800 + 1260 and s["tool_calls"] == 1 and s["tool_ms"] == 900
+    assert s["api_errors"] == 1
     assert s["cost_usd"] == 0.2 and s["models"]["gpt-5.6-luna"]["calls"] == 2
     assert s["span_s"] == round((NOW + 5.5) - (NOW + 2.0 - 1.8), 3)
     assert (

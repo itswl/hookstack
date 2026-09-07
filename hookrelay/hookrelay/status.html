@@ -157,7 +157,7 @@
   /* the chain's hops as a bar: each segment is the wait before that hop, sized to the chain */
   .tl-bars { display: flex; height: 4px; margin: 5px 0 0 16px; border-radius: 2px; overflow: hidden; background: rgba(255,255,255,.05); }
   .tl-seg { height: 100%; background: var(--accent); opacity: .7; }
-  .tl-seg:nth-child(even) { background: var(--amber); }
+  .tl-seg:nth-child(even) { background: var(--warn); }
   .mini .seg { font-family: var(--mono); color: var(--muted); }
   .mini .seg b { color: var(--text); font-weight: 500; }
   .mini .arrow { color: var(--muted); opacity: .7; }
@@ -656,9 +656,10 @@
         (h.cost_usd ? ' <span class="cost">' + esc(money(h.cost_usd)) + "</span>" : "") + "</span>";
     }).join("");
     // The same hops as a bar, so a long wait for the report reads at a glance.
-    var span = hops.length > 1 ? (Date.parse(hops[hops.length - 1].at) - Date.parse(t0)) : 0;
+    // `at` is epoch seconds, like everything else on this page (see rel()).
+    var span = hops.length > 1 ? (Number(hops[hops.length - 1].at) - Number(t0)) : 0;
     var bars = span > 0 ? '<div class="tl-bars" title="' + esc(rel(t0, hops[hops.length - 1].at)) + ' end to end">' + hops.slice(1).map(function (h, i) {
-      var w = Math.max(1, Math.round(100 * (Date.parse(h.at) - Date.parse(hops[i].at)) / span));
+      var w = Math.max(1, Math.round(100 * (Number(h.at) - Number(hops[i].at)) / span));
       return '<span class="tl-seg" style="width:' + w + '%" title="' + esc(h.door) + ' ' + esc(rel(t0, h.at)) + '"></span>';
     }).join("") + "</div>" : "";
     var rows = hops.map(function (h) {

@@ -342,6 +342,16 @@ def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
     cost = 0.0
     model_ms = 0
     tool_ms = 0
+    # The CLI's tool_result carries no duration; its tool_decision does carry the
+    # moment the call was allowed, under the same tool_use_id. The distance
+    # between the two is the tool's wall time, hooks included — which is what a
+    # person waiting on the run experienced.
+    decided_at: dict[str, float] = {}
+    for line in lines:
+        if line.get("kind") == "event" and line.get("name") == "tool_decision":
+            use_id = str((line.get("attrs") or {}).get("tool_use_id") or "")
+            if use_id and use_id not in decided_at:
+                decided_at[use_id] = float(line.get("ts") or 0.0)
     for line in lines:
         if line.get("kind") != "event":
             continue
@@ -353,8 +363,29 @@ def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
             duration_ms = int(duration) if duration is not None else 0
         except (TypeError, ValueError):
             duration_ms = 0
+        if name == "tool_result" and duration_ms == 0:
+            decided = decided_at.get(str(attrs.get("tool_use_id") or ""))
+            if decided is not None and end >= decided:
+                duration_ms = int(round((end - decided) * 1000))
         start = end - duration_ms / 1000.0
-        if name == "api_request":
+        if name == "api_error":
+            # A call that failed still took its time and belongs on the axis,
+            # marked; the retry that followed is its own api_request.
+            model = str(attrs.get("model") or "model")
+            items.append(
+                {
+                    "kind": "model",
+                    "name": model,
+                    "start": round(start, 3),
+                    "end": round(end, 3),
+                    "duration_ms": duration_ms,
+                    "success": False,
+                    "status_code": attrs.get("status_code"),
+                    "error": str(attrs.get("error") or "")[:120],
+                }
+            )
+            model_ms += duration_ms
+        elif name == "api_request":
             model = str(attrs.get("model") or "model")
             item = {
                 "kind": "model",
@@ -397,7 +428,8 @@ def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "waterfall": items,
         "summary": {
-            "model_calls": sum(1 for i in items if i["kind"] == "model"),
+            # Calls that were answered; the failed ones are counted beside them.
+            "model_calls": sum(1 for i in items if i["kind"] == "model" and i.get("success") is not False),
             "model_ms": model_ms,
             "tool_calls": sum(1 for i in items if i["kind"] == "tool"),
             "tool_ms": tool_ms,
