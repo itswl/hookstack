@@ -160,7 +160,11 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/json}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
-      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
+      # Fixed identity rather than a shared variable: deployment, service, node.
+      # The run stamps its pipe key beside these at start (engine._subprocess_env),
+      # so one Grafana filter on an event id returns every model call of that
+      # operation. Set OTEL_RESOURCE_ATTRIBUTES_EXTRA in .env for anything more.
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=shadow,service.name=hookprobe,hookstack.node=probe${OTEL_RESOURCE_ATTRIBUTES_EXTRA:-}
       OTEL_METRIC_EXPORT_INTERVAL: ${OTEL_METRIC_EXPORT_INTERVAL:-}
       # Content redaction is the CLI's own (<REDACTED>), not this repository's,
       # and it is five independent switches. Measured on 2.1.229: responses=1

@@ -305,6 +305,31 @@ def _system_prompt_append(settings: Settings) -> str:
         return ""
 
 
+def _otel_value(value: str) -> str:
+    """A W3C-baggage-safe attribute value: no separators, no whitespace."""
+    return "".join("_" if ch in ",;= \t\n" else ch for ch in value)[:200]
+
+
+def _resource_attributes(inherited: str, session_key: str) -> str:
+    """The container's static attributes plus this run's pipe key.
+
+    `probe:watch:111` → `hookstack.session_key=probe:watch:111,hookstack.event_id=111`;
+    a patrol key such as `patrol:self-review:2026-09-04` carries no event id and
+    gets only the first. Anything the operator already set on the container —
+    service.namespace, service.name, hookstack.node — stays in front.
+    """
+    parts = [
+        p
+        for p in (inherited or "").split(",")
+        if p.strip() and not p.startswith("hookstack.session_key=") and not p.startswith("hookstack.event_id=")
+    ]
+    parts.append(f"hookstack.session_key={_otel_value(session_key)}")
+    tail = session_key.rsplit(":", 1)[-1]
+    if tail.isdigit():
+        parts.append(f"hookstack.event_id={tail}")
+    return ",".join(parts)
+
+
 def _audit_hook(audit_dir: Path, session_key: str) -> Callable[..., Any]:
     """PostToolUse flight recorder: one JSONL line per tool call, per day.
 
@@ -506,14 +531,30 @@ class ClaudeAgentEngine:
         "WW_RELAY_SECRET",
     )
 
-    def _subprocess_env(self) -> dict[str, str]:
+    def _subprocess_env(self, session_key: str = "") -> dict[str, str]:
         """The env overrides for the agent's CLI subprocess: per-command
         deadlines, plus the service's own secrets blanked so a Bash step (or an
         injected instruction that reaches one) cannot read them out of the
-        environment. See _SECRETS_WITHHELD_FROM_AGENT for what and why."""
+        environment. See _SECRETS_WITHHELD_FROM_AGENT for what and why.
+
+        And the run's identity, stamped onto its telemetry. The CLI emits one
+        OpenTelemetry event per model call, keyed by its own session UUID; the
+        pipe keys everything by event id; joining the two took a person and two
+        lookups. So every event this run emits carries the pipe's key as a
+        resource attribute — `hookstack.session_key`, and `hookstack.event_id`
+        when the key embeds one — and a Grafana filter on one event id returns
+        every model call of that operation across every node that worked on it.
+        The container's own attributes (deployment, service, node) are kept in
+        front; the SDK REPLACES the inherited variable with this one, so the
+        static half has to be carried through here or it would be lost.
+        """
         env = self._engine_env()
         for name in self._SECRETS_WITHHELD_FROM_AGENT:
             env[name] = ""
+        if session_key:
+            env["OTEL_RESOURCE_ATTRIBUTES"] = _resource_attributes(
+                os.environ.get("OTEL_RESOURCE_ATTRIBUTES", ""), session_key
+            )
         return env
 
     def describe_inputs(self, *, resume: str | None = None) -> dict[str, Any]:
@@ -680,9 +721,9 @@ class ClaudeAgentEngine:
                     ),
                 ],
             },
-            # Per-command deadlines plus the service secrets blanked; see
-            # _subprocess_env and _SECRETS_WITHHELD_FROM_AGENT.
-            env=self._subprocess_env(),
+            # Per-command deadlines, the service secrets blanked, and this run's
+            # pipe key on its telemetry; see _subprocess_env.
+            env=self._subprocess_env(session_key),
             # Follow-up turns reopen the original investigation with its full
             # context (transcripts live under $HOME/.claude — keep that on the
             # persistent volume).

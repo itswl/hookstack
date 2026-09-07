@@ -126,6 +126,19 @@ investigation was observed spending on **two** models — a fast one for cheap
 turns and the main one for the reasoning — while the run's own total is a single
 number. Anyone re-pricing usage needs both names.
 
+### Who sent it, and which operation it belongs to
+
+Every event carries resource attributes in three layers, set per container in
+the compose file rather than from one shared variable (three probes on one image
+would otherwise be indistinguishable): `service.namespace` is the deployment
+(`work`, `shadow`), `service.name` the component (`hookprobe`), `hookstack.node`
+the instance (`watch`, `plan`, `work`, `probe`). At the start of each run the
+engine adds the pipe's key beside them — `hookstack.session_key=probe:watch:111`
+and `hookstack.event_id=111` when the key embeds one — so a filter on one event
+id returns every model call of that operation across every node that worked on
+it, the same key `/timeline` groups the chain by. Patrol runs carry a session key
+and no event id; they are their own origin.
+
 ### What is redacted, and by whom
 
 The CLI substitutes `<REDACTED>` for content in these events — nothing in this

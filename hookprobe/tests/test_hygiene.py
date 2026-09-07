@@ -174,3 +174,33 @@ def test_service_secrets_are_withheld_from_the_agent_subprocess(tmp_path: Path) 
     assert "HOOKPROBE_TOKEN" not in env
     # The deadlines still ride alongside the scrub.
     assert env["BASH_DEFAULT_TIMEOUT_MS"] == "30000"
+
+
+def test_a_run_stamps_the_pipe_key_onto_its_telemetry(tmp_path, monkeypatch) -> None:
+    """The join a person used to do by hand — CLI session UUID → run record →
+    pipe event id — is now an attribute on every event the run emits. The
+    container's own identity stays in front, because the SDK replaces the
+    inherited variable rather than merging it."""
+    from hookprobe.engine import ClaudeAgentEngine, _resource_attributes
+    from tests.helpers import make_settings
+
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "service.namespace=work,service.name=hookprobe,hookstack.node=watch")
+    env = ClaudeAgentEngine(make_settings(tmp_path))._subprocess_env("probe:watch:111")
+    assert env["OTEL_RESOURCE_ATTRIBUTES"] == (
+        "service.namespace=work,service.name=hookprobe,hookstack.node=watch,"
+        "hookstack.session_key=probe:watch:111,hookstack.event_id=111"
+    )
+    # No inherited attributes: just the stamps. A patrol key has no event id.
+    assert (
+        _resource_attributes("", "patrol:self-review:2026-09-04")
+        == "hookstack.session_key=patrol:self-review:2026-09-04"
+    )
+    # Separators in a key cannot break the attribute list.
+    assert _resource_attributes("", "odd,key=x") == "hookstack.session_key=odd_key_x"
+    # Re-stamping replaces, never accumulates.
+    assert _resource_attributes(
+        "hookstack.node=plan,hookstack.session_key=old,hookstack.event_id=1", "probe:plan:2"
+    ) == ("hookstack.node=plan,hookstack.session_key=probe:plan:2,hookstack.event_id=2")
+    # Without a session key nothing about telemetry is touched.
+    monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
+    assert "OTEL_RESOURCE_ATTRIBUTES" not in ClaudeAgentEngine(make_settings(tmp_path))._subprocess_env()

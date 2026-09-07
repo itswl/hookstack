@@ -154,6 +154,10 @@ services:
     # secret one `printenv` away from an agent that runs arbitrary bash. The
     # block below names only what this service reads.
     environment:
+      # Who this is, on every telemetry event it emits: deployment, service,
+      # node. Three probes on one image are indistinguishable without it, and
+      # the run adds its pipe key at start (engine._subprocess_env).
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=plan
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
@@ -284,6 +288,10 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
+      # Who this is, on every telemetry event it emits: deployment, service,
+      # node. Three probes on one image are indistinguishable without it, and
+      # the run adds its pipe key at start (engine._subprocess_env).
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=watch
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
@@ -437,6 +445,10 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
+      # Who this is, on every telemetry event it emits: deployment, service,
+      # node. Three probes on one image are indistinguishable without it, and
+      # the run adds its pipe key at start (engine._subprocess_env).
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=work
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
