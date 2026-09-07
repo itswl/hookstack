@@ -78,6 +78,24 @@ def _run_key(hop: dict, record: dict) -> str | None:
     return None
 
 
+def _startup_posture(sp: object) -> str:
+    if not isinstance(sp, dict):
+        return "not recorded"
+    kube, aws = sp.get("kube") or {}, sp.get("aws") or {}
+    bits = [f"verdict `{sp.get('verdict')}`", _when(sp.get("checked_at"))]
+    if kube.get("present"):
+        bits.append(
+            f"kube: {len(kube.get('mutating') or [])} mutating rule(s)"
+            + (f", {len(kube['errors'])} unanswered" if kube.get("errors") else "")
+        )
+    if aws.get("present"):
+        bits.append(
+            f"aws `{aws.get('identity') or '?'}`: {len(aws.get('allowed') or [])} dangerous action(s) allowed"
+            + (" (unverifiable)" if aws.get("unverifiable") else "")
+        )
+    return " · ".join(bits)
+
+
 def render(record: dict, runs: dict[str, dict | None]) -> str:
     hops = record.get("hops") or []
     totals = record.get("totals") or {}
@@ -155,6 +173,7 @@ def render(record: dict, runs: dict[str, dict | None]) -> str:
             "",
             f"- **Status**: {run.get('status')} · **Model**: `{run.get('model')}` · **Run record cost**: {_money(run.get('cost_usd'))} (the pipe's per-hop costs above are what was billed)",
             f"- **Posture**: {posture_line}",
+            f"- **Credential check at startup**: {_startup_posture(run.get('startup_posture'))}",
             f"- **Ruling**: {(run.get('ruling') or {}).get('verdict') or 'none'}",
             f"- **Tool calls**: {len(run.get('tool_calls') or [])} · **Refused by the guards**: {len(run.get('denied') or [])}",
         ]

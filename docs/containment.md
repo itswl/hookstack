@@ -12,6 +12,13 @@ written down gets trusted for things it never claimed — the way a unit test
 proving a shape check refuses a string a developer typed gets read as proof that
 a real model cannot be steered into emitting a harmful one.
 
+> **Measured, not only declared (2026-09-07).** The read-only boundary is the one boundary whose truth lives outside this
+> repository — in a kubeconfig and an AWS profile an operator mounted. Every runner now checks them at startup
+> (`hookprobe/posture.py`): what `kubectl auth can-i` and `iam simulate-principal-policy` say the identity may do, against
+> the posture it declares. Declared `readonly` with credentials that can mutate refuses to start (`HOOKPROBE_POSTURE_CHECK=enforce`);
+> a `danger-only` runner records its blast radius; an identity that cannot be asked is reported *unverifiable*, never confirmed.
+> The measurement is served on `GET /v1/posture` and cited in every run's audit record.
+
 ## The boundaries
 
 | Boundary | Stops | Does NOT stop | Enforced in |

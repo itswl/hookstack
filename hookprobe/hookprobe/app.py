@@ -39,7 +39,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from hookprobe import __version__, automation, events, handoff, library, ops, remediation
+from hookprobe import __version__, automation, events, handoff, library, ops, posture, remediation
 from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
@@ -155,6 +155,9 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         # A restart must not orphan the loop: runs a previous process left
         # mid-flight settle as failures that report themselves, and an approved
         # procedure it died in the middle of stops claiming to be running.
+        # Before the first run: are the credentials as narrow as the posture
+        # says? Under enforce a wider-than-declared runner does not come up.
+        await posture.on_startup(settings.workdir, settings.bash_guard, settings.posture_check)
         service.sweep_orphans()
         service.sweep_interrupted_remediations()
 
@@ -357,6 +360,15 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         return {**asdict(run), "inputs_now": _prompt_digests_now(settings)}
 
+    @app.get("/v1/posture", dependencies=[Depends(require_token)])
+    async def posture_record() -> dict[str, Any]:
+        """What the credentials could do when this runner started, measured
+        against the declared posture — the record behind "this ran read-only"."""
+        record = posture.read(settings.workdir)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no posture check recorded")
+        return record
+
     @app.get("/v1/runs/{session_key}/audit", dependencies=[Depends(require_token)])
     async def run_audit(session_key: str) -> dict[str, Any]:
         """The accountability record of one run: what posture it held, what it
@@ -388,6 +400,8 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             "meta": run.meta,
             "ruling": {"verdict": run.ruling, "by": run.ruled_by, "at": run.ruled_at},
             "posture": (run.inputs or {}).get("posture"),
+            # The startup measurement behind that declaration, as it stood most recently.
+            "startup_posture": posture.read(settings.workdir),
             "inputs": run.inputs,
             "tool_calls": [x for x in lines if not x.get("denied")],
             "denied": [x for x in lines if x.get("denied")],

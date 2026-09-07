@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (44)
+## Environment (45)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -55,8 +55,9 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_MCP_TOOLS` | *(empty)* | Which MCP tools this instance may actually call, as a closed set — mcp__chat__chat_search_messages or mcp__chat__* for a whole server |
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
 | `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
+| `HOOKPROBE_POSTURE_CHECK` | *(empty)* | Whether the credentials are checked against that declaration at startup (posture.py): enforce refuses to start a runner declared readonly whose kubeconfig or AWS identity can mutat… |
 
-## Routes (52)
+## Routes (53)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -86,6 +87,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/v1/memory/suggestions` | Facts investigations proposed for the environment memory |
 | POST | `/v1/memory/suggestions/{suggestion_id}/accept` | Adopt one queued line into CLAUDE.md under its own heading |
 | POST | `/v1/memory/suggestions/{suggestion_id}/dismiss` | Drop one queued line; nothing is written to memory |
+| GET | `/v1/posture` | What the credentials could do when this runner started, measured against the declared posture — the record behind "this ran read-only" |
 | GET | `/v1/remediations` | Open remediation proposals, newest first |
 | POST | `/v1/remediations/{proposal_id}/approve` | The one click that makes anything run |
 | POST | `/v1/remediations/{proposal_id}/reject` | Refuse a parked proposal; it keeps its file, marked rejected |

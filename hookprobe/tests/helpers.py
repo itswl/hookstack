@@ -65,6 +65,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "handoff_url": "",
         "handoff_secret": "",
         "bash_guard": "readonly",
+        "posture_check": "off",
         "retention_days": 0,
         "alarm_url": "",
         "alarm_min_interval_seconds": 600,

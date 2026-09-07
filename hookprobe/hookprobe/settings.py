@@ -129,6 +129,12 @@ class Settings:
     # This is not what bounds such a runner. The credentials mounted into it
     # are; see guard.py for why an allowlist would be the wrong shape here.
     bash_guard: str
+    # Whether the credentials are checked against that declaration at startup
+    # (posture.py): `enforce` refuses to start a runner declared readonly whose
+    # kubeconfig or AWS identity can mutate, `warn` starts and says so, `off`
+    # skips the check. A declared boundary nobody measures is a README, so the
+    # default is enforce; a writing posture (danger-only) is only ever recorded.
+    posture_check: str
 
     # Loop hygiene (hygiene.py), all advisory — the security boundary stays the
     # bash guard plus read-only credentials.
@@ -301,6 +307,7 @@ class Settings:
             handoff_url=(os.environ.get("HOOKPROBE_HANDOFF_URL") or "").strip(),
             handoff_secret=os.environ.get("HOOKPROBE_HANDOFF_SECRET") or "",
             bash_guard=(os.environ.get("HOOKPROBE_BASH_GUARD") or "").strip().lower() or "readonly",
+            posture_check=(os.environ.get("HOOKPROBE_POSTURE_CHECK") or "").strip().lower() or "enforce",
             bash_timeout_ms=max(0, _int("HOOKPROBE_BASH_TIMEOUT_MS", 120000)),
             bash_max_timeout_ms=max(0, _int("HOOKPROBE_BASH_MAX_TIMEOUT_MS", 600000)),
             auto_distill_max=max(0, _int("HOOKPROBE_AUTO_DISTILL_MAX", 0)),
