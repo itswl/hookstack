@@ -68,7 +68,7 @@ a source that already judged its own signal takes a terminal route instead:
 
 ![hookrelay's timeline: one chain per alert — signal, verdict, report — with costs, one incident grouped, and an audit record opened](img/hookrelay-timeline.png)
 
-![hookjudge's status page: fifteen verdicts, every free route exercised, 53% paid](img/hookjudge-status.png)
+![hookjudge's status page: eight verdicts, every free route exercised, half paid](img/hookjudge-status.png)
 
 Every screenshot above comes from one local Docker run started from nothing — not mockups.
 

@@ -41,6 +41,9 @@ services:
       # (DingTalk, WeCom). Loopback is right for the demo; in a real deployment
       # this is the address an operator's browser can actually reach.
       HOOKRELAY_PUBLIC_URL: http://127.0.0.1:8100
+      # Where the investigator's console is, as YOUR browser reaches it, so a
+      # hop in the timeline links to the investigation it names.
+      HOOKRELAY_UI_LINKS: ${HOOKRELAY_UI_LINKS:-probe-notify=http://127.0.0.1:8088/ui}
     volumes:
       # Checked in and mounted read-only, so `up` needs no setup step. Point
       # HOOKRELAY_CONFIG at /data/config.yaml to use your own instead.
@@ -150,6 +153,8 @@ services:
     environment:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
+      # The pipe's board as your browser reaches it; a run links to its chain there.
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       # Budget breaker for the autonomous door: window spend >= budget means
       # new escalations are refused (with a report card saying why). 0 = off.

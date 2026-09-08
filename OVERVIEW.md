@@ -21,12 +21,13 @@ three live in this repository, each entirely self-contained (its own package,
 tests, gate, Dockerfile and CI), and together they form a complete alert
 handling pipeline.
 
-Every screenshot below comes from one local Docker run on 2026-09-07, started
+Every screenshot below comes from one local Docker run on 2026-09-08, started
 from nothing (`docker compose down -v`, then hookstack up with
-`--profile probe`) — not mockups: fifteen demo alerts came in through two
-doors (a bare webhook and an Alertmanager-shaped one), fifteen verdicts and
-five deep investigations landed in the same ledger, and every report came back
-to the pipe as the third hop of the alert's own chain. The investigator ran a
+`--profile probe`) — not mockups: eight demo alerts came in through two doors
+(a bare webhook and an Alertmanager-shaped one), eight verdicts and five deep
+investigations landed in the same ledger, every report came back to the pipe
+as the third hop of the alert's own chain, and every card reached the sink
+through the chat bridge, rendered from the pipe's card model. The investigator ran a
 GPT-class model (`gpt-5.6-luna`) through a gateway speaking the Anthropic
 dialect — the engine is not provider-locked; one `ANTHROPIC_BASE_URL` plus a
 few model alias mappings is the whole switch. Steps are in [STACK.md](STACK.md)
@@ -77,13 +78,14 @@ never sent off to be processed again. Every message is accounted for: queued,
 delivered and dead-lettered are visible at a glance on the ledger page, and
 any event opens into its full decision chain.
 
-The screenshot below is the ledger after the four demo alerts — the whole
+The screenshot below is the ledger after the eight demo alerts — the whole
 hookstack loop on one page. Each front-door event is routed, in one decision, to
-both `to-judge` and `to-probe` (#1–#8: four alerts and the four verdicts that
-came back within seconds); minutes later the investigators' reports return
-through `probe-notify`, become card models, and are delivered to
-`ops-feishu` (the bridge renders the Feishu card) and `ops-dingtalk` (the plugin's markdown) (#9–#12) — 24 deliveries, all sent, nothing
-queued, nothing dead. The ledger also keeps **the bytes of both directions**:
+both `to-judge` and `to-probe` (#1–#16: eight alerts and the eight verdicts
+that came back within a second each); minutes later the five investigators'
+reports return through `probe-notify`, become card models, and are delivered
+to `ops-feishu` (the bridge renders the Feishu card) and `ops-dingtalk` (the
+plugin's markdown) (#17–#21) — 42 deliveries, all sent, nothing queued,
+nothing dead. The ledger also keeps **the bytes of both directions**:
 the payload as received has always been stored, and now the exact body of each
 delivery is kept too (body only — never the headers, which carry signatures
 and tokens), so `/trace/{id}` answers a receiver's dispute by reading the
@@ -115,21 +117,22 @@ same condition restated re-serves the last AI verdict, free) → **ai** (a real,
 paid model call) → **rule** (the keyword floor). The saving does not come from
 a cheaper model; it comes from most events never reaching `ai` at all.
 
-Below is the verdict ledger for those fifteen alerts, judged by the stub model
+Below is the verdict ledger for those eight alerts, judged by the stub model
 so the shape reproduces with no key: the payment-gateway alert paid for `ai`
 the first time and took `reuse` for free when the same condition was restated;
-six instances of one Alertmanager rule cost one `ai` call and four
-`rule-reuse` answers, the rule's last AI verdict answering again; the recovery
-took `recovery` for free, inheriting its firing's verdict — 15 verdicts, 8
-paid, zero failed returns. The stub prices its tokens like a real model, so
-the ledger's $0.0021 is the shape of the bill rather than the bill; the point
-is that the saving is structural, not a property of one model. The page also
-shows what the judge disagrees with: every gateway alert arrived `high` from
-the platform and left `critical` from the judge, and the review tab puts the
-ten disagreements in one place with an export for labelling. If a verdict's
+two instances of one Alertmanager rule cost one `ai` call and one `rule-reuse`
+answer, the rule's last AI verdict answering again; both recoveries took
+`recovery` for free, inheriting their firings' verdicts — 8 verdicts, 4 paid,
+zero failed returns, and the five-route bar under the cards is that policy
+drawn. The stub prices its tokens like a real model, so the ledger's $0.001 is
+the shape of the bill rather than the bill; the point is that the saving is
+structural, not a property of one model. The page also shows what the judge
+disagrees with: every gateway alert arrived `high` from the platform and left
+`critical` from the judge, and the review tab puts the four disagreements in
+one place with an export for labelling. If a verdict's
 return dies for good, the self-alarm carries the news.
 
-![hookjudge status page: fifteen verdicts, every free route exercised, 53% paid](docs/img/hookjudge-status.png)
+![hookjudge status page: eight verdicts, every free route exercised, half paid](docs/img/hookjudge-status.png)
 
 ## hookprobe: the investigator
 
@@ -211,10 +214,10 @@ transcript — all of it here, with the session it belongs to.
 And where the time went. The CLI reports every model call and tool result to
 the service itself (nothing else needs deploying), and the run's page draws
 them on one axis: model calls in blue with their duration, tokens and cost,
-tool calls in amber, a failed call in red with its status code. The run below
-spent 48 of its 217 seconds waiting on the model and 172 waiting on a
-subagent it had spawned — and made one call to a model alias the gateway did
-not route, which the waterfall surfaced before anyone read a log.
+tool calls in amber, a failed call in red with its status code, one row per
+round. The run below took 29 seconds, 98% of them waiting on the model across
+five rounds; its two costliest calls were 76% of its $0.61, and the header
+says so before anyone reads the rows.
 
 ![the waterfall: model and tool calls of one investigation on one time axis](docs/img/hookprobe-waterfall.png)
 
@@ -223,7 +226,7 @@ lists every runbook (frontmatter description, files, modification time) and
 renders one in full when opened. The runbook in the shot below is a product of
 this very run: after the disk investigation finished, one press of *distil
 into a runbook draft* had the service — never the agent — write down the
-lookups the run actually made, twenty-two of them, as a case under the alert's
+lookups the run actually made, sixteen of them, as a case under the alert's
 name, with provenance and a revision history; the next disk alert opens with
 it loaded. The SKILL.md format is shared across the whole OpenClaw lineage, so
 a downloaded package installs by unzipping it into `.claude/skills/` and sits

@@ -389,7 +389,15 @@
 
   var uiLinks = {};   // door → the board that owns its sessions (HOOKRELAY_UI_LINKS)
   function render(data) {
-    uiLinks = data.ui_links || uiLinks;
+    // The timeline may have rendered before /status answered (two fetches, no
+    // order); when the addresses arrive or change, draw the chains again so a
+    // hop's link to its investigation is there on a direct #timeline load.
+    var links = data.ui_links || {};
+    if (JSON.stringify(links) !== JSON.stringify(uiLinks)) {
+      uiLinks = links;
+      lastTimelineSig = "";
+      if (document.querySelector('.tab[data-tab="timeline"]').classList.contains("active")) loadTimeline();
+    }
     document.getElementById("cQueued").textContent = data.queue.queued;
     document.getElementById("cSent").textContent = data.queue.sent;
     document.getElementById("cDead").textContent = data.queue.dead;
