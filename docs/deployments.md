@@ -119,15 +119,24 @@ platform id against the ledger to the chain and its investigation session
 the investigator continues its own engine session under the same read-only
 posture and answers back through `probe-notify` with `thread_root`, which the
 `to-me` channel turns into an in-thread reply. Three things have to be true
-on the host for this to work, none of them in this repository: the Lark app
-must be allowed to receive group messages (`im:message.group_msg:readonly` or
-`im:message:readonly`, plus `im:message.p2p_msg:readonly`, which the CLI lists
-as the event's requirement) and send as a bot, the `im.message.receive_v1`
-event must be enabled in the developer console, and the bot must be a member
-of the group. Then `.env`: `LARK_THREAD_SECRET` (the door and the bridge share
-it) and `HOOKPROBE_FOLLOW_UP_SENDERS` (who may spend a turn from chat; empty
-refuses everyone). The work deployment has no chat return path yet: its
-watcher posts to a custom-bot webhook, which cannot receive.
+on the host for this to work, none of them in this repository. The bridge needs
+a Lark app of its own: Lark allows one event long-connection per app, so an
+app shared with any other consumer means one of them never receives anything
+(2026-09-08: the bridge moved to a dedicated app for exactly this reason). That
+app must be allowed to receive the group messages that mention it
+(`im:message.group_at_msg:readonly`; `im:message.p2p_msg:readonly` is what the
+CLI lists for the event) and to send as a bot; a reply therefore has to
+**@-mention the bot** to reach the bridge, unless the operator also grants
+`im:message.group_msg:readonly`, which reads every group message. The
+`im.message.receive_v1` event must be enabled in the developer console, and
+the bot must be a member of the group — added by a person; no bot can add
+itself and the old app lacked the scope to add another. Then `.env`:
+`LARK_THREAD_SECRET` (the door and the bridge share it) and
+`HOOKPROBE_FOLLOW_UP_SENDERS` (who may spend a turn from chat; empty refuses
+everyone). Switching the bridge's app also means clearing the CLI config on
+its volume (`lark-cli config remove`); the entrypoint keeps an existing one.
+The work deployment has no chat return path yet: its watcher posts to a
+custom-bot webhook, which cannot receive.
 
 **Timer: host crontab, or a container.** The work deployment ships its own,
 after the host version could not read its own brief: macOS keeps `~/Documents`
