@@ -580,8 +580,6 @@ services:
       RELAY_ACTION_URL: http://hookrelay:8100/card-action
       RELAY_THREAD_URL: ${RELAY_THREAD_URL:-http://hookrelay:8100/hook/lark-thread}
       THREAD_SECRET: ${LARK_THREAD_SECRET:-}
-    volumes:
-      - work-lark-bridge-config:/config
     depends_on:
       - hookrelay
 
@@ -735,9 +733,6 @@ services:
 # Explicit rather than inherited: the two services find each other by service
 # name on this network, which is what work.yaml's http://probe-plan:8088 and
 # this file's http://hookrelay:8100 both depend on.
-volumes:
-  work-lark-bridge-config:
-
 networks:
   default:
     name: work_net

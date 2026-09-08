@@ -269,11 +269,6 @@ services:
       # docs/deployments.md. Unset RELAY_THREAD_URL and the bridge does not listen.
       RELAY_THREAD_URL: ${RELAY_THREAD_URL:-http://hookrelay:8100/hook/lark-thread}
       THREAD_SECRET: ${LARK_THREAD_SECRET:-}
-    volumes:
-      # lark-cli's credential file and event cursor. A named volume rather than
-      # a bind: nothing in here is worth reading from the host, and the
-      # credential is written from the environment at every start.
-      - lark-bridge-config:/config
     # No published port. Only the pipe beside it on hookstack_net can reach it.
     depends_on:
       - hookrelay
@@ -295,8 +290,6 @@ services:
     depends_on:
       - hookrelay
 
-volumes:
-  lark-bridge-config:
 
 networks:
   default:

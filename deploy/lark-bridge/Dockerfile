@@ -19,7 +19,8 @@ COPY bridge.py render.py .
 
 # lark-cli keeps its app credentials and its event cursor here; mounted so a
 # restart does not re-authenticate and re-subscribe from scratch.
-ENV LARK_CLI_HOME=/config
+# No LARK_CLI_HOME: lark-cli 1.0.88 ignores it and writes $HOME/.lark-cli.
+# Nothing it keeps there is worth carrying between containers — see the README.
 ENV BRIDGE_PORT=9100
 EXPOSE 9100
 

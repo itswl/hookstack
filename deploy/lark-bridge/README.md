@@ -128,7 +128,7 @@ without `im:chat.members:write_only` cannot add another.
 
 | variable | default | meaning |
 |---|---|---|
-| `LARK_APP_ID`, `LARK_APP_SECRET` | *(required in app mode)* | the app; written into lark-cli's config on the `/config` volume on first start — see *Switching apps* |
+| `LARK_APP_ID`, `LARK_APP_SECRET` | *(required in app mode)* | the app; the entrypoint writes them into lark-cli's config at first start of each container — see *Switching apps* |
 | `LARK_WEBHOOK_URL`, `LARK_WEBHOOK_SECRET` | *(empty = app mode)* | webhook mode: post rendered cards to this custom-bot URL, signed with the bot's secret if it has one |
 | `LARK_BRAND` | `lark` | `lark` or `feishu` |
 | `LARK_CHAT_ID` | *(required in app mode)* | the default chat: cards without `chat_id` go here, and replies from here are forwarded |
@@ -139,10 +139,21 @@ without `im:chat.members:write_only` cannot add another.
 | `THREAD_SECRET` | *(empty)* | signs message forwards for that door (`X-Hook-Timestamp`, `X-Hook-Signature` = hex HMAC-SHA256 over `"{ts}.{body}"`) — the door's `${LARK_THREAD_SECRET}` |
 | `BRIDGE_PORT` | `9100` | where the pipe posts cards |
 
-The image pins `@larksuite/cli` (`ARG LARK_CLI_VERSION`); lark-cli keeps its
-credentials and event cursor under `/config`, a named volume in both composes
-(`deploy/docker-compose.shadow.yml`, and the `bridge` profile of
-`deploy/docker-compose.work.yml`).
+The image pins `@larksuite/cli` (`ARG LARK_CLI_VERSION`).
+
+**The bridge keeps nothing.** lark-cli's state lives in the container's own
+writable layer and is rebuilt from the environment whenever the container is
+recreated. There used to be a `/config` named volume here and an
+`ENV LARK_CLI_HOME=/config` to point at it; on 2026-09-08 the volume was found
+**empty after weeks of running** — lark-cli 1.0.88 ignores `LARK_CLI_HOME` and
+writes `$HOME/.lark-cli` regardless. Both are gone rather than repointed,
+because what is in that directory is a credential the entrypoint re-derives
+from `LARK_APP_ID`/`LARK_APP_SECRET`, a 28-byte version-check cache, and a
+`bus.pid` / `bus.sock` / `bus.alive.lock` set belonging to the process that is
+running right now. There is no event cursor. Carrying the last three into a new
+container is not persistence, it is handing a fresh process the corpse of the
+old one's bus — the exact shape of "another event bus is already connected"
+this deployment spent a day chasing.
 
 ## Wire shapes
 
@@ -168,11 +179,14 @@ the way to prove the wiring from inside a deployment.
   version problem, not this container. Find and stop the holder, or give this
   bridge its own app. The bridge keeps retrying (60 s backoff) and takes the
   slot when it frees.
-- **Switching apps.** The entrypoint leaves an existing lark-cli config alone,
-  so changing `LARK_APP_ID` in `.env` is not enough: run
-  `docker exec <bridge> lark-cli config remove` (or drop the volume), then
-  recreate the container. Add the new bot to every served chat first, or cards
-  fail with `Bot/User can NOT be out of the chat` until it is.
+- **Switching apps.** Change `LARK_APP_ID` / `LARK_APP_SECRET` in `.env` and
+  **recreate** the container (`docker compose up -d`): a new container starts
+  with no config and the entrypoint writes the new app's. A bare
+  `docker restart` is not enough — it reuses the writable layer, where the old
+  config still is, and the entrypoint leaves an existing one alone; there,
+  `docker exec <bridge> lark-cli config remove` first. Add the new bot to every
+  served chat before either, or cards fail with `Bot/User can NOT be out of the
+  chat` until somebody does.
 - **Is the wiring right?** From the pipe's container, post a signed protocol
   card with `X-Hookstack-Dry-Run: 1`: a 200 with `rendered` proves the
   address, the secret and the renderer without a message reaching anyone.
