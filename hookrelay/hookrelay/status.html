@@ -84,6 +84,7 @@
   .hop { display: grid; grid-template-columns: 112px 48px 112px 1fr 64px auto; gap: 10px; align-items: center;
          padding: 6px 0; border-top: 1px solid var(--border-soft); font-size: 13px; }
   .hop .hopto { overflow-wrap: anywhere; color: var(--muted); }
+  .hop .hopacts { display: flex; gap: 4px; justify-content: flex-end; white-space: nowrap; }
   .chip { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 6px;
           border: 1px solid var(--border); color: var(--muted); }
   .chip.sent { color: var(--ok); }
@@ -686,8 +687,8 @@
         '<span class="esrc">' + esc(h.door) + "</span>" +
         '<span class="hopto">' + to + "</span>" +
         '<span class="eid">' + esc(h.cost_usd ? money(h.cost_usd) : "") + "</span>" +
-        (board ? '<a class="btn tiny" href="' + esc(board) + "#session=" + encodeURIComponent(h.session) + '" target="_blank" rel="noopener">investigation</a>' : "") +
-        '<button class="btn tiny" data-tl-trace="' + esc(h.id) + '">trace</button>' +
+        '<span class="hopacts">' + (board ? '<a class="btn tiny" href="' + esc(board) + "#session=" + encodeURIComponent(h.session) + '" target="_blank" rel="noopener">investigation</a>' : "") +
+        '<button class="btn tiny" data-tl-trace="' + esc(h.id) + '">trace</button></span>' +
         '</div><div class="compare" id="tl-cmp-' + esc(h.id) + '" style="display:none"></div>';
     }).join("");
     return '<details class="event ev' + (op ? "" : " quiet") + '" data-key="chain-' + esc(c.chain) + '">' +

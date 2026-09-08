@@ -50,10 +50,11 @@
   .hp th { color: var(--muted); font-weight: 600; }
   .hp code { border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; }
   .hp .muted-p { color: var(--muted); font-size: 12.5px; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); gap:12px; margin-bottom:22px; }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
   .card .label { color:var(--muted); font-size:12px; margin-bottom:4px; }
-  .card .value { font-size:26px; font-weight:650; font-family:var(--mono); }
+  .card .value { font-size:24px; font-weight:650; font-family:var(--mono); }
+  .card .value .of { display:block; font:var(--ui); font-size:12px; color:var(--muted); margin-top:2px; }
   h2 { font-size:13px; color:var(--muted); font-weight:600; letter-spacing:.06em;
        text-transform:uppercase; margin:26px 0 10px; }
   .row { background:var(--surface); border:1px solid var(--border); border-radius:10px;
@@ -249,6 +250,9 @@
   if (want === "help" || want === "review") document.querySelector('.tab[data-tab="' + want + '"]').click();
 
   var KEY = "hookjudge-read-token";
+  // "42 of 52" as a number with its denominator under it: the big figure is
+  // what changed, the small line is what it is out of.
+  function ofHtml(denominator) { return '<span class="of">of ' + esc(denominator) + "</span>"; }
   function esc(v) {
     return String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/</g,"&lt;")
       .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
@@ -314,16 +318,16 @@
       document.getElementById("cCost").textContent = "$" + s.cost;
       document.getElementById("cDead").textContent = s.returns.dead || 0;
       var ag = s.agreement || {};
-      document.getElementById("cAgree").textContent =
-        ag.agree_pct == null ? "–" : ag.agree_pct + "% of " + ag.compared;
+      document.getElementById("cAgree").innerHTML =
+        ag.agree_pct == null ? "–" : Math.round(ag.agree_pct) + "%" + ofHtml(ag.compared + " compared");
       // Attention, not spend. "verdicts 24h" has always BEEN the number of times
       // somebody was interrupted — these two say how much of it was repetition
       // and how much of it anyone said was worth it.
       var at = s.attention || {};
-      document.getElementById("cRepeat").textContent =
-        at.interruptions == null ? "–" : at.repeats + " of " + at.interruptions;
-      document.getElementById("cMattered").textContent =
-        at.ruled ? at.mattered + " of " + at.ruled : "–";
+      document.getElementById("cRepeat").innerHTML =
+        at.interruptions == null ? "–" : at.repeats + ofHtml(at.interruptions + " interruptions");
+      document.getElementById("cMattered").innerHTML =
+        at.ruled ? at.mattered + ofHtml(at.ruled + " ruled on") : "–";
       renderAttention(at.noisiest || []);
       renderRoutes(s.routes || {});
       var rows = d.recent || [];
