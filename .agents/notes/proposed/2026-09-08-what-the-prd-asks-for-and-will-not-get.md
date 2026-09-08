@@ -12,6 +12,16 @@ Four items from the PRD are **not** being built, decided by the operator on
 against production. They are written here so the next person to read the PRD
 finds the reason instead of re-deriving the feeling.
 
+## Why
+
+A PRD is a list of things somebody wants; a codebase is a list of things
+somebody will have to keep true. The four below were each checked against what
+exists and, where a number could settle it, against production — and each turned
+out to be either a second view of something already answered or a mechanism that
+would damage the measurement it appeared to serve. Writing that down is cheaper
+than deciding it twice, and a "no" with evidence behind it is worth more later
+than a silent omission.
+
 ## Session pause
 
 Not built. `stop` exists and ends a turn. For an alert investigator "pause" has
