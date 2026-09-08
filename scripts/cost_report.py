@@ -312,10 +312,18 @@ def render(r: dict[str, Any]) -> str:
                 f"- **A person's approval took**: {_dur(w['approval_wait_p50_seconds'])} (median of "
                 f"{w['approvals_answered']} answered)",
                 f"- **Repeated conditions**: {w['repeat_pct']}% of work re-fired at least once",
-                f"- **Survived**: {w['resumed']} interrupted by a restart, "
-                f"{w['resume_success_pct'] if w['resume_success_pct'] is not None else '—'}% of them still finished · "
-                f"{w['auto_retries']} provider blip{'' if w['auto_retries'] == 1 else 's'} retried automatically · "
-                f"{w['handed_to_a_person']} handed back to a person",
+                (
+                    "- **Survived**: nothing was interrupted, no provider blip needed retrying, "
+                    "and nothing was handed back to a person"
+                    if not (w["resumed"] or w["auto_retries"] or w["handed_to_a_person"])
+                    else (
+                        f"- **Survived**: {w['resumed']} interrupted by a restart, "
+                        f"{w['resume_success_pct'] if w['resume_success_pct'] is not None else '—'}% of those finished "
+                        f"anyway · {w['auto_retries']} provider blip"
+                        f"{'' if w['auto_retries'] == 1 else 's'} retried automatically · "
+                        f"{w['handed_to_a_person']} handed back to a person"
+                    )
+                ),
                 "",
             ]
 

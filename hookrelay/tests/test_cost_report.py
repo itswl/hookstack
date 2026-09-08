@@ -226,3 +226,34 @@ def test_the_work_section_is_absent_rather_than_zero_when_the_board_was_not_read
     assert "## The work" not in page, "a service that was not read gets no section, not a page of zeros"
     page = cost_report.render({"hours": 168, "generated_at": 0.0, "work": {"opened": 0}})
     assert "_No work opened in this window._" in page
+
+
+def test_a_quiet_week_reads_as_a_sentence_not_a_row_of_dashes():
+    """The first real render on production printed "0 interrupted by a restart,
+    —% of those finished anyway · 0 provider blips retried" — every number true
+    and the line unreadable. A week where nothing went wrong should say so."""
+    quiet = {
+        "opened": 1,
+        "completed": 1,
+        "completion_pct": 100.0,
+        "verified_pct": 0.0,
+        "closed_unattended": 0,
+        "closed_unattended_pct": 0.0,
+        "ended_without_answer_pct": 0.0,
+        "repeat_pct": 0.0,
+        "first_result_p50_seconds": 30.0,
+        "approval_wait_p50_seconds": None,
+        "approvals_answered": 0,
+        "resumed": 0,
+        "resume_success_pct": None,
+        "auto_retries": 0,
+        "handed_to_a_person": 0,
+    }
+    page = cost_report.render({"hours": 168, "generated_at": 0.0, "work": quiet})
+    assert "nothing was interrupted, no provider blip needed retrying" in page
+    assert "—%" not in page
+
+    busy = {**quiet, "resumed": 2, "resume_success_pct": 50.0, "auto_retries": 1, "handed_to_a_person": 3}
+    page = cost_report.render({"hours": 168, "generated_at": 0.0, "work": busy})
+    assert "2 interrupted by a restart, 50.0% of those finished anyway" in page
+    assert "1 provider blip retried" in page, "one blip is not one blips"
