@@ -32,6 +32,11 @@ jobs — receive, route, deliver, account — and a `feishu` channel pointed at
 | posts a top-level message mentioning nobody | nothing | — |
 | anything sent by a bot (the pipe's own replies included) | nothing | — |
 
+One topic is one investigator run and one engine session; each reply in it is
+another turn of that session, which is why follow-ups cost cents — the model
+and its exceptions are in
+[hookprobe/docs/operating.md](../../hookprobe/docs/operating.md#from-a-chat-thread-one-topic-one-run-one-engine-session).
+
 The bridge decides only by **structure** — reply or not, mention or not, which
 chat, which sender type. It never reads the text; it carries it. The text is
 read by the investigator, under the same read-only posture and guards as an

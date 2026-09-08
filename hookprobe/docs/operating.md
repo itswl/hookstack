@@ -136,6 +136,47 @@ Follow-ups run under the same guard posture and timeout clamps as first
 passes. A failed follow-up never erases the original answer — earlier finals
 are kept on the run record (`previous_texts`).
 
+### From a chat thread: one topic, one run, one engine session
+
+The same mechanism is what the chat uses, with the pipe and the bridge in
+between ([deploy/lark-bridge/README.md](../../deploy/lark-bridge/README.md)).
+The mapping is exactly this:
+
+- **A new topic is a new run is a new engine session.** A top-level
+  @-mention reaches the event door as `kind: brief` (or `task` on the work
+  deployment) with `fields.thread_root`; `service.start` creates the run
+  `probe:lark-thread:<event>`, the engine opens a fresh Claude Agent SDK
+  session, and when the run finishes its `engine_session_id` and the topic's
+  root are on the record. The first report is posted inside the topic.
+- **A reply in the topic is another turn in that session.** The pipe resolves
+  the reply's root to the run (through the report that carried the same
+  `thread_root`) and the door calls `continue_run`, which spawns the engine
+  with `resume=<engine_session_id>` — the first turn's tool output, evidence
+  and dead ends are all still in context. That is why a follow-up costs cents
+  and seconds where the first turn cost dollars and minutes: the context is
+  reused, and the provider's cache hit is typically above 95%.
+- **A reply under an alert card is the same thing** — the chain that card
+  belongs to carries an investigation session, and the reply continues it.
+- Everyone replying in one topic continues the same session and shares its
+  context, provided each sender is in `HOOKPROBE_FOLLOW_UP_SENDERS`.
+
+When a reply does **not** resume the session, on purpose, and says so in the
+pipe's record:
+
+| situation | what happens |
+|---|---|
+| the previous turn is still running | `busy` — nothing is queued or started; ask again when it has answered |
+| the run crashed before the SDK reported a session id | `skipped`: "left no session to continue" — open a new topic |
+| the run has answered 20 follow-ups already | `skipped` — a hard cap per run, so one thread cannot become an open-ended bill |
+| the same message id arrives again (the platform redelivers) | `already_done` — one message, one turn |
+| the engine transcript was pruned by `HOOKPROBE_RETENTION_DAYS` | `skipped`: "left no session to continue" — the run record survives, the context does not |
+| the sender is not on the allowlist | `skipped` — before anything else is looked at |
+
+Where the mapping lives: in the pipe's ledger (the platform message id of every
+card it sent, and `fields.thread_root` on every report that answered into a
+topic), never in the bridge. The bridge can be restarted or moved to another
+app without a thread losing its session.
+
 ## Parallel subagents
 
 The engine's Task tool is enabled: a cascading incident can fan out into
