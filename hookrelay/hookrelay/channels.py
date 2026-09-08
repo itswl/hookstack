@@ -30,6 +30,8 @@ from hookrelay.markup import escape_markup
 from hookrelay.processed import FEISHU_FALLBACK_COLOR, FEISHU_LEVEL_COLOR, Processed
 
 Payload = dict[str, Any] | bytes
+# The version a bridge checks before reading anything else (docs/bridge-protocol.md).
+BRIDGE_PROTOCOL = "hookstack-bridge/1"
 BuiltRequest = tuple[str, Payload, dict[str, str]]
 
 
@@ -118,7 +120,7 @@ def redact_for_ledger(body: bytes | None) -> str | None:
     return json.dumps(parsed, ensure_ascii=False)
 
 
-@registry.channel("feishu")
+@registry.channel("feishu", capabilities=("callbacks",))
 def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     processed = _processed(channel, message)
     if processed is not None:
@@ -161,7 +163,7 @@ def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> Built
     return channel.url, payload, {}
 
 
-@registry.channel("dingtalk")
+@registry.channel("dingtalk", capabilities=("links",))
 def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     processed = _processed(channel, message)
     if processed is not None:
@@ -203,7 +205,7 @@ def _dingtalk_signed_url(channel: Channel, now: float) -> str:
     return url
 
 
-@registry.channel("wecom")
+@registry.channel("wecom", capabilities=("links",))
 def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     processed = _processed(channel, message)
     if processed is not None:
@@ -272,6 +274,49 @@ def build_generic(channel: Channel, message: dict[str, Any], now: float) -> Buil
         else:
             signed = body
         headers[channel.signature_header] = hmac.new(channel.secret.encode(), signed, hashlib.sha256).hexdigest()
+    return channel.url, body, headers
+
+
+@registry.channel("bridge", capabilities=("callbacks",))
+def build_bridge(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
+    """The chat-bridge protocol (docs/bridge-protocol.md): a card MODEL, signed
+    the way this pipe signs everything it sends, to a sidecar that renders it in
+    its platform's dialect and answers with the platform's message id.
+
+    This is the builder that does not know what a Feishu card looks like. The
+    three direct dialects above exist for custom-bot webhooks, which take a
+    finished payload and can neither call back nor reply in a thread; a bridge
+    can do both, and the pipe asks for both by FIELD (`reply_to`, `chat_id`),
+    never by platform. The hints go in before signing, because the signature
+    covers the exact bytes that leave — see the module docstring.
+    """
+    processed = _processed(channel, message)
+    if processed is not None:
+        card = processed.card_model()
+    elif _prebuilt(channel, message) is not None:
+        raise ValueError(
+            f"channel {channel.name}: payload: raw is a finished platform payload; a bridge takes a card model"
+        )
+    else:
+        fields = message.get("fields") or {}
+        card = {
+            "title": str(message.get("title") or ""),
+            "tone": str(message.get("level") or "info").lower(),
+            "summary": str(message.get("body") or ""),
+            # Plain lines, unescaped: the bridge escapes for its own dialect.
+            "details": "\n".join(f"{name}: {value}" for name, value in fields.items() if value),
+            "footer": f"hookrelay · {message.get('source')} · #{message.get('event_id')}",
+        }
+        card = {key: value for key, value in card.items() if value}
+    envelope = _bridge_hints(channel, message, {"protocol": BRIDGE_PROTOCOL, "card": card})
+    body = json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    headers = {"content-type": "application/json"}
+    if channel.secret:
+        stamp = str(int(now))
+        headers["X-Hook-Timestamp"] = stamp
+        headers["X-Hook-Signature"] = hmac.new(
+            channel.secret.encode(), stamp.encode() + b"." + body, hashlib.sha256
+        ).hexdigest()
     return channel.url, body, headers
 
 

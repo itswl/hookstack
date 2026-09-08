@@ -194,7 +194,17 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # carrying a field — the pipe learns WHICH card a reply is under (that is
     # the ledger's own row) and passes the text on unread, exactly as it does an
     # alert body. The bridge stays stateless because this lives here.
-    "hookrelay": (5700, Path("hookrelay/README.md")),
+    # 5700 -> 5800 on 2026-09-08, for the chat-bridge protocol
+    # (docs/bridge-protocol.md): a `bridge` channel type that sends a card
+    # MODEL — five blocks as plain facts — and lets the sidecar render it, plus
+    # capabilities on the registry so the app asks "can a person act from
+    # here?" instead of naming a platform. Split: +~75 source, +~45 code.
+    # Doctrine: this is the "deliver" job LOSING a dialect, not gaining one; the
+    # bridge path no longer needs the pipe to know a Feishu card's schema. The
+    # three direct dialect builders (~250 lines) stay for custom-bot webhooks
+    # and are what the next change moves to examples/plugins — the ceiling
+    # comes back down with them.
+    "hookrelay": (5800, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

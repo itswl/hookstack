@@ -19,9 +19,15 @@ and `meta.alert_name` in practice):
     }
 
 and every channel type renders it its own way. `actions` are carried but only
-by channels that HAVE interactive callbacks (Feishu): the value is opaque and
-already signed by the brain, because a signature is judgement about identity,
-not formatting.
+by channels that HAVE interactive callbacks (feishu, bridge): the value is
+opaque and already signed by the brain, because a signature is judgement about
+identity, not formatting.
+
+Two kinds of output live below. The dialect renderers (`feishu_card`,
+`markdown`) are for channels that post a FINISHED payload to a platform's own
+webhook. `card_model` is for a bridge (docs/bridge-protocol.md): the same
+five blocks as facts in plain text, rendered by the sidecar that knows the
+platform — which is how the pipe stops knowing what a Feishu card looks like.
 
 Rendering lives here rather than in each builder so the five blocks stay in one
 place: headline, identity breadcrumb, impact, links, footer.
@@ -155,6 +161,37 @@ class Processed:
         return " · ".join(b for b in bits if b)
 
     # ── per-vendor rendering ─────────────────────────────────────────────
+
+    # ── the neutral model: what a bridge renders, in no dialect ─────────────
+    def card_model(self) -> dict[str, Any]:
+        """The card as facts, not markup — the shape in docs/bridge-protocol.md.
+
+        Plain text throughout: the bridge that renders this into its platform's
+        dialect is the one place that knows what needs escaping there (see
+        hookrelay/markup.py for why that boundary is per dialect). Actions
+        travel as the brain signed them. `tone` names the STATE; the colour it
+        earns is the bridge's decision, so a recovery is "recovery" here and
+        green wherever it lands.
+        """
+        model: dict[str, Any] = {
+            "title": self.headline,
+            "tone": "recovery" if self.is_recovery else self.importance,
+            "lead": self.level_tag,
+            "summary": self.summary,
+            "crumb": self.breadcrumb(),
+            "impact": str(self.analysis.get("impact_scope") or ""),
+            "links": [{"text": str(x.get("text") or ""), "url": str(x.get("url") or "")} for x in self.links],
+            "actions": [
+                {
+                    "text": str(a.get("text") or "Action"),
+                    "style": str(a.get("style") or "default"),
+                    "value": a.get("value") or {},
+                }
+                for a in self.actions
+            ],
+            "footer": self.footer(),
+        }
+        return {key: value for key, value in model.items() if value not in ("", [], {})}
 
     def feishu_card(self) -> dict[str, Any]:
         elements: list[dict[str, Any]] = []

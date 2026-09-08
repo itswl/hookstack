@@ -259,14 +259,16 @@ channels:
     secret: ""
 
   - name: to-me
-    type: feishu
-    # Signs the card handed to the bridge. This hop shares a network with the
-    # platform's containers, so an unsigned door let any neighbour post a card
-    # into the operator's chat as the app. With a secret set, the feishu builder
-    # adds {timestamp, sign} and the bridge (BRIDGE_INBOUND_SECRET, same value)
-    # refuses anything that cannot prove it. Empty (default) keeps the old
-    # unsigned behaviour, and the bridge accepts it — so this is off until the
-    # .env line is set on both sides.
+    # The chat-bridge protocol (docs/bridge-protocol.md): the pipe sends a card
+    # MODEL and the sidecar renders it for its platform, so nothing in this file
+    # or in the pipe says what a Feishu card looks like. Swapping the IM means
+    # swapping the sidecar, not the pipe.
+    type: bridge
+    # Signs the card handed to the bridge with the pipe's own scheme
+    # (X-Hook-Timestamp / X-Hook-Signature over the exact bytes). This hop
+    # shares a network with the platform's containers, so an unsigned door let
+    # any neighbour post a card into the operator's chat as the app; the bridge
+    # (BRIDGE_INBOUND_SECRET, same value) refuses anything that cannot prove it.
     secret: ${LARK_BRIDGE_SECRET}
     url: http://lark-bridge:9100/
     # thread_replies: a report carrying `fields.thread_root` is posted as a reply

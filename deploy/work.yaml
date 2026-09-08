@@ -231,11 +231,12 @@ channels:
   # .env and never here. build_feishu adds {timestamp, sign} the moment a secret
   # exists, so turning it on is one .env line on each side.
   - name: to-lark-watch
-    type: feishu
+    # Chat-bridge protocol (docs/bridge-protocol.md): a card model to the
+    # sidecar, which renders and posts as the app. To fall back to a custom-bot
+    # webhook, set type: feishu and point the URL at the webhook.
+    type: bridge
     url: ${LARK_WATCH_URL}
     secret: ${LARK_WATCH_SECRET}
-    # thread_replies / chat_id take effect once the URL points at the bridge
-    # (`bridge` profile); a custom-bot webhook is sent neither key.
     options:
       payload: normalized
       thread_replies: true
@@ -281,7 +282,7 @@ channels:
   # — headline, body, level colour — instead of rendering a normalized event
   # built around it.
   - name: to-lark-plan
-    type: feishu
+    type: bridge
     url: ${LARK_PLAN_URL}
     secret: ${LARK_PLAN_SECRET}
     options:

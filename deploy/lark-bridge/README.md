@@ -2,13 +2,17 @@
 
 One small process, two directions, no state of its own.
 
-**Out.** hookrelay's `feishu` channel renders a card and POSTs it the way a
-custom-bot webhook would. The bridge accepts that exact body and sends it through
-the Lark message API **as the application** — which is the whole reason it
-exists: a custom bot can only send, so the buttons on its cards have nowhere to
-call back to, and it cannot reply inside a thread. When the pipe adds `reply_to`,
-the card goes out as a reply in that thread; when it adds `chat_id`, it goes to
-that chat, so one bridge serves several channels.
+**Out.** hookrelay's `bridge` channel sends a **card model** — the
+[chat-bridge protocol](../../docs/bridge-protocol.md): title, tone, summary,
+links, actions, as plain facts. The bridge renders it into a Feishu card
+(`render.py` — the card schema, its colours and its `lark_md` escaping live
+here and nowhere in the pipe) and sends it through the Lark message API **as
+the application** — which is the whole reason it exists: a custom bot can only
+send, so the buttons on its cards have nowhere to call back to, and it cannot
+reply inside a thread. When the pipe adds `reply_to`, the card goes out as a
+reply in that thread; when it adds `chat_id`, it goes to that chat, so one
+bridge serves several channels. A finished Feishu card from a `feishu`-type
+channel is still accepted and passed through, so either type can point here.
 
 **In.** The bridge dials out to Lark over a long connection and consumes two
 event streams: `card.action.trigger` (a button press → the pipe's `/card-action`
@@ -49,10 +53,12 @@ alert, and only for senders in `HOOKPROBE_FOLLOW_UP_SENDERS`
   `BRIDGE_CHAT_IDS`. A card for any other chat is refused with a 400; a message
   from any other chat is dropped. The blast radius is written here, not decided
   by callers.
-- **Cards.** With `BRIDGE_INBOUND_SECRET` set, a card must carry the pipe's
-  Feishu-style signature (`{timestamp, sign}`, `sign = base64(HMAC-SHA256(key="{ts}\n{secret}", msg=""))`)
-  — the same value as the channel's `secret`. Unsigned or wrong → 401, which
-  the pipe records as a failed delivery and retries or dead-letters in the open.
+- **Cards.** With `BRIDGE_INBOUND_SECRET` set (the channel's `secret`, same
+  value), a protocol card must carry the pipe's `X-Hook-Timestamp` /
+  `X-Hook-Signature` headers over the exact bytes; a legacy Feishu-shaped body
+  must carry the custom-bot `{timestamp, sign}`. Unsigned, wrong or older than
+  five minutes → 401, which the pipe records as a failed delivery and retries
+  or dead-letters in the open.
 - **State.** None. Which card belongs to which alert, which thread to which
   session — that is the pipe's ledger (`platform_message_id` on every sent
   delivery). A bridge can be restarted or replaced without losing a thread.
@@ -110,7 +116,7 @@ without `im:chat.members:write_only` cannot add another.
 | `LARK_BRAND` | `lark` | `lark` or `feishu` |
 | `LARK_CHAT_ID` | *(required)* | the default chat: cards without `chat_id` go here, and replies from here are forwarded |
 | `BRIDGE_CHAT_IDS` | *(empty)* | comma-separated further chats this bridge may post into and forward from (`options.chat_id` on a pipe channel names one) |
-| `BRIDGE_INBOUND_SECRET` | *(empty = accept every card)* | the pipe's channel secret; set it — the port sits on a network shared with other stacks |
+| `BRIDGE_INBOUND_SECRET` | *(empty = accept every card)* | the pipe's channel secret, verified on protocol cards (headers) and legacy cards (body); set it — the port sits on a network shared with other stacks |
 | `RELAY_ACTION_URL` | `http://hookrelay:8100/card-action` | where a button press goes |
 | `RELAY_THREAD_URL` | *(empty = do not listen for messages)* | the pipe's `lark-thread` door, e.g. `http://hookrelay:8100/hook/lark-thread` |
 | `THREAD_SECRET` | *(empty)* | signs message forwards for that door (`X-Hook-Timestamp`, `X-Hook-Signature` = hex HMAC-SHA256 over `"{ts}.{body}"`) — the door's `${LARK_THREAD_SECRET}` |
@@ -123,26 +129,15 @@ credentials and event cursor under `/config`, a named volume in both composes
 
 ## Wire shapes
 
-Inbound card (what the pipe posts):
-
-```json
-{"msg_type": "interactive", "card": {"...": "..."}, "timestamp": "1700000000", "sign": "...",
- "reply_to": "om_… (optional: post as a reply in this thread)",
- "chat_id": "oc_… (optional: this chat, if served)"}
-```
-
-Answer: `{"ok": true, "message_id": "om_…"}` — the id the pipe writes onto the
-delivery, and the handle a reply under that card will quote.
-
-Outbound message (what the bridge posts to `RELAY_THREAD_URL`):
-
-```json
-{"root_message_id": "om_…", "topic": "reply | new", "message_id": "om_…",
- "sender": "ou_…", "chat_id": "oc_…", "text": "the message, mentions stripped"}
-```
-
-Outbound press (to `RELAY_ACTION_URL`): `{"action": {"value": {"hookrelay_action": "<token>"}}, "actor": "ou_…"}`
-— the token is the authorisation; the bridge never inspects it.
+The three shapes are the protocol's, defined once in
+[docs/bridge-protocol.md](../../docs/bridge-protocol.md): a card model in
+(answered with `{"ok": true, "message_id": "om_…"}`), a message out to
+`RELAY_THREAD_URL`, a press out to `RELAY_ACTION_URL` as
+`{"hookrelay_action": "<token>", "actor": "ou_…"}`. The examples under
+[`contract/`](contract/) are what the tests on both sides use;
+`outbound-card.json` is produced by the pipe's own builder. Header
+`X-Hookstack-Dry-Run: 1` makes this bridge render and answer without sending —
+the way to prove the wiring from inside a deployment.
 
 ## Operating it
 
@@ -161,6 +156,9 @@ Outbound press (to `RELAY_ACTION_URL`): `{"action": {"value": {"hookrelay_action
   `docker exec <bridge> lark-cli config remove` (or drop the volume), then
   recreate the container. Add the new bot to every served chat first, or cards
   fail with `Bot/User can NOT be out of the chat` until it is.
+- **Is the wiring right?** From the pipe's container, post a signed protocol
+  card with `X-Hookstack-Dry-Run: 1`: a 200 with `rendered` proves the
+  address, the secret and the renderer without a message reaching anyone.
 - **Reading the logs.** `card delivered message_id=om_…` (and `(in thread)`
   for replies); `thread reply forwarded: 200 {…}` with the pipe's decision;
   `card refused: chat … is not one this bridge serves`; `press forwarded`.

@@ -122,6 +122,10 @@ step_bridge "the lark bridge parses and lints"
 python3 -m compileall -q deploy/lark-bridge
 hookrelay/.venv/bin/python -m ruff check deploy/lark-bridge
 hookrelay/.venv/bin/python -m ruff format --check deploy/lark-bridge
+# The renderer and the protocol door have tests of their own, and the pipe's
+# test_bridge_channel.py asserts the same fixture — the contract is checked from
+# both ends (docs/bridge-protocol.md).
+hookrelay/.venv/bin/python -m pytest -q deploy/lark-bridge/tests
 echo "lark-bridge: OK"
 
 # A Dockerfile is the one file no test opens. `COPY hookjudge/examples/` was

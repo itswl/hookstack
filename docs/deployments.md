@@ -110,6 +110,16 @@ list of zeros; the day a write credential is mounted, that list is what an
 operator reads before approving a handoff. The alert deployment's investigator
 has no credentials mounted at all and says so (`no-credentials`).
 
+**The chat is behind a protocol, not in the pipe.** Both deployments reach
+Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a
+card model — title, tone, summary, links, actions as plain facts — and the
+sidecar renders, posts as the app, and carries presses and replies back
+([docs/bridge-protocol.md](bridge-protocol.md)). Nothing in the pipe, the judge
+or the investigator names the platform; another IM is another sidecar, tested
+against the same fixture. The `to-me-watch` channel still posts a finished card
+to a custom-bot webhook (`type: feishu`), which is what the direct dialect types
+remain for.
+
 **Follow-ups from the chat thread: alert deployment only, since 2026-09-08.**
 A person who replies under a verdict or report card in the group continues
 that alert's investigation: the bridge forwards the reply, signed, to the

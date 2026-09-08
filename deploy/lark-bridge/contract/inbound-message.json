@@ -1,0 +1,8 @@
+{
+  "root_message_id": "om_x1",
+  "topic": "reply",
+  "message_id": "om_x2",
+  "sender": "ou_1",
+  "chat_id": "oc_example",
+  "text": "any zombie processes on node-3?"
+}

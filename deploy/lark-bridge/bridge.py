@@ -36,6 +36,9 @@ import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
+import render
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -76,6 +79,32 @@ MAX_BODY = 256 * 1024
 # code risk: an unset bridge never rejects a card.
 INBOUND_SECRET = os.environ.get("BRIDGE_INBOUND_SECRET", "")
 _SIGN_SKEW_SECONDS = 300
+
+
+PROTOCOL = "hookstack-bridge/1"
+DRY_RUN_HEADER = "x-hookstack-dry-run"
+
+
+def is_authentic_protocol(headers: Any, body: bytes) -> bool:
+    """The protocol's signature: the pipe's own scheme, over the exact bytes.
+
+    X-Hook-Timestamp and X-Hook-Signature = hex HMAC-SHA256(secret, "{ts}.{body}")
+    — the same scheme this bridge uses when it signs a message for the pipe's
+    thread door, so both directions are one function. The body is covered, which
+    the legacy in-body sign below never managed. Unset secret = always True.
+    """
+    if not INBOUND_SECRET:
+        return True
+    timestamp = str(headers.get("x-hook-timestamp") or "")
+    provided = str(headers.get("x-hook-signature") or "")
+    if not timestamp or not provided:
+        return False
+    try:
+        if abs(time.time() - int(timestamp)) > _SIGN_SKEW_SECONDS:
+            return False
+    except ValueError:
+        return False
+    return hmac.compare_digest(_sign(INBOUND_SECRET, body, timestamp), provided)
 
 
 def is_authentic(payload: dict) -> bool:
@@ -157,7 +186,8 @@ def send_card(card: dict, reply_to: str = "", chat_id: str = "") -> tuple[bool, 
 
 
 class Handler(BaseHTTPRequestHandler):
-    """The custom-bot webhook shape, accepted and re-sent as the app."""
+    """The pipe's cards, accepted and sent as the app — the protocol's card
+    model rendered here, or a finished Feishu card passed through."""
 
     protocol_version = "HTTP/1.1"
 
@@ -169,15 +199,26 @@ class Handler(BaseHTTPRequestHandler):
         if length > MAX_BODY:
             self._reply(413, {"ok": False, "error": "body too large"})
             return
+        raw = self.rfile.read(length) or b"{}"
         try:
-            payload = json.loads(self.rfile.read(length) or b"{}")
+            payload = json.loads(raw)
         except ValueError:
             self._reply(400, {"ok": False, "error": "body is not JSON"})
             return
         if not isinstance(payload, dict):
             self._reply(400, {"ok": False, "error": "body is not a JSON object"})
             return
-        if not is_authentic(payload):
+        # Two bodies are accepted. The protocol (docs/bridge-protocol.md): a
+        # card MODEL, signed in headers, rendered HERE. And the legacy shape a
+        # `feishu`-type channel posts to a custom bot — a finished Feishu card
+        # with the in-body sign — so a channel pointed here by either type works.
+        protocol = payload.get("protocol") == PROTOCOL
+        authentic = (
+            is_authentic_protocol(self.headers, raw)
+            if protocol
+            else is_authentic(payload)
+        )
+        if not authentic:
             # A card that cannot prove the shared secret is refused, not
             # delivered. hookrelay treats the 401 as a failed delivery and
             # dead-letters it in the open, which is the visible failure we want.
@@ -186,12 +227,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         card = payload.get("card")
         if not isinstance(card, dict):
-            # The pipe sends {msg_type: interactive, card: {...}}. Anything else
-            # is a channel pointed here by mistake, and saying so beats a 200.
             self._reply(
-                400, {"ok": False, "error": "expected an interactive card payload"}
+                400,
+                {"ok": False, "error": "expected a card model or an interactive card"},
             )
             return
+        if protocol:
+            card = render.feishu_card(card)["card"]
         # `reply_to` is the pipe's request to answer inside a thread (see
         # hookrelay's feishu channel, `thread_replies`). Read here, never sent on.
         reply_to = str(payload.get("reply_to") or "")[:120]
@@ -201,6 +243,14 @@ class Handler(BaseHTTPRequestHandler):
                 "card refused: chat %s is not one this bridge serves", chat_id[:12]
             )
             self._reply(400, {"ok": False, "error": "chat not served by this bridge"})
+            return
+        if protocol and self.headers.get(DRY_RUN_HEADER):
+            # The conformance hook: everything but the send. A bridge for any
+            # platform answers this the same way, with its own rendering.
+            logger.info("dry run: card rendered, not sent")
+            self._reply(
+                200, {"ok": True, "dry_run": True, "message_id": "", "rendered": card}
+            )
             return
         ok, detail = send_card(card, reply_to, chat_id)
         if ok:
@@ -314,11 +364,10 @@ def forward_press(event: dict) -> None:
         return
     # The token IS the authorisation: signed by the pipe, single-use, expiring.
     # The bridge never inspects it and could not forge one.
+    # The protocol's action shape: the token at the top level, and who pressed.
+    # The platform's own envelope (action.value…) stays on this side of the seam.
     body = json.dumps(
-        {
-            "action": {"value": {"hookrelay_action": token}},
-            "actor": event.get("operator_id") or "",
-        }
+        {"hookrelay_action": token, "actor": event.get("operator_id") or ""}
     )
     request = urllib.request.Request(  # nosec B310 — a fixed http:// URL from env, not user input
         RELAY_ACTION_URL,

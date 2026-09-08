@@ -1,0 +1,29 @@
+{
+  "card": {
+    "actions": [
+      {
+        "style": "primary",
+        "text": "Acknowledge",
+        "value": {
+          "signed": "opaque-token"
+        }
+      }
+    ],
+    "crumb": "demo-alarm · prod · Single top-up over 500",
+    "footer": "grafana · business · 2026-08-07 10:32:50",
+    "impact": "limited to the notification itself; no direct service impact observed",
+    "lead": "🔴 HIGH",
+    "links": [
+      {
+        "text": "Large top-up runbook",
+        "url": "https://kb.example/runbook/42"
+      }
+    ],
+    "summary": "three large top-ups in nine minutes across two accounts",
+    "title": "📡 Single top-up over 500",
+    "tone": "high"
+  },
+  "chat_id": "oc_example",
+  "protocol": "hookstack-bridge/1",
+  "reply_to": "om_example_root"
+}

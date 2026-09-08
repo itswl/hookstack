@@ -15,7 +15,7 @@ ARG LARK_CLI_VERSION=1.0.88
 RUN npm install -g "@larksuite/cli@${LARK_CLI_VERSION}" && npm cache clean --force
 
 WORKDIR /app
-COPY bridge.py .
+COPY bridge.py render.py .
 
 # lark-cli keeps its app credentials and its event cursor here; mounted so a
 # restart does not re-authenticate and re-subscribe from scratch.

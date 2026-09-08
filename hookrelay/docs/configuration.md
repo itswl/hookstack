@@ -298,8 +298,14 @@ Channels define pipes; routes decide which events enter which pipes.
 
 ```yaml
 channels:
+  - name: ops-chat
+    type: bridge                       # a card MODEL to a chat sidecar (docs/bridge-protocol.md); secret = header signature
+    url: http://lark-bridge:9100/
+    secret: ${BRIDGE_SECRET}
+    options: {thread_replies: true}    # an event naming fields.thread_root goes out as a reply in that thread
+
   - name: ops-feishu
-    type: feishu                       # card message; secret = bot signing (optional)
+    type: feishu                       # a finished card to a custom-bot webhook; secret = bot signing (optional)
     url: ${FEISHU_WEBHOOK_URL}
     secret: ${FEISHU_WEBHOOK_SECRET}
     max_per_minute: 20                 # rate limit DEFERS (reschedules), never drops

@@ -23,6 +23,12 @@ from typing import Any
 SOURCE_ADAPTERS: dict[str, Any] = {}
 PROCESSORS: dict[str, Any] = {}
 CHANNEL_BUILDERS: dict[str, Callable[..., Any]] = {}
+# What a person can do from a message on this channel type: `callbacks` (a
+# pressed button reaches /card-action) or `links` (a URL they open). Declared by
+# the builder, asked by the app — so nothing outside this registry needs an IM
+# platform's NAME to know whether an alert sent there can be acted on. A plugin
+# that declares nothing is assumed to offer nothing, which is the safe default.
+CHANNEL_CAPABILITIES: dict[str, frozenset[str]] = {}
 
 
 def source_adapter(name: str) -> Callable[[Any], Any]:
@@ -45,14 +51,19 @@ def processor(name: str) -> Callable[[Any], Any]:
     return register
 
 
-def channel(name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def channel(name: str, *, capabilities: tuple[str, ...] = ()) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def register(builder: Callable[..., Any]) -> Callable[..., Any]:
         if name in CHANNEL_BUILDERS:
             raise ValueError(f"channel type {name!r} registered twice")
         CHANNEL_BUILDERS[name] = builder
+        CHANNEL_CAPABILITIES[name] = frozenset(capabilities)
         return builder
 
     return register
+
+
+def channel_can(name: str, capability: str) -> bool:
+    return capability in CHANNEL_CAPABILITIES.get(name, frozenset())
 
 
 def load_plugins(directory: str | Path) -> list[str]:

@@ -142,8 +142,10 @@ def _escalation_can_work(settings: Settings, cfg: Config) -> bool:
 
       a secret        — without it no card carries an action of any kind.
       an enabled kind — card_actions decides what is offered; empty offers none.
-      a channel that can carry one — `feishu` posts a callback, and the markdown
-        dialects carry a LINK, which needs public_url to point anywhere.
+      a channel that can carry one — a type declaring `callbacks` (feishu,
+        bridge) posts one back; a type declaring `links` (dingtalk, wecom)
+        carries a URL, which needs public_url to point anywhere. Asked of the
+        registry, so a plugin's type takes part by declaring, not by being named here.
 
     KNOWN LIMIT, stated because it is a real one: this is a per-DEPLOYMENT
     answer, not a per-alert one. A deployment whose critical route reaches only a
@@ -156,9 +158,9 @@ def _escalation_can_work(settings: Settings, cfg: Config) -> bool:
     if not settings.action_secret or not cfg.card_actions:
         return False
     for channel in cfg.channels.values():
-        if channel.type == "feishu":
+        if registry.channel_can(channel.type, "callbacks"):
             return True
-        if channel.type in ("dingtalk", "wecom") and settings.public_url:
+        if registry.channel_can(channel.type, "links") and settings.public_url:
             return True
     return False
 
@@ -364,8 +366,8 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     if app_config.escalation is not None and not app.state.escalation_armed:
         logger.warning(
             "escalation is configured but disarmed: no card action can be pressed in this deployment "
-            "(needs HOOKRELAY_ACTION_SECRET, a card_actions kind, and either a feishu channel or "
-            "HOOKRELAY_PUBLIC_URL for a dingtalk/wecom link). Every alert would look untouched."
+            "(needs HOOKRELAY_ACTION_SECRET, a card_actions kind, and either a channel type with callbacks "
+            "— feishu, bridge — or HOOKRELAY_PUBLIC_URL for a dingtalk/wecom link). Every alert would look untouched."
         )
 
     # ── the page ──────────────────────────────────────────────────────────

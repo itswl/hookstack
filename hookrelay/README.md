@@ -8,12 +8,12 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 5,700 source lines, five dependencies) that takes JSON
+A pluggable router (under 5,800 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
 to Feishu / DingTalk / WeCom / generic HTTP — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 5,700 source lines is the
+Both numbers are **budgets, not descriptions**. 5,800 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
@@ -141,8 +141,8 @@ person's message) so the report lands inside the topic. A later reply in that
 topic has the person's message as its root, not a card; the lookup then finds
 the chain through the report that carried the same `thread_root`.
 
-The other half is on the channel: `options: {thread_replies: true}` on a `feishu`
-channel that sends through the bridge makes a delivery whose event carries
+The other half is on the channel: `options: {thread_replies: true}` on a `bridge`
+channel (or a `feishu` one pointed at the bridge) makes a delivery whose event carries
 `fields.thread_root` go out as a reply in that thread (`reply_to` in the body
 the bridge reads), and `options: {chat_id: oc_…}` names the chat, so one bridge
 serves several channels (the bridge refuses a chat it was not configured for).
@@ -235,8 +235,8 @@ Full field-by-field reference: **[docs/configuration.md](docs/configuration.md)*
 
 One YAML file (see `config.example.yaml`): `sources` (who may knock, how to
 extract `title`/`body`/`level`/`fields` via `{dotted.paths.0.into.json}`),
-`channels` (feishu / dingtalk / wecom / generic, each with optional signing and
-rate limit), `routes` (match on source + extracted fields → channels).
+`channels` (bridge / feishu / dingtalk / wecom / generic, each with optional signing and
+rate limit — `bridge` sends a card model to a chat sidecar, [docs/bridge-protocol.md](../docs/bridge-protocol.md)), `routes` (match on source + extracted fields → channels).
 Secrets are written as `${ENV_NAME}` and resolve at startup; the file itself
 stays commit-safe.
 
