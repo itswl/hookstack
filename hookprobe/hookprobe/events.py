@@ -189,6 +189,7 @@ _EVENT_MAX_BYTES = 128 * 1024
 _LEVEL_MAX = 40
 _TITLE_MAX = 300
 _SOURCE_MAX = 120
+_WORK_ID_MAX = 120
 _EVENT_ID_MAX = 200
 _BODY_MAX = 4000
 # A brief gets four times the room, and the difference is defensible for exactly
@@ -237,6 +238,25 @@ already gathered; run tools only if the answer needs something not yet looked at
 Read-only, as before. Lead with the answer."""
 _FOLLOW_UP_TEXT_MAX = 4000
 _MAX_FOLLOW_UPS_PER_RUN = 20
+
+
+def _work_id(fields: dict[str, Any], request: Request, session_key: str) -> str:
+    """Which piece of work this run belongs to (hookprobe/work.py).
+
+    Three sources, in this order, and none of them reads content:
+
+      1. `fields.work_id` — a node upstream said so. This is how a plan on one
+         service stitches to the work it was handed off to on another: the
+         handoff carries the id, the pipe copies the field, this door adopts it.
+      2. `X-Hook-Correlation-Id` — the pipe's own handle for this hop's chain,
+         already on every delivery it makes. Nothing new had to be configured
+         for a report and its alert to share an id.
+      3. the session key, for runs nobody routed here (the console's own).
+    """
+    stated = str(fields.get("work_id") or "").strip()[:_WORK_ID_MAX]
+    if stated:
+        return stated
+    return str(request.headers.get("x-hook-correlation-id") or "").strip()[:_WORK_ID_MAX] or session_key
 
 
 def _sender_allowed(settings: Settings, sender: str) -> bool:
@@ -576,7 +596,17 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
             body=str(event.get("body") or "")[: _BRIEF_BODY_MAX if kind == "brief" else _BODY_MAX],
             fields=_fenced_fields(event.get("fields")),
         ) + _verdict_instruction(settings.verdicts)
-        meta: dict[str, Any] = {"title": title, "level": level, "source": source, "event_id": event_id}
+        meta: dict[str, Any] = {
+            "title": title,
+            "level": level,
+            "source": source,
+            "event_id": event_id,
+            # What KIND of thing this is, as the caller named it — an alert, a
+            # work item, a question. The door already branched on it to pick a
+            # prompt; recording it is what lets a board group by it later.
+            "kind": kind or "alert",
+            "work_id": _work_id(fields, request, session_key),
+        }
         # A run opened from a chat topic answers INTO that topic: the pipe hands
         # the topic's root along, and the report carries it back (notify.py).
         topic_root = str(fields.get("thread_root") or "").strip()[:120]

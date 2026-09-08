@@ -154,6 +154,10 @@ sources:
       # alert that caused it instead of standing alone. `meta.event_id` because
       # hookprobe deliberately never sees the pipe's correlation id and echoes
       # back the id it was handed — see _resolve_run in hookprobe/events.py.
+      # Which piece of work this report belongs to, as the node stated it
+      # (hookprobe/work.py). Copied, never computed: it is what lets a plan on
+      # one node and the work it was handed to on another read as one item.
+      work_id: "{meta.work_id}"
       correlation_id: "{meta.event_id}"
       # The chat thread this report answers into, when a person's reply started
       # the turn ("" for a first report). The `to-me` channel turns it into an

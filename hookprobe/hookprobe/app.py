@@ -40,7 +40,19 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from hookprobe import __version__, automation, events, handoff, library, ops, posture, remediation, telemetry
+from hookprobe import (
+    __version__,
+    automation,
+    events,
+    handoff,
+    library,
+    ops,
+    posture,
+    remediation,
+    suggestions,
+    telemetry,
+    work,
+)
 from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
@@ -619,6 +631,64 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             settings.workdir, cls, item_id, "regretted", note=str((payload or {}).get("note") or "")[:300]
         )
         return {"recorded": True, "class": cls, "id": item_id}
+
+    @app.get("/v1/work", dependencies=[Depends(require_token)])
+    async def work_board(limit: int = 200) -> dict[str, Any]:
+        """The board: one row per piece of work, not per run.
+
+        Derived on every request from the run records, the proposal files and
+        the suggestion queue — see hookprobe/work.py for why nothing here is
+        stored a second time. `counts` is the header line an operator reads
+        first: how much is blocked, how much is in flight, and how much closed
+        without anybody having to step in.
+        """
+        items = work.resolve(
+            service.list_runs(limit=limit),
+            proposals=remediation.list_all(settings.workdir, limit=200),
+            suggestions=[row for row in suggestions.load(settings.workdir) if str(row.get("status") or "") == "open"],
+        )
+        return {"counts": work.counts(items), "items": [item.as_dict() for item in items]}
+
+    @app.get("/v1/agent", dependencies=[Depends(require_token)])
+    async def agent_card() -> dict[str, Any]:
+        """What this node IS: identity, runtime, the policy it runs under, health.
+
+        A deployment runs several of these and they were told apart only by
+        port — every board said "hookprobe" and every report came from
+        "hookprobe". Nothing here is new state; it is the settings this process
+        actually resolved, answered in one place so a board can name the agent
+        that did the work. Secrets never appear, in keeping with /v1/config.
+        """
+        running, queued = service.turn_counts()
+        return {
+            "name": settings.agent_name,
+            "role": settings.agent_role,
+            "version": __version__,
+            # One adapter today. The Runtime Contract that would let this say
+            # something else is the next stage's work, and naming the field now
+            # is cheaper than renaming every reader later.
+            "runtime": {
+                "adapter": "claude-code",
+                "model": settings.model,
+                "endpoint": settings.model_endpoint,
+            },
+            "workspace": str(settings.workdir),
+            "policy": {
+                "bash_guard": settings.bash_guard,
+                "escalate_levels": sorted(settings.escalate_levels),
+                "budget_usd": settings.budget_usd,
+                "budget_window_hours": settings.budget_window_hours,
+                "chat_senders": sorted(settings.follow_up_senders),
+                "hands_off": bool(settings.handoff_url),
+                "verdicts": sorted(settings.verdicts),
+            },
+            "health": {
+                "active_runs": service.active_count(),
+                "turns_running": running,
+                "turns_queued": queued,
+                "return_failures": service.return_failure_count(),
+            },
+        }
 
     @app.get("/v1/remediations", dependencies=[Depends(require_token)])
     async def remediations_list() -> dict[str, Any]:

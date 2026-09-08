@@ -144,6 +144,10 @@ sources:
       # deliberately never sees the pipe's, and echoes back the id it was handed
       # instead (see _resolve_run in hookprobe/events.py). The id both sides
       # already agree on is the right thing to key on.
+      # Which piece of work this report belongs to, as the node stated it
+      # (hookprobe/work.py). Copied, never computed: it is what lets a plan on
+      # one node and the work it was handed to on another read as one item.
+      work_id: "{meta.work_id}"
       correlation_id: "{meta.event_id}"
       # The chat thread this report answers into, when a person's reply
       # started the turn ("" for a first report); see the lark-thread door.
@@ -172,6 +176,9 @@ sources:
       # The plan's own session key, so the work runner can be pointed at the
       # case file that produced this — the investigation, not just its verdict.
       session: "{session}"
+      # The work item the plan belongs to, so the work runner adopts it instead
+      # of opening a second one for the same job (hookprobe/work.py).
+      work_id: "{work_id}"
       # `task` picks the how-would-this-be-done prompt at the far door. The work
       # runner is being asked to DO the thing the plan describes, and the
       # root-cause framing would have it write an incident report about
@@ -194,6 +201,10 @@ sources:
       origin: "{meta.source}"
       session: "{meta.session_key}"
       cost_usd: "{meta.cost_usd}"
+      # Which piece of work this report belongs to, as the node stated it
+      # (hookprobe/work.py). Copied, never computed: it is what lets a plan on
+      # one node and the work it was handed to on another read as one item.
+      work_id: "{meta.work_id}"
       correlation_id: "{meta.event_id}"
       # The chat thread this report answers into, when a person's reply
       # started the turn ("" for a first report); see the lark-thread door.

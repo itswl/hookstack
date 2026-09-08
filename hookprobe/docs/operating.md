@@ -178,6 +178,47 @@ card it sent, and `fields.thread_root` on every report that answered into a
 topic), never in the bridge. The bridge can be restarted or moved to another
 app without a thread losing its session.
 
+## The board — one row per piece of work
+
+`/ui#work` groups runs into **work items**: the thing somebody wants finished,
+which is usually one investigation and sometimes not. A re-fire and a chat
+follow-up add turns to work that already exists; a plan handed to a work runner
+is two runs on two services. Counting runs would report those as three or four
+pieces of work, most of them phantom, so the board counts work.
+
+The identity is `work_id`, decided by the event door: what an upstream node
+stated (`fields.work_id` — how a handoff stitches a plan to the work it became),
+else the correlation the pipe puts on every delivery, else the run's own session
+key. Nothing reads content to decide it.
+
+Five columns, blocked first, because a running item needs nothing from the person
+reading the page:
+
+| column | what it means |
+|---|---|
+| **waiting on you** | a procedure is proposed and nothing runs until somebody presses |
+| **needs a human** | the last run failed — including a refusal for budget |
+| **in flight** | a turn is running |
+| **verifying** | a procedure ran and every step exited 0, and nobody has said the condition cleared |
+| **done** | finished with nothing blocked |
+
+Three numbers sit above it. `blocked` is the first two columns. `verified` counts
+work a ruling called useful or whose own procedure came back clean — the only two
+signals this node can check without a person. `closed without anyone stepping in`
+is the strict one: done, verified, and it never had to stop and ask. On an
+unattended deployment that number is often zero, and that is the true reading —
+it says the verification loop is not closed, not that nothing happened.
+
+`/ui#approvals` is the other half: every procedure waiting for approval, every
+memory line an investigation proposed, and every report nobody has ruled on, with
+the buttons. It answers "what do I owe", which is deliberately wider than "what is
+blocked" — a memory line blocks nothing and still waits for a person.
+
+`GET /v1/agent` says what this node is — name, role, runtime, policy, health — so
+a deployment running an investigator, a planner and a work runner can tell them
+apart by something other than a port. Set `HOOKPROBE_AGENT_NAME` and
+`HOOKPROBE_AGENT_ROLE` per service.
+
 ## Parallel subagents
 
 The engine's Task tool is enabled: a cascading incident can fan out into

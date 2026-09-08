@@ -205,6 +205,17 @@ class Settings:
     # Where the pipe's board is, as a BROWSER reaches it (not as this container
     # does): a run then links to the chain it belongs to. Empty = no link.
     relay_ui_url: str
+    # Who this node is. A deployment runs several of these — an alert
+    # investigator, a planner, a work runner — and until now they were
+    # distinguishable only by port: every board said "hookprobe" and every
+    # report came from "hookprobe". The name is the agent's identity wherever
+    # work is listed; the role is the one line a person needs to know what it
+    # is for.
+    agent_name: str
+    # One line saying what this agent is FOR, shown wherever its work is listed.
+    # A name tells two nodes apart; a role tells a person which one should have
+    # picked up the thing in front of them.
+    agent_role: str
     # Outbound HMAC secret; signs the finding on its way back.
     return_secret: str
     # Where a retrospective condition ruling goes, and the credential for that
@@ -340,6 +351,8 @@ class Settings:
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             relay_ui_url=os.environ.get("HOOKPROBE_RELAY_UI_URL", "").strip().rstrip("/"),
+            agent_name=os.environ.get("HOOKPROBE_AGENT_NAME", "").strip()[:60] or "hookprobe",
+            agent_role=os.environ.get("HOOKPROBE_AGENT_ROLE", "").strip()[:160],
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),
             ruling_url=os.environ.get("HOOKPROBE_RULING_URL", ""),
             ruling_secret=os.environ.get("HOOKPROBE_RULING_SECRET", ""),

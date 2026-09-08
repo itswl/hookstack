@@ -61,6 +61,10 @@ def payload_for(run: Any, report: str) -> dict[str, Any]:
         "title": f"plan handed off: {run.session_key}",
         "message": report,
         "session": run.session_key,
+        # The work item this plan belongs to. The receiving door adopts it
+        # (events.py `_work_id`), so a plan and the work it was handed to are
+        # one item on a board even though they ran on different services.
+        "work_id": str((getattr(run, "meta", None) or {}).get("work_id") or run.session_key),
         "cost_usd": getattr(run, "cost_usd", 0.0),
     }
 

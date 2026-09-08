@@ -69,6 +69,10 @@ class ReturnDelivery:
                     "timestamp": time.time(),
                     # The loop's own facts, for the pipe's fields and ledger:
                     "session_key": run.session_key,
+                    # The work this report belongs to, so the pipe's ledger can
+                    # carry it and a person can follow one piece of work across
+                    # the two nodes that did it (hookprobe/work.py).
+                    "work_id": str(run.meta.get("work_id") or run.session_key),
                     # The chat thread this report belongs in, when a person's
                     # reply started the turn; "" for a first report. The pipe
                     # carries it to a channel that can reply in-thread.

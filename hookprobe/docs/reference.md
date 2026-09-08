@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (48)
+## Environment (50)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -52,7 +52,9 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_ALARM_URL` | *(empty)* | Direct self-alarm for report returns that exhaust their retries: the pipe is the broken link at that moment, so this posts straight to a bot/collector URL, touching nothing on the… |
 | `HOOKPROBE_SETTING_SOURCES` | `project` | Skill layers |
 | `HOOKPROBE_HANDOFF_URL` | *(empty)* | Where a finished run's report goes when an operator clicks "hand off", and the credential for that one door |
+| `HOOKPROBE_AGENT_ROLE` | *(empty)* | One line saying what this agent is FOR, shown wherever its work is listed |
 | `HOOKPROBE_RELAY_UI_URL` | *(empty)* | Where the pipe's board is, as a BROWSER reaches it (not as this container does): a run then links to the chain it belongs to |
+| `HOOKPROBE_AGENT_NAME` | *(empty)* | Who this node is |
 | `HOOKPROBE_MCP_TOOLS` | *(empty)* | Which MCP tools this instance may actually call, as a closed set — mcp__chat__chat_search_messages or mcp__chat__* for a whole server |
 | `HOOKPROBE_FOLLOW_UP_SENDERS` | *(empty)* | Who may continue an investigation by replying in its chat thread (events.py, kind: follow_up): platform sender ids, * for anyone the bridge forwards, empty for nobody — the default… |
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
@@ -60,7 +62,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_POSTURE_CHECK` | *(empty)* | Whether the credentials are checked against that declaration at startup (posture.py): enforce refuses to start a runner declared readonly whose kubeconfig or AWS identity can mutat… |
 | `HOOKPROBE_TELEMETRY_RECEIVER` | *(empty)* | Whether this service receives its own runs' OpenTelemetry (telemetry.py): on points the CLI at POST /otel/v1/{logs,metrics} here, keeps a per-run timing record under {workdir}/tele… |
 
-## Routes (55)
+## Routes (57)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -75,6 +77,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/sessions/{session_key}/final` | Poll for the finished report: 202 while running, then the full text once |
 | POST | `/sessions/{session_key}/stop` | Cancel the in-flight turn; it settles as a failed turn within a poll |
 | GET | `/ui` | The operator board |
+| GET | `/v1/agent` | What this node IS: identity, runtime, the policy it runs under, health |
 | GET | `/v1/agents` | The subagent roles the engine is offered |
 | DELETE | `/v1/agents/{name}` | Remove a role; the engine stops being offered it on the next run |
 | GET | `/v1/agents/{name}` | One role's definition, whole |
@@ -119,3 +122,4 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/v1/skills/{name}/review` | Mark a runbook read without changing a character of it |
 | GET | `/v1/system-prompt` | The appended methodology file as the engine will read it |
 | PUT | `/v1/system-prompt` | Replace the appended methodology, size-checked and atomic — read fresh at the next run |
+| GET | `/v1/work` | The board: one row per piece of work, not per run |

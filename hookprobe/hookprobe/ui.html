@@ -49,6 +49,26 @@ body{margin:0;background:var(--bg);color:var(--text);height:100vh;display:flex;f
      font:var(--ui)}
 header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
 nav.tabs{padding:0 12px;background:var(--panel)}
+/* the work board: one column per state, blocked first — see hookprobe/work.py */
+.wb{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;padding:2px 0 10px}
+.wb-col{min-width:0}
+.wb-h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);padding:0 2px 6px;display:flex;gap:6px;align-items:baseline}
+.wb-h b{color:var(--text);font-family:var(--mono);font-weight:600}
+.wb-card{border:1px solid var(--line);border-left:2px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;cursor:pointer;background:var(--bg)}
+.wb-card:hover{border-color:var(--accent)}
+.wb-card .t{font-size:13px;line-height:1.35;margin-bottom:4px;overflow-wrap:anywhere}
+.wb-card .m{font-size:11px;color:var(--dim);font-family:var(--mono);display:flex;flex-wrap:wrap;gap:6px}
+.wb-card .o{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px}
+.wb-card .o span{font-size:10.5px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--amber)}
+.wb-waiting_approval{border-left-color:var(--amber)} .wb-needs_human{border-left-color:var(--bad)}
+.wb-executing{border-left-color:var(--accent)} .wb-verifying{border-left-color:var(--amber)}
+.wb-done{border-left-color:var(--ok)}
+.wb-card .v{color:var(--ok)}
+.ap-row{border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:9px}
+.ap-row .h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:5px}
+.ap-row .h .w{margin-left:auto;font-size:11px;color:var(--dim);font-family:var(--mono)}
+.ap-row .cmd{font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px;margin:4px 0;overflow-x:auto}
+.ap-bar{display:flex;gap:6px;margin-top:6px}
 .prov{font-size:12px;color:var(--dim);padding:2px 0 6px}.prov b{color:var(--text);font-weight:500}.prov a{color:var(--accent)}
 header h1{font-size:15px;margin:0;font-weight:600}
 header h1 span{color:var(--dim);font-weight:400}
@@ -259,7 +279,9 @@ button.danger{color:var(--red);border-color:var(--red)}
   <input id="token" placeholder="bearer token" autocomplete="off">
 </header>
 <nav class="tabs">
+  <button class="tab" id="workBtn">work <span class="count" id="workCount"></span></button>
   <button class="tab active" id="sessionsTab">sessions</button>
+  <button class="tab" id="approvalsBtn">approvals <span class="count" id="apprCount"></span></button>
   <span class="tab-group"><span class="tab-group-label">knowledge</span>
     <button class="tab" id="skillsBtn">skills</button>
     <button class="tab" id="agentsBtn">agents</button>
@@ -1000,6 +1022,8 @@ $("#new").onclick = () => {
   $("#msg").focus();
 };
 
+$("#workBtn").onclick = () => openWork();
+$("#approvalsBtn").onclick = () => openApprovals();
 $("#sessionsTab").onclick = () => (sel ? select(sel) : $("#new").onclick());
 $("#skillsBtn").onclick = () => openSkills();
 $("#agentsBtn").onclick = () => openAgents();
@@ -1057,6 +1081,139 @@ function leaveSessions(mode) {
   $("#stopBtn").style.display = "none";
   $("#hint").textContent = "";
   refreshList();
+}
+
+// The board: one card per piece of work, not per run (hookprobe/work.py).
+// Blocked columns first, because a running item needs nothing from the person
+// reading this and a blocked one is waiting on them.
+const WB_LABEL = {
+  waiting_approval: "waiting on you",
+  needs_human: "needs a human",
+  executing: "in flight",
+  verifying: "verifying",
+  done: "done",
+};
+
+function wbCard(item) {
+  const age = item.updated_at ? rel(item.updated_at) : "";
+  const spent = item.cost_usd ? `$${Number(item.cost_usd).toFixed(2)}` : "";
+  const chips = (item.open || []).map((o) => `<span>${esc(o.kind === "approve" ? "approve: " + o.text : o.kind)}</span>`).join("");
+  return `<div class="wb-card wb-${esc(item.state)}" data-session="${attr((item.sessions || []).slice(-1)[0] || "")}">
+    <div class="t">${esc(item.title || item.work_id)}</div>
+    <div class="m">${item.kind ? `<span>${esc(item.kind)}</span>` : ""}${item.source ? `<span>${esc(item.source)}</span>` : ""}
+      ${spent ? `<span>${spent}</span>` : ""}<span>${item.turns} turn${item.turns === 1 ? "" : "s"}</span>
+      ${item.verified ? `<span class="v">verified · ${esc(item.verified_by)}</span>` : ""}
+      ${item.follow_ups ? `<span>${item.follow_ups} follow-up${item.follow_ups === 1 ? "" : "s"}</span>` : ""}
+      ${item.refires ? `<span>re-fired ${item.refires}×</span>` : ""}
+      ${age ? `<span>${esc(age)}</span>` : ""}</div>
+    ${chips ? `<div class="o">${chips}</div>` : ""}</div>`;
+}
+
+// "3m ago", from the same epoch seconds everything else on this page uses.
+function rel(ts) {
+  const d = Math.max(0, Math.round(Date.now() / 1000 - Number(ts)));
+  if (d < 60) return d + "s ago";
+  if (d < 3600) return Math.floor(d / 60) + "m ago";
+  if (d < 86400) return Math.floor(d / 3600) + "h ago";
+  return Math.floor(d / 86400) + "d ago";
+}
+
+async function openWork() {
+  markTab("workBtn");
+  leaveSessions("work");
+  try {
+    const d = await (await api("/v1/work")).json();
+    const c = d.counts || {};
+    $("#meta").textContent = "work · one row per piece of work, however many runs it took";
+    $("#prov").innerHTML = `${c.blocked || 0} blocked · ${c.executing || 0} in flight · ` +
+      `${c.done || 0} done, ${c.verified || 0} verified · ` +
+      `<b>${c.closed_unattended || 0}</b> closed without anyone stepping in`;
+    const items = d.items || [];
+    if (!items.length) { $("#turns").innerHTML = '<div class="empty">no work yet — an alert, a task or a question through the event door opens one</div>'; return; }
+    const order = ["waiting_approval", "needs_human", "executing", "verifying", "done"];
+    $("#turns").innerHTML = `<div class="wb">` + order.map((state) => {
+      const rows = items.filter((i) => i.state === state);
+      if (!rows.length) return "";
+      return `<div class="wb-col"><div class="wb-h">${esc(WB_LABEL[state] || state)} <b>${rows.length}</b></div>` +
+        rows.map(wbCard).join("") + "</div>";
+    }).join("") + "</div>";
+    $("#turns").scrollTop = 0;
+    $("#turns").querySelectorAll(".wb-card").forEach((card) => (card.onclick = () => {
+      const key = card.dataset.session;
+      if (key) select(key);
+    }));
+  } catch (e) { $("#turns").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// Everything that waits on a person, in one place: procedures nobody has
+// approved, memory lines nobody has adopted, reports nobody has ruled on. Two
+// of the three did not block any work — the page answers the wider question on
+// purpose, because "what do I owe" is what a person opens it to ask.
+async function openApprovals() {
+  markTab("approvalsBtn");
+  leaveSessions("approvals");
+  $("#meta").textContent = "approvals · what waits on a person · nothing here ran or was written";
+  $("#prov").textContent = "";
+  try {
+    const [rem, mem, runs] = await Promise.all([
+      (await api("/v1/remediations")).json().catch(() => ({ proposals: [] })),
+      (await api("/v1/memory/suggestions")).json().catch(() => ({ open: [] })),
+      (await api("/v1/runs?unruled=1&limit=50")).json().catch(() => []),
+    ]);
+    const proposals = (rem.proposals || []).filter((r) => r.status === "proposed");
+    const lines = mem.open || [];
+    const unruled = (runs || []).filter((r) => r.status !== "running");
+    const parts = [];
+    if (proposals.length) {
+      parts.push(`<div class="review-head" style="color:var(--amber)">procedures waiting for approval · ${proposals.length}</div>` +
+        proposals.map((r) => `<div class="ap-row" data-rem="${attr(r.id)}">
+          <div class="h"><span class="badge proposed">proposed</span><span>${esc(r.session_key)}</span>
+          <span class="w">${esc(fmtTime(r.created_at))}</span></div>
+          ${(r.steps || []).map((s) => `<div class="cmd">$ ${esc(s.command)}</div>`).join("")}
+          <div class="ap-bar"><button class="primary" data-act="approve">approve &amp; run</button>
+          <button class="danger" data-act="reject">reject</button></div></div>`).join(""));
+    }
+    if (lines.length) {
+      parts.push(`<div class="review-head">memory lines proposed by investigations · ${lines.length}</div>` +
+        lines.map((r) => `<div class="ap-row" data-mem="${attr(r.id)}">
+          <div class="h"><span>${esc(r.session_key)}</span><span class="w">${esc(fmtTime(r.at))}</span></div>
+          <div>${esc(r.line)}</div>
+          <div class="ap-bar"><button data-act="accept">remember it</button><button data-act="dismiss">dismiss</button></div></div>`).join(""));
+    }
+    if (unruled.length) {
+      parts.push(`<div class="review-head">reports nobody has ruled on · ${unruled.length}</div>` +
+        unruled.map((r) => `<div class="ap-row" data-run="${attr(r.session_key)}">
+          <div class="h"><span>${esc(r.title || r.session_key)}</span><span class="w">${esc(fmtTime(r.finished_at || r.created_at))}</span></div>
+          <div class="ap-bar"><button data-act="useful">found the cause</button><button data-act="useless">missed it</button>
+          <button data-act="open">open</button></div></div>`).join(""));
+    }
+    $("#turns").innerHTML = parts.length ? parts.join("")
+      : '<div class="empty">nothing waiting — no procedure to approve, no memory line queued, every report ruled</div>';
+    $("#turns").scrollTop = 0;
+    $("#turns").querySelectorAll(".ap-row button").forEach((b) => (b.onclick = async () => {
+      const row = b.closest(".ap-row"), act = b.dataset.act;
+      b.disabled = true;
+      try {
+        if (row.dataset.rem) await api(`/v1/remediations/${encodeURIComponent(row.dataset.rem)}/${act}`, { method: "POST" });
+        else if (row.dataset.mem) await api(`/v1/memory/suggestions/${encodeURIComponent(row.dataset.mem)}/${act}`, { method: "POST" });
+        else if (act === "open") { select(row.dataset.run); return; }
+        else await api(`/v1/runs/${encodeURIComponent(row.dataset.run)}/ruling`,
+          { method: "POST", body: JSON.stringify({ ruling: act, by: "console" }) });
+        await openApprovals();
+        await refreshBoardCounts();
+      } catch (e) { b.disabled = false; $("#hint").textContent = e.message; }
+    }));
+  } catch (e) { $("#turns").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// The two tab badges: what is blocked, and what is owed. On every tab, because
+// "is anything waiting on me" is not a question you should have to navigate to.
+async function refreshBoardCounts() {
+  try {
+    const c = (await (await api("/v1/work")).json()).counts || {};
+    $("#workCount").textContent = c.blocked ? String(c.blocked) : "";
+    $("#apprCount").textContent = c.open_items ? String(c.open_items) : "";
+  } catch (e) { /* the badges are a courtesy; the pages themselves say why */ }
 }
 
 async function openSkills() {
@@ -1752,6 +1909,8 @@ else if (location.hash.startsWith("#agents")) {
   if (agentLink) { leaveSessions("agents"); renderAgent(agentLink); }
   else openAgents();
 }
+else if (location.hash === "#work") openWork();
+else if (location.hash === "#approvals") openApprovals();
 else if (location.hash === "#memory") openMemory();
 else if (location.hash === "#prompt") openPrompt();
 else if (location.hash === "#system") openSystem();
@@ -1858,11 +2017,14 @@ async function refreshBudget() {
 // session (its live feed included), or the audit tail.
 async function tick() {
   await refreshBudget();
+  await refreshBoardCounts();
   if (viewMode === "sessions") {
     await refreshList();
     if (sel) await renderDetail(false).catch(() => null);
   } else if (viewMode === "audit" && auditReload) {
     await auditReload();
+  } else if (viewMode === "work") {
+    await openWork();
   }
   const now = new Date().toTimeString().slice(0, 8);
   $("#stamp").textContent = "refreshed " + now;
