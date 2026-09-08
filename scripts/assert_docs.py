@@ -114,6 +114,34 @@ _COUNT_EN = re.compile(
     re.IGNORECASE,
 )
 _COUNT_ZH = re.compile(r"([一二三四五六七八九十]|\d+)条[^。\n]{0,12}?(?:路由|路径)")
+
+# The same rule for the containment table, which drifted exactly the way this
+# check exists to stop: a boundary was added, the table grew to fifteen rows,
+# and three of the four places that state the count still said fourteen while
+# the fourth said fifteen. Nobody reading either number could tell which was
+# true, and the number is the claim the security page is FOR.
+BOUNDARY_TABLE = Path("docs/containment.md")
+BOUNDARY_COUNT_STATED = (
+    Path("README.md"),
+    Path("docs/index.md"),
+    Path("docs/zh/index.md"),
+)
+_BOUNDARY_ROW = re.compile(r"^\| \*\*", re.MULTILINE)
+_BOUNDARY_EN = re.compile(
+    r"\b(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+    r"twenty-one|twenty-two|twenty-three|twenty-four|twenty-five|\d+)\s+structural\s+"
+    r"(?:security\s+)?boundaries\b",
+    re.IGNORECASE,
+)
+_BOUNDARY_ZH = re.compile(r"([一二三四五六七八九十]{1,3}|\d+)条结构性边界")
+_TEENS = {
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+    "twenty-one": 21, "twenty-two": 22, "twenty-three": 23, "twenty-four": 24, "twenty-five": 25,
+    "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15, "十六": 16,
+    "十七": 17, "十八": 18, "十九": 19, "二十": 20, "二十一": 21, "二十二": 22,
+    "二十三": 23, "二十四": 24, "二十五": 25,
+}
 _NUMBER_WORDS = {
     **{
         w: i
@@ -135,6 +163,17 @@ _NUMBER_WORDS = {
     },
     **{w: i for i, w in enumerate("一二三四五六七八九十", 1)},
 }
+
+
+def _stated_boundaries(text: str) -> list[tuple[int, int]]:
+    """Every (line number, stated boundary count) in the text, both languages."""
+    out = []
+    for pattern in (_BOUNDARY_EN, _BOUNDARY_ZH):
+        for m in pattern.finditer(text):
+            word = m.group(1).lower()
+            value = _TEENS.get(word) or _NUMBER_WORDS.get(word)
+            out.append((text.count("\n", 0, m.start()) + 1, value or int(word)))
+    return out
 
 
 def _stated_counts(text: str) -> list[tuple[int, int]]:
@@ -258,6 +297,15 @@ def main() -> int:
                     f"{doc}:{line} says {count} routes, but {ROUTE_CONSTANTS} defines {defined} ROUTE_* constants"
                 )
 
+    rows = len(_BOUNDARY_ROW.findall(BOUNDARY_TABLE.read_text(encoding="utf-8")))
+    for doc in BOUNDARY_COUNT_STATED:
+        for line, count in _stated_boundaries(doc.read_text(encoding="utf-8")):
+            if count != rows:
+                problems.append(
+                    f"{doc}:{line} says {count} structural boundaries, "
+                    f"but {BOUNDARY_TABLE} lists {rows}"
+                )
+
     if problems:
         print("docs have fallen behind:", file=sys.stderr)
         for line in problems:
@@ -276,7 +324,8 @@ def main() -> int:
     print(
         f"docs: every route, knob and config key across {len(SERVICES)} services is written up or named as not, "
         f"{len(ENUMERATED)} enumerated sets match their tuples, "
-        f"{stated} stated route counts all equal the {defined} defined"
+        f"{stated} stated route counts all equal the {defined} defined, "
+        f"{rows} containment boundaries match every page that counts them"
     )
     return 0
 
