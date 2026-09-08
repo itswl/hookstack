@@ -153,6 +153,7 @@ reference is a README nobody finishes and a reference nobody trusts.
 | [docs/configuration.md](docs/configuration.md) | every knob with the reason it exists; MCP servers by hand; browser evidence |
 | [docs/cost.md](docs/cost.md) | what a run costs, why reuse is the lever, loop hygiene, model-call telemetry |
 | [docs/learning.md](docs/learning.md) | case files, runbooks, skills, and the hookstack loop that closes back onto the judge |
+| [docs/runtimes.md](docs/runtimes.md) | which agent runtime runs a turn, the contract a second one has to meet, and what codex does and does not give |
 | [examples/patrols/README.md](examples/patrols/README.md) | patrol mode — scheduled investigations with no new code, and the two clocks that can drive them |
 | [../docs/containment.md](../docs/containment.md) | every boundary in hookstack, each with a column for what it does **not** stop |
 

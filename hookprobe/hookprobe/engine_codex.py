@@ -143,6 +143,11 @@ class CodexEngine:
         """
         if self._gate_proven:
             return
+        if shutil.which(self._binary) is None and not Path(self._binary).is_file():
+            raise RuntimeError(
+                f"HOOKPROBE_RUNTIME=codex but {self._binary!r} is not on this node's PATH. "
+                "The adapter drives the CLI as a subprocess; there is nothing to drive."
+            )
         probe = {
             "hook_event_name": "PreToolUse",
             # Refused under every posture: no allowlist names it, and an

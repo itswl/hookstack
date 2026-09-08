@@ -315,3 +315,10 @@ def test_a_working_gate_is_proven_once(tmp_path: Path) -> None:
     engine = CodexEngine(make_settings(tmp_path, runtime="codex", codex_python=sys.executable))
     engine.verify_gate()
     assert engine._gate_proven, "a probe on every turn is a cost paid forever for an answer that cannot change"
+
+
+def test_a_missing_runtime_is_caught_before_a_turn_is_accepted(tmp_path: Path) -> None:
+    """Failing at boot beats failing on the first alert at three in the morning."""
+    engine = CodexEngine(make_settings(tmp_path, runtime="codex", codex_binary="codex-that-is-not-installed"))
+    with pytest.raises(RuntimeError, match="not on this node's PATH"):
+        engine.verify_gate()

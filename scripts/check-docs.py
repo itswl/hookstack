@@ -31,7 +31,10 @@ def _docs() -> list[Path]:
     """
     try:
         listed = subprocess.run(  # nosec B603 B607 — fixed argv, no input
-            ["git", "-C", str(ROOT), "ls-files", "-z", "*.md"],
+            # Tracked, plus untracked-but-not-ignored: a doc written and not yet
+            # staged is still a doc this gate should be reading, and only the
+            # ignored ones are none of its business.
+            ["git", "-C", str(ROOT), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.md"],
             capture_output=True,
             check=True,
             timeout=30,
