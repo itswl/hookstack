@@ -128,10 +128,18 @@ happened.
 
 The reason is one failure. A patrol on this deployment died on *"the model has
 reached its context window limit"*, and nothing anywhere had said it was close.
-The number existed the whole time; nobody asked for it. `get_context_usage()` is
-one extra round trip to the runtime, no model call, and never fatal — a failure
-to answer how full the context is must not fail a turn that already produced a
-report.
+The number existed the whole time; nobody asked for it.
+
+Asking is bounded twice, and the second bound was bought the hard way. It is an
+extra request to the runtime on the hot path of every turn, so it has a **three
+second timeout** — an observation that can hang is not an observation. And it is
+**asked once per process** if it fails: the first version had a ten second
+timeout and no latch, and CLI 2.1.259 does not answer the request at all, so a
+trivial turn that should have taken two and a half seconds took twelve and a
+half, every time, buying a number that was never going to arrive. The latch is
+per process rather than per run, so a deployment that upgrades its CLI gets the
+number back on its next restart — which is when its runtime changed anyway. On a
+runtime that does not answer, `context` stays `null` and the log says so once.
 
 Compaction is not free and it is not visible: what it drops, it drops, and a
 report with a gap in the middle of a long investigation has no other explanation

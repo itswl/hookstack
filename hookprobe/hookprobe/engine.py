@@ -257,6 +257,11 @@ def _compaction_hook(record: Callable[[dict[str, Any]], None]) -> Callable[..., 
     return hook
 
 
+# Short on purpose: a control request the runtime answers at all answers fast,
+# and one it does not answer is being waited on for nothing.
+_CONTEXT_USAGE_TIMEOUT = 3.0
+
+
 def _context_facts(usage: Any) -> dict[str, Any] | None:
     """The few numbers worth keeping from a context-usage answer.
 
@@ -673,6 +678,9 @@ class ClaudeAgentEngine:
         # stop can ask the SDK rather than kill the coroutine. None between runs
         # and after one finishes — an engine instance runs one turn at a time.
         self._interrupt: Callable[[], Any] | None = None
+        # Whether this runtime answers "how full is the context". Latched off on
+        # the first failure — see _context_usage for what asking every turn cost.
+        self._context_usage_works = True
 
     async def stop(self) -> bool:
         """Ask the running turn to wind down, keeping its ResultMessage.
@@ -1082,14 +1090,7 @@ class ClaudeAgentEngine:
         # One extra round trip to the CLI, no model call, and never fatal: a
         # failure to ANSWER how full the context is must not fail a turn that
         # already produced a report.
-        context: dict[str, Any] | None = None
-        try:
-            # Bounded. This is an extra request to the CLI on the hot path of
-            # every turn, and an observation that can HANG is not an observation
-            # — it is an outage waiting for the runtime to stop answering.
-            context = _context_facts(await asyncio.wait_for(client.get_context_usage(), timeout=10))
-        except Exception:  # noqa: BLE001 — an observation is not worth a failed run
-            logger.debug("context usage unavailable", exc_info=True)
+        context = await self._context_usage(client)
         return EngineResult(
             text=text,
             message_count=message_count,
@@ -1103,6 +1104,34 @@ class ClaudeAgentEngine:
             context=context,
             compactions=tuple(compactions),
         )
+
+    async def _context_usage(self, client: Any) -> dict[str, Any] | None:
+        """How full the context is, asked at most once per process if it fails.
+
+        This is an extra request to the CLI on the hot path of every turn, so it
+        is bounded twice. A timeout, because an observation that can hang is not
+        an observation — it is an outage waiting for the runtime to stop
+        answering. And a latch, because the first version of this cost **ten
+        seconds on every turn**: CLI 2.1.259 does not answer the request at all,
+        so a trivial turn that should take two and a half seconds took twelve
+        and a half, and the number it was buying was never going to arrive. Ask
+        once, learn, stop asking.
+
+        The latch is per PROCESS, not per run: a deployment that upgrades its
+        CLI gets the number back on the next restart, which is when its runtime
+        changed anyway.
+        """
+        if not self._context_usage_works:
+            return None
+        try:
+            return _context_facts(await asyncio.wait_for(client.get_context_usage(), timeout=_CONTEXT_USAGE_TIMEOUT))
+        except Exception:  # noqa: BLE001 — an observation is not worth a failed run, or a slow one
+            self._context_usage_works = False
+            logger.info(
+                "this runtime does not report context usage; not asking again in this process "
+                "(the run record's `context` will stay null)"
+            )
+            return None
 
     def _input_changes(self, before: dict[str, str]) -> tuple[str, ...]:
         """What this run did to its own input surface — empty when it behaved."""

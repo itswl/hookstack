@@ -88,3 +88,45 @@ def test_a_runtime_that_says_nothing_leaves_the_record_saying_nothing(tmp_path) 
         assert run.turns[0]["context"] is None and run.turns[0]["compactions"] == []
 
     asyncio.run(scenario())
+
+
+def test_a_runtime_that_does_not_answer_is_asked_once_per_process(tmp_path) -> None:
+    """The first version of this cost ten seconds on EVERY turn: CLI 2.1.259
+    does not answer the request at all, so a trivial turn that should take two
+    and a half seconds took twelve and a half, buying a number that was never
+    going to arrive. Ask once, learn, stop asking."""
+    from hookprobe.engine import ClaudeAgentEngine
+
+    asked = 0
+
+    class Silent:
+        async def get_context_usage(self) -> Any:
+            nonlocal asked
+            asked += 1
+            raise TimeoutError("the runtime never answers this")
+
+    engine = ClaudeAgentEngine(make_settings(tmp_path))
+    assert engine._context_usage_works is True
+    assert asyncio.run(engine._context_usage(Silent())) is None
+    assert asked == 1 and engine._context_usage_works is False
+    for _ in range(5):
+        assert asyncio.run(engine._context_usage(Silent())) is None
+    assert asked == 1, "a turn must not pay for a question this runtime has already refused"
+
+
+def test_a_runtime_that_answers_is_asked_every_turn(tmp_path) -> None:
+    from hookprobe.engine import ClaudeAgentEngine
+
+    class Talkative:
+        def __init__(self) -> None:
+            self.asked = 0
+
+        async def get_context_usage(self) -> Any:
+            self.asked += 1
+            return _Usage(totalTokens=1000, maxTokens=200_000, percentage=0.5)
+
+    engine = ClaudeAgentEngine(make_settings(tmp_path))
+    client = Talkative()
+    for _ in range(3):
+        assert asyncio.run(engine._context_usage(client))["tokens"] == 1000
+    assert client.asked == 3 and engine._context_usage_works is True
