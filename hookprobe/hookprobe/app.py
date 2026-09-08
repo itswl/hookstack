@@ -186,7 +186,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         # Before the first run: are the credentials as narrow as the posture
         # says? Under enforce a wider-than-declared runner does not come up.
         await posture.on_startup(settings.workdir, settings.bash_guard, settings.posture_check)
-        service.sweep_orphans()
+        service.recover_orphans()
         service.sweep_interrupted_remediations()
 
         async def retention_loop() -> None:
@@ -631,6 +631,30 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             settings.workdir, cls, item_id, "regretted", note=str((payload or {}).get("note") or "")[:300]
         )
         return {"recorded": True, "class": cls, "id": item_id}
+
+    @app.post("/v1/runs/{session_key}/retry", dependencies=[Depends(require_token)])
+    async def retry_run(session_key: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Human takeover: try a failed investigation again from the board.
+
+        The work board's `needs a human` column is where this is pressed. It
+        continues the engine session when the failure left one, so the second
+        attempt starts from what the first gathered rather than from nothing.
+        """
+        try:
+            run = service.retry(session_key, by=str((payload or {}).get("by") or "operator"))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RunBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ValueError, NotResumableError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "status": "retrying",
+            "sessionKey": run.session_key,
+            "runId": run.run_id,
+            "resumed": bool(run.engine_session_id),
+            "attempt": int(run.meta.get("retries") or 1) + 1,
+        }
 
     @app.get("/v1/work", dependencies=[Depends(require_token)])
     async def work_board(limit: int = 200) -> dict[str, Any]:

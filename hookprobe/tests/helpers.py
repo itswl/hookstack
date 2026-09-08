@@ -43,6 +43,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "event_secret": "",
         "return_url": "",
         "relay_ui_url": "",
+        "resume_interrupted": True,
         "agent_name": "hookprobe",
         "agent_role": "",
         # Off by default: a test that wants rulings filed sets both, and every

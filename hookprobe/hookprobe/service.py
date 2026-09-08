@@ -49,7 +49,55 @@ def _inferred_actor(session_key: str) -> str:
     return f"{INFERRED_BY_PREFIX}{session_key}"
 
 
+# One continuation per run, ever. The counter is persisted on the run, so a
+# process that crashes on every boot settles the second time instead of buying
+# a turn on each restart.
+_MAX_RESUMES = 1
+
+# What a continued run is told. It says what happened and forbids the expensive
+# mistake: a model that starts over pays for the whole investigation again and
+# reports as if the first attempt never happened.
+_RESUME_MESSAGE = (
+    "The service running this investigation restarted before you finished. "
+    "Everything you had gathered is still in this session. Continue from where you stopped "
+    "and produce the report — do not start the investigation over."
+)
+
+
 class Engine(Protocol):
+    """The runtime contract: what this service needs from whatever runs a turn.
+
+    One adapter exists (hookprobe/engine.py, the Claude Code SDK). This is the
+    shape a second one has to fill, and it is written down because two of the
+    obligations are invisible in the signatures below and losing either would
+    take this service's claims with it:
+
+    * **A tool gate that runs BEFORE a tool does.** The read-only posture is not
+      a prompt; it is a PreToolUse hook that refuses mutating verbs, and the
+      posture check at startup measures credentials against what the node
+      declared. A runtime that can only be asked nicely not to write cannot be
+      run under `readonly`, and a deployment swapping one in would keep the
+      word and lose the boundary.
+    * **A per-call audit record the agent cannot edit.** `/v1/runs/{key}/audit`
+      and the flight recorder under `{workdir}/audit` are written from the same
+      hooks, including inside subagents, whose calls never appear in the message
+      stream. Without them a run's account of itself is the run's own word.
+
+    And three that are visible, but easy to satisfy shallowly:
+
+    * **Session identity that outlives this process.** `resume` is handed back
+      the id from a previous turn — possibly from a previous *boot*, since
+      `recover_orphans` continues a run a crash interrupted. An id that is only
+      valid in-process satisfies the type and breaks the feature.
+    * **Incremental events**, `on_event`, including `{"type": "session", "id":
+      …}` as soon as the id is known. Emitting it only at the end is what made
+      an interrupted first turn unrecoverable.
+    * **Cost and usage on the result**, or `None` — never zero as a stand-in for
+      unknown. The ledger keeps "nobody counted" and "this was free" apart, and
+      a runtime that reports 0.0 for an unpriced turn corrupts both the budget
+      breaker and the weekly account.
+    """
+
     async def run(
         self,
         *,
@@ -346,6 +394,50 @@ class RunService:
         self._spawn(run, message, timeout_s, resume=run.engine_session_id)
         return run
 
+    def retry(self, session_key: str, *, by: str = "operator") -> Run:
+        """Try a failed investigation again, because a person said so.
+
+        The counterpart to `recover_orphans`, for the failures nothing automatic
+        will pick up: a timeout, a provider error, a restart that had no session
+        to continue. Until now the only way back was to re-fire the alert or
+        retype the question, which means the operator carries what the service
+        already knows.
+
+        Continues the engine session when there is one — everything the failed
+        attempt gathered comes with it — and otherwise re-asks the question the
+        run opened with. Not budget-gated, for the reason `/hooks/agent` is not:
+        a human's explicit request should not bounce off a meter. Not capped
+        either; pressing it again is a person's decision, and every press is a
+        turn in the record with the name of whoever asked.
+        """
+        run = self._store.get(session_key)
+        if run is None:
+            raise LookupError("session not found")
+        if not run.finished:
+            raise RunBusyError("a turn is already in progress for this session")
+        if run.status != FAILED:
+            raise ValueError("only a failed run can be retried")
+        opening = str((run.turns[0].get("message") if run.turns else "") or run.current_message or "").strip()
+        if run.engine_session_id:
+            message, resume = _RESUME_MESSAGE, run.engine_session_id
+        elif opening:
+            message, resume = opening, None
+        else:
+            raise NotResumableError("this run kept neither an engine session nor its opening question")
+        run.meta["retries"] = int(run.meta.get("retries") or 0) + 1
+        run.meta["retried_by"] = by[:80]
+        run.status = RUNNING
+        run.run_id = uuid.uuid4().hex[:12]
+        run.text = ""
+        run.error = None
+        run.finished_at = None
+        run.cost_usd = None
+        run.return_status = ""
+        run.current_message = message
+        logger.info("retry session=%s by=%s resume=%s", session_key, by, resume or "-")
+        self._spawn(run, message, self._settings.default_timeout_seconds, resume=resume)
+        return run
+
     def stop(self, session_key: str) -> Run:
         """End the in-flight turn; it finishes as a failed turn, not a hang.
 
@@ -445,23 +537,79 @@ class RunService:
 
         task.add_done_callback(_done)
 
-    def sweep_orphans(self) -> int:
-        """Settle runs a previous process left mid-flight, at startup.
+    def recover_orphans(self) -> tuple[int, int]:
+        """Runs a previous process left mid-flight: continue them, or settle them.
 
         Live state does not survive a restart, but a relay-born investigation
         has no poller on the other side — only a pipe waiting for probe-notify.
-        Silence would break "failure completes the loop", so every orphan
-        becomes a failed run that reports itself like any other failure.
+        Silence would break "failure completes the loop", so an orphan that
+        cannot be continued still becomes a failed run that reports itself.
+
+        Continuing is the better answer where it is available. The engine's
+        transcript lives on the data volume, not in this process, so a session
+        id is a handle to everything the interrupted attempt gathered — tool
+        output, evidence, dead ends. Failing the run threw all of it away and
+        reported a failure an operator then re-asked by hand, paying twice.
+
+        Four things bound it, because this is the one path that spends money
+        with nobody asking:
+
+        * a session id must exist — recorded mid-turn now (`on_event`), so a
+          first turn cut off after its first message is resumable at all;
+        * ONE resume per run, counted in `meta.resumes` and persisted, so a
+          crash loop cannot become a spend loop;
+        * the budget breaker, checked here as the event door checks it;
+        * `HOOKPROBE_RESUME_INTERRUPTED=off`, for a deployment that would
+          rather no restart ever spend on its own.
+
+        The interrupted attempt is recorded as a turn of its own with no cost —
+        `None`, "nobody counted", which is the truth: the provider billed
+        whatever it billed and no result ever came back to say. It shows in
+        `window_unpriced()`, where it belongs.
+
+        Returns (resumed, failed).
         """
-        swept = 0
+        resumed = failed = 0
         for run in self._store.list_runs(limit=1000):
             if run.finished or run.session_key in self._running:
                 continue
-            self._fail(run, "interrupted by a restart before the investigation finished")
-            swept += 1
-        if swept:
-            logger.warning("swept %s orphaned run(s) left by a previous process", swept)
-        return swept
+            if self._can_resume(run):
+                self._resume_interrupted(run)
+                resumed += 1
+            else:
+                self._fail(run, "interrupted by a restart before the investigation finished")
+                failed += 1
+        if resumed or failed:
+            logger.warning(
+                "restart left %s run(s) mid-flight: %s continued, %s settled as failed",
+                resumed + failed,
+                resumed,
+                failed,
+            )
+        return resumed, failed
+
+    def _can_resume(self, run: Run) -> bool:
+        if not self._settings.resume_interrupted or not run.engine_session_id:
+            return False
+        if int(run.meta.get("resumes") or 0) >= _MAX_RESUMES:
+            return False
+        state = self.budget_state()
+        return not (state is not None and state[0] >= state[1])
+
+    def _resume_interrupted(self, run: Run) -> None:
+        """Record the lost attempt, then continue the session it left behind."""
+        run.error = "interrupted by a restart"
+        run.text = ""
+        run.cost_usd = None
+        self._record_turn(run, None)
+        run.meta["resumes"] = int(run.meta.get("resumes") or 0) + 1
+        run.error = None
+        run.status = RUNNING
+        run.run_id = uuid.uuid4().hex[:12]
+        run.finished_at = None
+        run.current_message = _RESUME_MESSAGE
+        logger.info("resuming interrupted run session=%s engine=%s", run.session_key, run.engine_session_id)
+        self._spawn(run, _RESUME_MESSAGE, self._settings.default_timeout_seconds, resume=run.engine_session_id)
 
     def sweep_interrupted_remediations(self) -> int:
         """Settle procedures a previous process died in the middle of, at startup.
@@ -798,6 +946,15 @@ class RunService:
 
         def on_event(event: dict[str, Any]) -> None:
             event["ts"] = time.time()
+            # Not a step in the investigation — the handle that makes this turn
+            # resumable. Checkpointed immediately, because the whole point is to
+            # have it on disk BEFORE anything can kill this process.
+            if event.get("type") == "session":
+                found = str(event.get("id") or "")
+                if found and run.engine_session_id != found:
+                    run.engine_session_id = found
+                    self._store.checkpoint(run)
+                return
             # A tool_done is a timing report, not a new step. Matched to its
             # streamed step by tool_use_id it becomes that step's duration; an
             # id the stream never produced is a subagent's call — the message

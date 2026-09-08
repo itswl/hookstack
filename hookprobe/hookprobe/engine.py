@@ -812,6 +812,7 @@ class ClaudeAgentEngine:
         input_changes: tuple[str, ...] = ()
         last_text = ""
         message_count = 0
+        session_seen = ""
         result: Any = None
         # ClaudeSDKClient rather than query(), and the reason is the bill.
         #
@@ -833,6 +834,19 @@ class ClaudeAgentEngine:
             await client.connect()
             await client.query(message)
             async for msg in client.receive_response():
+                # The id that makes this turn resumable, published the moment
+                # the runtime first mentions it rather than at the end with the
+                # result. A process killed mid-turn used to leave a run with no
+                # session id and therefore nothing to continue — the whole
+                # investigation thrown away because the handle to it arrived
+                # one message too late. `getattr`, because a runtime that does
+                # not carry one simply never emits this and the caller falls
+                # back to failing the run, which is the old behaviour.
+                if not session_seen:
+                    found = str(getattr(msg, "session_id", "") or "")
+                    if found:
+                        session_seen = found
+                        emit({"type": "session", "id": found})
                 if isinstance(msg, StreamEvent):
                     # Transient by design: deltas are for a human watching right
                     # now. The finished blocks below are what gets recorded — and

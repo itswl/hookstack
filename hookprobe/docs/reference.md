@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (50)
+## Environment (51)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -57,12 +57,13 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_AGENT_NAME` | *(empty)* | Who this node is |
 | `HOOKPROBE_MCP_TOOLS` | *(empty)* | Which MCP tools this instance may actually call, as a closed set — mcp__chat__chat_search_messages or mcp__chat__* for a whole server |
 | `HOOKPROBE_FOLLOW_UP_SENDERS` | *(empty)* | Who may continue an investigation by replying in its chat thread (events.py, kind: follow_up): platform sender ids, * for anyone the bridge forwards, empty for nobody — the default… |
+| `HOOKPROBE_RESUME_INTERRUPTED` | `on` | Whether a run this process finds mid-flight at startup — left by a crash, an OOM kill or a redeploy — is CONTINUED in its own engine session or settled as a failure |
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |
 | `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
 | `HOOKPROBE_POSTURE_CHECK` | *(empty)* | Whether the credentials are checked against that declaration at startup (posture.py): enforce refuses to start a runner declared readonly whose kubeconfig or AWS identity can mutat… |
 | `HOOKPROBE_TELEMETRY_RECEIVER` | *(empty)* | Whether this service receives its own runs' OpenTelemetry (telemetry.py): on points the CLI at POST /otel/v1/{logs,metrics} here, keeps a per-run timing record under {workdir}/tele… |
 
-## Routes (57)
+## Routes (58)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -104,6 +105,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/v1/runs/{session_key}/audit` | The accountability record of one run: what posture it held, what it cost, every tool call it made and every one the guards refused, and whether its steering inputs changed under it |
 | POST | `/v1/runs/{session_key}/distill` | A skill draft for what this run learned — returned, never saved |
 | POST | `/v1/runs/{session_key}/handoff` | Hand this run's report to the pipe, for whichever node the operator wired that door to |
+| POST | `/v1/runs/{session_key}/retry` | Human takeover: try a failed investigation again from the board |
 | POST | `/v1/runs/{session_key}/ruling` | One run, ruled from the sessions page — and told what the ruling DID |
 | GET | `/v1/runs/{session_key}/stream` | The open session's steps, pushed as they happen (NDJSON, one per line) |
 | GET | `/v1/runs/{session_key}/telemetry` | The shape of one run: every model call and tool call on one time axis, with what each cost, from the telemetry the CLI posted to this service |

@@ -178,6 +178,42 @@ card it sent, and `fields.thread_root` on every report that answered into a
 topic), never in the bridge. The bridge can be restarted or moved to another
 app without a thread losing its session.
 
+## A restart continues an investigation instead of losing it
+
+The engine's transcript lives on the data volume, not in this process. A run in
+flight when the service restarts — a crash, an OOM kill, a redeploy — used to
+become a failed run that reported itself, and an operator re-asked the question
+by hand, paying for the whole investigation twice. At startup the service now
+**continues** such a run in its own engine session, so everything the
+interrupted attempt gathered comes with it.
+
+Four bounds, because this is the one path that spends money with nobody asking:
+
+| bound | what it stops |
+|---|---|
+| a session id must exist | nothing to continue; the run fails and reports, as before |
+| one resume per run, counted on the run | a crash loop becoming a spend loop |
+| the budget breaker | a restart spending past the window's ceiling |
+| `HOOKPROBE_RESUME_INTERRUPTED=off` | any automatic spending after a restart, for a deployment that wants none |
+
+The id is what makes it possible, and it is recorded **mid-turn**: the runtime
+publishes it as an event the moment it first says it, and the service
+checkpoints it to disk immediately. Recorded from the engine's result instead —
+which is where it used to come from — a first turn cut off before it finished
+had no handle to continue, which is exactly the case worth recovering.
+
+The lost attempt is kept as a turn of its own, priced `null`: the provider
+billed whatever it billed and no result ever came back to say. It counts in the
+unpriced-turn figure, where it belongs, rather than being quietly dropped or
+recorded as free.
+
+For the failures nothing automatic picks up — a timeout, a provider error, a
+restart with no session to continue — `POST /v1/runs/{key}/retry` is the human
+takeover, and the work board's **needs a human** column has the button. It
+continues the engine session when there is one, re-asks the opening question
+when there is not, and is not budget-gated: a person's explicit request should
+not bounce off a meter.
+
 ## The board — one row per piece of work
 
 `/ui#work` groups runs into **work items**: the thing somebody wants finished,

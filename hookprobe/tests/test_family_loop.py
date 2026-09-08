@@ -461,7 +461,10 @@ def test_restart_sweep_reports_orphans_through_the_loop(tmp_path) -> None:
     async def next_boot() -> None:
         settings = make_settings(tmp_path, return_url=url, return_secret="ret-secret")
         service = RunService(settings, FakeEngine(), RunStore(results))
-        assert service.sweep_orphans() == 1
+        # No engine session on this one — nothing to continue, so it settles
+        # as a failure and reports itself, which is the old behaviour and still
+        # the right one. The resumable case is in test_resume.py.
+        assert service.recover_orphans() == (0, 1)
         run = None
         for _ in range(300):
             run = service.get("probe:inbound:31")

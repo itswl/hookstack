@@ -1106,7 +1106,8 @@ function wbCard(item) {
       ${item.follow_ups ? `<span>${item.follow_ups} follow-up${item.follow_ups === 1 ? "" : "s"}</span>` : ""}
       ${item.refires ? `<span>re-fired ${item.refires}×</span>` : ""}
       ${age ? `<span>${esc(age)}</span>` : ""}</div>
-    ${chips ? `<div class="o">${chips}</div>` : ""}</div>`;
+    ${chips ? `<div class="o">${chips}</div>` : ""}
+    ${item.state === "needs_human" ? `<div class="ap-bar"><button data-retry="${attr((item.sessions || []).slice(-1)[0] || "")}">try again</button></div>` : ""}</div>`;
 }
 
 // "3m ago", from the same epoch seconds everything else on this page uses.
@@ -1148,6 +1149,20 @@ async function openWork() {
     $("#turns").querySelectorAll(".wb-card").forEach((card) => (card.onclick = () => {
       const key = card.dataset.session;
       if (key) select(key);
+    }));
+    // Human takeover, from the column that is waiting for one. It continues the
+    // engine session when the failure left one, so the second attempt starts
+    // from what the first gathered.
+    $("#turns").querySelectorAll("[data-retry]").forEach((b) => (b.onclick = async (e) => {
+      e.stopPropagation();
+      b.disabled = true;
+      b.textContent = "trying…";
+      try {
+        const r = await api(`/v1/runs/${encodeURIComponent(b.dataset.retry)}/retry`,
+          { method: "POST", body: JSON.stringify({ by: "console" }) });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
+        await openWork();
+      } catch (err) { b.disabled = false; b.textContent = "try again"; $("#hint").textContent = err.message; }
     }));
   } catch (e) { $("#turns").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }

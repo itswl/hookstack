@@ -205,6 +205,15 @@ class Settings:
     # Where the pipe's board is, as a BROWSER reaches it (not as this container
     # does): a run then links to the chain it belongs to. Empty = no link.
     relay_ui_url: str
+    # Whether a run this process finds mid-flight at startup — left by a crash,
+    # an OOM kill or a redeploy — is CONTINUED in its own engine session or
+    # settled as a failure. On, because the alternative throws away everything
+    # the interrupted attempt gathered and reports a failure the operator then
+    # re-asks by hand. Off for a deployment that would rather no restart ever
+    # spend money on its own; the run then fails and says why, as before.
+    # Bounded either way: one resume per run, and the budget breaker still
+    # applies, so a crash loop cannot become a spend loop.
+    resume_interrupted: bool
     # Who this node is. A deployment runs several of these — an alert
     # investigator, a planner, a work runner — and until now they were
     # distinguishable only by port: every board said "hookprobe" and every
@@ -351,6 +360,7 @@ class Settings:
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             relay_ui_url=os.environ.get("HOOKPROBE_RELAY_UI_URL", "").strip().rstrip("/"),
+            resume_interrupted=(os.environ.get("HOOKPROBE_RESUME_INTERRUPTED", "on").strip().lower() != "off"),
             agent_name=os.environ.get("HOOKPROBE_AGENT_NAME", "").strip()[:60] or "hookprobe",
             agent_role=os.environ.get("HOOKPROBE_AGENT_ROLE", "").strip()[:160],
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),
