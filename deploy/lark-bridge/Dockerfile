@@ -17,10 +17,12 @@ RUN npm install -g "@larksuite/cli@${LARK_CLI_VERSION}" && npm cache clean --for
 WORKDIR /app
 COPY bridge.py render.py .
 
-# lark-cli keeps its app credentials and its event cursor here; mounted so a
-# restart does not re-authenticate and re-subscribe from scratch.
-# No LARK_CLI_HOME: lark-cli 1.0.88 ignores it and writes $HOME/.lark-cli.
-# Nothing it keeps there is worth carrying between containers — see the README.
+# No LARK_CLI_HOME here, and no volume in either compose. lark-cli 1.0.88
+# ignores that variable and writes $HOME/.lark-cli; what it keeps there is a
+# credential the entrypoint re-derives from the environment, a version-check
+# cache, and the bus pid/socket/locks of the process running right now. The
+# last of those is why the volume is gone rather than repointed — see the
+# README. Every container starts from its environment and keeps nothing.
 ENV BRIDGE_PORT=9100
 EXPOSE 9100
 
