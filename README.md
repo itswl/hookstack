@@ -6,7 +6,7 @@
 
 **Run AI agents in production with absolute financial accountability and structural containment.**
 
-hookstack turns a noisy stream of signals into a few priced, signed, auditable interruptions. Point your alert sources at it — Alertmanager, Grafana, any webhook. A cheap judge decides whether a person needs to act *now*; an agent investigates the events that earn it; what survives lands as a card in Feishu/Lark, DingTalk or WeCom, with buttons a person can rule with. Every hop is signed and accounted for, every model call is priced, and a weekly page says what the machines spent and what they saved — in numbers somebody can check.
+hookstack turns a noisy stream of signals into a few priced, signed, auditable interruptions. Point your alert sources at it — Alertmanager, Grafana, any webhook. A cheap judge decides whether a person needs to act *now*; an agent investigates the events that earn it; what survives lands as a card in your chat — Feishu/Lark through a small bridge, DingTalk and WeCom through a shipped plugin — with buttons a person can rule with. Every hop is signed and accounted for, every model call is priced, and a weekly page says what the machines spent and what they saved — in numbers somebody can check.
 
 Built for SRE and platform teams who want AI agents on the alert stream without handing them the keys: agents run read-only by default, behind scoped credentials, budget ceilings and a closed list of tools. Alerts are where it was built and hardened, but they are not the shape. The same pipe, on the same code, carries an operator's own work signals — chat and tickets — to a planner and a human-approved handoff ([two deployments, one codebase](docs/deployments.md)).
 
@@ -21,7 +21,7 @@ Narrative overview with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 - **Every verdict priced, every week accounted for.** One page reads the three ledgers and puts measured beside counterfactual — what the routes avoided, what runbooks answered, how the live arm compared with its shadows — and says in words what it could not measure.
 - **One page per event.** `/audit/{event_id}` shows every hop with digests, decision steps, deliveries and human actions; `/trace/{id}` replays the bodies; `/timeline` groups chains into incidents.
 - **Agents you can contain.** Read-only by default and measured at startup, a closed tool allowlist, budget ceilings that refuse out loud, and fourteen structural boundaries each documented with what it does **not** stop ([containment](docs/containment.md)).
-- **Your model, your chat.** The investigator takes any Anthropic-dialect endpoint, the judge any OpenAI-compatible base including local models; shadow arms compare prompts or models on live traffic before anything is promoted. Cards go to Feishu/Lark, DingTalk, WeCom or a plain webhook; OpenTelemetry is on by default and received by the investigator itself — every run's waterfall is on its own page with no collector deployed, and forwarded untouched when you name one.
+- **Your model, your chat.** The investigator takes any Anthropic-dialect endpoint, the judge any OpenAI-compatible base including local models; shadow arms compare prompts or models on live traffic before anything is promoted. Cards reach the chat through one small protocol between the pipe and a per-platform bridge ([docs/bridge-protocol.md](docs/bridge-protocol.md)) — Feishu/Lark today, DingTalk and WeCom as a shipped plugin, another platform is another bridge — or go as signed JSON to any webhook; OpenTelemetry is on by default and received by the investigator itself — every run's waterfall is on its own page with no collector deployed, and forwarded untouched when you name one.
 
 ![hookrelay's ledger: every message accounted for, every delivery with an outcome](docs/img/hookrelay-ledger.png)
 
@@ -43,13 +43,15 @@ No checkout and no build: everything runs from published images, and the stub mo
 
 Real credentials in `.env` make the stub step aside, and `--profile probe` adds the investigator.
 
+The published images are `0.2.0`, from before the chat bridge: in that quickstart the pipe still renders the Feishu card itself. The source compose runs the current design — the pipe sends a card model and `lark-bridge`, in webhook mode against the sink, renders it — and is what the gate and CI exercise.
+
 ## The Three Services
 
 One shape, wired by configuration rather than code: **something produces signals, a pipe carries them and accounts for every hop, specialized nodes decide or investigate, and what survives reaches a person.**
 
 ```
-upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► lark / dingtalk / wecom / webhook
-              (adapts)  │   (judges)     (formats)
+upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► chat bridge / webhook
+              (adapts)  │   (judges)     (models)
                         └─► hookprobe ──► hookrelay ──► the same channels
                             (investigates critical/high; opt-in, see STACK.md)
 ```
@@ -97,7 +99,7 @@ When a verdict earns it (critical/high), the pipe hands a copy of the event to h
 
 ### lark-bridge — the sidecar the pipe would not become
 
-A custom bot can only *send*, so the buttons on its cards have nowhere to call back ([its own README](deploy/lark-bridge/README.md) covers the Lark app it needs and how to run it). The bridge exists for that return path: it **dials out** to Lark over a long connection to receive button presses and forwards each to hookrelay's signed card-action door. Because the connection is outbound, the alerting network opens no inbound port — hookrelay's public front door was deliberately rolled back, and this does not reopen it. A sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four jobs — receive, route, deliver, account — and the pipe caps its own size.
+A custom bot can only *send*, so the buttons on its cards have nowhere to call back — and a pipe that rendered every platform's card would have to know every platform. The bridge is where both problems live. The pipe speaks one small protocol to it ([docs/bridge-protocol.md](docs/bridge-protocol.md)): a **card model** — title, tone, summary, links, actions as plain facts — signed with the pipe's own scheme; the bridge renders the Feishu card, sends it as the application (or, in webhook mode, to a custom bot's URL), and hands back the platform's message id. It **dials out** to Lark over a long connection to receive button presses and thread replies and forwards each to hookrelay's signed doors, so the alerting network opens no inbound port — hookrelay's public front door stays closed. Nothing in the pipe, the judge or the investigator names the platform: another chat is another bridge, tested against the same fixture; DingTalk and WeCom markdown come from a shipped plugin. It is a sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four jobs — receive, route, deliver, account — and the pipe caps its own size ([its own README](deploy/lark-bridge/README.md) covers the Lark app it needs and how to run it).
 
 ## Product Roadmap & Advanced Patterns
 

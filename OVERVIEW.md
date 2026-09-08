@@ -37,7 +37,7 @@ few model alias mappings is the whole switch. Steps are in [STACK.md](STACK.md)
 upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
       │
       ▼
-  hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ──► Feishu / DingTalk / WeCom
+  hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ──► chat bridge ──► Feishu (DingTalk / WeCom via plugin)
   (pipe: adapt+route+ledger) │ (judge: verdict+cost)   (formats and delivers)
                              │
                              └──► hookprobe :8088 ──► hookrelay ──► the same channels
@@ -48,7 +48,7 @@ upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
 
 | Component | Role | In one line | Deliberately does NOT |
 | --- | --- | --- | --- |
-| [`hookrelay/`](hookrelay) | the pipe | Adapts every upstream dialect into one normalized event, routes it to the brains, renders verdicts and reports into each channel's format, and accounts for all of it | Understand content, or judge |
+| [`hookrelay/`](hookrelay) | the pipe | Adapts every upstream dialect into one normalized event, routes it to the brains, turns verdicts and reports into a neutral card model for the chat bridge to render, and accounts for all of it | Understand content, or judge |
 | [`hookjudge/`](hookjudge) | the judge | One event in, one verdict out. Five routes ordered by cost: recovery, reuse, rule-reuse, ai, rule | Render cards, or know channels |
 | [`hookprobe/`](hookprobe) | the investigator | Runs one tool-using agent investigation per important alert, read-only by default and measured so at startup, and returns a root-cause report; sessions can be asked follow-ups, and experience accumulates | Receive alerts, or send notifications |
 
@@ -81,8 +81,8 @@ The screenshot below is the ledger after the four demo alerts — the whole
 hookstack loop on one page. Each front-door event is routed, in one decision, to
 both `to-judge` and `to-probe` (#1–#8: four alerts and the four verdicts that
 came back within seconds); minutes later the investigators' reports return
-through `probe-notify`, get dressed as cards, and are delivered to
-`ops-feishu` and `ops-dingtalk` (#9–#12) — 24 deliveries, all sent, nothing
+through `probe-notify`, become card models, and are delivered to
+`ops-feishu` (the bridge renders the Feishu card) and `ops-dingtalk` (the plugin's markdown) (#9–#12) — 24 deliveries, all sent, nothing
 queued, nothing dead. The ledger also keeps **the bytes of both directions**:
 the payload as received has always been stored, and now the exact body of each
 delivery is kept too (body only — never the headers, which carry signatures
@@ -125,7 +125,7 @@ paid, zero failed returns. The stub prices its tokens like a real model, so
 the ledger's $0.0021 is the shape of the bill rather than the bill; the point
 is that the saving is structural, not a property of one model. The page also
 shows what the judge disagrees with: every gateway alert arrived `high` from
-the platform and left `critical` from the judge, and the review strip puts the
+the platform and left `critical` from the judge, and the review tab puts the
 ten disagreements in one place with an export for labelling. If a verdict's
 return dies for good, the self-alarm carries the news.
 

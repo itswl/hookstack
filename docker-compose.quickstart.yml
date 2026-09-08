@@ -17,6 +17,15 @@
 #
 # Pinned by tag on purpose. `latest` moves under you between two `up`s and
 # turns "it worked yesterday" into a question nobody can answer.
+#
+# 0.2.0 predates the chat bridge: in these images the pipe still renders the
+# Feishu card itself, and the stack.yaml baked into the pipe's image says so.
+# The NEXT release changes this file, because the baked stack.yaml then needs
+# two things this one does not have: a `lark-bridge` service in webhook mode
+# (docs/bridge-protocol.md — the pipe sends a card model, the sidecar renders
+# it and posts to the sink; needs `lark-bridge` in release.yml's image matrix)
+# and HOOKRELAY_PLUGINS=/app/examples/plugins for the DingTalk dialect. The
+# source compose (docker-compose.yml) already runs that shape.
 
 name: hookstack
 

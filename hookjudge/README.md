@@ -13,8 +13,8 @@ pipe's job ([hookrelay](../README.md), a sibling in this repo), and keeping them
 there is the entire point of this service existing separately.
 
 ```
-upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► lark / dingtalk / wecom / webhook
-              (adapts)      (judges)      (formats)
+upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► chat bridge / webhook
+              (adapts)      (judges)      (models)
 ```
 
 hookjudge has exactly one outbound address: the pipe. Fan-out is not its

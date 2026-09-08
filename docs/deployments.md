@@ -153,9 +153,9 @@ The work deployment gets the same path through its `bridge` profile: a
 lark-bridge of its own (a third Lark app — one connection per app, and the
 alert deployment's bridge holds the second), serving both of its chats
 (`LARK_WATCH_CHAT_ID`, `LARK_PLAN_CHAT_ID`; the pipe names the chat per channel
-with `options.chat_id`). Its two Feishu channels keep posting to the custom-bot
-webhooks until `LARK_WATCH_URL` / `LARK_PLAN_URL` point at the bridge and the
-channel secrets equal `LARK_BRIDGE_SECRET`; a reply is then routed by
+with `options.chat_id`). Its two chat channels are `type: bridge` and post
+through that bridge (`LARK_WATCH_URL` / `LARK_PLAN_URL`, channel secrets equal
+to `LARK_BRIDGE_SECRET`); a reply is routed by
 `return_source` to the node that holds the session — `plan-notify` to the
 planner, `work-notify` to the work node. And a person can open a topic
 instead of waiting for a card: a top-level @-mention in the group starts a work

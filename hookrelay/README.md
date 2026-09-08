@@ -37,7 +37,7 @@ comprehensive platform) behind the generic channel. hookrelay only promises two 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp config.example.yaml config.yaml   # edit sources/channels/routes
-GRAFANA_HOOK_SECRET=xxx FEISHU_WEBHOOK_URL=https://... \
+GRAFANA_HOOK_SECRET=xxx BRIDGE_SECRET=xxx \
   .venv/bin/python -m hookrelay      # listens on 127.0.0.1:8100
 ```
 
@@ -142,7 +142,7 @@ topic has the person's message as its root, not a card; the lookup then finds
 the chain through the report that carried the same `thread_root`.
 
 The other half is on the channel: `options: {thread_replies: true}` on a `bridge`
-channel (or a `feishu` one pointed at the bridge) makes a delivery whose event carries
+channel makes a delivery whose event carries
 `fields.thread_root` go out as a reply in that thread (`reply_to` in the body
 the bridge reads), and `options: {chat_id: oc_…}` names the chat, so one bridge
 serves several channels (the bridge refuses a chat it was not configured for).

@@ -89,8 +89,10 @@ routes {'ai': 2, 'reuse': 1, 'recovery': 1}
 
 And the pipe's own ledger closes the books: **16 delivered, 0 queued, 0 dead**
 — per front-door event one copy to `to-judge` and one to `to-probe` (4 + 4),
-per judgement one Feishu card and one DingTalk message (4 + 4). One judgement
-reaches every downstream in its own dialect — the sink logs show the same
+per judgement one Feishu card and one DingTalk message (4 + 4) — the card
+rendered by `lark-bridge` in webhook mode from the pipe's card model, the
+markdown by the shipped DingTalk plugin. One judgement reaches every downstream
+in its own dialect without the pipe knowing either — the sink logs show the same
 verdict rendered both ways, plus the four normalized events that landed on
 `/probe-standin`.
 
@@ -135,10 +137,16 @@ Neither ships. `hookrelay/deploy/docker-compose.prod.yml` has no trace of them.
 
 | | replaces | lives with |
 | --- | --- | --- |
-| `sink` | the Feishu/DingTalk/WeCom bots — and, on `/probe-standin`, the investigator | `hookrelay/examples/sink.py` — it stands in for the pipe's downstreams |
+| `sink` | the chat bots' incoming webhooks (the bridge posts its rendered Feishu card here, the DingTalk plugin posts straight in) — and, on `/probe-standin`, the investigator | `hookrelay/examples/sink.py` — it stands in for the pipe's downstreams |
 | `stub-ai` | the model provider | `hookjudge/examples/stub_ai.py` — it stands in for the brain's model |
 
-Both are threaded, which is not a detail: the pipe delivers to channels in
+`lark-bridge` is not a stand-in: the compose runs the real sidecar in webhook
+mode ([docs/bridge-protocol.md](docs/bridge-protocol.md)), with no Lark account,
+rendering the pipe's card model into the Feishu card the sink then prints — the
+same image production runs as the app. The pipe loads the shipped example
+plugins (`HOOKRELAY_PLUGINS`), which is where the `dingtalk` type comes from.
+
+Both stand-ins are threaded, which is not a detail: the pipe delivers to channels in
 parallel, and a single-threaded sink served one connection while the other
 timed out and was **retried** — so the downstream received the same alert
 twice. The ledger still said `sent`. A duplicate notification caused entirely
