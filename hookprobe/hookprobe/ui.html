@@ -838,18 +838,24 @@ async function renderDetail(startPolling) {
   // How much of this session's context was reused rather than paid for again.
   // The prefix an investigation carries is the harness's ~29k, not ours to trim,
   // so reuse is the only lever left — which makes this worth a permanent place.
+  // Reads over everything the prompts were made of: fresh input, reads AND
+  // writes. Leaving the writes out once showed "98% cached" on a turn that had
+  // written 123k tokens to the cache and read 69k — it paid for more context
+  // than it reused, and the writes are the dearer tokens.
   const tok = (run.turns || []).reduce((acc, turn) => {
     const u = turn.usage || {};
     acc.fresh += Number(u.input_tokens || 0);
     acc.cached += Number(u.cache_read_input_tokens || u.cacheReadInputTokens || 0);
+    acc.written += Number(u.cache_creation_input_tokens || u.cacheCreationInputTokens || 0);
     return acc;
-  }, { fresh: 0, cached: 0 });
-  const hit = tok.fresh + tok.cached ? Math.round((100 * tok.cached) / (tok.fresh + tok.cached)) : null;
+  }, { fresh: 0, cached: 0, written: 0 });
+  const made = tok.fresh + tok.cached + tok.written;
+  const hit = made ? Math.round((100 * tok.cached) / made) : null;
   $("#meta").textContent =
     `${run.session_key} · ${run.status}` +
     (run.model ? ` · ${modelWithEndpoint(run.model, run.model_endpoint)}` : "") +
     (turnCount ? ` · ${turnCount} turn${turnCount > 1 ? "s" : ""} $${spent.toFixed(4)}` : "") +
-    (hit === null ? "" : ` · cache ${hit}%`) +
+    (hit === null ? "" : ` · context reuse ${hit}% (read ${fmtTok(tok.cached)} · wrote ${fmtTok(tok.written)})`) +
     ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");
   // Recorded prompt inputs are only legible next to the files as they are now.
@@ -1609,7 +1615,7 @@ cause</i>. Cost has always been countable and worth was countable nowhere, so "y
 alert?" had a dollar figure and nothing to put beside it. The rulings come from the <b>Found the cause</b> /
 <b>Missed it</b> buttons on the delivered card, and a session that carries one shows it in the list. An
 investigation nobody ruled on is unrated, never counted as a miss.</td></tr>
-<tr><td><b>cache %</b></td><td>How much of the context was reused instead of paid for again. An investigation carries
+<tr><td><b>context reuse %</b></td><td>Of everything the prompts were made of — fresh input, tokens read back from the cache, tokens written to it — the share that was read back. Writes count as paid, because they are: a turn that writes 120k tokens of tool output into the cache pays for it at the dearer rate whatever it reads later. Dollar figures are the CLI's estimate at its own price table; for a model behind a third-party gateway they are the shape of the bill, not the bill. An investigation carries
 about 29k tokens before its alert is even mentioned — the harness's own system prompt and tool schemas, which neither a
 smaller tool list nor a different prompt preset shrinks — so reuse is the only lever left. It is high inside a session
 and low across them: <b>a follow-up here is roughly ten times cheaper than opening a new investigation</b>, alerts
@@ -1707,13 +1713,14 @@ async function refreshBudget() {
     // Spend is shown whether or not a ceiling was set: an operator who declined
     // to cap the window still wants to know what it has cost.
     const spent = `$${Number(b.spent_usd || 0).toFixed(2)} / ${b.window_hours || 24}h`;
-    const cache = b.cache_hit_ratio === null || b.cache_hit_ratio === undefined
+    const cache = b.context_reuse === null || b.context_reuse === undefined
       ? ""
-      : ` · cache ${Math.round(b.cache_hit_ratio * 100)}%`;
+      : ` · reuse ${Math.round(b.context_reuse * 100)}%`;
     el.textContent = (b.enabled ? `${spent} of $${Number(b.budget_usd).toFixed(2)}` : spent) + cache;
-    el.title = b.enabled
-      ? "spend in the budget window, the ceiling the event door refuses at, and how much context was reused rather than re-paid"
-      : "spend in the window · no ceiling set (HOOKPROBE_BUDGET_USD) · cache = context reused rather than re-paid";
+    const made = `read ${fmtTok(b.cache_read_tokens || 0)} · wrote ${fmtTok(b.cache_written_tokens || 0)} · fresh ${fmtTok(b.input_tokens || 0)}`;
+    el.title = (b.enabled
+      ? "spend in the budget window (the CLI's estimate at its own price table), the ceiling the event door refuses at, and how much of the context was read back from cache rather than paid for — "
+      : "spend in the window (the CLI's estimate at its own price table) · no ceiling set (HOOKPROBE_BUDGET_USD) · reuse = context read back from cache rather than paid for — ") + made;
     el.classList.toggle("hot", !!b.exhausted);
     // The other half of the bill. Printed as the service worded it rather than
     // reassembled here: the sentence gets quoted at people deciding whether to

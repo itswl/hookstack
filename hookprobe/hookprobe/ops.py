@@ -180,7 +180,7 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
         """The breaker's arithmetic: window spend, ceiling, cache ratio and the worth line."""
         # The spend is reported either way: "what has this cost" is a question
         # worth answering even for an operator who declined to set a ceiling.
-        fresh, cached = service.window_cache()
+        fresh, cached, written = service.window_cache()
         spend = service.window_spend()
         investigations, useful, useless, inferred = service.window_rulings()
         window = {
@@ -188,11 +188,14 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             "spent_usd": round(spend, 6),
             # The prefix an investigation pays for is the harness's, not ours,
             # so the only lever left is reuse — which means this is the number
-            # to watch. Reads over reads-plus-fresh: the provider caches
-            # implicitly here, so cache writes are always zero.
+            # to watch. Reads over EVERYTHING the prompts were made of — fresh,
+            # read back, written to cache — because a turn that wrote 123k
+            # tokens and read 69k paid for more context than it reused, and a
+            # ratio that left the writes out called that "98% cached".
             "input_tokens": fresh,
             "cache_read_tokens": cached,
-            "cache_hit_ratio": round(cached / (cached + fresh), 4) if (cached + fresh) else None,
+            "cache_written_tokens": written,
+            "context_reuse": round(cached / (cached + fresh + written), 4) if (cached + fresh + written) else None,
             # How many turns in the window spent money the engine never got to
             # report — a wall-clock timeout is the most expensive turn there is
             # and the one that bills nothing. Non-zero means the figure above is

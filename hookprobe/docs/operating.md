@@ -153,8 +153,9 @@ The mapping is exactly this:
   `thread_root`) and the door calls `continue_run`, which spawns the engine
   with `resume=<engine_session_id>` — the first turn's tool output, evidence
   and dead ends are all still in context. That is why a follow-up costs cents
-  and seconds where the first turn cost dollars and minutes: the context is
-  reused, and the provider's cache hit is typically above 95%.
+  and seconds where the first turn cost dollars and minutes: almost all of
+  the prompt is read back from the cache instead of being sent and written
+  again.
 - **A reply under an alert card is the same thing** — the chain that card
   belongs to carries an investigation session, and the reply continues it.
 - Everyone replying in one topic continues the same session and shares its

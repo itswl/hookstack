@@ -232,22 +232,27 @@ class RunStore:
                 inferred += 1
         return investigations, useful, useless, inferred
 
-    def cache_since(self, cutoff: float) -> tuple[int, int]:
-        """(fresh_input_tokens, cache_read_tokens) across turns after `cutoff`.
+    def cache_since(self, cutoff: float) -> tuple[int, int, int]:
+        """(fresh_input_tokens, cache_read_tokens, cache_written_tokens) across
+        turns after `cutoff`.
 
         Worth watching rather than assuming. Measured on this deployment: the
         prompt an investigation carries before its alert is even mentioned is
         ~29k tokens of the harness's own system prompt and tool schemas — not
         ours to trim, since neither the prompt preset nor the allowed-tools list
-        moves it. What is left is whether that fixed prefix gets reused, and this
-        is the number that says so.
+        moves it. What is left is whether that fixed prefix gets reused, and
+        these are the numbers that say so.
 
-        Note the provider here caches implicitly: cache *writes* are always zero,
-        so the honest ratio is reads over reads-plus-fresh, not reads over
-        writes.
+        Writes are returned on purpose. This used to be a pair, on the argument
+        that the provider cached implicitly and writes were always zero — true
+        of one provider, and then a GPT-class model behind an Anthropic-dialect
+        gateway reported 123k tokens WRITTEN against 69k read on a single turn.
+        Reads over reads-plus-fresh then said "98% cached" of a turn that had
+        paid for more context than it reused. The ratio the callers compute is
+        reads over everything the prompt was made of: fresh, read, written.
         """
         self._scan_disk_once()
-        fresh = cached = 0
+        fresh = cached = written = 0
         for run in self._runs.values():
             for turn in run.turns:
                 finished = turn.get("finished_at")
@@ -256,7 +261,8 @@ class RunStore:
                 usage = turn.get("usage") or {}
                 fresh += int(usage.get("input_tokens") or 0)
                 cached += int(usage.get("cache_read_input_tokens") or 0)
-        return fresh, cached
+                written += int(usage.get("cache_creation_input_tokens") or 0)
+        return fresh, cached, written
 
     def list_runs(self, limit: int = 100) -> list[Run]:
         """Newest first, including finished runs persisted by earlier processes."""

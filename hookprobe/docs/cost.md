@@ -8,8 +8,14 @@ operate the service; all of it is required to argue about the bill.
 
 Each turn shows what it cost: model, tokens in and out, cache reads, dollars,
 seconds. The session's running total sits beside the session key, and the header
-chip carries the window's spend and its **cache %** — how much context was reused
-rather than paid for again.
+chip carries the window's spend and its **context reuse** — of everything the
+prompts were made of (fresh input, tokens read back from the cache, tokens
+written to it), the share that was read back. Writes count as paid, because they
+are the dearer tokens: one turn on a GPT-class model behind an Anthropic-dialect
+gateway wrote 123k tokens and read 69k, and a ratio that ignored the writes
+called it 98% cached. The dollar figures are the CLI's estimate at its own
+price table — the shape of the bill, not the bill, for a model it does not
+know the price of.
 
 The other half of that arithmetic is **whether any of it helped**, which nothing
 measured. Cost was countable to the cent from the first commit and worth was

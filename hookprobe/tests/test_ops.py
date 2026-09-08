@@ -425,16 +425,26 @@ def test_the_window_reports_how_much_context_was_reused(tmp_path) -> None:
     run.turns = [
         {"finished_at": now, "usage": {"input_tokens": 29000, "cache_read_input_tokens": 0}},
         {"finished_at": now, "usage": {"input_tokens": 200, "cache_read_input_tokens": 28800}},
-        # Older than the window: counted by neither.
+        # A gateway that reports cache WRITES: the context this turn paid to
+        # store is part of what the prompt was made of, not free.
+        {
+            "finished_at": now,
+            "usage": {"input_tokens": 100, "cache_read_input_tokens": 29000, "cache_creation_input_tokens": 60000},
+        },
+        # Older than the window: counted by none.
         {"finished_at": now - 90000, "usage": {"input_tokens": 5000, "cache_read_input_tokens": 5000}},
     ]
     store.create(run)
     store._scanned = True  # nothing on disk to merge in
 
-    fresh, cached = store.cache_since(now - 3600)
+    fresh, cached, written = store.cache_since(now - 3600)
 
-    assert (fresh, cached) == (29200, 28800)
-    assert round(cached / (cached + fresh), 3) == 0.497
+    assert (fresh, cached, written) == (29300, 57800, 60000)
+    reads_only = round(cached / (cached + fresh), 3)
+    reuse = round(cached / (cached + fresh + written), 3)
+    assert reads_only == 0.664 and reuse == 0.393, (
+        "leaving the writes out is what made a paid-for context look 'cached'"
+    )
 
 
 def test_gate_matches_ci():

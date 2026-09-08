@@ -544,8 +544,8 @@ class RunService:
             return None
         return self.window_spend(), self._settings.budget_usd
 
-    def window_cache(self) -> tuple[int, int]:
-        """(fresh, cached) input tokens over the budget window."""
+    def window_cache(self) -> tuple[int, int, int]:
+        """(fresh, cached, written) input tokens over the budget window."""
         cutoff = time.time() - self._settings.budget_window_hours * 3600
         return self._store.cache_since(cutoff)
 
