@@ -268,7 +268,13 @@ def counts(items: list[WorkItem]) -> dict[str, int]:
     for item in items:
         out[item.state] = out.get(item.state, 0) + 1
     out["blocked"] = sum(out.get(state, 0) for state in BLOCKED)
-    out["open_items"] = sum(len(i.open) for i in items)
+    # What a person is actually asked to do. Rulings are counted apart on
+    # purpose: an approval blocks work and a memory line waits to be written,
+    # but a ruling is optional feedback — and on an unattended deployment there
+    # are hundreds of them. Folded together, three procedures that block
+    # something were invisible behind 164 reports nobody was ever going to rule.
+    out["open_items"] = sum(1 for i in items for o in i.open if o["kind"] != "ruling")
+    out["unruled"] = sum(1 for i in items for o in i.open if o["kind"] == "ruling")
     out["verified"] = sum(1 for i in items if i.verified)
     # The north star, as far as this node can honestly compute it: finished,
     # verified by a ruling or by its own procedure, and it never had to stop and

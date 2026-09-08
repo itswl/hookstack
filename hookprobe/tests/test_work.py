@@ -132,6 +132,7 @@ def test_a_memory_suggestion_waits_on_a_person_without_blocking_the_work() -> No
     (item,) = work.resolve([run], suggestions=rows)
     assert item.state == work.DONE
     assert [o["kind"] for o in item.open] == ["memory"] and item.open[0]["text"].startswith("node-3")
+    assert work.counts([item])["open_items"] == 1, "it waits on a person even though it blocks nothing"
 
 
 def test_the_counts_are_the_header_line_and_the_north_star_is_strict() -> None:
@@ -145,7 +146,8 @@ def test_the_counts_are_the_header_line_and_the_north_star_is_strict() -> None:
     assert counts["done"] == 3 and counts["needs_human"] == 1 and counts["blocked"] == 1
     assert counts["verified"] == 2
     assert counts["closed_unattended"] == 1, "verified but hands-on does not count; unverified does not count"
-    assert counts["open_items"] == 2, "two runs still owe a ruling"
+    assert counts["unruled"] == 2, "two runs never got a verdict"
+    assert counts["open_items"] == 0, "a ruling is feedback, not something a person is asked to do"
 
 
 def _client(tmp_path, **overrides):

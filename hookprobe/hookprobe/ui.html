@@ -1131,11 +1131,18 @@ async function openWork() {
     const items = d.items || [];
     if (!items.length) { $("#turns").innerHTML = '<div class="empty">no work yet — an alert, a task or a question through the event door opens one</div>'; return; }
     const order = ["waiting_approval", "needs_human", "executing", "verifying", "done"];
+    // A column is capped: `done` on a live deployment is hundreds of items and
+    // rendering them all makes the three that need a person unfindable. Newest
+    // first, and the column head keeps the true total.
+    const CAP = 25;
     $("#turns").innerHTML = `<div class="wb">` + order.map((state) => {
       const rows = items.filter((i) => i.state === state);
       if (!rows.length) return "";
+      const shown = rows.slice(0, CAP);
+      const more = rows.length - shown.length;
       return `<div class="wb-col"><div class="wb-h">${esc(WB_LABEL[state] || state)} <b>${rows.length}</b></div>` +
-        rows.map(wbCard).join("") + "</div>";
+        shown.map(wbCard).join("") +
+        (more ? `<div class="empty" style="padding:6px 2px">${more} older, on the sessions list</div>` : "") + "</div>";
     }).join("") + "</div>";
     $("#turns").scrollTop = 0;
     $("#turns").querySelectorAll(".wb-card").forEach((card) => (card.onclick = () => {
