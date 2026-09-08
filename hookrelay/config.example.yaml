@@ -46,17 +46,19 @@ channels:
     max_per_minute: 20
     options: {thread_replies: true}    # a report naming fields.thread_root answers in that thread
 
-  # Markdown webhooks are dialects, and dialects are plugins: these two types
-  # come from examples/plugins/chat_markdown_channels.py, loaded from
-  # HOOKRELAY_PLUGINS. Actions on them are LINKS (HOOKRELAY_PUBLIC_URL).
-  - name: ops-dingtalk
-    type: dingtalk
-    url: ${DINGTALK_WEBHOOK_URL}
-    secret: ${DINGTALK_WEBHOOK_SECRET}
-
-  - name: ops-wecom
-    type: wecom
-    url: ${WECOM_WEBHOOK_URL}
+  # Markdown webhooks are dialects, and dialects are PLUGINS: the `dingtalk`
+  # and `wecom` types come from examples/plugins/chat_markdown_channels.py.
+  # Opt in by pointing HOOKRELAY_PLUGINS at a directory holding that file
+  # (the quickstart compose mounts examples/plugins), then uncomment. Their
+  # actions are LINKS to HOOKRELAY_PUBLIC_URL — a webhook robot cannot call back.
+  # - name: ops-dingtalk
+  #   type: dingtalk
+  #   url: ${DINGTALK_WEBHOOK_URL}
+  #   secret: ${DINGTALK_WEBHOOK_SECRET}
+  #
+  # - name: ops-wecom
+  #   type: wecom
+  #   url: ${WECOM_WEBHOOK_URL}
 
   - name: archive
     type: generic
@@ -93,7 +95,7 @@ routes:
     source: "*"
     when:
       level: [high, critical]
-    send_to: [ops-chat, ops-dingtalk]
+    send_to: [ops-chat]              # add ops-dingtalk once the plugin channel is enabled
     priority: 100
 
   - name: grafana-default
