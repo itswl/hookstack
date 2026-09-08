@@ -187,6 +187,10 @@ services:
       # volume and stops, which is exactly how the shadow's patrol reports were
       # silently going nowhere for a while.
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/plan-notify
+      # Who this node is on a board (GET /v1/agent). Three probes run here and
+      # were told apart only by port.
+      HOOKPROBE_AGENT_NAME: planner
+      HOOKPROBE_AGENT_ROLE: turns a work signal into a plan a person can approve; hands the approved plan to the work runner
       # The Hand off button on this node's sessions page, and the only reason
       # it appears at all. It posts to the PIPE's plan-approved door, never to
       # probe-work directly: one hop shorter would leave the handover with no
@@ -308,6 +312,8 @@ services:
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
       HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
+      HOOKPROBE_AGENT_NAME: watcher
+      HOOKPROBE_AGENT_ROLE: reads the operator's own feeds and raises what looks like work
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
@@ -484,6 +490,8 @@ services:
       HOOKPROBE_RETURN_SECRET: ${WORK_RETURN_SECRET:?set WORK_RETURN_SECRET in .env}
       # The whole reason this container exists as a separate service.
       HOOKPROBE_BASH_GUARD: danger-only
+      HOOKPROBE_AGENT_NAME: work runner
+      HOOKPROBE_AGENT_ROLE: does the thing an approved plan describes — the one node a person hands work to, and the only one not on readonly
       AWS_CONFIG_FILE: /data/aws/config
       AWS_SHARED_CREDENTIALS_FILE: /data/aws/credentials
       AWS_PROFILE: ${PROBE_PLAN_AWS_PROFILE:-demo-ro-profile}

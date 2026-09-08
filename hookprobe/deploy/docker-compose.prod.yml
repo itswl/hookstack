@@ -99,6 +99,9 @@ services:
       # through /hooks/event ever deliver here; callers that poll /final
       # are unaffected.
       HOOKPROBE_RETURN_URL: ${HOOKPROBE_RETURN_URL:-http://hookrelay:8100/hook/probe-notify}
+      # Who this node is on a board (GET /v1/agent).
+      HOOKPROBE_AGENT_NAME: ${HOOKPROBE_AGENT_NAME:-investigator}
+      HOOKPROBE_AGENT_ROLE: ${HOOKPROBE_AGENT_ROLE:-investigates the alerts the judge says are worth a person, read-only, and reports back through the pipe}
       HOOKPROBE_ESCALATE_LEVELS: ${HOOKPROBE_ESCALATE_LEVELS:-critical,high}
       # Who may continue an investigation by replying in its chat thread: sender
       # ids (ou_…), or `*` for anyone the bridge forwards from the group. Empty =
