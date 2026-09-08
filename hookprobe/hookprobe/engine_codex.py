@@ -41,21 +41,23 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import shutil
-import subprocess  # nosec B404 — spawning the CLI IS this adapter
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import hookprobe
+from hookprobe import gate
 from hookprobe.engine import EngineResult, engine_error, file_fact
 from hookprobe.gate import tool_detail
 from hookprobe.guard import READONLY
 from hookprobe.settings import Settings
 
 logger = logging.getLogger("hookprobe.engine.codex")
+
+# Where `python -m hookprobe.gate` has to be importable from.
+_PACKAGE_ROOT = str(Path(hookprobe.__file__).resolve().parent.parent)
 
 # Codex item types that are a tool doing something, and what to call them in the
 # process feed. Anything not listed still reaches the feed under its own type —
@@ -127,19 +129,11 @@ class CodexEngine:
         return self._home
 
     def verify_gate(self) -> None:
-        """Prove the gate answers before trusting a turn to it, or refuse to run.
+        """Prove this node can gate a tool before it runs one, or refuse to run.
 
-        This exists because the first live run of this adapter did not have a
-        gate and nothing said so. The hook command could not import hookprobe,
-        codex logged the failure and carried on, and a `kubectl delete` ran to
-        completion on a node whose /v1/agent was reporting `bash_guard:
-        readonly`. Every layer behaved reasonably and the posture was gone.
-
-        So the claim is checked rather than assumed: spawn the gate exactly as
-        the runtime will, hand it a call that no posture permits, and require a
-        refusal. A node that cannot gate must not run — the note that parked
-        this work said an adapter failing this is a finding, not an obstacle,
-        and a startup that stops here is that finding being reported.
+        The proof itself is `gate.verify`, shared with every other adapter that
+        reaches the gate by spawning it. What is checked here first is the thing
+        only this adapter can know: whether there is a CLI to drive at all.
         """
         if self._gate_proven:
             return
@@ -148,30 +142,7 @@ class CodexEngine:
                 f"HOOKPROBE_RUNTIME=codex but {self._binary!r} is not on this node's PATH. "
                 "The adapter drives the CLI as a subprocess; there is nothing to drive."
             )
-        probe = {
-            "hook_event_name": "PreToolUse",
-            # Refused under every posture: no allowlist names it, and an
-            # allowlist that did would be naming a server that does not exist.
-            "tool_name": "mcp__hookprobe_gate_selftest__probe",
-            "tool_input": {},
-        }
-        try:
-            done = subprocess.run(  # nosec B603 — argv is this node's own settings, never model output
-                [self._settings.codex_python, "-m", "hookprobe.gate"],
-                input=json.dumps(probe),
-                capture_output=True,
-                text=True,
-                env=self._env("probe:gate-selftest"),
-                timeout=20,
-            )
-            decision = json.loads(done.stdout or "{}")
-        except Exception as exc:  # noqa: BLE001 — every failure here means the same thing
-            raise RuntimeError(f"the tool gate did not answer, so this node cannot hold a posture: {exc}") from exc
-        if (decision.get("hookSpecificOutput") or {}).get("permissionDecision") != "deny":
-            raise RuntimeError(
-                "the tool gate answered but did not refuse a call no posture permits. "
-                f"Command: {self._settings.codex_python} -m hookprobe.gate. Answer: {done.stdout.strip()[:200]!r}"
-            )
+        gate.verify(self._settings.codex_python, self._env("probe:gate-selftest"))
         self._gate_proven = True
         logger.info("tool gate verified: %s -m hookprobe.gate refuses what it must", self._settings.codex_python)
 
@@ -182,21 +153,8 @@ class CodexEngine:
         environment, so the gate needs no arguments and no state file to know
         which posture it is enforcing or which session it is recording.
         """
-        env = dict(os.environ)
+        env = gate.environment(self._settings, session_key, package_root=_PACKAGE_ROOT)
         env["CODEX_HOME"] = str(self._home)
-        # The gate IS this package, so the spawned interpreter has to be able to
-        # import it. Found out the hard way: without this the hook command died
-        # on ModuleNotFoundError, codex carried on, and a `kubectl delete` ran
-        # on a node declaring itself read-only. A gate that fails to launch is
-        # not a gate, and nothing downstream noticed.
-        package_root = str(Path(hookprobe.__file__).resolve().parent.parent)
-        env["PYTHONPATH"] = os.pathsep.join(p for p in (package_root, os.environ.get("PYTHONPATH", "")) if p)
-        env["HOOKPROBE_SESSION_KEY"] = session_key
-        env["HOOKPROBE_GATE_MODE"] = self._settings.bash_guard
-        env["HOOKPROBE_GATE_MCP"] = ",".join(sorted(self._settings.mcp_tools))
-        env["HOOKPROBE_GATE_AUDIT"] = str(self._workdir / "audit")
-        env["HOOKPROBE_GATE_WORKDIR"] = str(self._workdir)
-        env["HOOKPROBE_GATE_HOME"] = str(Path.home())
         return env
 
     # -------------------------------------------------------------------- run

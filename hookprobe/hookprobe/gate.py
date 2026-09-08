@@ -234,6 +234,69 @@ def decide(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
     return {}
 
 
+def environment(settings: Any, session_key: str, *, package_root: str) -> dict[str, str]:
+    """The environment a spawned runtime passes down to this gate.
+
+    Shared by every adapter that reaches the gate by spawning it, because the
+    alternative is each of them deciding separately what the gate is allowed to
+    know — and one of them getting it slightly wrong is a node holding a posture
+    nobody asked for.
+    """
+    env = dict(os.environ)
+    # The gate IS this package, so the interpreter spawning it has to be able to
+    # import it. Learned the hard way: without this the hook died on
+    # ModuleNotFoundError, the runtime carried on, and a `kubectl delete` ran on
+    # a node declaring itself read-only.
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (package_root, os.environ.get("PYTHONPATH", "")) if p)
+    env["HOOKPROBE_SESSION_KEY"] = session_key
+    env["HOOKPROBE_GATE_MODE"] = settings.bash_guard
+    env["HOOKPROBE_GATE_MCP"] = ",".join(sorted(settings.mcp_tools))
+    env["HOOKPROBE_GATE_AUDIT"] = str(settings.workdir / "audit")
+    env["HOOKPROBE_GATE_WORKDIR"] = str(settings.workdir)
+    env["HOOKPROBE_GATE_HOME"] = str(Path.home())
+    return env
+
+
+# Refused under every posture: no allowlist names it, and an allowlist that did
+# would be naming a server that does not exist.
+SELFTEST_TOOL = "mcp__hookprobe_gate_selftest__probe"
+
+
+def verify(python: str, env: dict[str, str]) -> None:
+    """Prove the gate answers before a turn is trusted to it, or raise.
+
+    This exists because the first live run of a spawned-gate adapter had no gate
+    and nothing said so. The hook command could not import hookprobe, the
+    runtime logged it and carried on, and a `kubectl delete` ran to completion
+    on a node whose /v1/agent said `bash_guard: readonly`. Every layer behaved
+    reasonably and the posture was simply absent.
+
+    So the claim is checked rather than assumed: spawn the gate exactly as the
+    runtime will, hand it a call that no posture permits, and require a refusal.
+    A node that cannot gate must not run.
+    """
+    import subprocess  # nosec B404 — spawning the gate is the point
+
+    probe = {"hook_event_name": "PreToolUse", "tool_name": SELFTEST_TOOL, "tool_input": {}}
+    try:
+        done = subprocess.run(  # nosec B603 — argv is this node's own settings, never model output
+            [python, "-m", "hookprobe.gate"],
+            input=json.dumps(probe),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=20,
+        )
+        decision = json.loads(done.stdout or "{}")
+    except Exception as exc:  # noqa: BLE001 — every failure here means the same thing
+        raise RuntimeError(f"the tool gate did not answer, so this node cannot hold a posture: {exc}") from exc
+    if (decision.get("hookSpecificOutput") or {}).get("permissionDecision") != "deny":
+        raise RuntimeError(
+            "the tool gate answered but did not refuse a call no posture permits. "
+            f"Command: {python} -m hookprobe.gate. Answer: {done.stdout.strip()[:200]!r}"
+        )
+
+
 def main() -> int:
     """Read one payload, print one decision.
 

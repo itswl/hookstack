@@ -331,6 +331,10 @@ class Settings:
             codex_binary=os.environ.get("HOOKPROBE_CODEX_BINARY", "").strip() or "codex",
             codex_python=os.environ.get("HOOKPROBE_CODEX_PYTHON", "").strip() or sys.executable or "python3",
             codex_config=_path_env("HOOKPROBE_CODEX_CONFIG"),
+            pi_binary=os.environ.get("HOOKPROBE_PI_BINARY", "").strip() or "pi",
+            pi_python=os.environ.get("HOOKPROBE_PI_PYTHON", "").strip() or sys.executable or "python3",
+            pi_config=_path_env("HOOKPROBE_PI_CONFIG"),
+            pi_provider=os.environ.get("HOOKPROBE_PI_PROVIDER", "").strip(),
             max_turns=max(1, _int("HOOKPROBE_MAX_TURNS", 32)),
             max_concurrent=max(1, _int("HOOKPROBE_MAX_CONCURRENT", 2)),
             default_timeout_seconds=max(1, _int("HOOKPROBE_DEFAULT_TIMEOUT_SECONDS", 900)),
@@ -420,3 +424,16 @@ class Settings:
     # The Codex provider config copied into the home this node owns. Read, never
     # written: an operator's credentials stay in the operator's file.
     codex_config: Path | None = None
+    # pi only. The binary; the interpreter its gate extension shells out to,
+    # which must import hookprobe; the operator's pi config directory, whose
+    # models.json and auth.json are copied into the home this node owns; and
+    # which provider in that config serves the model.
+    pi_binary: str = "pi"
+    # The interpreter the pi gate extension spawns. Same requirement as the
+    # Codex one: it has to be able to import hookprobe, because the gate is
+    # hookprobe.
+    pi_python: str = "python3"
+    # The operator's pi configuration directory, read and never written.
+    pi_config: Path | None = None
+    # Which provider in that configuration serves this node's model.
+    pi_provider: str = ""

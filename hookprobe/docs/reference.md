@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (61)
+## Environment (65)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -16,6 +16,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_TOKEN` | *(empty)* | Inbound: callers authenticate with a single bearer token (an OpenClaw-dialect client presents its hooks token here) |
 | `HOOKPROBE_MODEL` | `claude-opus-5` | Engine: which Claude model runs the investigation and how hard the runtime caps it |
 | `HOOKPROBE_CODEX_CONFIG` | *(empty)* | The Codex provider config copied into the home this node owns |
+| `HOOKPROBE_PI_CONFIG` | *(empty)* | The operator's pi configuration directory, read and never written |
 | `HOOKPROBE_SYSTEM_PROMPT_APPEND` | *(empty)* | Operator methodology appended to the engine's own system prompt, read fresh at every run (hot-editable) |
 | `HOOKPROBE_AGENTS_CONFIG` | *(empty)* | Named subagent roles (JSON: name -> {description, prompt, tools?, model?, skills?}), the config-file twin of .claude/agents/*.md files |
 | `HOOKPROBE_REMEDIATION_ALLOWLIST` | *(empty)* | Remediation executor gate: a file of full-match regexes, one per line, hot-read at execution time |
@@ -48,12 +49,15 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_BUDGET_USD` | `0.0` | The budget breaker, guarding the only path that spends money without a human asking: once the window's recorded spend reaches budget_usd, the event door refuses NEW investigations… |
 | `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24.0` | Window the spend ceiling is measured over |
 | `HOOKPROBE_RETENTION_DAYS` | `0` | Volume retention (days): case files and engine transcripts older than this are pruned daily |
+| `HOOKPROBE_PI_PROVIDER` | *(empty)* | Which provider in that configuration serves this node's model |
 | `HOOKPROBE_SKILLS` | *(empty)* | Directory of skills the engine may load |
 | `HOOKPROBE_RETURN_URL` | *(empty)* | The one door findings go back to |
 | `HOOKPROBE_ALARM_URL` | *(empty)* | Direct self-alarm for report returns that exhaust their retries: the pipe is the broken link at that moment, so this posts straight to a bot/collector URL, touching nothing on the… |
 | `HOOKPROBE_SETTING_SOURCES` | `project` | Skill layers |
 | `HOOKPROBE_CODEX_BINARY` | *(empty)* | Codex only |
 | `HOOKPROBE_CODEX_PYTHON` | *(empty)* | The interpreter the Codex adapter spawns its tool gate with |
+| `HOOKPROBE_PI_BINARY` | *(empty)* | pi only |
+| `HOOKPROBE_PI_PYTHON` | *(empty)* | The interpreter the pi gate extension spawns |
 | `HOOKPROBE_HANDOFF_URL` | *(empty)* | Where a finished run's report goes when an operator clicks "hand off", and the credential for that one door |
 | `HOOKPROBE_AGENT_ROLE` | *(empty)* | One line saying what this agent is FOR, shown wherever its work is listed |
 | `HOOKPROBE_RELAY_UI_URL` | *(empty)* | Where the pipe's board is, as a BROWSER reaches it (not as this container does): a run then links to the chain it belongs to |

@@ -31,7 +31,10 @@ from pathlib import Path
 import pytest
 
 from hookprobe import gate
-from hookprobe.engine_codex import CodexEngine, _Turn, sandbox_for
+from hookprobe.engine_codex import CodexEngine, sandbox_for
+from hookprobe.engine_codex import _Turn as _CodexTurn
+from hookprobe.engine_pi import GATE_EXTENSION, PiEngine
+from hookprobe.engine_pi import _Turn as _PiTurn
 from hookprobe.runtimes import ADAPTERS, build_engine
 from tests.helpers import make_settings
 
@@ -61,9 +64,9 @@ CODEX_DENIED_STREAM = [
 ]
 
 
-def _drive(lines: list[str]) -> tuple[_Turn, list[dict]]:
+def _drive(lines: list[str]) -> tuple[_CodexTurn, list[dict]]:
     seen: list[dict] = []
-    turn = _Turn(seen.append)
+    turn = _CodexTurn(seen.append)
     for line in lines:
         turn.feed(line)
     return turn, seen
@@ -79,7 +82,7 @@ def test_every_adapter_is_covered_by_this_suite() -> None:
     assertion that cannot be satisfied by writing a new adapter and forgetting
     this file.
     """
-    assert set(ADAPTERS) == {"claude", "codex"}
+    assert set(ADAPTERS) == {"claude", "codex", "pi"}
 
 
 def test_an_unknown_runtime_is_refused_rather_than_defaulted(tmp_path: Path) -> None:
@@ -322,3 +325,138 @@ def test_a_missing_runtime_is_caught_before_a_turn_is_accepted(tmp_path: Path) -
     engine = CodexEngine(make_settings(tmp_path, runtime="codex", codex_binary="codex-that-is-not-installed"))
     with pytest.raises(RuntimeError, match="not on this node's PATH"):
         engine.verify_gate()
+
+
+# Captured from a real pi turn against the same gateway, asked to run a command
+# the gate refuses and then one it does not. Trimmed, never edited.
+PI_STREAM = [
+    '{"type":"session","version":3,"id":"01a0821c-0f2d-7029-a4c5-e5a63ae77503","cwd":"/data"}',
+    '{"type":"tool_execution_start","toolCallId":"call_Q7ZBx","toolName":"bash",'
+    '"args":{"command":"kubectl delete pod pi-canary; echo pi-ok","timeout":120}}',
+    '{"type":"tool_execution_end","toolCallId":"call_Q7ZBx","toolName":"bash","isError":true,'
+    '"result":{"content":[{"type":"text","text":"read-only guard: kubectl mutation or pod entry is blocked"}]}}',
+    '{"type":"tool_execution_start","toolCallId":"call_Qqwoj","toolName":"bash",'
+    '"args":{"command":"echo pi-ok","timeout":30}}',
+    '{"type":"tool_execution_end","toolCallId":"call_Qqwoj","toolName":"bash","isError":false,'
+    '"result":{"content":[{"type":"text","text":"pi-ok\\n"}]}}',
+    '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text",'
+    '"text":"`kubectl delete pod pi-canary` was blocked by the read-only guard, while `echo pi-ok` ran."}],'
+    '"usage":{"input":3,"output":30,"cacheRead":6289,"cacheWrite":75,"totalTokens":6397,'
+    '"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}}}',
+]
+
+
+def _drive_pi(lines: list[str]) -> tuple[_PiTurn, list[dict]]:
+    seen: list[dict] = []
+    turn = _PiTurn(seen.append)
+    for line in lines:
+        turn.feed(line)
+    return turn, seen
+
+
+def test_pi_puts_the_session_id_first_too() -> None:
+    turn, seen = _drive_pi(PI_STREAM)
+    assert seen[0] == {"type": "session", "id": "01a0821c-0f2d-7029-a4c5-e5a63ae77503"}
+    assert turn.session_was_first
+
+
+def test_pi_marks_a_refused_call_rather_than_hiding_it() -> None:
+    """Where the two runtimes disagree, and the feed still has to read the same.
+
+    Codex omits the tool entirely when the gate refuses. pi announces the call,
+    preflights, and ends it with the refusal as its result — so the step exists
+    and has to be marked, which is arguably the better record: it shows what the
+    agent tried.
+    """
+    _, seen = _drive_pi(PI_STREAM)
+    kinds = [event["type"] for event in seen]
+    assert kinds == ["session", "tool_use", "tool_done", "tool_use", "tool_done", "text"]
+    assert seen[2]["error"] is True, "a call the gate refused is not a call that succeeded"
+    assert "error" not in seen[4]
+
+
+def test_pi_reports_zero_cost_as_unknown_when_tokens_were_spent() -> None:
+    """The trap in a runtime that DOES report cost.
+
+    pi prices a turn from its model catalog. A model served through a private
+    gateway is not in that catalog, so the number comes back 0 beside six
+    thousand real tokens — the exact shape the ledger forbids. A budget breaker
+    fed those would watch an unattended node spend all week and see nothing.
+    """
+    turn, _ = _drive_pi(PI_STREAM)
+    result = turn.result(duration_ms=8000, returncode=0, stderr="")
+    assert result.cost_usd is None
+    assert result.usage is not None and result.usage["totalTokens"] == 6397
+
+
+def test_pi_reports_a_real_price_when_it_has_one() -> None:
+    priced = PI_STREAM[:-1] + [
+        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],'
+        '"usage":{"totalTokens":6397,"cost":{"total":0.0431}}}}'
+    ]
+    turn, _ = _drive_pi(priced)
+    assert turn.result(duration_ms=1, returncode=0, stderr="").cost_usd == 0.0431
+
+
+def test_pi_free_is_only_free_with_nothing_spent() -> None:
+    free = PI_STREAM[:-1] + [
+        '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],'
+        '"usage":{"totalTokens":0,"cost":{"total":0}}}}'
+    ]
+    turn, _ = _drive_pi(free)
+    assert turn.result(duration_ms=1, returncode=0, stderr="").cost_usd == 0.0
+
+
+def test_pi_reaches_the_same_gate(tmp_path: Path) -> None:
+    engine = PiEngine(make_settings(tmp_path, runtime="pi", codex_python=sys.executable, pi_python=sys.executable))
+    env = engine._env("probe:conformance:pi")
+    assert env["HOOKPROBE_GATE_PYTHON"] == sys.executable
+    assert env["HOOKPROBE_GATE_MODE"] == "readonly"
+    done = subprocess.run(
+        [env["HOOKPROBE_GATE_PYTHON"], "-m", "hookprobe.gate"],
+        input=json.dumps(
+            {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "kubectl delete ns prod"}}
+        ),
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert json.loads(done.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_the_pi_gate_extension_ships_with_the_package() -> None:
+    """Without it pi runs with no posture at all, so its absence stops the node."""
+    assert GATE_EXTENSION.is_file()
+    source = GATE_EXTENSION.read_text(encoding="utf-8")
+    assert "hookprobe.gate" in source, "the extension must reach the one gate, not carry a second posture"
+    assert "block: true" in source
+    # It has to survive `pip install` too. It does not by default: package-data
+    # listed only the console, so an image would have had the adapter and not
+    # the posture it depends on.
+    packaging = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+    assert "*.ts" in packaging
+
+
+def test_pi_refuses_to_run_without_its_extension(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hookprobe.engine_pi.GATE_EXTENSION", tmp_path / "gone.ts")
+    engine = PiEngine(make_settings(tmp_path, runtime="pi", pi_python=sys.executable))
+    with pytest.raises(RuntimeError, match="gate extension is missing"):
+        engine.verify_gate()
+
+
+def test_pi_does_not_trust_the_workspace(tmp_path: Path) -> None:
+    """The workspace holds files a previous run wrote, so nothing in it is an input."""
+    argv = PiEngine(make_settings(tmp_path, runtime="pi"))._argv("hello", None)
+    assert "--no-approve" in argv
+    assert argv[-2:] == ["--", "hello"], "a prompt that opens with a dash is a prompt, not a flag"
+
+
+def test_pi_resume_names_the_session(tmp_path: Path) -> None:
+    argv = PiEngine(make_settings(tmp_path, runtime="pi"))._argv("hello", "01a0821c-0f2d-7029-a4c5-e5a63ae77503")
+    assert argv[argv.index("--session") + 1] == "01a0821c-0f2d-7029-a4c5-e5a63ae77503"
+
+
+def test_pi_keeps_its_transcripts_on_the_persistent_volume(tmp_path: Path) -> None:
+    engine = PiEngine(make_settings(tmp_path, runtime="pi"))
+    assert Path(engine._env("k")["PI_CODING_AGENT_SESSION_DIR"]).is_relative_to(tmp_path)

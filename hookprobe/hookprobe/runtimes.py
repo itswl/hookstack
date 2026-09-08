@@ -26,9 +26,15 @@ def _codex(settings: Settings) -> Any:
     return CodexEngine(settings)
 
 
+def _pi(settings: Settings) -> Any:
+    from hookprobe.engine_pi import PiEngine
+
+    return PiEngine(settings)
+
+
 # Imported lazily inside the factories: the Claude adapter drags the SDK in with
 # it, and a deployment running codex should not need it installed to boot.
-ADAPTERS: dict[str, Callable[[Settings], Any]] = {"claude": _claude, "codex": _codex}
+ADAPTERS: dict[str, Callable[[Settings], Any]] = {"claude": _claude, "codex": _codex, "pi": _pi}
 
 
 def build_engine(settings: Settings) -> Any:
