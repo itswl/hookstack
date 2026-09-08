@@ -15,6 +15,17 @@ answer into pi's `{ block, reason }`.
 Codex proved the contract could be met twice. pi is what made writing it
 worthwhile, because pi is where the runtimes stop agreeing.
 
+## Why a third at all
+
+Two implementations prove a contract can be satisfied twice. They do not prove
+it says anything, because both were written by the same person on the same day
+against the same reading of it. pi was picked as the third precisely because it
+is unlike codex: no sandbox, an in-process extension instead of a spawned hook,
+and a runtime that reports money. Each of those turned out to be a place where
+an adapter written from the Protocol's signatures alone would have satisfied
+the type and broken the service — which is the answer to whether the contract
+was worth writing down.
+
 ## The zero that lied
 
 Codex reports tokens and never money, so `cost_usd` is `None` and the honesty is
