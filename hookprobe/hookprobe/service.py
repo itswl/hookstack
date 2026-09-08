@@ -1413,5 +1413,11 @@ class RunService:
                 # about, so a report and the evidence that the run edited what
                 # produced it are never more than one record apart.
                 "input_changes": list(result.input_changes) if result else [],
+                # How full the context was when this turn ended, and any
+                # compaction the runtime did while it ran. The patrol that died
+                # on a context-window limit had this number available all along
+                # and nothing asked for it.
+                "context": result.context if result else None,
+                "compactions": list(result.compactions) if result else [],
             }
         )

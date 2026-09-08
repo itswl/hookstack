@@ -70,6 +70,14 @@ class EngineResult:
     # a healthy run; anything here means the run rewrote what steers the next
     # one, whichever tool it went through. See hookprobe.inputs.
     input_changes: tuple[str, ...] = ()
+    # How full the model's context was when this turn ended, and whether the
+    # runtime folded any of it away while the turn ran. A production patrol died
+    # on "the model has reached its context window limit" and nothing anywhere
+    # had said it was close — the number existed and nobody asked for it. Absent
+    # when the runtime does not answer, which is the honest shape for a fact we
+    # can only be told.
+    context: dict[str, Any] | None = None
+    compactions: tuple[dict[str, Any], ...] = ()
 
 
 def _bash_guard_hook(mode: str, record: Callable[[dict[str, Any]], None] | None = None) -> Callable[..., Any]:
@@ -224,6 +232,49 @@ def _input_guard_hook(
         return {}
 
     return hook
+
+
+def _compaction_hook(record: Callable[[dict[str, Any]], None]) -> Callable[..., Any]:
+    """PreCompact: the runtime is about to fold this session's context away.
+
+    Nothing is refused here — it is not a gate. It is the only way to know a
+    compaction happened at all, and what it drops it drops: a report with a gap
+    in the middle of a long investigation has no other explanation available
+    afterwards.
+    """
+
+    async def hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
+        record(
+            {
+                "type": "compacted",
+                "trigger": str(input_data.get("trigger") or "")[:40],
+                "instructions": str(input_data.get("custom_instructions") or "")[:200],
+            }
+        )
+        return {}
+
+    return hook
+
+
+def _context_facts(usage: Any) -> dict[str, Any] | None:
+    """The few numbers worth keeping from a context-usage answer.
+
+    Not the whole object: `categories` is a per-kind breakdown that changes
+    shape with the runtime, and a record is worth more when it holds the same
+    keys next year.
+    """
+    total = getattr(usage, "totalTokens", None)
+    limit = getattr(usage, "maxTokens", None)
+    if total is None and limit is None:
+        return None
+    facts: dict[str, Any] = {"tokens": total, "limit": limit}
+    pct = getattr(usage, "percentage", None)
+    if pct is not None:
+        facts["percent"] = round(float(pct), 1)
+    auto = getattr(usage, "isAutoCompactEnabled", None)
+    if auto is not None:
+        facts["auto_compact"] = bool(auto)
+    return facts
 
 
 def _hook_list(*fns: Callable[..., Any]) -> list[Any]:
@@ -805,6 +856,13 @@ class ClaudeAgentEngine:
         # streamed step, and an id it has never seen is, by elimination, a
         # subagent's.
         step_starts: dict[str, float] = {}
+        # Compactions this turn, kept for the record and echoed into the feed so
+        # a person watching sees the moment the context was folded.
+        compactions: list[dict[str, Any]] = []
+
+        def _note_compaction(event: dict[str, Any]) -> None:
+            compactions.append(event)
+            emit(event)
 
         async def _step_begin(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
             if tool_use_id:
@@ -892,6 +950,9 @@ class ClaudeAgentEngine:
                         ),
                     ),
                 ],
+                # Not a gate: nothing is refused here, and it is the only way to
+                # know the runtime folded the context away while a turn ran.
+                "PreCompact": [HookMatcher(matcher=None, hooks=_hook_list(_compaction_hook(_note_compaction)))],
             },
             # Per-command deadlines, the service secrets blanked, and this run's
             # pipe key on its telemetry; see _subprocess_env.
@@ -1017,6 +1078,14 @@ class ClaudeAgentEngine:
         error = engine_error(result, text)
         usage = getattr(result, "usage", None)
         model_usage = getattr(result, "model_usage", None)
+        # One extra round trip to the CLI, no model call, and never fatal: a
+        # failure to ANSWER how full the context is must not fail a turn that
+        # already produced a report.
+        context: dict[str, Any] | None = None
+        try:
+            context = _context_facts(await client.get_context_usage())
+        except Exception:  # noqa: BLE001 — an observation is not worth a failed run
+            logger.debug("context usage unavailable", exc_info=True)
         return EngineResult(
             text=text,
             message_count=message_count,
@@ -1027,6 +1096,8 @@ class ClaudeAgentEngine:
             model_usage=dict(model_usage) if isinstance(model_usage, dict) else None,
             duration_ms=getattr(result, "duration_ms", None),
             input_changes=input_changes,
+            context=context,
+            compactions=tuple(compactions),
         )
 
     def _input_changes(self, before: dict[str, str]) -> tuple[str, ...]:

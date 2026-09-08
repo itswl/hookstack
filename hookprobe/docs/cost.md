@@ -118,6 +118,37 @@ true about the other nine. Every avoided figure is a count times this week's ave
 and is labelled a counterfactual; a service that was not read gets a sentence,
 not a zero. Deterministic — no model is paid to do arithmetic on a ledger.
 
+## How full the context was, and when it was folded
+
+Every turn's record now carries how full the model's context was when it ended —
+tokens, the limit, the percentage, and whether the runtime folds it away on its
+own — and any compaction that happened while it ran, with what triggered it.
+The console prints both on the turn line, in amber past 80% or whenever a fold
+happened.
+
+The reason is one failure. A patrol on this deployment died on *"the model has
+reached its context window limit"*, and nothing anywhere had said it was close.
+The number existed the whole time; nobody asked for it. `get_context_usage()` is
+one extra round trip to the runtime, no model call, and never fatal — a failure
+to answer how full the context is must not fail a turn that already produced a
+report.
+
+Compaction is not free and it is not visible: what it drops, it drops, and a
+report with a gap in the middle of a long investigation has no other explanation
+available afterwards. The `PreCompact` hook refuses nothing — it is the only way
+to know a fold happened at all.
+
+Only the facts that keep their shape are stored. The per-kind `categories`
+breakdown follows the runtime and is dropped; a record is worth more when it
+holds the same keys next year. A runtime that answers nothing leaves `null`
+rather than zeros, because "we were not told" and "the context was empty" are
+different facts.
+
+**Asking for a compaction is not built.** The runtime compacts on its own and
+exposes no entry point to demand one, so the honest surface is observing it. If
+that changes, the place to add it is the runtime contract on `service.Engine`,
+where the PRD's `compact(session)` belongs.
+
 ## Model-call telemetry (on by default, received here, forwarded if you say where)
 
 Every run's totals are already on its record — cost, tokens, per-model

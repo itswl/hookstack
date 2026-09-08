@@ -50,6 +50,7 @@ body{margin:0;background:var(--bg);color:var(--text);height:100vh;display:flex;f
 header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
 nav.tabs{padding:0 12px;background:var(--panel)}
 /* the work board: one column per state, blocked first — see hookprobe/work.py */
+.ctx-hot{color:var(--amber)}
 .wb-top{font-size:12px;color:var(--dim);padding:2px 2px 8px;overflow-wrap:anywhere}
 .wb-top b{color:var(--text);font-weight:600}
 .wb-q{width:100%;box-sizing:border-box;margin-bottom:10px;background:var(--bg);border:1px solid var(--line);
@@ -632,7 +633,18 @@ function statsHtml(t) {
   if (cr != null || cw != null) bits.push(`cache ${fmtTok(cr)}r/${fmtTok(cw)}w`);
   if (t.cost_usd != null) bits.push(`$${Number(t.cost_usd).toFixed(4)}`);
   if (t.duration_ms != null) bits.push(`${(t.duration_ms / 1000).toFixed(1)}s`);
-  return bits.length ? `<div class="stats">${esc(bits.join("  ·  "))}</div>` : "";
+  // How full the context was when this turn ended. A patrol on this deployment
+  // died on "the model has reached its context window limit" and nothing
+  // anywhere had said it was close; the runtime knew all along.
+  const ctx = t.context || null;
+  const pct = ctx && ctx.percent != null ? Math.round(ctx.percent) : null;
+  const line = bits.length ? `<div class="stats">${esc(bits.join("  ·  "))}` : "";
+  const ctxBit = pct == null ? "" :
+    `  ·  <span class="${pct >= 80 ? "ctx-hot" : ""}" title="${attr(fmtTok(ctx.tokens) + " of " + fmtTok(ctx.limit) +
+      (ctx.auto_compact ? " · the runtime folds it away on its own before the limit" : " · no automatic compaction"))}">context ${pct}%</span>`;
+  const folds = (t.compactions || []).length;
+  const foldBit = folds ? `  ·  <span class="ctx-hot">context folded ${folds}×</span>` : "";
+  return line ? `${line}${ctxBit}${foldBit}</div>` : "";
 }
 function fmtMs(ms) {
   if (ms == null) return "";
