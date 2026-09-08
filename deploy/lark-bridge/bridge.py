@@ -29,6 +29,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import subprocess  # nosec B404 — the Lark CLI is the transport; see _lark()
 import sys
 import threading
@@ -422,7 +423,9 @@ def bus_running() -> bool:
         result = _lark(["event", "status"], timeout=20)
     except (OSError, subprocess.SubprocessError):
         return False
-    return "Bus: running" in (result.stdout or "")
+    # The CLI pads the label to a column ("Bus:              running (PID …)"),
+    # and says "Bus: not running" with one space — match the words, not the gap.
+    return re.search(r"Bus:\s+running", result.stdout or "") is not None
 
 
 def consume_messages() -> None:
