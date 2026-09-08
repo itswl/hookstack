@@ -1306,7 +1306,10 @@ class RunService:
     def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:
         run.status = FAILED
         run.error = reason
-        run.text = failure_report(reason)
+        # Whatever the engine managed to say goes into the failure report rather
+        # than under it. `run.text` is empty during a turn — the answer is on
+        # the result, when there is one.
+        run.text = failure_report(reason, produced=result.text if result is not None else "")
         # A failure that got a result still knows its bill; one that was cut off
         # mid-turn — wall clock, crash, Stop — never will, because the engine
         # reports dollars only with its result. Recording None there is the

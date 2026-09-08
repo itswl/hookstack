@@ -551,6 +551,16 @@ def transient(error: str) -> bool:
     return any(marker in lowered for marker in _TRANSIENT_MARKERS)
 
 
+# How an engine's own error line opens. Checked against the head of the text,
+# because a provider error is a line and an answer is prose or JSON.
+_ERROR_LINE_MARKERS = ("api error", "error:", "http error", "connection", "parseerror", "exception")
+
+
+def _looks_like_an_error_line(detail: str) -> bool:
+    head = detail[:60].lower()
+    return any(marker in head for marker in _ERROR_LINE_MARKERS)
+
+
 def engine_error(result: Any, text: str) -> str | None:
     """Why a finished run failed, in words the operator can act on.
 
@@ -569,8 +579,23 @@ def engine_error(result: Any, text: str) -> str | None:
         cutoff = _CUTOFF_SUBTYPES.get(subtype)
         if cutoff:
             return f"{cutoff} ({subtype})"
-        detail = " ".join(text.split())[:200]
-        return detail or f"engine reported {subtype or 'error'}"
+        detail = " ".join(text.split())
+        # Quote the text only when the text IS the error. A provider's line —
+        # "API Error: 402 Insufficient Balance", "API Error: 524 {…}" — is the
+        # most useful reason there is, and `transient()` reads it to decide
+        # whether to try again, so it must survive verbatim.
+        #
+        # When the text is the run's own ANSWER, quoting it produced a board
+        # entry that read like a finished report wearing the word "failed": a
+        # patrol on 2026-09-03 was flagged with an unmapped subtype and its
+        # reason became "One inference needs checking — the skill cases show…",
+        # a sentence with no failure in it. Name what happened instead, and let
+        # `failure_report` keep the answer.
+        if detail and _looks_like_an_error_line(detail):
+            return detail[:200]
+        if detail:
+            return f"engine reported {subtype or 'error'} after producing an answer"
+        return f"engine reported {subtype or 'error'}"
     if not text:
         return "engine returned an empty result"
     return None

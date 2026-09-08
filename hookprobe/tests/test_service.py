@@ -495,9 +495,18 @@ def test_a_failed_run_reports_what_the_engine_said_not_its_subtype() -> None:
     assert engine_error(failed, "API Error: 402 Insufficient Balance") == "API Error: 402 Insufficient Balance"
 
     # Collapsed to one line and capped: this is a log line, not a report.
-    long = engine_error(failed, "line one\n\n   line two" + " x" * 300)
-    assert long is not None and "\n" not in long and long.startswith("line one line two")
-    assert len(long) == 200
+    long_error = engine_error(failed, "API Error: 524 " + "{cloudflare} " * 60)
+    assert long_error is not None and "\n" not in long_error and long_error.startswith("API Error: 524")
+    assert len(long_error) == 200, "a provider line survives verbatim — transient() reads it to decide on a retry"
+
+    # But the run's own ANSWER is not a reason. A patrol on 2026-09-03 was
+    # flagged with a subtype this module does not map, and its reason became
+    # "One inference needs checking — the skill cases show…" — a board entry
+    # that read like a finished report wearing the word "failed", while the
+    # $1.68 of analysis behind it was replaced by the failure template. Same
+    # lesson as the cutoff below, one case wider.
+    answered = engine_error(failed, "One inference needs checking — the skill cases show readings declining." * 4)
+    assert answered == "engine reported success after producing an answer"
 
     # The subtype is still the fallback, for an error that came with no words.
     assert engine_error(_Result(is_error=True, subtype="mystery"), "  ") == "engine reported mystery"
@@ -520,3 +529,28 @@ def test_a_failed_run_reports_what_the_engine_said_not_its_subtype() -> None:
     # And a genuine success stays a success; an empty one is still a failure.
     assert engine_error(_Result(is_error=False, subtype="success"), "the report") is None
     assert engine_error(_Result(is_error=False, subtype="success"), "") == "engine returned an empty result"
+
+
+def test_a_failure_keeps_what_the_run_managed_to_say() -> None:
+    """The template used to assert "No analysis was produced for this alert"
+    over the top of 1002 characters of analysis that had been produced. A
+    partial answer is the most useful thing a failed run leaves behind."""
+    import json as _json
+
+    from hookprobe.reports import failure_report, report_summary
+
+    empty = _json.loads(failure_report("timed out after 900s"))
+    assert empty["summary"] == "hookprobe run failed: timed out after 900s"
+    assert empty["impact"]["description"] == "No analysis was produced for this alert."
+
+    kept = _json.loads(
+        failure_report("engine reported success after producing an answer", produced="  Redis\n\nis fine  ")
+    )
+    assert "partial answer" in kept["summary"]
+    assert kept["root_cause"]["description"].endswith("It had produced this much before the failure: Redis is fine")
+    assert kept["impact"]["description"] == "A partial answer survives in root_cause."
+    assert report_summary(failure_report("x", produced="y")).startswith("hookprobe run failed after producing")
+
+    # Capped, so a failure card does not become a wall.
+    huge = _json.loads(failure_report("x", produced="y " * 5000))
+    assert len(huge["root_cause"]["description"]) < 4200

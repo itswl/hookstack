@@ -69,20 +69,43 @@ def report_summary(text: str) -> str:
     return text.strip()[:800]
 
 
-def failure_report(reason: str) -> str:
-    """A minimal report-shaped JSON so an OpenClaw-dialect caller renders the failure."""
+# Enough of a partial answer to be worth reading, capped so a failure card does
+# not become a wall.
+_PARTIAL_MAX = 4000
+
+
+def failure_report(reason: str, produced: str = "") -> str:
+    """A report-shaped JSON so an OpenClaw-dialect caller renders the failure.
+
+    `produced` is whatever the engine returned before it was flagged. It used to
+    be discarded: a patrol run on 2026-09-03 produced 1002 characters of
+    analysis, was flagged with a subtype this module does not map, and had every
+    word of it replaced by this template — including the line "No analysis was
+    produced for this alert", which was false about work that cost $1.68. What
+    the run managed to say now survives the failure that interrupted it, and the
+    template stops asserting the opposite.
+    """
+    partial = " ".join(str(produced or "").split())[:_PARTIAL_MAX]
+    root = f"The analysis runner failed before reaching a conclusion: {reason}"
+    if partial:
+        root += f" It had produced this much before the failure: {partial}"
     return json.dumps(
         {
-            "summary": f"hookprobe run failed: {reason}",
-            "root_cause": {
-                "status": "unknown",
-                "description": f"The analysis runner failed before reaching a conclusion: {reason}",
-            },
+            "summary": (
+                f"hookprobe run failed after producing a partial answer: {reason}"
+                if partial
+                else f"hookprobe run failed: {reason}"
+            ),
+            "root_cause": {"status": "unknown", "description": root},
             "evidence": [],
             "impact": {
                 "scope": "analysis pipeline",
                 "severity": "unknown",
-                "description": "No analysis was produced for this alert.",
+                "description": (
+                    "A partial answer survives in root_cause."
+                    if partial
+                    else "No analysis was produced for this alert."
+                ),
             },
             "timeline": [],
             "recommendations": [
