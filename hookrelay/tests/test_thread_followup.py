@@ -145,6 +145,9 @@ async def test_a_reply_under_our_card_becomes_a_hop_addressed_to_the_investigati
     assert reply["fields"]["session"] == "probe:ww:1" and reply["fields"]["thread_root"] == "om_report"
     assert reply["fields"]["kind"] == "follow_up" and reply["fields"]["sender"] == "ou_sre"
     assert reply["fields"]["correlation_id"] == f"hr-{report_id}"
+    assert reply["fields"]["return_source"] == "probe-notify", (
+        "the door the report came through names the node to route to"
+    )
 
 
 async def test_a_reply_under_a_card_nobody_here_sent_is_skipped_with_a_name(store, cfg):
@@ -201,6 +204,51 @@ async def test_send_keeps_the_platform_id_and_asks_for_a_thread_reply(cfg):
         Client(), cfg.channels["to-probe"], {**base, "fields": {"thread_root": "om_report"}}
     )
     assert ok and "reply_to" not in json.loads(body)
+
+
+async def test_a_channel_can_name_the_chat_one_bridge_serves_several(cfg):
+    captured: dict = {}
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"ok": True, "message_id": "om_new"}
+
+    class Client:
+        async def post(self, url, content=None, headers=None):
+            captured["content"] = content
+            return Response()
+
+    two = Config.from_dict(
+        {
+            **CFG,
+            "channels": [
+                *CFG["channels"],
+                {
+                    "name": "to-plan-chat",
+                    "type": "feishu",
+                    "url": "http://bridge/",
+                    "options": {"payload": "normalized", "thread_replies": True, "chat_id": "oc_plan"},
+                },
+            ],
+        }
+    )
+    message = {
+        "event_id": 7,
+        "source": "ww",
+        "title": "t",
+        "body": "b",
+        "level": "high",
+        "received_at": 0.0,
+        "payload": {},
+        "fields": {},
+    }
+    ok, _, body, _ = await channels.send(Client(), two.channels["to-plan-chat"], message)
+    assert ok and json.loads(body)["chat_id"] == "oc_plan"
+    ok, _, body, _ = await channels.send(Client(), two.channels["to-me"], message)
+    assert ok and "chat_id" not in json.loads(body), "a channel without the option asks for nothing"
 
 
 async def test_lark_api_shape_is_understood_too():

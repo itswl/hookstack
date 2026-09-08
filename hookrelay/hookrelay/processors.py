@@ -204,6 +204,7 @@ class ThreadLookupProcessor:
             {
                 "thread_root": root,
                 "session": found["session"],
+                "return_source": str(found.get("return_source") or ""),
                 "correlation_id": found["quote"],
                 "kind": str(ctx.extracted["fields"].get("kind") or "follow_up"),
             }

@@ -523,11 +523,14 @@ class Store:
         trip = await self.round_trip(int(row["event_id"]))
         if trip is None:
             return None
-        session = ""
+        session = return_source = ""
         for item in sorted(trip["returns"], key=lambda r: float(r.get("received_at") or 0.0), reverse=True):
             candidate = str((item.get("fields") or {}).get("session") or "")
             if candidate:
-                session = candidate
+                # The door the session's report came through names the node that
+                # owns it — on a deployment with several investigators, that is
+                # what a route needs to hand the follow-up back to the right one.
+                session, return_source = candidate, str(item.get("source") or "")
                 break
         return {
             "card_event_id": int(row["event_id"]),
@@ -535,6 +538,7 @@ class Store:
             "origin_event_id": int(trip["origin"]["id"]),
             "quote": f"hr-{int(row['event_id'])}",
             "session": session,
+            "return_source": return_source,
             "title": str(trip["origin"].get("title") or ""),
         }
 

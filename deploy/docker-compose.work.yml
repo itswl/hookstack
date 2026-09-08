@@ -55,6 +55,16 @@ services:
       # Lark. The webhook URL is the credential either way.
       LARK_WATCH_SECRET: ${LARK_WATCH_SECRET:-}
       LARK_PLAN_SECRET: ${LARK_PLAN_SECRET:-}
+      # Chat follow-ups (docs/deployments.md). The two Feishu channels post to the
+      # custom-bot webhooks above until these URLs point at the bridge
+      # (http://lark-bridge:9100/, `bridge` profile) and the channel secrets equal
+      # LARK_BRIDGE_SECRET; the chat ids let one bridge serve both channels.
+      LARK_WATCH_URL: ${LARK_WATCH_URL:-${LARK_WATCH_WEBHOOK}}
+      LARK_PLAN_URL: ${LARK_PLAN_URL:-${LARK_PLAN_WEBHOOK}}
+      LARK_WATCH_CHAT_ID: ${LARK_WATCH_CHAT_ID:-}
+      LARK_PLAN_CHAT_ID: ${LARK_PLAN_CHAT_ID:-}
+      # Signs the lark-thread door; the bridge holds the same value.
+      LARK_THREAD_SECRET: ${LARK_THREAD_SECRET:-}
       # Signs the pipe's delivery to probe-plan's escalation door. Empty leaves
       # that hop unsigned, which is survivable on a private compose network and
       # is still worth setting: it is one line and it is the only thing standing
@@ -154,6 +164,9 @@ services:
     # secret one `printenv` away from an agent that runs arbitrary bash. The
     # block below names only what this service reads.
     environment:
+      # Who may continue this node's sessions by replying in the chat thread
+      # (sender ids, or `*`); empty = nobody.
+      HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
@@ -288,6 +301,9 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
+      # Who may continue this node's sessions by replying in the chat thread
+      # (sender ids, or `*`); empty = nobody.
+      HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
@@ -445,6 +461,9 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
+      # Who may continue this node's sessions by replying in the chat thread
+      # (sender ids, or `*`); empty = nobody.
+      HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
@@ -524,6 +543,34 @@ services:
       - ../work-data/probe-plan-secrets/aws:/data/aws:ro
     ports:
       - "127.0.0.1:8090:8088"
+
+  # The chat's way back in, for this deployment: dials out to Lark as a THIRD
+  # app (one event connection per app; the alert deployment's bridge holds the
+  # second), sends the two channels' cards as that app into their chats, and
+  # forwards a person's reply under a card to the pipe's lark-thread door.
+  # Off unless `--profile bridge` and the app credentials are in .env.
+  lark-bridge:
+    profiles: [bridge]
+    build: ./lark-bridge
+    image: lark-bridge:work
+    container_name: work-lark-bridge
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      LARK_APP_ID: ${LARK_APP_ID:-}
+      LARK_APP_SECRET: ${LARK_APP_SECRET:-}
+      LARK_BRAND: ${LARK_BRAND:-lark}
+      # The default chat (the watcher's) and the other chat it may serve (the planner's).
+      LARK_CHAT_ID: ${LARK_WATCH_CHAT_ID:-}
+      BRIDGE_CHAT_IDS: ${LARK_PLAN_CHAT_ID:-}
+      BRIDGE_INBOUND_SECRET: ${LARK_BRIDGE_SECRET:-}
+      RELAY_ACTION_URL: http://hookrelay:8100/card-action
+      RELAY_THREAD_URL: ${RELAY_THREAD_URL:-http://hookrelay:8100/hook/lark-thread}
+      THREAD_SECRET: ${LARK_THREAD_SECRET:-}
+    volumes:
+      - work-lark-bridge-config:/config
+    depends_on:
+      - hookrelay
 
   watch-timer:
     image: hookprobe:work
@@ -675,6 +722,9 @@ services:
 # Explicit rather than inherited: the two services find each other by service
 # name on this network, which is what work.yaml's http://probe-plan:8088 and
 # this file's http://hookrelay:8100 both depend on.
+volumes:
+  work-lark-bridge-config:
+
 networks:
   default:
     name: work_net

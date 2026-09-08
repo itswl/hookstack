@@ -135,8 +135,13 @@ carried, not read.
 The other half is on the channel: `options: {thread_replies: true}` on a `feishu`
 channel that sends through the bridge makes a delivery whose event carries
 `fields.thread_root` go out as a reply in that thread (`reply_to` in the body
-the bridge reads). The ledger keeps the platform's message id of every sent
-delivery (`platform_message_id`) for exactly this lookup.
+the bridge reads), and `options: {chat_id: oc_…}` names the chat, so one bridge
+serves several channels (the bridge refuses a chat it was not configured for).
+The stage also writes `fields.return_source` — the door the session's report
+came through — so a deployment with several investigators routes the reply to
+the node that holds the session (`when: {return_source: plan-notify}`). The
+ledger keeps the platform's message id of every sent delivery
+(`platform_message_id`) for exactly this lookup.
 
 ### The `http` processor contract
 

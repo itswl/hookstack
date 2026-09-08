@@ -145,6 +145,9 @@ sources:
       # instead (see _resolve_run in hookprobe/events.py). The id both sides
       # already agree on is the right thing to key on.
       correlation_id: "{meta.event_id}"
+      # The chat thread this report answers into, when a person's reply
+      # started the turn ("" for a first report); see the lark-thread door.
+      thread_root: "{meta.thread_root}"
 
   # The one door in this file a MACHINE never posts to.
   #
@@ -192,6 +195,29 @@ sources:
       session: "{meta.session_key}"
       cost_usd: "{meta.cost_usd}"
       correlation_id: "{meta.event_id}"
+      # The chat thread this report answers into, when a person's reply
+      # started the turn ("" for a first report); see the lark-thread door.
+      thread_root: "{meta.thread_root}"
+
+  # A person's reply under one of our cards, forwarded by lark-bridge (the
+  # `bridge` profile of this deployment). The pipe reads one thing: the id of
+  # the card replied under; the thread-lookup stage resolves it to the chain
+  # and the session, and `return_source` says which node's report it was —
+  # plan-notify or work-notify — so the routes below hand the question back to
+  # the node that holds the session. Text carried, never read.
+  - name: lark-thread
+    secret: ${LARK_THREAD_SECRET}
+    title: "{text}"
+    body: "{text}"
+    level: info
+    fields:
+      root_message_id: "{root_message_id}"
+      message_id: "{message_id}"
+      sender: "{sender}"
+      chat_id: "{chat_id}"
+    # Distinct replies must never dedup into each other: the message id is the identity.
+    fingerprint_fields: [message_id]
+    dedup_window_seconds: 86400
 
 channels:
   # The signal, as itself. `payload: normalized` (the default, stated anyway):
@@ -204,9 +230,14 @@ channels:
   # exists, so turning it on is one .env line on each side.
   - name: to-lark-watch
     type: feishu
-    url: ${LARK_WATCH_WEBHOOK}
+    url: ${LARK_WATCH_URL}
     secret: ${LARK_WATCH_SECRET}
-    options: {payload: normalized}
+    # thread_replies / chat_id take effect once the URL points at the bridge
+    # (`bridge` profile); a custom-bot webhook is sent neither key.
+    options:
+      payload: normalized
+      thread_replies: true
+      chat_id: ${LARK_WATCH_CHAT_ID}
 
   # The investigator's escalation door. Every signal is handed over and
   # probe-plan decides by level whether it is worth a paid run
@@ -249,9 +280,12 @@ channels:
   # built around it.
   - name: to-lark-plan
     type: feishu
-    url: ${LARK_PLAN_WEBHOOK}
+    url: ${LARK_PLAN_URL}
     secret: ${LARK_PLAN_SECRET}
-    options: {payload: processed}
+    options:
+      payload: processed
+      thread_replies: true
+      chat_id: ${LARK_PLAN_CHAT_ID}
 
 routes:
   # Two routes rather than one, because the watcher's own contract says
@@ -344,7 +378,31 @@ routes:
 # last round would otherwise post duplicate cards; hookprobe's own idempotency
 # per (source, event_id) already stops the duplicate INVESTIGATION, so this is
 # specifically about not telling the operator the same thing twice.
-pipeline: [dedup, silence, routes]
+  # A reply resolved to a plan's chain goes back to the planner; one resolved
+  # to a work node's chain goes to the work node. Unresolved replies never get
+  # here: the stage skips them as unknown_thread.
+  - name: thread-to-plan
+    source: lark-thread
+    when: {return_source: plan-notify}
+    send_to: [to-plan]
+    priority: 100
+    stop: true
+  - name: thread-to-work
+    source: lark-thread
+    when: {return_source: work-notify}
+    send_to: [to-work]
+    priority: 100
+    stop: true
+pipeline:
+  - dedup
+  - silence
+  # Which card was this reply under, whose chain, whose session, which node.
+  - type: thread_lookup
+    name: thread-lookup
+    when: {source: lark-thread}
+    from: root_message_id
+    skip_code: unknown_thread
+  - routes
 
 # No card_actions: no bridge, so no callback can reach this pipe, and an
 # unsigned button URL in a group chat is one anybody can press on your behalf.

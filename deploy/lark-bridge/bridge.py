@@ -43,6 +43,14 @@ logging.basicConfig(
 logger = logging.getLogger("lark-bridge")
 
 CHAT_ID = os.environ["LARK_CHAT_ID"]
+# Every chat this bridge may post into and will forward replies from: the
+# default above plus BRIDGE_CHAT_IDS (comma-separated). A pipe channel names one
+# with `options: {chat_id: …}`; a request for a chat outside this set is refused
+# — the bridge's blast radius is written here, not decided by its callers.
+CHAT_IDS = {
+    CHAT_ID,
+    *(c.strip() for c in os.environ.get("BRIDGE_CHAT_IDS", "").split(",") if c.strip()),
+}
 RELAY_ACTION_URL = os.environ.get(
     "RELAY_ACTION_URL", "http://hookrelay:8100/card-action"
 )
@@ -111,14 +119,15 @@ def _lark(
     )
 
 
-def send_card(card: dict, reply_to: str = "") -> tuple[bool, str]:
-    """Post one interactive card to the private chat, as the application — or,
-    when the pipe says which message it answers, as a reply in that message's
-    thread, so a follow-up's answer lands under the question."""
+def send_card(card: dict, reply_to: str = "", chat_id: str = "") -> tuple[bool, str]:
+    """Post one interactive card to a chat, as the application — the default
+    chat unless the pipe named another it may use — or, when the pipe says which
+    message it answers, as a reply in that message's thread, so a follow-up's
+    answer lands under the question."""
     if reply_to:
         args = ["im", "+messages-reply", "--message-id", reply_to, "--reply-in-thread"]
     else:
-        args = ["im", "+messages-send", "--chat-id", CHAT_ID]
+        args = ["im", "+messages-send", "--chat-id", chat_id or CHAT_ID]
     result = _lark(
         [
             *args,
@@ -186,7 +195,14 @@ class Handler(BaseHTTPRequestHandler):
         # `reply_to` is the pipe's request to answer inside a thread (see
         # hookrelay's feishu channel, `thread_replies`). Read here, never sent on.
         reply_to = str(payload.get("reply_to") or "")[:120]
-        ok, detail = send_card(card, reply_to)
+        chat_id = str(payload.get("chat_id") or "")[:120]
+        if chat_id and chat_id not in CHAT_IDS:
+            logger.warning(
+                "card refused: chat %s is not one this bridge serves", chat_id[:12]
+            )
+            self._reply(400, {"ok": False, "error": "chat not served by this bridge"})
+            return
+        ok, detail = send_card(card, reply_to, chat_id)
         if ok:
             logger.info(
                 "card delivered message_id=%s%s",
@@ -375,7 +391,8 @@ def forward_message(event: dict) -> None:
     """
     if not RELAY_THREAD_URL:
         return
-    if str(event.get("chat_id") or "") != CHAT_ID:
+    chat_id = str(event.get("chat_id") or "")
+    if chat_id not in CHAT_IDS:
         return
     if str(event.get("sender_type") or "user") != "user":
         return
@@ -396,7 +413,7 @@ def forward_message(event: dict) -> None:
             "root_message_id": root,
             "message_id": str(event.get("message_id") or event.get("id") or ""),
             "sender": str(event.get("sender_id") or ""),
-            "chat_id": CHAT_ID,
+            "chat_id": chat_id,
             "text": text[:4000],
         },
         ensure_ascii=False,

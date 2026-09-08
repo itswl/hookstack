@@ -294,17 +294,21 @@ def _platform_message_id(data: Any) -> str:
     return ""
 
 
-def _thread_reply(channel: Channel, message: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    """Ask the receiver to post this as a reply in a thread, when the event says
-    which and the channel can (`options: {thread_replies: true}` — a bridge that
-    sends as an application; a custom-bot webhook has no reply API and would
-    only be confused by the key). `thread_root` is a field like any other: the
-    pipe carries it, does not read it."""
-    if not channel.options.get("thread_replies"):
-        return payload
-    root = str((message.get("fields") or {}).get("thread_root") or "").strip()
-    if root:
-        payload = {**payload, "reply_to": root[:120]}
+def _bridge_hints(channel: Channel, message: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Two keys only a bridge that sends as an application understands, added
+    only when the channel says it is one. `reply_to` (with `options:
+    {thread_replies: true}`) asks for this to be posted as a reply in the thread
+    the event names in `fields.thread_root`; `chat_id` (with `options: {chat_id:
+    …}`) names the chat, so one bridge can serve several channels. A custom-bot
+    webhook has neither API and is never sent either key. The pipe carries the
+    field values; it does not read them."""
+    if channel.options.get("thread_replies"):
+        root = str((message.get("fields") or {}).get("thread_root") or "").strip()
+        if root:
+            payload = {**payload, "reply_to": root[:120]}
+    chat = str(channel.options.get("chat_id") or "").strip()
+    if chat:
+        payload = {**payload, "chat_id": chat[:120]}
     return payload
 
 
@@ -332,7 +336,7 @@ async def send(
         # raises instead of failing is retried every tick forever.
         return False, f"build: {error.__class__.__name__}: {error}", None, ""
     if isinstance(payload, dict):
-        payload = _thread_reply(channel, message, payload)
+        payload = _bridge_hints(channel, message, payload)
     # Headers, never body: a receiver that dedupes needs a stable key, and a
     # brain that will hand work BACK to us needs something to quote so the two
     # halves of a round trip can be found together. Neither may perturb the

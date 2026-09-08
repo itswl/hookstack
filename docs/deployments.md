@@ -135,8 +135,15 @@ itself and the old app lacked the scope to add another. Then `.env`:
 `HOOKPROBE_FOLLOW_UP_SENDERS` (who may spend a turn from chat; empty refuses
 everyone). Switching the bridge's app also means clearing the CLI config on
 its volume (`lark-cli config remove`); the entrypoint keeps an existing one.
-The work deployment has no chat return path yet: its watcher posts to a
-custom-bot webhook, which cannot receive.
+The work deployment gets the same path through its `bridge` profile: a
+lark-bridge of its own (a third Lark app — one connection per app, and the
+alert deployment's bridge holds the second), serving both of its chats
+(`LARK_WATCH_CHAT_ID`, `LARK_PLAN_CHAT_ID`; the pipe names the chat per channel
+with `options.chat_id`). Its two Feishu channels keep posting to the custom-bot
+webhooks until `LARK_WATCH_URL` / `LARK_PLAN_URL` point at the bridge and the
+channel secrets equal `LARK_BRIDGE_SECRET`; a reply is then routed by
+`return_source` to the node that holds the session — `plan-notify` to the
+planner, `work-notify` to the work node.
 
 **Timer: host crontab, or a container.** The work deployment ships its own,
 after the host version could not read its own brief: macOS keeps `~/Documents`
