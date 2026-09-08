@@ -1,7 +1,8 @@
 # Running all of hookstack
 
-The pipe and the brain, plus a downstream you can read and a stub model, in
-one command. Every step and every expected output below was re-verified from a
+The whole loop — a signal in, a verdict, an investigation, a card a person
+could act on, and the ledger that accounts for all of it — plus a downstream you
+can read and a stub model, in one command. Every step and every expected output below was re-verified from a
 clean slate — no images, no volumes, no ledger history — on a plain local
 Docker before this page was last rewritten.
 

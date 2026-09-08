@@ -4,17 +4,32 @@
 [![ci-hookjudge](https://github.com/itswl/hookstack/actions/workflows/ci-hookjudge.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookjudge.yml)
 [![ci-hookprobe](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml)
 
-**Run AI agents in production with absolute financial accountability and structural containment.**
+**Turn the signals a team already has into agent work that actually finishes — tracked, approved, verified, and accounted for.**
 
-hookstack turns a noisy stream of signals into a few priced, signed, auditable interruptions. Point your alert sources at it — Alertmanager, Grafana, any webhook. A cheap judge decides whether a person needs to act *now*; an agent investigates the events that earn it; what survives lands as a card in your chat — Feishu/Lark through a small bridge, DingTalk and WeCom through a shipped plugin — with buttons a person can rule with. Every hop is signed and accounted for, every model call is priced, and a weekly page says what the machines spent and what they saved — in numbers somebody can check.
+hookstack is a work operations platform for agents. It takes the signals a team already has — alerts, webhooks, chat messages, tickets, timers, monitoring events, and a person simply asking — and turns each one into a piece of **work** that an agent carries to an end: it picks the work up, keeps one session across every follow-up and every restart, plans what it would do, stops for a person on anything that writes, has its result verified, and leaves an audit record behind. Every hop is signed, every model call is priced, and one page a week says what the machine spent and what it saved — with the numbers a person can go and check.
 
-Built for SRE and platform teams who want AI agents on the alert stream without handing them the keys: agents run read-only by default, behind scoped credentials, budget ceilings and a closed list of tools. Alerts are where it was built and hardened, but they are not the shape. The same pipe, on the same code, carries an operator's own work signals — chat and tickets — to a planner and a human-approved handoff ([two deployments, one codebase](docs/deployments.md)).
+Built for SRE, platform and operations teams who want agents doing real work without handing them the keys: agents run read-only by default and are measured against that at startup, behind scoped credentials, budget ceilings and a closed list of tools. Alerts are where it was hardened and they are still the busiest door — not the shape. The same pipe, on the same code, carries an operator's own work signals to a planner and a human-approved handoff ([two deployments, one codebase](docs/deployments.md)). What it does **not** have yet: teams as a first-class thing — one deployment is one workspace, the chat sender allowlist and the console token are the whole of "who", and there are no roles, no per-person permissions and no tenancy.
 
 Narrative overview with screenshots: [OVERVIEW.md](OVERVIEW.md). MIT licensed.
 
+## The shape of the work
+
+Seven steps, and each one names the thing that does it — so the positioning above is checkable rather than a claim.
+
+| step | what does it |
+|---|---|
+| **a signal arrives** | a door per source: any webhook, Alertmanager and Grafana shapes, a chat message, a timer, a watcher, or a person typing into the console |
+| **an agent picks it up** | the route names the node; the caller says what KIND of thing it is — an alert to investigate, a task to plan, a question to answer |
+| **the session persists** | one engine session per piece of work: a reply in the chat thread continues it for cents, a re-fire joins it instead of funding a cold start, and a restart resumes it rather than losing what it gathered |
+| **a plan is executed** | the planner writes what it would do; a person hands it to the work runner, the one node not on `readonly` |
+| **a person confirms** | every button is signed before the card leaves; a procedure runs only after an approval, step by step against an allowlist, as an argv and never through a shell — and expires after a day |
+| **the result is verified** | a ruling, or the procedure's own steps exiting 0, or the condition itself ending — the board says which, and counts the work that closed with nobody stepping in |
+| **the audit settles** | one page per event with every hop, digest, decision and human action; a flight recorder of every tool call the agent cannot edit; a timing waterfall per run; a weekly page over all three ledgers |
+
 ## What you get
 
-- **Fewer interruptions, and the right ones.** The judge answers one question — *does a person need to act now?* — and a storm, a restatement or a recovery never buys a second verdict. Measured on 795 production alerts, 28 of 29 alert rules answered identically every time, so `rule-reuse` answers them without a model call.
+- **Only the work worth doing.** A cheap judge decides whether a signal becomes work at all — *does a person need to act now?* — and a storm, a restatement or a recovery never buys a second verdict. Measured on 795 production alerts, 28 of 29 alert rules answered identically every time, so `rule-reuse` answers them without a model call.
+- **One board, one row per piece of work.** However many runs it took, across however many nodes: what is blocked, what is in flight, what finished, what was verified, and the strict number — work that closed **without anyone stepping in**. Beside it, everything that waits on a person, and the agent's own line: which node this is, what it may do, and whether its reports are reaching the pipe.
 - **A card a person can rule with.** Worth it, not worth it, silence, approve — each button signed before the card leaves, each click recorded, and every ruling fed back into the runbooks and the weekly page.
 - **Investigations that leave something behind.** A finished run distils its own runbook; the next occurrence of the same condition adds a case, and a condition a person ruled *not worth it* answers its re-fires from that runbook for $0. A follow-up question on an open investigation costs about a tenth of a fresh run, measured.
 - **Remediation with a person in the loop.** The investigator proposes; a signed approve runs each step against an allowlist, as an argv and never through a shell, on a node whose credential is the whole blast radius.

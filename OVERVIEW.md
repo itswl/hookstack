@@ -1,15 +1,18 @@
 # hookstack — an overview
 
-hookstack is a set of small services grown around one question: how does an alert get
-handled?
+hookstack is a work operations platform for agents: a signal arrives, an agent
+picks the work up and keeps one session on it, plans what it would do, stops for
+a person on anything that writes, has its result verified, and leaves an audit
+record behind.
 
-That question is this document's whole vocabulary, and it is worth saying once
-at the top that it is the ORIGIN rather than the boundary. The shape underneath
-— something produces signals, a pipe accounts for every hop, nodes decide or
-investigate, what survives reaches a person — has since carried an operator's
-own work signals from chat and tickets on the same code, with no service change
-at all. If you have no alert stream, read "alert" as "signal" throughout and
-almost nothing else needs translating; the two deployments are compared in
+This document is written in the vocabulary of one signal — how does an ALERT get
+handled — and it is worth saying once at the top that this is the ORIGIN rather
+than the boundary. The shape underneath is the same for a chat message, a
+ticket, a timer or a person simply asking: a pipe accounts for every hop, nodes
+decide or investigate, work reaches an end and a person can see how. Those other
+signals run on this code today with no service change at all; if you have no
+alert stream, read "alert" as "signal" throughout and almost nothing else needs
+translating. The two deployments are compared in
 [docs/deployments.md](docs/deployments.md).
 
 hookstack's design philosophy is one job per component.
@@ -18,8 +21,8 @@ channel format out. **hookjudge** is the judge — one event, one verdict, one
 line in the ledger. **hookprobe** is the investigator — one tool-using
 agent run, read-only by default, for the alerts that deserve more than a verdict. All
 three live in this repository, each entirely self-contained (its own package,
-tests, gate, Dockerfile and CI), and together they form a complete alert
-handling pipeline.
+tests, gate, Dockerfile and CI), and together they carry a piece of work from
+the signal that raised it to the audit record it leaves behind.
 
 Every screenshot below comes from one local Docker run on 2026-09-08, started
 from nothing (`docker compose down -v`, then hookstack up with
