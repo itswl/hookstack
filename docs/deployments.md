@@ -119,7 +119,9 @@ platform id against the ledger to the chain and its investigation session
 the investigator continues its own engine session under the same read-only
 posture and answers back through `probe-notify` with `thread_root`, which the
 `to-me` channel turns into an in-thread reply. Three things have to be true
-on the host for this to work, none of them in this repository. The bridge needs
+on the host for this to work, none of them in this repository
+([deploy/lark-bridge/README.md](../deploy/lark-bridge/README.md) has the
+full list). The bridge needs
 a Lark app of its own: Lark allows one event long-connection per app, so an
 app shared with any other consumer means one of them never receives anything
 (2026-09-08: the bridge moved to a dedicated app for exactly this reason). That

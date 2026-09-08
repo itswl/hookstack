@@ -184,7 +184,7 @@ When a verdict earns it (critical/high), the pipe hands a copy of the event to h
 
 ### lark-bridge — the sidecar the pipe would not become
 
-A custom bot can only *send*, so the buttons on its cards have nowhere to call back. The bridge exists for that return path: it **dials out** to Lark over a long connection to receive button presses and forwards each to hookrelay's signed card-action door. Because the connection is outbound, the alerting network opens no inbound port — hookrelay's public front door was deliberately rolled back, and this does not reopen it. A sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four jobs — receive, route, deliver, account — and the pipe caps its own size.
+A custom bot can only *send*, so the buttons on its cards have nowhere to call back ([its own README](https://github.com/itswl/hookstack/blob/main/deploy/lark-bridge/README.md) covers the Lark app it needs and how to run it). The bridge exists for that return path: it **dials out** to Lark over a long connection to receive button presses and forwards each to hookrelay's signed card-action door. Because the connection is outbound, the alerting network opens no inbound port — hookrelay's public front door was deliberately rolled back, and this does not reopen it. A sidecar rather than a pipe plugin because an IM platform's auth, token refresh and websocket dialect are none of the pipe's four jobs — receive, route, deliver, account — and the pipe caps its own size.
 
 ---
 
