@@ -23,9 +23,10 @@
 # The NEXT release changes this file, because the baked stack.yaml then needs
 # two things this one does not have: a `lark-bridge` service in webhook mode
 # (docs/bridge-protocol.md — the pipe sends a card model, the sidecar renders
-# it and posts to the sink; needs `lark-bridge` in release.yml's image matrix)
-# and HOOKRELAY_PLUGINS=/app/examples/plugins for the DingTalk dialect. The
-# source compose (docker-compose.yml) already runs that shape.
+# it and posts to the sink; release.yml publishes ghcr.io/itswl/lark-bridge
+# from the next tag on) and HOOKRELAY_PLUGINS=/app/examples/plugins for the
+# DingTalk dialect. The source compose (docker-compose.yml) already runs that
+# shape.
 
 name: hookstack
 

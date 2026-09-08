@@ -88,7 +88,15 @@ jobs:
     timeout-minutes: 45
     strategy:
       matrix:
-        service: [hookrelay, hookjudge, hookprobe]
+        # The fourth image is the chat bridge (docs/bridge-protocol.md): the
+        # sidecar that renders the pipe's card model for Feishu, as an app or
+        # through a custom bot's webhook. It lives under deploy/, so the build
+        # context is named per entry rather than assumed to be the service name.
+        include:
+          - { service: hookrelay,   context: hookrelay }
+          - { service: hookjudge,   context: hookjudge }
+          - { service: hookprobe,   context: hookprobe }
+          - { service: lark-bridge, context: deploy/lark-bridge }
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
@@ -101,17 +109,17 @@ jobs:
       - id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       # Only the immutable version tag here. `:latest` is moved by the promote
-      # job below, once all three have succeeded — see the comment there.
+      # job below, once all four have succeeded — see the comment there.
       - uses: docker/build-push-action@v7
         with:
-          context: ${{ matrix.service }}
+          context: ${{ matrix.context }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
-  # `:latest` moves for all three or for none of them.
+  # `:latest` moves for all four or for none of them.
   #
   # The matrix above publishes per service, so a failure in the third leg used to
   # leave the first two already pointing `:latest` at the new release and the
@@ -119,7 +127,9 @@ jobs:
   # is split. The three components speak one wire contract to each other; half of
   # them being a version ahead is exactly the shape of problem that takes a day
   # to see. The version tags are immutable and land per leg, so a partial run
-  # leaves them harmlessly published and nobody's `:latest` moved.
+  # leaves them harmlessly published and nobody's `:latest` moved. The bridge is
+  # in the same set: a pipe that speaks a newer protocol than the bridge it
+  # ships beside is the same split, one hop further out.
   #
   # imagetools re-tags the existing multi-arch manifest — no rebuild, no pull,
   # and the digest `:latest` gains is the same one the version tag already has.
@@ -138,7 +148,7 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - name: move :latest to this release
         run: |
-          for service in hookrelay hookjudge hookprobe; do
+          for service in hookrelay hookjudge hookprobe lark-bridge; do
             repo="ghcr.io/${{ github.repository_owner }}/$service"
             docker buildx imagetools create \
               --tag "$repo:latest" "$repo:${{ steps.version.outputs.version }}"
