@@ -298,9 +298,12 @@ def _state(item: WorkItem, runs: list[Run], now: float) -> str:
     return DONE
 
 
-def counts(items: list[WorkItem]) -> dict[str, int]:
+def counts(items: list[WorkItem]) -> dict[str, Any]:
     """The board's header line, and the numbers the PRD's overview asks for."""
-    out = {state: 0 for state in BOARD_ORDER}
+    # `Any` rather than `int`: every entry is a count except the rate, which is a
+    # fraction — and None when there is no work, because "no work" and "nothing
+    # failed" are different answers.
+    out: dict[str, Any] = {state: 0 for state in BOARD_ORDER}
     for item in items:
         out[item.state] = out.get(item.state, 0) + 1
     out["blocked"] = sum(out.get(state, 0) for state in BLOCKED)
@@ -316,4 +319,10 @@ def counts(items: list[WorkItem]) -> dict[str, int]:
     # verified by a ruling or by its own procedure, and it never had to stop and
     # ask. Zero is a real answer — it says the verification loop is not closed.
     out["closed_unattended"] = sum(1 for i in items if i.state == DONE and i.verified and not i.hands_on)
+    # The share of work that ended without an answer — the PRD's "failure rate",
+    # counted over WORK rather than runs, because a run that failed and was
+    # retried into an answer is not a piece of work that failed. Abandoned work
+    # counts: nobody came, so it ended without an answer just the same.
+    ended_badly = out.get(NEEDS_HUMAN, 0) + out.get(ABANDONED, 0)
+    out["failure_rate"] = round(ended_badly / len(items), 4) if items else None
     return out

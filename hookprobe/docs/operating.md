@@ -267,9 +267,26 @@ already answering a question nobody was asking by the 8th. The retry button is
 on both columns; choosing to reopen an old failure is a person's call, and the
 column name is what makes it an informed one.
 
-Three numbers sit above it. `blocked` is the first two columns.
+A line above it says what this node IS — name, role, guard, model, what it is
+running right now, and in red the count of reports that never reached the pipe,
+which is the one health signal that means an agent is failing silently. Nothing
+read `/v1/agent` before; a deployment runs several probes and the only way to
+tell which one a board belonged to was the port in the address bar.
+
+Then the numbers. `blocked` is the first two columns.
 `closed without anyone stepping in` is the strict one: done, verified, and it
-never had to stop and ask.
+never had to stop and ask. `% ended without an answer` is the failure rate,
+counted over **work** rather than runs: a run that failed and was retried into
+an answer is not a piece of work that failed, and abandoned work is, because
+nobody came. A filter sits above the columns, because a board with 184 items in
+one of them needs a way to reach one of them.
+
+Those six figures are the whole of what the PRD asks a product overview to
+answer. There is deliberately no separate Overview page: five of the six were
+already here, and a ninth navigation item repeating them would be a second
+place for the same numbers to be wrong in. Aggregating several nodes onto one
+page is a different thing and is not built — see the note in
+`.agents/notes/proposed/`.
 
 **Verified** means one of three things, and the board says which:
 

@@ -50,6 +50,10 @@ body{margin:0;background:var(--bg);color:var(--text);height:100vh;display:flex;f
 header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
 nav.tabs{padding:0 12px;background:var(--panel)}
 /* the work board: one column per state, blocked first — see hookprobe/work.py */
+.wb-top{font-size:12px;color:var(--dim);padding:2px 2px 8px;overflow-wrap:anywhere}
+.wb-top b{color:var(--text);font-weight:600}
+.wb-q{width:100%;box-sizing:border-box;margin-bottom:10px;background:var(--bg);border:1px solid var(--line);
+  color:var(--text);border-radius:6px;padding:5px 9px;font:inherit;font-size:12.5px}
 .wb{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;padding:2px 0 10px}
 .wb-col{min-width:0}
 .wb-h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);padding:0 2px 6px;display:flex;gap:6px;align-items:baseline}
@@ -1121,25 +1125,49 @@ function rel(ts) {
   return Math.floor(d / 86400) + "d ago";
 }
 
+let workQuery = "";
+
+// The node itself, in one line. Nothing read /v1/agent before this: a
+// deployment runs several probes and the only way to tell which one a board
+// belonged to was the port in the address bar.
+function agentLine(a) {
+  if (!a) return "";
+  const h = a.health || {}, p = a.policy || {};
+  const bad = Number(h.return_failures || 0);
+  return `<b>${esc(a.name || "hookprobe")}</b>${a.role ? ` · ${esc(a.role)}` : ""}` +
+    ` · ${esc(p.bash_guard || "?")} · ${esc((a.runtime || {}).model || "?")}` +
+    ` · ${Number(h.active_runs || 0)} running, ${Number(h.turns_queued || 0)} queued` +
+    (bad ? ` · <span style="color:var(--bad)">${bad} report${bad > 1 ? "s" : ""} never reached the pipe</span>` : "");
+}
+
 async function openWork() {
   markTab("workBtn");
   leaveSessions("work");
   try {
-    const d = await (await api("/v1/work")).json();
+    const [wr, ar] = await Promise.all([api("/v1/work"), api("/v1/agent").catch(() => null)]);
+    const d = await wr.json();
+    const agent = ar && ar.ok ? await ar.json() : null;
     const c = d.counts || {};
     $("#meta").textContent = "work · one row per piece of work, however many runs it took";
+    const rate = c.failure_rate === null || c.failure_rate === undefined
+      ? "" : ` · ${Math.round(c.failure_rate * 100)}% ended without an answer`;
     $("#prov").innerHTML = `${c.blocked || 0} blocked · ${c.executing || 0} in flight · ` +
       `${c.done || 0} done, ${c.verified || 0} verified · ` +
-      `<b>${c.closed_unattended || 0}</b> closed without anyone stepping in`;
+      `<b>${c.closed_unattended || 0}</b> closed without anyone stepping in${rate}`;
     const items = d.items || [];
     if (!items.length) { $("#turns").innerHTML = '<div class="empty">no work yet — an alert, a task or a question through the event door opens one</div>'; return; }
+    // A board with 184 items in one column needs a way to reach one of them.
+    const q = workQuery.trim().toLowerCase();
+    const match = (i) => !q || `${i.title} ${i.work_id} ${i.state} ${i.source || ""} ${i.kind || ""}`.toLowerCase().includes(q);
     const order = ["waiting_approval", "needs_human", "executing", "verifying", "done", "abandoned"];
     // A column is capped: `done` on a live deployment is hundreds of items and
     // rendering them all makes the three that need a person unfindable. Newest
     // first, and the column head keeps the true total.
     const CAP = 25;
-    $("#turns").innerHTML = `<div class="wb">` + order.map((state) => {
-      const rows = items.filter((i) => i.state === state);
+    const head = `<div class="wb-top">${agentLine(agent)}</div>` +
+      `<input id="wbq" class="wb-q" placeholder="filter work…" autocomplete="off" value="${attr(workQuery)}">`;
+    $("#turns").innerHTML = head + `<div class="wb">` + order.map((state) => {
+      const rows = items.filter((i) => i.state === state && match(i));
       if (!rows.length) return "";
       const shown = rows.slice(0, CAP);
       const more = rows.length - shown.length;
@@ -1147,7 +1175,11 @@ async function openWork() {
         shown.map(wbCard).join("") +
         (more ? `<div class="empty" style="padding:6px 2px">${more} older, on the sessions list</div>` : "") + "</div>";
     }).join("") + "</div>";
-    $("#turns").scrollTop = 0;
+    const box = $("#wbq");
+    // The live tick re-renders this pane; without restoring the caret a filter
+    // could not be typed into at all.
+    box.oninput = () => { workQuery = box.value; openWork(); };
+    if (workQuery) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
     $("#turns").querySelectorAll(".wb-card").forEach((card) => (card.onclick = () => {
       const key = card.dataset.session;
       if (key) select(key);

@@ -265,3 +265,17 @@ def test_a_proposal_past_its_window_cannot_be_approved_and_stops_asking(tmp_path
     assert items["w2"].state == work.DONE
     assert not [o for o in items["w2"].open if o["kind"] == "approve"]
     assert any("expired unapproved" in a["name"] for a in items["w2"].artifacts), "still visible, just not offered"
+
+
+def test_the_failure_rate_counts_work_not_runs(tmp_path=None) -> None:
+    """A run that failed and was retried into an answer is not a piece of work
+    that failed. Abandoned work is: nobody came, so it ended without one."""
+    ok = _run("probe:ww:1", meta={"work_id": "w1"})
+    retried = _run("probe:ww:2", meta={"work_id": "w2", "auto_retries": 1})
+    lost = _run("probe:ww:3", status=FAILED, meta={"work_id": "w3"})
+    gone = _run("probe:ww:4", status=FAILED, meta={"work_id": "w4"})
+    gone.finished_at = time.time() - 30 * 86400
+
+    counts = work.counts(work.resolve([ok, retried, lost, gone]))
+    assert counts["failure_rate"] == 0.5, "two of four ended without an answer"
+    assert work.counts([])["failure_rate"] is None, "no work, no rate — not zero"
