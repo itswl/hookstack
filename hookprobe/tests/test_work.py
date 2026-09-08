@@ -209,3 +209,22 @@ def test_the_door_takes_the_work_id_an_upstream_node_stated_over_the_pipes_own()
         assert card["name"] == "hookprobe" and card["runtime"]["adapter"] == "claude-code"
         assert "budget_usd" in card["policy"] and card["health"]["active_runs"] == 0
         assert "token" not in json.dumps(card).lower(), "an agent card carries no secrets"
+
+
+def test_a_failure_nobody_came_back_to_leaves_the_blocked_count(tmp_path=None) -> None:
+    """`blocked` has to mean "a person could act on this now". Production's
+    board opened with twelve items in `needs a human`, two worth acting on and
+    the oldest three weeks old — a number mixing "look at this today" with
+    "nobody ever did" is the same mistake as counting unruled reports as debts."""
+    fresh = _run("probe:ww:1", status=FAILED, meta={"work_id": "w1"})
+    fresh.finished_at = time.time() - 3600
+    old = _run("probe:ww:2", status=FAILED, meta={"work_id": "w2"})
+    old.finished_at = time.time() - 21 * 86400
+
+    items = {i.work_id: i for i in work.resolve([fresh, old])}
+    assert items["w1"].state == work.NEEDS_HUMAN
+    assert items["w2"].state == work.ABANDONED
+
+    counts = work.counts(list(items.values()))
+    assert counts["needs_human"] == 1 and counts["abandoned"] == 1
+    assert counts["blocked"] == 1, "abandoned work is a count, not a queue"

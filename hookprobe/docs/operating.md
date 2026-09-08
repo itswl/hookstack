@@ -251,10 +251,21 @@ reading the page:
 | column | what it means |
 |---|---|
 | **waiting on you** | a procedure is proposed and nothing runs until somebody presses |
-| **needs a human** | the last run failed — including a refusal for budget |
+| **needs a human** | the last run failed within the last two days — including a refusal for budget |
 | **in flight** | a turn is running |
 | **verifying** | a procedure ran and every step exited 0, and nobody has said the condition cleared |
 | **done** | finished with nothing blocked |
+| **abandoned** | it failed and nobody came back to it inside two days |
+
+`blocked` is the first two columns only. **Abandoned work is a count, not a
+queue**: this board opened on production with twelve items in *needs a human*,
+of which two were worth acting on and the oldest was three weeks old. A number
+that mixes "somebody should look at this today" with "nobody ever did" is
+useless as the thing an operator reads in the morning. Two days is the window,
+from the evidence that set it — an investigation that died on the 4th was
+already answering a question nobody was asking by the 8th. The retry button is
+on both columns; choosing to reopen an old failure is a person's call, and the
+column name is what makes it an informed one.
 
 Three numbers sit above it. `blocked` is the first two columns.
 `closed without anyone stepping in` is the strict one: done, verified, and it

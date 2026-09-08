@@ -61,6 +61,7 @@ nav.tabs{padding:0 12px;background:var(--panel)}
 .wb-card .o{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px}
 .wb-card .o span{font-size:10.5px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--amber)}
 .wb-waiting_approval{border-left-color:var(--amber)} .wb-needs_human{border-left-color:var(--bad)}
+.wb-abandoned{border-left-color:var(--dim)} .wb-abandoned .t{color:var(--dim)}
 .wb-executing{border-left-color:var(--accent)} .wb-verifying{border-left-color:var(--amber)}
 .wb-done{border-left-color:var(--ok)}
 .wb-card .v{color:var(--ok)}
@@ -1089,6 +1090,7 @@ function leaveSessions(mode) {
 const WB_LABEL = {
   waiting_approval: "waiting on you",
   needs_human: "needs a human",
+  abandoned: "abandoned",
   executing: "in flight",
   verifying: "verifying",
   done: "done",
@@ -1107,7 +1109,7 @@ function wbCard(item) {
       ${item.refires ? `<span>re-fired ${item.refires}×</span>` : ""}
       ${age ? `<span>${esc(age)}</span>` : ""}</div>
     ${chips ? `<div class="o">${chips}</div>` : ""}
-    ${item.state === "needs_human" ? `<div class="ap-bar"><button data-retry="${attr((item.sessions || []).slice(-1)[0] || "")}">try again</button></div>` : ""}</div>`;
+    ${item.state === "needs_human" || item.state === "abandoned" ? `<div class="ap-bar"><button data-retry="${attr((item.sessions || []).slice(-1)[0] || "")}">try again</button></div>` : ""}</div>`;
 }
 
 // "3m ago", from the same epoch seconds everything else on this page uses.
@@ -1131,7 +1133,7 @@ async function openWork() {
       `<b>${c.closed_unattended || 0}</b> closed without anyone stepping in`;
     const items = d.items || [];
     if (!items.length) { $("#turns").innerHTML = '<div class="empty">no work yet — an alert, a task or a question through the event door opens one</div>'; return; }
-    const order = ["waiting_approval", "needs_human", "executing", "verifying", "done"];
+    const order = ["waiting_approval", "needs_human", "executing", "verifying", "done", "abandoned"];
     // A column is capped: `done` on a live deployment is hundreds of items and
     // rendering them all makes the three that need a person unfindable. Newest
     // first, and the column head keeps the true total.

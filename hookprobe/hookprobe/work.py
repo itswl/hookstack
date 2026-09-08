@@ -45,13 +45,30 @@ EXECUTING = "executing"
 WAITING_APPROVAL = "waiting_approval"
 VERIFYING = "verifying"
 NEEDS_HUMAN = "needs_human"
+# A failure nobody came back to. Not a queue — a count, and a different fact
+# from `needs_human`: production's board opened with twelve items in that
+# column, of which two were worth acting on and the oldest was three weeks
+# old. A number that mixes "somebody should look at this today" with "nobody
+# ever did" is the same mistake as counting 164 unruled reports as debts, and
+# it makes the only number an operator reads in the morning useless.
+ABANDONED = "abandoned"
 DONE = "done"
 
 # Board order: what a person should look at first. Blocked before busy, because
 # a running item needs nothing from anybody and a blocked one is waiting on the
 # person reading the board.
-BOARD_ORDER = (WAITING_APPROVAL, NEEDS_HUMAN, EXECUTING, VERIFYING, DONE)
+BOARD_ORDER = (WAITING_APPROVAL, NEEDS_HUMAN, EXECUTING, VERIFYING, DONE, ABANDONED)
+# What `blocked` means: work a person could act on now. Abandoned work is not
+# in it, deliberately.
 BLOCKED = (WAITING_APPROVAL, NEEDS_HUMAN)
+
+# How long a failure stays somebody's problem. Two days, from the evidence that
+# set this: an alert investigation that died on 2026-09-04 was already answering
+# a question nobody was asking by the time it was read on the 8th. Retrying it
+# then would have paid for a stale answer — so the window in which a failure is
+# still worth a person's attention is short, and after it the honest label is
+# what happened rather than what somebody might still do.
+_ABANDONED_AFTER_SECONDS = 48 * 3600
 
 
 @dataclass
@@ -246,11 +263,11 @@ def resolve(
             )
 
     for item in items.values():
-        item.state = _state(item, [r for r in runs if identify(r) == item.work_id])
+        item.state = _state(item, [r for r in runs if identify(r) == item.work_id], now)
     return sorted(items.values(), key=lambda i: i.updated_at or i.opened_at, reverse=True)
 
 
-def _state(item: WorkItem, runs: list[Run]) -> str:
+def _state(item: WorkItem, runs: list[Run], now: float) -> str:
     """The precedence, in one place, with the reason for each step.
 
     A memory suggestion does NOT block: the report is delivered and the work is
@@ -264,7 +281,8 @@ def _state(item: WorkItem, runs: list[Run]) -> str:
         return WAITING_APPROVAL  # nothing runs until somebody presses
     last = max(runs, key=lambda r: r.finished_at or r.created_at, default=None)
     if last is not None and last.status == FAILED:
-        return NEEDS_HUMAN
+        when = last.finished_at or last.created_at
+        return ABANDONED if (now - when) > _ABANDONED_AFTER_SECONDS else NEEDS_HUMAN
     if item.verified_by == "remediation" and any(o["kind"] == "ruling" for o in item.open):
         # A procedure ran and every step came back 0, but nobody has said the
         # condition actually cleared. On an unattended deployment items can sit
