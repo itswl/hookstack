@@ -1,0 +1,260 @@
+"""The posture as one decision, and as a command a runtime can spawn.
+
+This node's read-only claim is not a prompt. It is a gate that runs BEFORE a
+tool does, and the Runtime Contract on `service.Engine` names it first among
+the obligations a second adapter has to meet.
+
+The two runtimes meet it by different mechanisms. The Claude adapter registers
+in-process `PreToolUse` hooks; Codex spawns a command per tool call and reads
+its answer from stdout. The mechanisms differ and that is fine. What must not
+differ is the DECISION, because the moment it is written twice the word
+`readonly` means one thing on a deployment running one engine and something
+slightly else on a deployment running the other, and nothing in either test
+suite would notice the drift.
+
+So the decision lives here once, as a pure function, and both mechanisms call
+it. `python -m hookprobe.gate` is the same function reading one hook payload on
+stdin and writing one decision on stdout, which is the shape Claude Code and
+Codex happen to share.
+
+This module is deliberately cheap to import: `guard`, `inputs`, `redact` and
+the standard library, and nothing that reaches for an SDK. It is spawned once
+per tool call, so an import that costs half a second costs it on every tool the
+agent runs.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+from hookprobe import inputs
+from hookprobe.guard import READONLY, bash_deny_reason
+from hookprobe.redact import redact
+
+# Tools that put bytes on disk. NotebookEdit and MultiEdit are not in the
+# engine's allowlist today; naming them costs nothing and means enabling one
+# later cannot quietly reopen the hole.
+WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+_WRITE_PATH_KEYS = ("file_path", "notebook_path", "path")
+
+
+def tool_detail(tool_input: Any) -> str:
+    """One line saying what a tool call is about, for the live process feed.
+
+    Redacted HERE rather than at the sinks, because this one string is the most
+    copied in the service: it reaches the run's event feed and `results/*.json`,
+    the flight recorder's `audit/*.jsonl`, and — via distill — the case block of
+    a generated SKILL.md that every later run loads and /v1/skills serves. Three
+    sinks today and a fourth one feature away; masking at each of them is
+    masking the next one leaks around. See hookprobe/redact.py for what it does
+    and does not catch.
+    """
+    data = tool_input if isinstance(tool_input, dict) else {}
+    for key in ("command", "file_path", "pattern", "query", "url", "path", "skill", "description"):
+        value = data.get(key)
+        if value:
+            return redact(str(value))[:300]
+    try:
+        return redact(json.dumps(data, ensure_ascii=False))[:200]
+    except (TypeError, ValueError):
+        return ""
+
+
+def append_audit(audit_dir: Path, line: dict[str, Any]) -> None:
+    """One JSONL line into today's audit file. Never raises; see the callers."""
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    day_file = audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")
+    with day_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
+def mcp_deny_reason(tool_name: str, allowed: frozenset[str]) -> str | None:
+    """Why this MCP tool may not run, or None to let it through.
+
+    Mounting an MCP server is plumbing; deciding what the agent may DO with it
+    is policy, and this is the component that reads attacker-influenced text —
+    so the two are separate settings and this one is closed by default. There is
+    no such thing as a read-only server: a chat server ships `send_message` beside
+    `search_chat_records`, so without a tool-level gate, "let the planner read
+    the thread" and "let a message in that thread post as the operator" were the
+    same mount.
+
+    Two forms, both exact: the full `mcp__server__tool`, or `mcp__server__*` for
+    a whole server. No general globbing — a pattern language here would be a
+    second thing to get subtly wrong, and the list is meant to be read by
+    somebody deciding what an agent may do on their behalf.
+
+    Non-MCP tools are not this guard's business; `_ALLOWED_TOOLS` and the bash
+    and input guards already answer for those.
+    """
+    if not tool_name.startswith("mcp__"):
+        return None
+    if tool_name in allowed:
+        return None
+    server = tool_name.split("__")[1] if tool_name.count("__") >= 2 else ""
+    if server and f"mcp__{server}__*" in allowed:
+        return None
+    if not allowed:
+        return (
+            f"{tool_name} refused: no MCP tool may run until HOOKPROBE_MCP_TOOLS names one. "
+            "Mounting a server does not grant its tools — list exactly the ones this instance "
+            "may call (or mcp__<server>__* for all of them), and remember that whoever can put "
+            "text in front of this agent can ask it to use every tool on that list."
+        )
+    return (
+        f"{tool_name} refused: not in HOOKPROBE_MCP_TOOLS. This instance may call "
+        f"{', '.join(sorted(allowed))} and nothing else."
+    )
+
+
+def deny_reason(
+    tool_name: str,
+    tool_input: Any,
+    *,
+    bash_mode: str = READONLY,
+    mcp_allowed: frozenset[str] = frozenset(),
+    workdir: Path | None = None,
+    home: Path | None = None,
+) -> tuple[str, str, str] | None:
+    """Which guard refuses this call, why, and what to record — or None to allow.
+
+    Returns `(guard, reason, detail)`. The three guards answer for disjoint sets
+    of tools, so the order below is presentation rather than precedence.
+    """
+    name = str(tool_name or "")
+    data = tool_input if isinstance(tool_input, dict) else {}
+
+    if name == "Bash":
+        command = str(data.get("command") or "")
+        reason = bash_deny_reason(command, bash_mode)
+        if reason is not None:
+            return ("bash", reason, command[:300])
+
+    if name.startswith("mcp__"):
+        reason = mcp_deny_reason(name, mcp_allowed)
+        if reason is not None:
+            return ("mcp", reason, "")
+
+    if name in WRITE_TOOLS and workdir is not None:
+        for key in _WRITE_PATH_KEYS:
+            target = str(data.get(key) or "")
+            reason = inputs.write_deny_reason(target, workdir=workdir, home=home)
+            if reason is not None:
+                return ("input", reason, target[:300])
+
+    return None
+
+
+def refusal(reason: str) -> dict[str, Any]:
+    """A PreToolUse denial, in the shape Claude Code and Codex both read."""
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
+def _env_path(name: str) -> Path | None:
+    raw = os.environ.get(name, "").strip()
+    return Path(raw) if raw else None
+
+
+def decide(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
+    """One hook payload in, one decision out. The whole of the spawned gate.
+
+    Configuration arrives through the environment because that is what a spawned
+    hook actually inherits — verified against Codex, which passes the parent's
+    environment to hook commands unchanged. Nothing here is read from the
+    payload except the call being judged: a runtime that could talk this process
+    into a wider posture would be a gate the agent can argue with.
+    """
+    event = str(payload.get("hook_event_name") or "")
+    # Which run this tool call belongs to, so the flight recorder can say. Set
+    # by the adapter when it spawns the runtime, never by an operator.
+    session = env.get("HOOKPROBE_SESSION_KEY", "") or str(payload.get("session_id") or "")
+    # Where the flight recorder writes. Absent means no audit, which is a
+    # decision the adapter makes and not a default anything drifts into.
+    audit_dir = Path(env["HOOKPROBE_GATE_AUDIT"]) if env.get("HOOKPROBE_GATE_AUDIT") else None
+    tool_name = str(payload.get("tool_name") or "")
+    tool_input = payload.get("tool_input")
+
+    if event == "PreToolUse":
+        verdict = deny_reason(
+            tool_name,
+            tool_input,
+            # The posture this call is judged against, passed by the adapter
+            # from `bash_guard`. Nothing in the payload can widen it.
+            bash_mode=env.get("HOOKPROBE_GATE_MODE", READONLY),
+            # The MCP tools this node may call, from `mcp_tools`. Empty means
+            # none, which is the closed default the guard is built around.
+            mcp_allowed=frozenset(t for t in env.get("HOOKPROBE_GATE_MCP", "").split(",") if t),
+            # The run's own volume, so the input guard knows which files steer
+            # the next run and may not be written by this one.
+            workdir=_env_path("HOOKPROBE_GATE_WORKDIR"),
+            # The agent's home, whose settings and skills are inputs too.
+            home=_env_path("HOOKPROBE_GATE_HOME"),
+        )
+        if verdict is None:
+            return {}
+        which, reason, detail = verdict
+        if audit_dir is not None:
+            append_audit(
+                audit_dir,
+                {
+                    "ts": round(time.time(), 3),
+                    "session": session,
+                    "tool": tool_name,
+                    "detail": redact(detail),
+                    "denied": True,
+                    "guard": which,
+                    "reason": reason,
+                },
+            )
+        return refusal(reason)
+
+    if event == "PostToolUse" and audit_dir is not None:
+        response = payload.get("tool_response")
+        append_audit(
+            audit_dir,
+            {
+                "ts": round(time.time(), 3),
+                "session": session,
+                "tool": tool_name,
+                "detail": tool_detail(tool_input),
+                "error": bool(response.get("is_error")) if isinstance(response, dict) else False,
+            },
+        )
+    return {}
+
+
+def main() -> int:
+    """Read one payload, print one decision.
+
+    Fails CLOSED, and only on the pre-tool path: if this process cannot reach a
+    decision — bad JSON, an unreadable audit directory, a bug — the tool does
+    not run. The alternative is a gate whose failure mode is silently becoming
+    permissive, which is the failure mode you would never find out about.
+    """
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("hook payload was not an object")
+        print(json.dumps(decide(payload, dict(os.environ)), ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001 — see the docstring: this is the fail-closed path
+        if '"PreToolUse"' in raw or "'PreToolUse'" in raw:
+            print(json.dumps(refusal(f"the tool gate could not reach a decision: {exc}")))
+        else:
+            print("{}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -688,11 +688,12 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             "name": settings.agent_name,
             "role": settings.agent_role,
             "version": __version__,
-            # One adapter today. The Runtime Contract that would let this say
-            # something else is the next stage's work, and naming the field now
-            # is cheaper than renaming every reader later.
+            # Two adapters now, and this field is the reason the selection is a
+            # registry rather than an `if`: a node reporting one runtime while
+            # running another is exactly the claim the contract exists to keep
+            # honest. See hookprobe/tests/test_runtime_contract.py.
             "runtime": {
-                "adapter": "claude-code",
+                "adapter": settings.runtime,
                 "model": settings.model,
                 "endpoint": settings.model_endpoint,
             },

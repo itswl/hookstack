@@ -23,9 +23,12 @@ from typing import Any, Literal, cast
 
 from hookprobe import inputs, telemetry
 from hookprobe.files import system_prompt_path
+from hookprobe.gate import _WRITE_PATH_KEYS, mcp_deny_reason
+from hookprobe.gate import WRITE_TOOLS as _WRITE_TOOLS
+from hookprobe.gate import append_audit as _append_audit
+from hookprobe.gate import tool_detail as _tool_detail
 from hookprobe.guard import bash_deny_reason
 from hookprobe.hygiene import post_tool_hook
-from hookprobe.redact import redact
 from hookprobe.settings import Settings
 
 logger = logging.getLogger("hookprobe.engine")
@@ -117,45 +120,6 @@ def _bash_guard_hook(mode: str, record: Callable[[dict[str, Any]], None] | None 
     return hook
 
 
-def mcp_deny_reason(tool_name: str, allowed: frozenset[str]) -> str | None:
-    """Why this MCP tool may not run, or None to let it through.
-
-    Mounting an MCP server is plumbing; deciding what the agent may DO with it
-    is policy, and this is the component that reads attacker-influenced text —
-    so the two are separate settings and this one is closed by default. There is
-    no such thing as a read-only server: a chat server ships `send_message` beside
-    `search_chat_records`, so without a tool-level gate, "let the planner read
-    the thread" and "let a message in that thread post as the operator" were the
-    same mount.
-
-    Two forms, both exact: the full `mcp__server__tool`, or `mcp__server__*` for
-    a whole server. No general globbing — a pattern language here would be a
-    second thing to get subtly wrong, and the list is meant to be read by
-    somebody deciding what an agent may do on their behalf.
-
-    Non-MCP tools are not this guard's business; `_ALLOWED_TOOLS` and the bash
-    and input guards already answer for those.
-    """
-    if not tool_name.startswith("mcp__"):
-        return None
-    if tool_name in allowed:
-        return None
-    server = tool_name.split("__")[1] if tool_name.count("__") >= 2 else ""
-    if server and f"mcp__{server}__*" in allowed:
-        return None
-    if not allowed:
-        return (
-            f"{tool_name} refused: no MCP tool may run until HOOKPROBE_MCP_TOOLS names one. "
-            "Mounting a server does not grant its tools — list exactly the ones this instance "
-            "may call (or mcp__<server>__* for all of them), and remember that whoever can put "
-            "text in front of this agent can ask it to use every tool on that list."
-        )
-    return (
-        f"{tool_name} refused: not in HOOKPROBE_MCP_TOOLS. This instance may call "
-        f"{', '.join(sorted(allowed))} and nothing else."
-    )
-
-
 def _mcp_guard_hook(
     allowed: frozenset[str], record: Callable[[dict[str, Any]], None] | None = None
 ) -> Callable[..., Any]:
@@ -190,13 +154,6 @@ def _mcp_guard_hook(
         }
 
     return hook
-
-
-# Tools that put bytes on disk. NotebookEdit and MultiEdit are not in
-# _ALLOWED_TOOLS today; naming them costs nothing and means enabling one later
-# cannot quietly reopen the hole.
-_WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
-_WRITE_PATH_KEYS = ("file_path", "notebook_path", "path")
 
 
 def _input_guard_hook(
@@ -289,28 +246,6 @@ def _hook_list(*fns: Callable[..., Any]) -> list[Any]:
     signatures. One list[Any] at the exact boundary, instead of ignores at
     every registration site."""
     return list(fns)
-
-
-def _tool_detail(tool_input: Any) -> str:
-    """One line saying what a tool call is about, for the live process feed.
-
-    Redacted HERE rather than at the sinks, because this one string is the most
-    copied in the service: it reaches the run's event feed and `results/*.json`,
-    the flight recorder's `audit/*.jsonl`, and — via distill — the case block of
-    a generated SKILL.md that every later run loads and /v1/skills serves. Three
-    sinks today and a fourth one feature away; masking at each of them is
-    masking the next one leaks around. See hookprobe/redact.py for what it does
-    and does not catch.
-    """
-    data = tool_input if isinstance(tool_input, dict) else {}
-    for key in ("command", "file_path", "pattern", "query", "url", "path", "skill", "description"):
-        value = data.get(key)
-        if value:
-            return redact(str(value))[:300]
-    try:
-        return redact(json.dumps(data, ensure_ascii=False))[:200]
-    except (TypeError, ValueError):
-        return ""
 
 
 def _skills_filter(raw: str) -> list[str] | Literal["all"] | None:
@@ -420,16 +355,6 @@ def _resource_attributes(inherited: str, session_key: str) -> str:
     if tail.isdigit():
         parts.append(f"hookstack.event_id={tail}")
     return ",".join(parts)
-
-
-def _append_audit(audit_dir: Path, line: dict[str, Any]) -> None:
-    """One JSONL line into today's audit file. Never raises; see _audit_hook."""
-    import time
-
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    day_file = audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")
-    with day_file.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
 def _audit_recorder(audit_dir: Path, session_key: str) -> Callable[[dict[str, Any]], None]:

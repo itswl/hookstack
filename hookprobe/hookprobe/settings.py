@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -326,6 +327,10 @@ class Settings:
             token=os.environ.get("HOOKPROBE_TOKEN", ""),
             model=os.environ.get("HOOKPROBE_MODEL", "claude-opus-5"),
             model_endpoint=_endpoint_host(os.environ.get("ANTHROPIC_BASE_URL", "")),
+            runtime=(os.environ.get("HOOKPROBE_RUNTIME") or "").strip().lower() or "claude",
+            codex_binary=os.environ.get("HOOKPROBE_CODEX_BINARY", "").strip() or "codex",
+            codex_python=os.environ.get("HOOKPROBE_CODEX_PYTHON", "").strip() or sys.executable or "python3",
+            codex_config=_path_env("HOOKPROBE_CODEX_CONFIG"),
             max_turns=max(1, _int("HOOKPROBE_MAX_TURNS", 32)),
             max_concurrent=max(1, _int("HOOKPROBE_MAX_CONCURRENT", 2)),
             default_timeout_seconds=max(1, _int("HOOKPROBE_DEFAULT_TIMEOUT_SECONDS", 900)),
@@ -396,3 +401,22 @@ class Settings:
     # needs no guessing. Without it a board reading `opus-5` means Anthropic to
     # every reader, and has meant DeepSeek and then BigModel here.
     model_endpoint: str = "api.anthropic.com"
+
+    # WHICH runtime runs a turn. "claude" is the SDK adapter this service grew
+    # up on; "codex" drives the Codex CLI. The Runtime Contract on
+    # service.Engine says what a value here has to supply, and two of its five
+    # obligations are invisible in the type — a runtime that cannot gate a tool
+    # before it runs cannot be run under `readonly` whatever it is called.
+    runtime: str = "claude"
+    # Codex only. The binary; the interpreter its hooks are spawned with, which
+    # must be able to import hookprobe because the gate IS hookprobe; and the
+    # operator's provider config, copied into the home this node owns rather
+    # than written to, so credentials stay in the operator's file.
+    codex_binary: str = "codex"
+    # The interpreter the Codex adapter spawns its tool gate with. It must be
+    # able to import hookprobe, because the gate IS hookprobe; a node whose gate
+    # cannot start refuses to run rather than running without one.
+    codex_python: str = "python3"
+    # The Codex provider config copied into the home this node owns. Read, never
+    # written: an operator's credentials stay in the operator's file.
+    codex_config: Path | None = None

@@ -206,7 +206,7 @@ def test_the_door_takes_the_work_id_an_upstream_node_stated_over_the_pipes_own()
         assert board["counts"]["done"] == 3
 
         card = client.get("/v1/agent", headers={"Authorization": f"Bearer {TOKEN}"}).json()
-        assert card["name"] == "hookprobe" and card["runtime"]["adapter"] == "claude-code"
+        assert card["name"] == "hookprobe" and card["runtime"]["adapter"] == "claude"
         assert "budget_usd" in card["policy"] and card["health"]["active_runs"] == 0
         assert "token" not in json.dumps(card).lower(), "an agent card carries no secrets"
 

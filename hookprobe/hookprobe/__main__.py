@@ -8,8 +8,8 @@ from pathlib import Path
 import uvicorn
 
 from hookprobe.app import create_app
-from hookprobe.engine import ClaudeAgentEngine
 from hookprobe.runs import RunStore
+from hookprobe.runtimes import build_engine
 from hookprobe.service import RunService
 from hookprobe.settings import Settings
 
@@ -70,7 +70,7 @@ def main() -> None:
     Path.home().mkdir(parents=True, exist_ok=True)
     _check_transcripts_writable()
     store = RunStore(settings.workdir / "results")
-    engine = ClaudeAgentEngine(settings)
+    engine = build_engine(settings)
     service = RunService(settings, engine, store)
     _warn_open_doors(settings)
     uvicorn.run(create_app(settings, service), host=settings.host, port=settings.port, log_level="info")
