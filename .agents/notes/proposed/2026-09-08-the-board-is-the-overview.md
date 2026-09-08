@@ -67,3 +67,53 @@ turns up, it belongs there or it belongs nowhere.
 **A three-probe deployment still has three boards.** On the laptop that runs a
 planner, a watcher and a work runner, "what is happening" means opening three
 tabs. That is honest for now and the note above says what would fix it.
+
+## Parked on 2026-09-09, and the correction that came with it
+
+The operator parked this until it hurts. Recorded here rather than in a second
+note, because a decision with two homes is the thing this note is about.
+
+**The correction:** everything above argues from the pipe's doctrine, its
+remaining weight and CORS. Those are all true and none of them is the real
+reason. The real reason is that **this stack runs unattended**. A page nobody
+opens has no value however cheaply it is built, and the three-tab complaint the
+note ends on is not the harm. The harm is a node blocking while the board that
+would say so is one nobody opens. That is not hypothetical: it is exactly what
+produced the `abandoned` state, when twelve items sat between four and
+twenty-two days on a console that was up and healthy the whole time.
+
+So the useful form of a cross-node overview is **not a view. It is a signal.**
+Not "I can see every node", but "the one node that needs me finds me."
+
+**Which means most of it already exists**: `scripts/cost_report.py` renders,
+`scripts/post_watch_signal.py` delivers through a door of the pipe so the
+message is accounted for like everything else, and `patrol-timer.sh` or a
+crontab supplies the clock. `hookprobe/examples/patrols/README.md` already
+carries the cron line for the weekly page. The single missing piece is that
+`--probe` takes one node.
+
+**What to build, when it is time:** `--probe` accepts a list, the report grows a
+per-node section, and a node that could not be read is printed as unreachable
+rather than omitted. No new service, nothing added to the pipe, no CORS, and the
+peer tokens stay in the operator's own shell instead of being distributed to
+every node so each can read the others.
+
+**What NOT to build**, so the cheap wrong version does not get built by whoever
+picks this up: not a ninth page, not an aggregator inside the pipe, and not
+probe-to-probe peering, which spends N-squared credentials to reach a place a
+single script already stands in.
+
+## What counts as the pain point
+
+Named now, while it is cheap to be honest about, because "when it hurts" decays
+into "never" without a recognisable trigger:
+
+1. **A node's work goes `abandoned` and nobody saw it happen.** Sharpest of the
+   three, and the only one that is measurable: `abandoned` climbing on any node
+   whose board is not the one routinely opened. This is the original harm.
+2. **A second deployment that matters.** Today there is one probe in production
+   and three on a laptop; the laptop's are told apart by role and are usually
+   opened deliberately.
+3. **"What is happening" stops having a one-tab answer.** If the honest reply
+   needs more than one board, the board has stopped being the front page and
+   this note's central claim has expired.
