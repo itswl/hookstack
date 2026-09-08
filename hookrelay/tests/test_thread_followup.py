@@ -180,6 +180,13 @@ async def test_send_keeps_the_platform_id_and_asks_for_a_thread_reply(cfg):
             return {"ok": True, "message_id": "om_new"}
 
     class Client:
+        # The pipe asks for a method now (a channel may say PUT or PATCH);
+        # this double stands in for httpx.AsyncClient, so it answers the same call.
+        async def request(self, method, url, **kw):
+            assert method in ("POST", "PUT", "PATCH"), method
+            self.method = method
+            return await self.post(url, **kw)
+
         async def post(self, url, content=None, headers=None):
             captured["content"] = content
             return Response()
@@ -218,6 +225,13 @@ async def test_a_channel_can_name_the_chat_one_bridge_serves_several(cfg):
             return {"ok": True, "message_id": "om_new"}
 
     class Client:
+        # The pipe asks for a method now (a channel may say PUT or PATCH);
+        # this double stands in for httpx.AsyncClient, so it answers the same call.
+        async def request(self, method, url, **kw):
+            assert method in ("POST", "PUT", "PATCH"), method
+            self.method = method
+            return await self.post(url, **kw)
+
         async def post(self, url, content=None, headers=None):
             captured["content"] = content
             return Response()

@@ -286,8 +286,23 @@ async def send(
         payload = json.dumps(payload, ensure_ascii=False).encode()
         if "content-type" not in {key.lower() for key in headers}:
             headers = {**headers, "content-type": "application/json"}
+    # How this receiver wants to be written to. Both are about the RECEIVER,
+    # which is what a channel describes — not about the message, which is the
+    # builder's. Writing a status back to a ticket system is the case that
+    # needed them: the pipe could already point a `generic` channel at any URL,
+    # but it could only ever POST, and it could not carry the API's own
+    # credential. Restricted to the three methods that mean "here is a change":
+    # GET is what the card-action page deliberately refuses to act on, and
+    # DELETE from a config typo is not a mistake anybody recovers from.
+    #
+    # Config headers go UNDER the builder's, so a channel can add
+    # `Authorization` and can never quietly replace a signature.
+    extra = channel.options.get("headers")
+    if isinstance(extra, dict):
+        headers = {**{str(k): str(v) for k, v in extra.items()}, **headers}
+    method = str(channel.options.get("method") or "POST").upper()
     try:
-        response = await client.post(url, content=payload, headers=headers)
+        response = await client.request(method, url, content=payload, headers=headers)
     except httpx.HTTPError as error:
         return False, f"transport: {error.__class__.__name__}: {error}", payload, ""
     if response.status_code >= 300:

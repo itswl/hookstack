@@ -74,6 +74,13 @@ async def test_a_delivery_carries_the_chain_handle_a_brain_will_be_identified_by
     seen: dict[str, object] = {}
 
     class Recorder:
+        # The pipe asks for a method now (a channel may say PUT or PATCH);
+        # this double stands in for httpx.AsyncClient, so it answers the same call.
+        async def request(self, method, url, **kw):
+            assert method in ("POST", "PUT", "PATCH"), method
+            self.method = method
+            return await self.post(url, **kw)
+
         async def post(self, url, content, headers):
             seen.update({"url": url, "headers": headers, "content": content})
 
@@ -96,3 +103,72 @@ async def test_a_delivery_carries_the_chain_handle_a_brain_will_be_identified_by
     assert seen["headers"]["X-Request-Id"] == "hr-1887", "allowlist-minded receivers keep this one"
     assert seen["headers"]["X-Hook-Idempotency-Key"] == "1887:to-probe"
     assert b"_correlation_id" not in (body or b""), "transport, not content: it must not enter the signed body"
+
+
+async def test_a_channel_states_how_its_receiver_wants_to_be_written_to():
+    """Writing a status back to a ticket system is the case that needed this.
+
+    The pipe could already point a `generic` channel at any URL, but it could
+    only POST and it could not carry the receiver's own credential. Both are
+    facts about the RECEIVER, which is what a channel describes — the builder
+    owns the message, the channel owns how it is delivered.
+    """
+    from hookrelay import channels
+    from hookrelay.config import Channel
+
+    seen: dict[str, object] = {}
+
+    class Recorder:
+        async def request(self, method, url, content, headers):
+            seen.update({"method": method, "url": url, "headers": headers})
+
+            class Response:
+                status_code = 200
+                text = "{}"
+
+                @staticmethod
+                def json():
+                    return {}
+
+            return Response()
+
+    channel = Channel(
+        name="ticket",
+        type="generic",
+        url="https://tickets.example/api/issues/7",
+        secret="s",
+        options={"method": "patch", "headers": {"Authorization": "Bearer abc", "X-Actor": "hookstack"}},
+    )
+    ok, _detail, _body, _id = await channels.send(Recorder(), channel, MESSAGE)
+
+    assert ok and seen["method"] == "PATCH", "lowercase in config, upper on the wire"
+    assert seen["headers"]["Authorization"] == "Bearer abc" and seen["headers"]["X-Actor"] == "hookstack"
+    assert "X-Hook-Signature" in seen["headers"], "the pipe still signs what it sends"
+
+
+def test_a_channel_cannot_ask_for_a_method_that_is_not_a_change():
+    """Boot, not first delivery. GET is the verb the card-action page refuses to
+    act on precisely because chat clients fetch links; DELETE from a config typo
+    is not a mistake anybody recovers from."""
+    import pytest
+
+    from hookrelay.config import Config, ConfigError
+
+    def cfg(options: dict) -> None:
+        Config.from_dict(
+            {
+                "sources": [{"name": "s", "secret": "x", "title": "{t}", "body": "{b}"}],
+                "channels": [{"name": "out", "type": "generic", "url": "https://x.example", "options": options}],
+                "routes": [{"name": "all", "source": "*", "send_to": ["out"]}],
+            }
+        )
+
+    cfg({"method": "PUT"})  # fine
+    with pytest.raises(ConfigError, match="not one of"):
+        cfg({"method": "DELETE"})
+    with pytest.raises(ConfigError, match="not one of"):
+        cfg({"method": "GET"})
+    with pytest.raises(ConfigError, match="flat name"):
+        cfg({"headers": ["Authorization: Bearer x"]})
+    with pytest.raises(ConfigError, match="flat name"):
+        cfg({"headers": {"X": {"nested": 1}}})

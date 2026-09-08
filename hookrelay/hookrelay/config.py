@@ -149,6 +149,11 @@ class Source:
         return True
 
 
+# What a delivery may be. A channel says which one its receiver wants; the
+# default is the only one every receiver here has ever needed.
+_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH"})
+
+
 @dataclass(frozen=True, slots=True)
 class Channel:
     name: str
@@ -449,6 +454,18 @@ class Config:
                 )
             if not ch.url:
                 raise ConfigError(f"channel {ch.name}: url is empty (env ref unset?)")
+            method = str(ch.options.get("method") or "POST").upper()
+            if method not in _WRITE_METHODS:
+                raise ConfigError(
+                    f"channel {ch.name}: method {method!r} is not one of {', '.join(sorted(_WRITE_METHODS))} — "
+                    "a delivery states a change; GET is the one the card-action page refuses to act on and "
+                    "DELETE is not a typo anybody recovers from"
+                )
+            extra = ch.options.get("headers")
+            if extra is not None and (
+                not isinstance(extra, dict) or any(not isinstance(v, str | int | float) for v in extra.values())
+            ):
+                raise ConfigError(f"channel {ch.name}: options.headers must be a flat name → value mapping")
             if ch.name in channels:
                 raise ConfigError(f"duplicate channel name: {ch.name}")
             channels[ch.name] = ch

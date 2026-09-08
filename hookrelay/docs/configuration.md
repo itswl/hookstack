@@ -322,6 +322,17 @@ channels:
     secret: ${PLATFORM_SECRET}
     signature_header: X-Webhook-Signature   # speak the receiver's dialect
 
+  # Writing a STATUS BACK to the system that raised the work: the same generic
+  # channel, told how its receiver wants to be written to. Both keys describe
+  # the RECEIVER, which is what a channel is for — the builder owns the message.
+  - name: ticket-writeback
+    type: generic
+    url: ${TICKET_API_URL}
+    options:
+      payload: raw                     # the receiver's shape is the brain's business
+      method: PATCH                    # POST (default), PUT or PATCH — see below
+      headers: {Authorization: "Bearer ${TICKET_API_TOKEN}"}
+
 routes:                                # walked by priority, highest first
   - name: high-everywhere
     source: "*"                        # "*" or one source name
@@ -339,6 +350,15 @@ routes:                                # walked by priority, highest first
 An event matching several routes goes to the UNION of their channels (each
 channel once). No route matched → the decision records `skipped · no_route` —
 a named outcome, visible on the page, not a mystery.
+
+**`options.method` and `options.headers`** are checked at boot, not at the first
+delivery. The method may be `POST`, `PUT` or `PATCH` and nothing else: `GET` is
+the verb `/card-action` deliberately refuses to act on, because chat clients
+fetch links to build previews, and `DELETE` from a config typo is not a mistake
+anybody recovers from. Config headers are merged **under** the pipe's own, so a
+channel can add the receiver's credential and can never quietly replace a
+signature — and headers are never written to the ledger, which keeps bodies
+only.
 
 Delivery semantics (all channel types): outbox row per (event × channel),
 exponential backoff 30s·2ⁿ capped at 10 min, 8 attempts, then a visible

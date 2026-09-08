@@ -103,6 +103,13 @@ async def test_send_returns_the_exact_bytes_posted(cfg):
             raise ValueError("not json")
 
     class Client:
+        # The pipe asks for a method now (a channel may say PUT or PATCH);
+        # this double stands in for httpx.AsyncClient, so it answers the same call.
+        async def request(self, method, url, **kw):
+            assert method in ("POST", "PUT", "PATCH"), method
+            self.method = method
+            return await self.post(url, **kw)
+
         async def post(self, url, content=None, headers=None):
             captured["content"] = content
             return Response()

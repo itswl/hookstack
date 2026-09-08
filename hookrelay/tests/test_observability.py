@@ -323,6 +323,13 @@ async def test_idempotency_key_travels_as_a_header_not_in_the_signed_body(store,
     captured: list[dict] = []
 
     class _Client:
+        # The pipe asks for a method now (a channel may say PUT or PATCH);
+        # this double stands in for httpx.AsyncClient, so it answers the same call.
+        async def request(self, method, url, **kw):
+            assert method in ("POST", "PUT", "PATCH"), method
+            self.method = method
+            return await self.post(url, **kw)
+
         async def post(self, url, *, content=None, json=None, headers=None):
             captured.append({"headers": headers or {}, "content": content, "json": json})
 
