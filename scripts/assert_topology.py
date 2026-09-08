@@ -42,7 +42,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT / "hookrelay"), str(Path.cwd())]
 
 import yaml  # noqa: E402
-
 from hookrelay.config import Config, ConfigError  # noqa: E402
 from hookrelay.topology import render  # noqa: E402
 

@@ -1,0 +1,24 @@
+# The root config, so the one directory holding the checks is not the one
+# directory nothing checks. `scripts/` was unlinted and unformatted for its
+# whole life — ruff found no config above it and fell back to a default rule
+# set nobody chose, which is how fifteen files ended up carrying a shebang
+# without an executable bit and nobody heard about it.
+#
+# The same rules the three services use (hookrelay/pyproject.toml and its two
+# siblings). Each service keeps its own config: ruff resolves the nearest one,
+# so this governs `scripts/` and `deploy/` and never overrides theirs.
+line-length = 120
+target-version = "py312"
+
+[lint]
+# pycodestyle, pyflakes, import order, pyupgrade, bugbear, simplify.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[lint.per-file-ignores]
+# The two report generators build a document a person reads, line by line, out
+# of long f-strings. Wrapping those hides what the output looks like from
+# whoever is editing it, which is the one thing worth optimising in a file whose
+# entire job is producing a page. Every OTHER rule applies to them, and E501
+# applies everywhere else in scripts/ — the exception is the text, not the file.
+"scripts/cost_report.py" = ["E501"]
+"scripts/audit_export.py" = ["E501"]

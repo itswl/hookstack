@@ -217,7 +217,9 @@ def render(service: str) -> str:
         if literal in ('""', "''"):
             shown = "*(empty)*"
         else:
-            shown = f"`{literal[1:-1] or ''}`" if literal[:1] in "\"'" and literal[-1:] == literal[:1] else f"`{literal}`"
+            shown = (
+                f"`{literal[1:-1] or ''}`" if literal[:1] in "\"'" and literal[-1:] == literal[:1] else f"`{literal}`"
+            )
         described = _first_sentence(comments.get(field, ""))
         if not described:
             UNDESCRIBED.setdefault(service, []).append(env)

@@ -97,15 +97,9 @@ def _subjects(ledger: dict[str, Any], source: str, since: float) -> dict[str, fl
         if row.get("source") != source or float(row.get("received_at") or 0) <= since:
             continue
         origin = str((row.get("fields") or {}).get("origin") or "")
-        subject = (
-            origin.split(ORIGIN_SEPARATOR, 1)[1].strip()
-            if ORIGIN_SEPARATOR in origin
-            else ""
-        )
+        subject = origin.split(ORIGIN_SEPARATOR, 1)[1].strip() if ORIGIN_SEPARATOR in origin else ""
         if subject:
-            out[subject] = max(
-                out.get(subject, 0.0), float(row.get("received_at") or 0)
-            )
+            out[subject] = max(out.get(subject, 0.0), float(row.get("received_at") or 0))
     return out
 
 
@@ -146,16 +140,13 @@ def main() -> int:
     offered = cursors.get("offered")
     signalled = _subjects(ledger, source, since)
 
-    print(
-        f"\nthe round posted {len(signalled)} signal(s) across {len(set(signalled))} conversation(s)"
-    )
+    print(f"\nthe round posted {len(signalled)} signal(s) across {len(set(signalled))} conversation(s)")
 
     # 1. The one that was actually broken.
     stalled = [
         name
         for name in signalled
-        if float(a_reported.get(name, 0)) <= float(b_reported.get(name, 0))
-        and name in b_reported
+        if float(a_reported.get(name, 0)) <= float(b_reported.get(name, 0)) and name in b_reported
     ]
     check(
         not stalled,
@@ -188,9 +179,7 @@ def main() -> int:
     #    dropped off the feed list, leaving stale bookkeeping behind. Treating
     #    the missing side as zero made every one of those a permanent violation.
     impossible = [
-        (n, a_reported[n], a_feeds[n])
-        for n in a_reported
-        if n in a_feeds and float(a_reported[n]) > float(a_feeds[n])
+        (n, a_reported[n], a_feeds[n]) for n in a_reported if n in a_feeds and float(a_reported[n]) > float(a_feeds[n])
     ]
     check(
         not impossible,

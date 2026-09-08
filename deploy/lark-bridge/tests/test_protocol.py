@@ -22,20 +22,14 @@ from pathlib import Path
 import bridge
 import pytest
 
-FIXTURE = json.loads(
-    (
-        Path(__file__).resolve().parents[1] / "contract" / "outbound-card.json"
-    ).read_text()
-)
+FIXTURE = json.loads((Path(__file__).resolve().parents[1] / "contract" / "outbound-card.json").read_text())
 
 
 @pytest.fixture
 def server(monkeypatch):
     sent: list[tuple[dict, str, str]] = []
 
-    def fake_send(
-        card: dict, reply_to: str = "", chat_id: str = ""
-    ) -> tuple[bool, str]:
+    def fake_send(card: dict, reply_to: str = "", chat_id: str = "") -> tuple[bool, str]:
         sent.append((card, reply_to, chat_id))
         return True, "om_sent_1"
 
@@ -77,25 +71,18 @@ def test_the_fixture_is_accepted_rendered_and_sent_where_it_asks(server) -> None
         {"ok": True, "message_id": "om_sent_1"},
     )
     card, reply_to, chat_id = sent[0]
-    assert (reply_to, chat_id) == (FIXTURE["reply_to"], FIXTURE["chat_id"]), (
-        "the hints are read here, never sent on"
-    )
-    assert (
-        card["header"]["template"] == "red"
-        and card["header"]["title"]["content"] == FIXTURE["card"]["title"]
-    )
-    assert "lark_md" in json.dumps(card), (
-        "rendered into the dialect on this side of the seam"
-    )
+    assert (reply_to, chat_id) == (FIXTURE["reply_to"], FIXTURE["chat_id"]), "the hints are read here, never sent on"
+    assert card["header"]["template"] == "red" and card["header"]["title"]["content"] == FIXTURE["card"]["title"]
+    assert "lark_md" in json.dumps(card), "rendered into the dialect on this side of the seam"
 
 
 def test_a_tampered_body_a_stale_stamp_or_no_signature_is_refused(server) -> None:
     url, sent = server
     body = _body()
     headers = _signed(body)
-    assert (
-        _post(url, _body(chat_id="oc_example", reply_to="om_other"), headers)[0] == 401
-    ), "the signature covers the bytes"
+    assert _post(url, _body(chat_id="oc_example", reply_to="om_other"), headers)[0] == 401, (
+        "the signature covers the bytes"
+    )
     assert _post(url, body, _signed(body, ts=str(int(time.time()) - 3600)))[0] == 401
     assert _post(url, body, {})[0] == 401
     assert sent == []
@@ -105,12 +92,7 @@ def test_a_dry_run_renders_and_sends_nothing(server) -> None:
     url, sent = server
     body = _body()
     status, answer = _post(url, body, {**_signed(body), "X-Hookstack-Dry-Run": "1"})
-    assert (
-        status == 200
-        and answer["ok"]
-        and answer["dry_run"]
-        and answer["message_id"] == ""
-    )
+    assert status == 200 and answer["ok"] and answer["dry_run"] and answer["message_id"] == ""
     assert answer["rendered"]["header"]["template"] == "red"
     assert sent == []
 
@@ -131,9 +113,7 @@ def test_the_legacy_feishu_body_still_passes_through_untouched(server) -> None:
     card with the custom-bot sign in the body, sent as it came."""
     url, sent = server
     ts = str(int(time.time()))
-    sign = base64.b64encode(
-        hmac.new(f"{ts}\n{'s3'}".encode(), b"", hashlib.sha256).digest()
-    ).decode()
+    sign = base64.b64encode(hmac.new(f"{ts}\n{'s3'}".encode(), b"", hashlib.sha256).digest()).decode()
     card = {
         "header": {
             "title": {"tag": "plain_text", "content": "legacy"},
@@ -154,31 +134,23 @@ def test_the_legacy_feishu_body_still_passes_through_untouched(server) -> None:
     assert sent[0] == (card, "om_r", "")
 
 
-def test_webhook_mode_posts_the_rendered_card_with_actions_as_links(
-    server, monkeypatch
-) -> None:
+def test_webhook_mode_posts_the_rendered_card_with_actions_as_links(server, monkeypatch) -> None:
     """The same protocol, delivered through a custom bot's incoming webhook: no
     message id comes back, hints are ignored, actions become links at the base
     the pipe named."""
     url, sent = server
     posted: list[dict] = []
     monkeypatch.setattr(bridge, "WEBHOOK_MODE", True)
-    monkeypatch.setattr(
-        bridge, "send_webhook", lambda card: posted.append(card) or (True, "")
-    )
+    monkeypatch.setattr(bridge, "send_webhook", lambda card: posted.append(card) or (True, ""))
     # The fixture's action carries the brain's opaque value; a PIPE action carries
     # `hookrelay_action`, and only those become links (a link needs a token).
     card = {
         **FIXTURE["card"],
         "actions": [{"text": "Silence 1h", "value": {"hookrelay_action": "tok"}}],
     }
-    body = _body(
-        card=card, action_link_base="https://relay.example", chat_id="oc_anyone"
-    )
+    body = _body(card=card, action_link_base="https://relay.example", chat_id="oc_anyone")
     assert _post(url, body, _signed(body)) == (200, {"ok": True, "message_id": ""})
     assert sent == [], "not sent as the app"
     (card,) = posted
     assert not [e for e in card["elements"] if e["tag"] == "action"]
-    assert any("card-action?t=" in json.dumps(e) for e in card["elements"]), (
-        "actions rendered as links to the pipe"
-    )
+    assert any("card-action?t=" in json.dumps(e) for e in card["elements"]), "actions rendered as links to the pipe"

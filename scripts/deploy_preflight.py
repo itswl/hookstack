@@ -60,9 +60,7 @@ def pipe_doors(text: str) -> list[tuple[str, str | None]]:
     name: str | None = None
     secret: str | None = None
     for raw in text.splitlines():
-        stripped = (
-            raw.split("#", 1)[0].rstrip() if not raw.lstrip().startswith("#") else ""
-        )
+        stripped = raw.split("#", 1)[0].rstrip() if not raw.lstrip().startswith("#") else ""
         if not stripped:
             continue
         if re.match(r"^[A-Za-z_]+:\s*$", stripped):  # a top-level section
@@ -98,9 +96,7 @@ def check_pipe_config(path: Path, env: dict[str, str], allow: set[str]) -> list[
             problems.append(f"door {name!r}: no secret key at all")
             continue
         if secret == "":
-            problems.append(
-                f"door {name!r}: secret is a literal empty string — an unsigned door on a shared network"
-            )
+            problems.append(f"door {name!r}: secret is a literal empty string — an unsigned door on a shared network")
             continue
         match = ENV_REF.match(secret)
         if not match:
@@ -108,9 +104,7 @@ def check_pipe_config(path: Path, env: dict[str, str], allow: set[str]) -> list[
             continue
         var = match.group(1)
         if var not in allow and not env.get(var):
-            problems.append(
-                f"door {name!r}: ${{{var}}} is empty or missing in .env — the door would come up unsigned"
-            )
+            problems.append(f"door {name!r}: ${{{var}}} is empty or missing in .env — the door would come up unsigned")
     return problems
 
 
@@ -129,11 +123,7 @@ def check_compose(path: Path, env: dict[str, str], allow: set[str]) -> list[str]
 def main(argv: list[str]) -> int:
     root = Path(argv[1]) if len(argv) > 1 else Path.cwd()
     env = load_env(root / ".env")
-    allow = {
-        v.strip()
-        for v in os.environ.get("DEPLOY_ALLOW_EMPTY", "").split(",")
-        if v.strip()
-    }
+    allow = {v.strip() for v in os.environ.get("DEPLOY_ALLOW_EMPTY", "").split(",") if v.strip()}
     problems = check_pipe_config(root / "deploy" / "shadow.yaml", env, allow)
     for compose in (
         "deploy/docker-compose.shadow.yml",

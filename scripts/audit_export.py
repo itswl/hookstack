@@ -29,14 +29,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-
 MISSING = "missing"  # the far end answered 404: no such run — not an error, not a hop of the investigator
 
 
 def _get(url: str, token: str) -> dict | str | None:
-    req = urllib.request.Request(
-        url, headers={"X-Read-Token": token, "Authorization": f"Bearer {token}"}
-    )
+    req = urllib.request.Request(url, headers={"X-Read-Token": token, "Authorization": f"Bearer {token}"})
     try:
         with urllib.request.urlopen(req, timeout=15) as res:
             return json.load(res)
@@ -47,9 +44,7 @@ def _get(url: str, token: str) -> dict | str | None:
 
 
 def _when(ts: float | None) -> str:
-    return (
-        time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(float(ts))) if ts else "—"
-    )
+    return time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(float(ts))) if ts else "—"
 
 
 def _money(value: object) -> str:
@@ -119,11 +114,7 @@ def render(record: dict, runs: dict[str, dict | None]) -> str:
         pl = h.get("payload") or {}
         dl = "<br>".join(
             f"{d.get('channel')} · {d.get('status')}"
-            + (
-                f" · {d['sent']['bytes']} B `{str(d['sent']['sha256'])[:12]}`"
-                if d.get("sent")
-                else ""
-            )
+            + (f" · {d['sent']['bytes']} B `{str(d['sent']['sha256'])[:12]}`" if d.get("sent") else "")
             for d in h.get("deliveries") or []
         )
         outcome = h.get("outcome") or ""
@@ -192,11 +183,7 @@ def render(record: dict, runs: dict[str, dict | None]) -> str:
     if not any_run:
         out.append(
             "No investigator run is part of this operation"
-            + (
-                " (or none could be read: pass --probe and HOOKPROBE_TOKEN)."
-                if not runs
-                else "."
-            )
+            + (" (or none could be read: pass --probe and HOOKPROBE_TOKEN)." if not runs else ".")
         )
     return "\n".join(out).rstrip() + "\n"
 
@@ -204,9 +191,7 @@ def render(record: dict, runs: dict[str, dict | None]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("event_id", type=int)
-    ap.add_argument(
-        "--relay", default=os.environ.get("HOOKRELAY_URL", "http://127.0.0.1:8100")
-    )
+    ap.add_argument("--relay", default=os.environ.get("HOOKRELAY_URL", "http://127.0.0.1:8100"))
     ap.add_argument("--probe", default=os.environ.get("HOOKPROBE_URL", ""))
     args = ap.parse_args()
     relay_token = os.environ.get("HOOKRELAY_READ_TOKEN", "")

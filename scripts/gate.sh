@@ -118,6 +118,18 @@ echo "shell: every root script parses"
 # protocol. Not guarded by an `if` — a check that skips when a tool is missing is
 # a check that passes by finding nothing.
 step_bridge() { printf '\n\033[1;34m── %s\033[0m\n' "$1"; }
+step_bridge "the checks themselves are held to the standard they enforce"
+# scripts/ was the one directory nothing checked — no ruff config resolved above
+# it, so it fell back to a rule set nobody chose and fifteen files carried a
+# shebang without an executable bit for their whole life. The root ruff.toml
+# gives it the services' rules; this runs them.
+hookrelay/.venv/bin/python -m ruff check scripts
+hookrelay/.venv/bin/python -m ruff format --check scripts
+for f in scripts/*.py; do
+  head -1 "$f" | grep -q '^#!' && [ ! -x "$f" ] && { echo "$f has a shebang and no executable bit"; exit 1; }
+done
+echo "scripts: OK"
+
 step_bridge "the lark bridge parses and lints"
 python3 -m compileall -q deploy/lark-bridge
 hookrelay/.venv/bin/python -m ruff check deploy/lark-bridge

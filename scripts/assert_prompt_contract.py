@@ -106,10 +106,7 @@ def main() -> int:
         for p in problems:
             print(f"  {p}", file=sys.stderr)
         return 1
-    print(
-        f"prompt contract: {_SYSTEM_PROMPT_VERSION} stamped and hash-bound, "
-        f"{len(scenarios)} safety scenarios hold"
-    )
+    print(f"prompt contract: {_SYSTEM_PROMPT_VERSION} stamped and hash-bound, {len(scenarios)} safety scenarios hold")
     return 0
 
 

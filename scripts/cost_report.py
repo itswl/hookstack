@@ -37,9 +37,7 @@ from typing import Any
 
 
 def _get(url: str, token: str) -> dict | list | None:
-    req = urllib.request.Request(
-        url, headers={"X-Read-Token": token, "Authorization": f"Bearer {token}"}
-    )
+    req = urllib.request.Request(url, headers={"X-Read-Token": token, "Authorization": f"Bearer {token}"})
     try:
         with urllib.request.urlopen(req, timeout=20) as res:
             return json.load(res)
@@ -78,9 +76,7 @@ def compute(
         cost = float(s.get("cost") or 0.0)
         avg_paid = cost / paid if paid else 0.0
         free_routes = {
-            k: int(v.get("count") or 0)
-            for k, v in routes.items()
-            if k in ("recovery", "reuse", "rule-reuse")
+            k: int(v.get("count") or 0) for k, v in routes.items() if k in ("recovery", "reuse", "rule-reuse")
         }
         floor = int((routes.get("rule") or {}).get("count") or 0)
         att = s.get("attention") or {}
@@ -108,11 +104,7 @@ def compute(
                 "did_not_matter": int(att.get("did_not_matter") or 0),
                 "ruled": int(att.get("ruled") or 0),
                 "quiet_regrets": att.get("quiet_regrets"),
-                "delivered_per_condition": round(
-                    (interruptions - wake_no) / conditions, 2
-                )
-                if conditions
-                else None,
+                "delivered_per_condition": round((interruptions - wake_no) / conditions, 2) if conditions else None,
             },
         }
 
@@ -125,24 +117,15 @@ def compute(
             "chains": len(chains),
             "hops": int((timeline.get("totals") or {}).get("hops") or 0),
             "priced_cost": float((timeline.get("totals") or {}).get("cost_usd") or 0.0),
-            "unpriced_hops": int(
-                (timeline.get("totals") or {}).get("unpriced_hops") or 0
-            ),
+            "unpriced_hops": int((timeline.get("totals") or {}).get("unpriced_hops") or 0),
             "span_days": round((now - oldest) / 86400, 1),
             "incidents_multi": len(multi),
-            "top_incidents": sorted(
-                incidents, key=lambda i: -float(i.get("cost_usd") or 0)
-            )[:5],
+            "top_incidents": sorted(incidents, key=lambda i: -float(i.get("cost_usd") or 0))[:5],
         }
 
     if isinstance(runs, list):
         since = now - hours * 3600
-        week = [
-            r
-            for r in runs
-            if float(r.get("finished_at") or 0) >= since
-            and r.get("status") != "running"
-        ]
+        week = [r for r in runs if float(r.get("finished_at") or 0) >= since and r.get("status") != "running"]
         costs = [float(r.get("cost_usd") or 0) for r in week]
         answered = [r for r in week if r.get("answered_from_runbook")]
         paid_runs = [r for r in week if float(r.get("cost_usd") or 0) > 0]
@@ -159,17 +142,14 @@ def compute(
             # Only a real risk when the listing hit its cap AND its oldest row is
             # still inside the window — then older in-window runs may exist unseen.
             "listing_truncated": len(runs) >= 200
-            and min((float(r.get("finished_at") or now) for r in runs), default=now)
-            >= since,
+            and min((float(r.get("finished_at") or now) for r in runs), default=now) >= since,
         }
     if isinstance(budget, dict):
         report["budget"] = budget
     return report
 
 
-def compare_arms(
-    live_rows: list | None, shadows: list[tuple[str, list | None]]
-) -> dict[str, Any]:
+def compare_arms(live_rows: list | None, shadows: list[tuple[str, list | None]]) -> dict[str, Any]:
     """The live judge against each shadow arm, joined on the alert they both saw.
 
     Not an accuracy number — nobody knows which arm is right — but the shape of
@@ -182,9 +162,7 @@ def compare_arms(
         out["unavailable"] = True
         return out
     live = {
-        str(r.get("correlation_id") or ""): r
-        for r in live_rows
-        if r.get("correlation_id") and not r.get("is_recovery")
+        str(r.get("correlation_id") or ""): r for r in live_rows if r.get("correlation_id") and not r.get("is_recovery")
     }
     for url, rows in shadows:
         if not isinstance(rows, list):
@@ -207,9 +185,7 @@ def compare_arms(
             if lw == "no" and sw == "yes":
                 live_quieter += 1
                 if len(quieter_examples) < 3:
-                    quieter_examples.append(
-                        str(base.get("summary") or base.get("title") or key)[:70]
-                    )
+                    quieter_examples.append(str(base.get("summary") or base.get("title") or key)[:70])
             elif lw == "yes" and sw == "no":
                 live_louder += 1
         out["arms"].append(
@@ -217,11 +193,7 @@ def compare_arms(
                 "url": url,
                 "compared": compared,
                 "importance_differs": importance_differs,
-                "importance_differs_pct": round(
-                    100.0 * importance_differs / compared, 1
-                )
-                if compared
-                else None,
+                "importance_differs_pct": round(100.0 * importance_differs / compared, 1) if compared else None,
                 "live_quieter": live_quieter,
                 "live_louder": live_louder,
                 "live_quieter_examples": quieter_examples,
@@ -249,11 +221,7 @@ def render(r: dict[str, Any]) -> str:
             f"- **Measured**: {j['judged']} verdicts, {j['paid']} paid ({j['paid_ratio_pct']}%), **{_money(j['cost'])}** · {_money(j['avg_paid'])} per paid verdict",
             "- **Free routes**: "
             + ", ".join(f"{k} {v}" for k, v in fr.items())
-            + (
-                f" · rule floor {j['rule_floor']} (a degradation, not a saving)"
-                if j["rule_floor"]
-                else ""
-            ),
+            + (f" · rule floor {j['rule_floor']} (a degradation, not a saving)" if j["rule_floor"] else ""),
             f"- **Counterfactual**: {j['avoided_verdicts']} verdicts answered without a model call ≈ **{_money(j['avoided_cost'])} avoided**",
         ]
     a = (j or {}).get("attention")
@@ -265,11 +233,7 @@ def render(r: dict[str, Any]) -> str:
             f"- **Interruptions**: {a['interruptions']} across {a['conditions']} conditions · repeats {a['repeats']} ({_pct(a['repeats'], a['interruptions'])}) · likely flapping {a['likely_flapping']}",
             f"- **Kept from a person**: wake=no {a['wake_no']} · wake=yes {a['wake_yes']} → **{a['delivered_per_condition']} delivered cards per condition**",
             f"- **Worth, as ruled by people**: mattered {a['mattered']} · did not matter {a['did_not_matter']} · ruled {a['ruled']}"
-            + (
-                f" · quiet regrets {a['quiet_regrets']}"
-                if a.get("quiet_regrets") not in (None, "")
-                else ""
-            ),
+            + (f" · quiet regrets {a['quiet_regrets']}" if a.get("quiet_regrets") not in (None, "") else ""),
         ]
 
     inv = r.get("investigator")
@@ -384,13 +348,7 @@ def main() -> int:
         if args.relay
         else None
     )
-    budget = (
-        _get(
-            f"{args.probe.rstrip('/')}/v1/budget", os.environ.get("HOOKPROBE_TOKEN", "")
-        )
-        if args.probe
-        else None
-    )
+    budget = _get(f"{args.probe.rstrip('/')}/v1/budget", os.environ.get("HOOKPROBE_TOKEN", "")) if args.probe else None
     runs = (
         _get(
             f"{args.probe.rstrip('/')}/v1/runs?limit=200",
@@ -407,12 +365,8 @@ def main() -> int:
         live_rows = (judge or {}).get("recent") if isinstance(judge, dict) else None
         shadow_rows = []
         for url in args.shadow_judge:
-            body = _get(
-                f"{url.rstrip('/')}/status?window_hours={int(args.hours)}&limit=500", jt
-            )
-            shadow_rows.append(
-                (url, (body or {}).get("recent") if isinstance(body, dict) else None)
-            )
+            body = _get(f"{url.rstrip('/')}/status?window_hours={int(args.hours)}&limit=500", jt)
+            shadow_rows.append((url, (body or {}).get("recent") if isinstance(body, dict) else None))
         arms = compare_arms(live_rows, shadow_rows)
     report = compute(
         judge if isinstance(judge, dict) else None,
@@ -424,11 +378,7 @@ def main() -> int:
     )
     if arms is not None:
         report["arms"] = arms
-    sys.stdout.write(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n"
-        if args.json
-        else render(report)
-    )
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n" if args.json else render(report))
     return 0
 
 

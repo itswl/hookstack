@@ -36,7 +36,6 @@ from urllib.parse import urlparse
 sys.path[:0] = [str(Path(__file__).resolve().parent.parent / "hookrelay"), str(Path.cwd())]
 
 import yaml  # noqa: E402
-
 from hookrelay.config import Config, ConfigError  # noqa: E402
 
 ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
@@ -349,7 +348,9 @@ def main(argv: list[str]) -> int:
                     f"or unanswered ('') verdicts stop failing open into a card"
                 )
             if when.get("source") != "judge-notify":
-                problems.append("the wake filter is not pinned to source judge-notify — it would drop other sources' events")
+                problems.append(
+                    "the wake filter is not pinned to source judge-notify — it would drop other sources' events"
+                )
     elif quiet is not None:
         problems.append("a filter quiets on `wake` but judge-notify does not extract it — the stage can never match")
 
@@ -363,7 +364,9 @@ def main(argv: list[str]) -> int:
     # it exists to catch, so it reports what it actually checked: every hop stays
     # on the compose network, and the brains are both fed.
     chat_channels = sorted(name for name, ch in cfg.channels.items() if ch.type != "generic")
-    reach = f"{len(chat_channels)} reach a person ({', '.join(chat_channels)})" if chat_channels else "none reach a person"
+    reach = (
+        f"{len(chat_channels)} reach a person ({', '.join(chat_channels)})" if chat_channels else "none reach a person"
+    )
     print(
         f"shadow config: {path.name} boots — {len(cfg.sources)} door(s), "
         f"{len(cfg.channels)} channel(s) all in-network, {len(brains)} brains fed, "

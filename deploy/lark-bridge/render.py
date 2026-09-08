@@ -84,11 +84,7 @@ def _details(text: str) -> str:
     rendered = []
     for line in str(text).splitlines():
         name, sep, value = line.partition(": ")
-        rendered.append(
-            f"**{escape_markup(name)}**: {escape_markup(value)}"
-            if sep
-            else escape_markup(line)
-        )
+        rendered.append(f"**{escape_markup(name)}**: {escape_markup(value)}" if sep else escape_markup(line))
     return "\n".join(rendered)
 
 
@@ -102,9 +98,7 @@ def _action_links(actions: list[dict[str, Any]], link_base: str) -> str:
     rendered = []
     for action in actions:
         value = action.get("value")
-        token = (
-            str(value.get("hookrelay_action") or "") if isinstance(value, dict) else ""
-        )
+        token = str(value.get("hookrelay_action") or "") if isinstance(value, dict) else ""
         if token:
             rendered.append(
                 markdown_link(
@@ -115,9 +109,7 @@ def _action_links(actions: list[dict[str, Any]], link_base: str) -> str:
     return " · ".join(r for r in rendered if r)
 
 
-def feishu_card(
-    model: dict[str, Any], *, actions: str = "buttons", link_base: str = ""
-) -> dict[str, Any]:
+def feishu_card(model: dict[str, Any], *, actions: str = "buttons", link_base: str = "") -> dict[str, Any]:
     """One card model → one Feishu interactive message body.
 
     `actions="buttons"` when this bridge sends as an application, whose button
@@ -143,14 +135,7 @@ def feishu_card(
     if details:
         elements.append(_md(_details(details)))
     links = [x for x in (model.get("links") or []) if isinstance(x, dict)]
-    lines = "\n".join(
-        r
-        for r in (
-            markdown_link(str(x.get("text") or ""), str(x.get("url") or ""))
-            for x in links
-        )
-        if r
-    )
+    lines = "\n".join(r for r in (markdown_link(str(x.get("text") or ""), str(x.get("url") or "")) for x in links) if r)
     if lines:
         elements.append(_md(f"**Runbooks**\n{lines}"))
     declared = [a for a in (model.get("actions") or []) if isinstance(a, dict)]
@@ -172,9 +157,7 @@ def feishu_card(
                             "content": str(a.get("text") or "Action"),
                         },
                         "type": str(a.get("style") or "default"),
-                        "value": a.get("value")
-                        if isinstance(a.get("value"), dict)
-                        else {},
+                        "value": a.get("value") if isinstance(a.get("value"), dict) else {},
                     }
                     for a in declared
                 ],
@@ -182,9 +165,7 @@ def feishu_card(
         )
     footer = str(model.get("footer") or "")
     if footer:
-        elements.append(
-            {"tag": "note", "elements": [{"tag": "plain_text", "content": footer}]}
-        )
+        elements.append({"tag": "note", "elements": [{"tag": "plain_text", "content": footer}]})
     return {
         "msg_type": "interactive",
         "card": {
@@ -193,9 +174,7 @@ def feishu_card(
                     "tag": "plain_text",
                     "content": str(model.get("title") or "Alert"),
                 },
-                "template": TONE_COLOR.get(
-                    str(model.get("tone") or "").lower(), FALLBACK_COLOR
-                ),
+                "template": TONE_COLOR.get(str(model.get("tone") or "").lower(), FALLBACK_COLOR),
             },
             "elements": elements,
         },

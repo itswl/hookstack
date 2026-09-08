@@ -50,7 +50,9 @@ PAGES = (
 # not an oversight, and the reason is here so the next audit does not re-find it.
 ROUTES_UNWRITTEN: dict[str, str] = {
     "/v1/remediations": "the console's own list view; the approve/reject pair below is what an operator is told about",
-    "/v1/remediations/{proposal_id}/approve": "documented as behaviour under the remediation gate, not as a path to call",
+    "/v1/remediations/{proposal_id}/approve": (
+        "documented as behaviour under the remediation gate, not as a path to call"
+    ),
     "/v1/remediations/{proposal_id}/reject": "same",
     "/v1/memory/suggestions": "list view behind the memory page",
     "/v1/memory/suggestions/{suggestion_id}/accept": "the page and the card are the paths a person uses",
@@ -135,12 +137,36 @@ _BOUNDARY_EN = re.compile(
 )
 _BOUNDARY_ZH = re.compile(r"([一二三四五六七八九十]{1,3}|\d+)条结构性边界")
 _TEENS = {
-    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
-    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
-    "twenty-one": 21, "twenty-two": 22, "twenty-three": 23, "twenty-four": 24, "twenty-five": 25,
-    "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15, "十六": 16,
-    "十七": 17, "十八": 18, "十九": 19, "二十": 20, "二十一": 21, "二十二": 22,
-    "二十三": 23, "二十四": 24, "二十五": 25,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+    "twenty-one": 21,
+    "twenty-two": 22,
+    "twenty-three": 23,
+    "twenty-four": 24,
+    "twenty-five": 25,
+    "十一": 11,
+    "十二": 12,
+    "十三": 13,
+    "十四": 14,
+    "十五": 15,
+    "十六": 16,
+    "十七": 17,
+    "十八": 18,
+    "十九": 19,
+    "二十": 20,
+    "二十一": 21,
+    "二十二": 22,
+    "二十三": 23,
+    "二十四": 24,
+    "二十五": 25,
 }
 _NUMBER_WORDS = {
     **{
@@ -206,9 +232,7 @@ _ROUTE = re.compile(r'@app\.(?:get|post|put|delete)\("([^"]+)"')
 # thing that makes a key user-facing, and a dataclass field with no loader line
 # is internal state that nobody can set.
 _YAML_KEY = re.compile(r'item\.get\(\s*"([a-z][a-z0-9_]*)"')
-CONFIG_LOADERS = (
-    (Path("hookrelay/hookrelay/config.py"), Path("hookrelay/docs/configuration.md")),
-)
+CONFIG_LOADERS = ((Path("hookrelay/hookrelay/config.py"), Path("hookrelay/docs/configuration.md")),)
 # Keys that are deliberately not in the reference, with the reason.
 KEYS_UNWRITTEN = {
     "name": "every section has one; naming it as a key would be noise",
@@ -233,14 +257,9 @@ def _corpus() -> str:
     docs = [
         p
         for p in Path().rglob("*.md")
-        if ".venv" not in str(p)
-        and GENERATED not in p.read_text(encoding="utf-8", errors="ignore")[:400]
+        if ".venv" not in str(p) and GENERATED not in p.read_text(encoding="utf-8", errors="ignore")[:400]
     ]
-    return _normalised(
-        "\n".join(
-            p.read_text(encoding="utf-8", errors="ignore") for p in [*docs, *PAGES]
-        )
-    )
+    return _normalised("\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in [*docs, *PAGES]))
 
 
 def _tuple_members(path: str, name: str) -> list[str]:
@@ -256,24 +275,18 @@ def main() -> int:
     problems: list[str] = []
 
     for service in SERVICES:
-        source = "\n".join(
-            f.read_text(encoding="utf-8") for f in Path(service, service).glob("*.py")
-        )
+        source = "\n".join(f.read_text(encoding="utf-8") for f in Path(service, service).glob("*.py"))
         for route in sorted(set(_ROUTE.findall(source))):
             if _normalised(route) in corpus or route in ROUTES_UNWRITTEN:
                 continue
-            problems.append(
-                f"{service}: route {route} appears in no document and is not in ROUTES_UNWRITTEN"
-            )
+            problems.append(f"{service}: route {route} appears in no document and is not in ROUTES_UNWRITTEN")
 
     for loader, doc in CONFIG_LOADERS:
         text = doc.read_text(encoding="utf-8")
         for key in sorted(set(_YAML_KEY.findall(loader.read_text(encoding="utf-8")))):
             if key in KEYS_UNWRITTEN or f"`{key}`" in text or f"{key}:" in text:
                 continue
-            problems.append(
-                f"{loader.parent.parent.name}: config key `{key}` appears in no document"
-            )
+            problems.append(f"{loader.parent.parent.name}: config key `{key}` appears in no document")
 
     for label, module, name, doc in ENUMERATED:
         members = _tuple_members(module, name)
@@ -283,9 +296,7 @@ def main() -> int:
         text = doc.read_text(encoding="utf-8")
         absent = [m for m in members if f"`{m}`" not in text]
         if absent:
-            problems.append(
-                f"{label}: {doc} does not list {absent} (the tuple has {len(members)})"
-            )
+            problems.append(f"{label}: {doc} does not list {absent} (the tuple has {len(members)})")
 
     defined = len(_ROUTE_CONST.findall(ROUTE_CONSTANTS.read_text(encoding="utf-8")))
     stated = 0
@@ -301,10 +312,7 @@ def main() -> int:
     for doc in BOUNDARY_COUNT_STATED:
         for line, count in _stated_boundaries(doc.read_text(encoding="utf-8")):
             if count != rows:
-                problems.append(
-                    f"{doc}:{line} says {count} structural boundaries, "
-                    f"but {BOUNDARY_TABLE} lists {rows}"
-                )
+                problems.append(f"{doc}:{line} says {count} structural boundaries, but {BOUNDARY_TABLE} lists {rows}")
 
     if problems:
         print("docs have fallen behind:", file=sys.stderr)

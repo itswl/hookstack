@@ -40,9 +40,7 @@ from typing import Any
 
 import render
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("lark-bridge")
 
 # Two ways to deliver. As the APPLICATION (default): lark-cli, a chat id, button
@@ -64,9 +62,7 @@ CHAT_IDS = {
     *([CHAT_ID] if CHAT_ID else []),
     *(c.strip() for c in os.environ.get("BRIDGE_CHAT_IDS", "").split(",") if c.strip()),
 }
-RELAY_ACTION_URL = os.environ.get(
-    "RELAY_ACTION_URL", "http://hookrelay:8100/card-action"
-)
+RELAY_ACTION_URL = os.environ.get("RELAY_ACTION_URL", "http://hookrelay:8100/card-action")
 # A person's reply under one of the pipe's cards, forwarded to the pipe's
 # `lark-thread` door — signed with that door's secret, the pipe's own scheme
 # (X-Hook-Timestamp + X-Hook-Signature over "{ts}.{body}"). Unset = the bridge
@@ -140,9 +136,7 @@ def is_authentic(payload: dict) -> bool:
     return hmac.compare_digest(expected, provided)
 
 
-def _lark(
-    args: list[str], stdin: str | None = None, timeout: int = 60
-) -> subprocess.CompletedProcess[str]:
+def _lark(args: list[str], stdin: str | None = None, timeout: int = 60) -> subprocess.CompletedProcess[str]:
     """One place that shells out, so there is one place to read for what it runs.
 
     argv, never a shell string: the card JSON contains operator-authored alert
@@ -181,17 +175,13 @@ def send_card(card: dict, reply_to: str = "", chat_id: str = "") -> tuple[bool, 
         ]
     )
     if result.returncode != 0:
-        return False, (result.stderr or result.stdout or "lark-cli failed").strip()[
-            :300
-        ]
+        return False, (result.stderr or result.stdout or "lark-cli failed").strip()[:300]
     try:
         answer = json.loads(result.stdout or "{}")
     except ValueError:
         return False, "lark-cli returned no JSON"
     if not answer.get("ok", False):
-        return False, json.dumps(answer.get("error") or answer, ensure_ascii=False)[
-            :300
-        ]
+        return False, json.dumps(answer.get("error") or answer, ensure_ascii=False)[:300]
     return True, str((answer.get("data") or {}).get("message_id") or "")
 
 
@@ -208,9 +198,7 @@ def send_webhook(card: dict) -> tuple[bool, str]:
         ts = str(int(time.time()))
         key = f"{ts}\n{WEBHOOK_SECRET}".encode()
         body["timestamp"] = ts
-        body["sign"] = base64.b64encode(
-            hmac.new(key, b"", hashlib.sha256).digest()
-        ).decode()
+        body["sign"] = base64.b64encode(hmac.new(key, b"", hashlib.sha256).digest()).decode()
     request = urllib.request.Request(  # nosec B310 — a fixed https:// URL from env, not user input
         WEBHOOK_URL,
         data=json.dumps(body, ensure_ascii=False).encode(),
@@ -224,11 +212,7 @@ def send_webhook(card: dict) -> tuple[bool, str]:
         return False, f"http {error.code}: {error.read()[:200]!r}"
     except (urllib.error.URLError, TimeoutError, ValueError) as error:
         return False, str(error)[:300]
-    code = (
-        answer.get("code", answer.get("StatusCode", 0))
-        if isinstance(answer, dict)
-        else 0
-    )
+    code = answer.get("code", answer.get("StatusCode", 0)) if isinstance(answer, dict) else 0
     if code not in (0, None):
         return False, json.dumps(answer, ensure_ascii=False)[:300]
     return True, ""
@@ -262,11 +246,7 @@ class Handler(BaseHTTPRequestHandler):
         # `feishu`-type channel posts to a custom bot — a finished Feishu card
         # with the in-body sign — so a channel pointed here by either type works.
         protocol = payload.get("protocol") == PROTOCOL
-        authentic = (
-            is_authentic_protocol(self.headers, raw)
-            if protocol
-            else is_authentic(payload)
-        )
+        authentic = is_authentic_protocol(self.headers, raw) if protocol else is_authentic(payload)
         if not authentic:
             # A card that cannot prove the shared secret is refused, not
             # delivered. hookrelay treats the 401 as a failed delivery and
@@ -295,9 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         reply_to = str(payload.get("reply_to") or "")[:120]
         chat_id = str(payload.get("chat_id") or "")[:120]
         if chat_id and chat_id not in CHAT_IDS and not WEBHOOK_MODE:
-            logger.warning(
-                "card refused: chat %s is not one this bridge serves", chat_id[:12]
-            )
+            logger.warning("card refused: chat %s is not one this bridge serves", chat_id[:12])
             self._reply(400, {"ok": False, "error": "chat not served by this bridge"})
             return
         if WEBHOOK_MODE and (reply_to or chat_id):
@@ -312,13 +290,9 @@ class Handler(BaseHTTPRequestHandler):
             # The conformance hook: everything but the send. A bridge for any
             # platform answers this the same way, with its own rendering.
             logger.info("dry run: card rendered, not sent")
-            self._reply(
-                200, {"ok": True, "dry_run": True, "message_id": "", "rendered": card}
-            )
+            self._reply(200, {"ok": True, "dry_run": True, "message_id": "", "rendered": card})
             return
-        ok, detail = (
-            send_webhook(card) if WEBHOOK_MODE else send_card(card, reply_to, chat_id)
-        )
+        ok, detail = send_webhook(card) if WEBHOOK_MODE else send_card(card, reply_to, chat_id)
         if ok:
             logger.info(
                 "card delivered %s%s",
@@ -367,11 +341,7 @@ def acknowledge(event: dict, note: str) -> None:
         # a press came back forwarded-but-unrepainted and the log could not tell
         # an expired update token from a card body the platform declined to hand
         # over, which are different problems with different fixes.
-        missing = ", ".join(
-            name
-            for name, value in (("token", token), ("card_content", content))
-            if not value
-        )
+        missing = ", ".join(name for name, value in (("token", token), ("card_content", content)) if not value)
         logger.info(
             "press not repainted — missing %s (event carried: %s)",
             missing,
@@ -382,12 +352,8 @@ def acknowledge(event: dict, note: str) -> None:
         card = json.loads(content)
         if not isinstance(card, dict):
             raise TypeError("card_content is not an object")
-        elements = [
-            el for el in (card.get("elements") or []) if el.get("tag") != "action"
-        ]
-        elements.append(
-            {"tag": "note", "elements": [{"tag": "plain_text", "content": note}]}
-        )
+        elements = [el for el in (card.get("elements") or []) if el.get("tag") != "action"]
+        elements.append({"tag": "note", "elements": [{"tag": "plain_text", "content": note}]})
         card["elements"] = elements
         # Card 1.0 needs open_ids or the API answers 300090 "openid empty". Ours
         # are 1.0 — hookrelay builds {header, elements} with no schema key.
@@ -432,9 +398,7 @@ def forward_press(event: dict) -> None:
     # The bridge never inspects it and could not forge one.
     # The protocol's action shape: the token at the top level, and who pressed.
     # The platform's own envelope (action.value…) stays on this side of the seam.
-    body = json.dumps(
-        {"hookrelay_action": token, "actor": event.get("operator_id") or ""}
-    )
+    body = json.dumps({"hookrelay_action": token, "actor": event.get("operator_id") or ""})
     request = urllib.request.Request(  # nosec B310 — a fixed http:// URL from env, not user input
         RELAY_ACTION_URL,
         data=body.encode(),
@@ -489,9 +453,7 @@ def forward_press(event: dict) -> None:
 
 
 def _sign(secret: str, body: bytes, ts: str) -> str:
-    return hmac.new(
-        secret.encode(), f"{ts}.".encode() + body, hashlib.sha256
-    ).hexdigest()
+    return hmac.new(secret.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
 
 
 def forward_message(event: dict) -> None:
@@ -628,9 +590,7 @@ def consume(event_key: str, handler, attach_only: bool = False) -> None:
                 event = json.loads(line)
             except ValueError:
                 continue
-            if event.get("type") in (event_key, None) or event_key.startswith(
-                "im.message"
-            ):
+            if event.get("type") in (event_key, None) or event_key.startswith("im.message"):
                 handler(event)
                 backoff = 2  # a working stream resets the penalty
         process.wait()
