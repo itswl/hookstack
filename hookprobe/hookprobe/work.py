@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hookprobe.remediation import stale as proposal_stale
-from hookprobe.runs import FAILED, RUNNING, Run
+from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run
 
 # The states a work item can be in. `received` is not among them on purpose:
 # the PRD's state list has one, but in this loop a run is executing the moment
@@ -107,6 +107,16 @@ class WorkItem:
     thread_root: str = ""
     refires: int = 0
     follow_ups: int = 0
+    # When this work first produced something a person could read. Not
+    # `updated_at`, which moves with every later turn, ruling and recovery —
+    # the question "how long until it was any use" has exactly one answer and
+    # it is the first completed run's.
+    first_result_at: float | None = None
+    # How the work survived, or did not: continuations after a restart,
+    # automatic retries after a provider blip, and retries a person asked for.
+    resumes: int = 0
+    auto_retries: int = 0
+    retries: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -130,6 +140,10 @@ class WorkItem:
             "thread_root": self.thread_root,
             "refires": self.refires,
             "follow_ups": self.follow_ups,
+            "first_result_at": self.first_result_at,
+            "resumes": self.resumes,
+            "auto_retries": self.auto_retries,
+            "retries": self.retries,
         }
 
 
@@ -206,6 +220,12 @@ def resolve(
         item.asked_by = item.asked_by or str(meta.get("asked_by") or "")
         item.thread_root = item.thread_root or str(meta.get("thread_root") or "")
         item.refires += int(meta.get("refires") or 0)
+        item.resumes += int(meta.get("resumes") or 0)
+        item.auto_retries += int(meta.get("auto_retries") or 0)
+        item.retries += int(meta.get("retries") or 0)
+        if run.status == COMPLETED and run.finished_at:
+            earliest = item.first_result_at
+            item.first_result_at = run.finished_at if earliest is None else min(earliest, run.finished_at)
         item.follow_ups += len(meta.get("follow_ups") or [])
         item.turns += len(run.turns)
         item.updated_at = max(item.updated_at, run.finished_at or run.created_at)

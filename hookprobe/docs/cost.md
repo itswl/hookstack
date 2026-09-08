@@ -100,7 +100,21 @@ everything — see
 page: what the judge billed and what its free routes avoided, what the
 investigator billed, how many re-fires a runbook answered for $0, what people
 ruled and what they have not, the budget, and the pipe's priced chains and
-incidents. Every avoided figure is a count times this week's average paid call
+incidents.
+
+Since 2026-09-08 it also reports **the work** — the product figures rather than
+the bill. How much work opened in the window and how much of it completed; what
+share was verified and by what; how much closed with nobody stepping in; the
+median time to a first useful result and the median time a person took to
+answer an approval; how much re-fired; and how the work survived — interrupted
+by a restart and finished anyway, retried automatically after a provider blip,
+or handed back to a person. Every one of those was already recorded somewhere
+and had never been added up: the board answers "what is happening now" and this
+answers "how did the week go", which is a different question and belongs on a
+different page. Windowed by when the work OPENED, so a piece of work and the
+outcome it reached are counted in the same week. Medians, not means: one
+approval that waited three days would move a mean far enough to say nothing
+true about the other nine. Every avoided figure is a count times this week's average paid call
 and is labelled a counterfactual; a service that was not read gets a sentence,
 not a zero. Deterministic — no model is paid to do arithmetic on a ledger.
 

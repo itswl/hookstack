@@ -170,3 +170,59 @@ def test_arms_are_compared_on_the_alert_both_saw_and_the_quiet_cell_is_named() -
     assert c["unavailable"] is True
     page = cost_report.render({**cost_report.compute(None, None, None, None, hours=168, now=NOW), "arms": out})
     assert "live quieter than the shadow: 1" in page and "disk 71%" in page and "`http://c`: _not read_" in page
+
+
+def test_the_work_metrics_answer_the_product_questions_over_one_window():
+    """Every figure here was already recorded somewhere and had never been added
+    up. The board answers "what is happening now"; these answer "how did the
+    week go", which is a different question and belongs on a different page."""
+    import time
+
+    now = time.time()
+
+    def item(state, **kw):
+        base = {"state": state, "opened_at": now - 3600, "verified": False, "hands_on": False, "refires": 0}
+        return {**base, **kw}
+
+    items = [
+        item("done", first_result_at=now - 3000, verified=True),
+        item("done", first_result_at=now - 3400, verified=True, hands_on=True, refires=2, resumes=1),
+        item("done", first_result_at=now - 2000),
+        item("abandoned", retries=1),
+        item("waiting_approval", hands_on=True),
+        # Older than the window: counted by none of it.
+        item("done", opened_at=now - 40 * 86400, verified=True),
+    ]
+    proposals = [
+        {"created_at": now - 3600, "approved_at": now - 1800},
+        {"created_at": now - 7200, "approved_at": now - 6900},
+        {"created_at": now - 60},  # never answered: not a wait, not a zero
+        {"created_at": now - 90 * 86400, "approved_at": now - 89 * 86400},  # outside the window
+    ]
+    m = cost_report.work_metrics({"items": items}, proposals, hours=168, now=now)
+
+    assert m["opened"] == 5, "windowed by when the work opened, so a piece of work and its outcome land in one week"
+    assert m["completed"] == 3 and m["completion_pct"] == 60.0
+    assert m["verified_pct"] == 66.7, "two of the three completed"
+    assert m["closed_unattended"] == 1 and m["closed_unattended_pct"] == 20.0, "hands_on does not count"
+    assert m["ended_without_answer_pct"] == 20.0
+    assert m["repeat_pct"] == 20.0
+    assert m["first_result_p50_seconds"] == 600.0, "median, not mean"
+    assert m["approval_wait_p50_seconds"] == 1050.0 and m["approvals_answered"] == 2
+    assert m["resumed"] == 1 and m["resume_success_pct"] == 100.0
+    assert m["handed_to_a_person"] == 1
+
+    # Nothing interrupted is the common and good case, and it is not zero percent.
+    quiet = cost_report.work_metrics({"items": [item("done", verified=True)]}, [], hours=168, now=now)
+    assert quiet["resume_success_pct"] is None and quiet["approval_wait_p50_seconds"] is None
+
+    # A window with no work says so rather than dividing by it.
+    assert cost_report.work_metrics({"items": []}, [], hours=168, now=now) == {"opened": 0}
+    assert cost_report.work_metrics(None, None, hours=168, now=now) is None
+
+
+def test_the_work_section_is_absent_rather_than_zero_when_the_board_was_not_read():
+    page = cost_report.render({"hours": 168, "generated_at": 0.0, "work": None})
+    assert "## The work" not in page, "a service that was not read gets no section, not a page of zeros"
+    page = cost_report.render({"hours": 168, "generated_at": 0.0, "work": {"opened": 0}})
+    assert "_No work opened in this window._" in page

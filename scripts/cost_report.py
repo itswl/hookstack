@@ -56,17 +56,91 @@ def _pct(n: float, d: float) -> str:
     return f"{100.0 * n / d:.0f}%" if d else "—"
 
 
+def _p50(values: list[float]) -> float | None:
+    """Median, not mean. One approval that waited three days would move a mean
+    far enough to say nothing true about the other nine."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def work_metrics(work: dict | None, proposals: list | None, *, hours: float, now: float) -> dict[str, Any] | None:
+    """The PRD's product metrics, over the work this window opened.
+
+    Every figure here was already recorded somewhere and had never been added
+    up: the board answers "what is happening now" and these answer "how did the
+    last week go", which is a different question and a different page.
+
+    Windowed by when the work OPENED, so a piece of work and the outcome it
+    reached are counted in the same week rather than split across two.
+    """
+    if not isinstance(work, dict) or not isinstance(work.get("items"), list):
+        return None
+    cutoff = now - hours * 3600
+    items = [i for i in work["items"] if float(i.get("opened_at") or 0) >= cutoff]
+    total = len(items)
+    if not total:
+        return {"opened": 0}
+    done = [i for i in items if i.get("state") == "done"]
+    ended_badly = [i for i in items if i.get("state") in ("needs_human", "abandoned")]
+    verified = [i for i in done if i.get("verified")]
+    resumed = [i for i in items if int(i.get("resumes") or 0)]
+    first_results = [
+        float(i["first_result_at"]) - float(i["opened_at"])
+        for i in items
+        if i.get("first_result_at") and i.get("opened_at")
+    ]
+    waits = [
+        float(p["approved_at"]) - float(p["created_at"])
+        for p in (proposals or [])
+        if isinstance(p, dict) and p.get("approved_at") and p.get("created_at") and float(p["created_at"]) >= cutoff
+    ]
+    return {
+        "opened": total,
+        "completed": len(done),
+        # Ratios the PRD names. Each is over the work opened in the window, so
+        # they add up against one denominator a reader can check.
+        "completion_pct": round(100 * len(done) / total, 1),
+        "verified_pct": round(100 * len(verified) / len(done), 1) if done else None,
+        "closed_unattended": sum(1 for i in done if i.get("verified") and not i.get("hands_on")),
+        "closed_unattended_pct": round(
+            100 * sum(1 for i in done if i.get("verified") and not i.get("hands_on")) / total, 1
+        ),
+        "ended_without_answer_pct": round(100 * len(ended_badly) / total, 1),
+        "repeat_pct": round(100 * sum(1 for i in items if int(i.get("refires") or 0)) / total, 1),
+        # Latencies, median: how long until the work was any use, and how long a
+        # person took to answer the one question only a person can answer.
+        "first_result_p50_seconds": _p50(first_results),
+        "approval_wait_p50_seconds": _p50(waits),
+        "approvals_answered": len(waits),
+        # How the work survived. `resume_success_pct` is None when nothing was
+        # interrupted, which is the common and good case — not zero.
+        "resumed": len(resumed),
+        "resume_success_pct": (
+            round(100 * sum(1 for i in resumed if i.get("state") == "done") / len(resumed), 1) if resumed else None
+        ),
+        "auto_retries": sum(int(i.get("auto_retries") or 0) for i in items),
+        "handed_to_a_person": sum(int(i.get("retries") or 0) for i in items),
+    }
+
+
 def compute(
     judge: dict | None,
     timeline: dict | None,
     budget: dict | None,
     runs: list | None,
     *,
+    work: dict | None = None,
+    proposals: list | None = None,
     hours: float,
     now: float,
 ) -> dict[str, Any]:
     """Every figure the page prints, from the raw API bodies. Pure."""
     report: dict[str, Any] = {"hours": hours, "generated_at": now}
+    if work is not None or proposals is not None:
+        report["work"] = work_metrics(work, proposals, hours=hours, now=now)
 
     if isinstance(judge, dict) and isinstance(judge.get("summary"), dict):
         s = judge["summary"]
@@ -210,6 +284,40 @@ def render(r: dict[str, Any]) -> str:
         f"_Generated {time.strftime('%Y-%m-%d %H:%M %Z', time.localtime(r['generated_at']))}. Measured figures are what was billed and delivered; counterfactuals are what the cost policy avoided, priced at this week's average paid call, and are estimates of a bill that did not happen._",
         "",
     ]
+
+    w = r.get("work")
+    if w is not None:
+        out += ["## The work", ""]
+        if not w.get("opened"):
+            out.append("_No work opened in this window._")
+        else:
+
+            def _dur(seconds: float | None) -> str:
+                if seconds is None:
+                    return "—"
+                if seconds < 90:
+                    return f"{seconds:.0f}s"
+                if seconds < 5400:
+                    return f"{seconds / 60:.0f}m"
+                return f"{seconds / 3600:.1f}h"
+
+            out += [
+                f"- **Opened**: {w['opened']} pieces of work · **completed** {w['completed']} ({w['completion_pct']}%) "
+                f"· **ended without an answer** {w['ended_without_answer_pct']}%",
+                f"- **Verified**: {w['verified_pct'] if w['verified_pct'] is not None else '—'}% of completed work — "
+                "a person's ruling, its own procedure exiting 0, or the condition ending",
+                f"- **Closed with nobody stepping in**: {w['closed_unattended']} ({w['closed_unattended_pct']}%) — "
+                "the north star: finished, verified, and it never had to stop and ask",
+                f"- **Time to first useful result**: {_dur(w['first_result_p50_seconds'])} (median)",
+                f"- **A person's approval took**: {_dur(w['approval_wait_p50_seconds'])} (median of "
+                f"{w['approvals_answered']} answered)",
+                f"- **Repeated conditions**: {w['repeat_pct']}% of work re-fired at least once",
+                f"- **Survived**: {w['resumed']} interrupted by a restart, "
+                f"{w['resume_success_pct'] if w['resume_success_pct'] is not None else '—'}% of them still finished · "
+                f"{w['auto_retries']} provider blip{'' if w['auto_retries'] == 1 else 's'} retried automatically · "
+                f"{w['handed_to_a_person']} handed back to a person",
+                "",
+            ]
 
     j = r.get("judge")
     out += ["## The judge", ""]
@@ -359,6 +467,13 @@ def main() -> int:
     )
     if isinstance(runs, dict):
         runs = runs.get("runs")
+    # The board's own derivation, read rather than recomputed: one place decides
+    # what a piece of work is and what state it is in, and this page reports it.
+    probe_token = os.environ.get("HOOKPROBE_TOKEN", "")
+    work = _get(f"{args.probe.rstrip('/')}/v1/work?limit=500", probe_token) if args.probe else None
+    proposals = _get(f"{args.probe.rstrip('/')}/v1/remediations", probe_token) if args.probe else None
+    if isinstance(proposals, dict):
+        proposals = proposals.get("proposals")
     arms = None
     if args.judge and args.shadow_judge:
         jt = os.environ.get("HOOKJUDGE_READ_TOKEN", "")
@@ -373,6 +488,8 @@ def main() -> int:
         timeline if isinstance(timeline, dict) else None,
         budget if isinstance(budget, dict) else None,
         runs if isinstance(runs, list) else None,
+        work=work if isinstance(work, dict) else None,
+        proposals=proposals if isinstance(proposals, list) else None,
         hours=args.hours,
         now=now,
     )
