@@ -68,6 +68,16 @@ def _prompt_files(settings: Settings) -> dict[str, Path]:
     }
 
 
+def _run_links(board: str, meta: dict[str, Any]) -> dict[str, str]:
+    """Where this run's chain lives in the pipe — when the deployment has said
+    where its board is (HOOKPROBE_RELAY_UI_URL). The board resolves `#chain=`
+    by the hop's event id, so the id the pipe handed this run is enough."""
+    event_id = meta.get("event_id")
+    if not board or event_id is None:
+        return {}
+    return {"chain": f"{board.rstrip('/')}/#chain={event_id}"}
+
+
 def _prompt_digests_now(settings: Settings) -> dict[str, str | None]:
     """Those same files as they stand right now, for comparing against a record.
 
@@ -364,7 +374,11 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         run = service.get(session_key)
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
-        return {**asdict(run), "inputs_now": _prompt_digests_now(settings)}
+        return {
+            **asdict(run),
+            "inputs_now": _prompt_digests_now(settings),
+            "links": _run_links(settings.relay_ui_url, run.meta),
+        }
 
     @app.get("/v1/posture", dependencies=[Depends(require_token)])
     async def posture_record() -> dict[str, Any]:

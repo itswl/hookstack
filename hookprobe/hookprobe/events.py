@@ -582,6 +582,10 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
         topic_root = str(fields.get("thread_root") or "").strip()[:120]
         if topic_root:
             meta["thread_root"] = topic_root
+        # Who asked, when a person did: the console shows it, and a run that a
+        # person opened is a different thing to read than one an alert opened.
+        if chat_sender:
+            meta["asked_by"] = chat_sender
         payload: dict[str, Any] = {"message": message, "sessionKey": session_key, "_meta": meta}
 
         # Storm coalescing: a re-fire of the same condition (same source+title,

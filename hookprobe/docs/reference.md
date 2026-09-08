@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (47)
+## Environment (48)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -52,6 +52,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_ALARM_URL` | *(empty)* | Direct self-alarm for report returns that exhaust their retries: the pipe is the broken link at that moment, so this posts straight to a bot/collector URL, touching nothing on the… |
 | `HOOKPROBE_SETTING_SOURCES` | `project` | Skill layers |
 | `HOOKPROBE_HANDOFF_URL` | *(empty)* | Where a finished run's report goes when an operator clicks "hand off", and the credential for that one door |
+| `HOOKPROBE_RELAY_UI_URL` | *(empty)* | Where the pipe's board is, as a BROWSER reaches it (not as this container does): a run then links to the chain it belongs to |
 | `HOOKPROBE_MCP_TOOLS` | *(empty)* | Which MCP tools this instance may actually call, as a closed set — mcp__chat__chat_search_messages or mcp__chat__* for a whole server |
 | `HOOKPROBE_FOLLOW_UP_SENDERS` | *(empty)* | Who may continue an investigation by replying in its chat thread (events.py, kind: follow_up): platform sender ids, * for anyone the bridge forwards, empty for nobody — the default… |
 | `HOOKPROBE_VERDICTS` | *(empty)* | The closed vocabulary this instance is allowed to CONCLUDE with, so a report can steer the next hop instead of only being read |

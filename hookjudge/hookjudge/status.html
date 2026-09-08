@@ -25,6 +25,17 @@
   .rc .live.on { color: var(--ok); border-color: var(--ok); }
   .rc .live.off { color: var(--warn); border-color: var(--warn); }
   /* ── end design tokens ────────────────────────────────────────────────────── */
+  /* ── hookstack tab shell · keep this block identical in all three pages ── */
+  .tabs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  .tab { background: none; border: 0; color: var(--muted); padding: 8px 12px; cursor: pointer; font: inherit;
+         font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab-group { display: flex; align-items: center; gap: 2px; margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border); }
+  .tab-group-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding-right: 6px; }
+  .tab .count { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 4px; }
+  .tab.active .count { color: var(--accent); }
+  /* ── end tab shell ──────────────────────────────────────────────────────── */
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font: var(--ui); }
   .wrap { max-width:1060px; margin:0 auto; padding:28px 20px 60px; }
@@ -69,6 +80,13 @@
   .empty { color:var(--muted); text-align:center; padding:30px 0; }
 
 .review{border:1px solid var(--warn);border-radius:8px;margin:10px 0;padding:8px 10px}
+  .wrap .tabs { margin-bottom: 18px; }
+  .routes { display:flex; height:10px; border-radius:5px; overflow:hidden; background:var(--surface); border:1px solid var(--border); margin:-8px 0 6px; }
+  .routes span { display:block; min-width:2px; }
+  .routes .ai { background:var(--accent); } .routes .reuse, .routes .recovery { background:var(--ok); }
+  .routes .rule, .routes .rule-reuse { background:var(--warn); } .routes .reuse { opacity:.55; } .routes .rule-reuse { opacity:.55; }
+  .routes-legend { font-family:var(--mono); font-size:12px; color:var(--muted); margin-bottom:20px; }
+  .routes-legend b { color:var(--text); font-weight:500; }
 .review h3{margin:0 0 6px;font-size:12px;color:var(--warn);text-transform:uppercase;letter-spacing:.4px}
 .rv{display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap;font-size:12.5px}
 .rv .t{flex:1 1 240px}
@@ -106,7 +124,6 @@
   <header>
     <h1>hookjudge</h1>
     <span class="sub">judgement only: one event, one verdict, one line in the ledger</span>
-    <a href="#" id="helpLink" class="sub" style="text-decoration:none">help</a>
     <span class="stamp" id="stamp">loading…</span>
   <span class="rc">
     <button id="rNow" title="refresh now">&#8635;</button>
@@ -117,7 +134,12 @@
     <input id="tokenInput" type="password" placeholder="X-Read-Token (kept in this browser only)">
     <button id="tokenSave">enter</button>
   </div>
-  <div id="helpSec" class="hp" style="display:none">
+  <div class="tabs">
+    <button class="tab active" data-tab="board">board</button>
+    <button class="tab" data-tab="review">review <span class="count" id="rvCount">0</span></button>
+    <button class="tab" data-tab="help">help</button>
+  </div>
+  <div id="helpSec" class="hp" data-panel="help" style="display:none">
     <h2>What this is</h2>
     <p>hookjudge is the <b>judge</b> behind the pipe: one normalized event in, one verdict out
     (importance, type, a one-sentence summary), returned to the pipe and recorded in the ledger.
@@ -186,6 +208,7 @@
       <tr><td><code>HOOKJUDGE_RETENTION_DAYS</code> · <code>HOOKJUDGE_ALARM_URL</code></td><td>Ledger retention (30 days by default) / where a dead-letter self-alarm goes</td></tr>
     </table>
   </div>
+  <div data-panel="board">
   <div class="cards">
     <div class="card"><div class="label">verdicts 24h</div><div class="value" id="cJudged">–</div></div>
     <div class="card"><div class="label">paid share</div><div class="value" id="cPaid">–</div></div>
@@ -195,27 +218,35 @@
     <div class="card" title="cards that restated a condition this window had already reported"><div class="label">repeat interruptions</div><div class="value" id="cRepeat">–</div></div>
     <div class="card" title="of the interruptions a human actually ruled on"><div class="label">mattered</div><div class="value" id="cMattered">–</div></div>
   </div>
+  <div class="routes" id="routes"></div>
+  <div class="routes-legend" id="routesLegend">…</div>
   <h2>Noisiest conditions</h2>
   <div id="atRows"><div class="empty">…</div></div>
   <h2>Recent verdicts</h2>
-  <div id="reviewSec" class="review" style="display:none">
-    <h3>review · <span id="rvCount">0</span> disagreements <button id="rvExport" style="float:right">export labels</button></h3>
-    <div id="rvRows"></div>
-  </div>
-
   <div id="rows"><div class="empty">…</div></div>
+  </div>
+  <div data-panel="review" style="display:none">
+    <div id="reviewSec" class="review">
+      <h3>where the platform and the judge disagreed — one click is one eval label <button id="rvExport" style="float:right">export labels</button></h3>
+      <div id="rvRows"><div class="empty">…</div></div>
+    </div>
+  </div>
 </div>
 <script>
 (function () {
   "use strict";
-  if (location.hash === "#help") {
-    document.getElementById("helpSec").style.display = "";
-  }
-  document.getElementById("helpLink").addEventListener("click", function (e) {
-    e.preventDefault();
-    var sec = document.getElementById("helpSec");
-    sec.style.display = sec.style.display === "none" ? "" : "none";
+  // ── tabs: the same strip as the pipe's board and the investigator's console ──
+  document.querySelectorAll(".tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      var which = tab.getAttribute("data-tab");
+      document.querySelectorAll(".tab").forEach(function (t) { t.classList.toggle("active", t === tab); });
+      document.querySelectorAll("[data-panel]").forEach(function (p) {
+        p.style.display = p.getAttribute("data-panel") === which ? "" : "none";
+      });
+    });
   });
+  var want = (location.hash || "").slice(1);
+  if (want === "help" || want === "review") document.querySelector('.tab[data-tab="' + want + '"]').click();
 
   var KEY = "hookjudge-read-token";
   function esc(v) {
@@ -294,6 +325,7 @@
       document.getElementById("cMattered").textContent =
         at.ruled ? at.mattered + " of " + at.ruled : "–";
       renderAttention(at.noisiest || []);
+      renderRoutes(s.routes || {});
       var rows = d.recent || [];
       fetch("/disagreements?limit=20", { headers: readHeaders() })
         .then(function (r) { return r.ok ? r.json() : { queue: [] }; })
@@ -327,6 +359,22 @@
   // every card including recoveries, the verdict divides episodes by FIRINGS,
   // and a row showing only the first two invites the reader to do 30/77 and
   // conclude the flag is broken when the comparison was 30 of 47.
+  // The five routes as one bar: the cost policy, visible. Paid (ai) first,
+  // then what the rules decided, then what was reused; the legend carries the
+  // counts so the bar never has to be read precisely.
+  var ROUTES = ["ai", "rule", "rule-reuse", "reuse", "recovery"];
+  function renderRoutes(routes) {
+    var total = ROUTES.reduce(function (n, k) { return n + ((routes[k] || {}).count || 0); }, 0);
+    var bar = document.getElementById("routes"), legend = document.getElementById("routesLegend");
+    if (!total) { bar.innerHTML = ""; legend.textContent = "no verdicts in this window"; return; }
+    bar.innerHTML = ROUTES.filter(function (k) { return (routes[k] || {}).count; }).map(function (k) {
+      var n = routes[k].count;
+      return '<span class="' + k + '" style="width:' + (100 * n / total) + '%" title="' + k + " · " + n + '"></span>';
+    }).join("");
+    var paid = (routes.ai || {}).count || 0;
+    legend.innerHTML = ROUTES.map(function (k) { return k + " <b>" + ((routes[k] || {}).count || 0) + "</b>"; }).join(" · ") +
+      " — " + total + " verdicts, <b>" + paid + "</b> paid (" + Math.round(100 * paid / total) + "%)";
+  }
   function renderAttention(list) {
     document.getElementById("atRows").innerHTML = list.length ? list.map(function (c) {
       // Was `c.mattered ? "" : " cold"`, which tints every row on a box where
@@ -359,10 +407,11 @@
   // Two named buttons take a side; the picker records a third answer.
   function renderReview(d) {
     var queue = (d && d.queue) || [];
-    var sec = document.getElementById("reviewSec");
     document.getElementById("rvCount").textContent = queue.length;
-    if (!queue.length) { sec.style.display = "none"; return; }
-    sec.style.display = "";
+    if (!queue.length) {
+      document.getElementById("rvRows").innerHTML = '<div class="empty">no disagreements in the ledger — the platform\'s level and the judge\'s importance agree on every row</div>';
+      return;
+    }
     document.getElementById("rvRows").innerHTML = queue.map(function (r) {
       var others = ["critical","high","medium","low"].filter(function (x) {
         return x !== r.level && x !== r.importance;

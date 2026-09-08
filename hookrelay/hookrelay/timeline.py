@@ -119,6 +119,11 @@ def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
                 "skip_code": row.get("skip_code"),
                 "to": row.get("channels") or [],
                 "cost_usd": _cost(row) or None,
+                # Which investigation a return names, and who spoke from chat:
+                # the board links the one and prints the other. Content-blind
+                # still — two field NAMES the doors agreed on, never their text.
+                "session": str((row.get("fields") or {}).get("session") or "")[:120] or None,
+                "sender": str((row.get("fields") or {}).get("sender") or "")[:80] or None,
             }
         )
         burst = str((row.get("fields") or {}).get("burst_id") or "")

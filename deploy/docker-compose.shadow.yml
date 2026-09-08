@@ -67,6 +67,9 @@ services:
       # to 127.0.0.1 and nothing else; it stops being survivable the moment a
       # reverse proxy is put in front, which is why it is set now.
       HOOKRELAY_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
+      # Where each return door's console is, AS THE OPERATOR'S BROWSER reaches it (through the
+      # same loopback tunnel as this board); the timeline links a hop to its investigation.
+      HOOKRELAY_UI_LINKS: ${HOOKRELAY_UI_LINKS:-probe-notify=http://127.0.0.1:8088/ui}
       # Guards PUT /config, the silence valve and the dead-letter retry.
       # Unlike the read token, an empty value here FAILS CLOSED — token_ok
       # returns False when nothing is configured, so the endpoints refuse

@@ -104,6 +104,8 @@ services:
       # ids (ou_…), or `*` for anyone the bridge forwards from the group. Empty =
       # nobody, which is the default until an operator decides.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
+      # The pipe's board as the operator's browser reaches it; a run links to its chain there.
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
       # Production wants a ceiling: window spend >= budget refuses new
       # escalations, each refusal reporting itself to the channels. 0 = off.
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}

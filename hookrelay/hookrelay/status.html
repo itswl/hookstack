@@ -27,6 +27,17 @@
   .rc .live.on { color: var(--ok); border-color: var(--ok); }
   .rc .live.off { color: var(--warn); border-color: var(--warn); }
   /* ── end design tokens ────────────────────────────────────────────────────── */
+  /* ── hookstack tab shell · keep this block identical in all three pages ── */
+  .tabs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  .tab { background: none; border: 0; color: var(--muted); padding: 8px 12px; cursor: pointer; font: inherit;
+         font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab-group { display: flex; align-items: center; gap: 2px; margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border); }
+  .tab-group-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding-right: 6px; }
+  .tab .count { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 4px; }
+  .tab.active .count { color: var(--accent); }
+  /* ── end tab shell ──────────────────────────────────────────────────────── */
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: var(--ui); }
   .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 60px; }
@@ -91,10 +102,7 @@
            font-family: var(--mono); font-size: 12px; overflow-x: auto; }
   .empty { color: var(--muted); padding: 30px 0; text-align: center; }
 
-  .tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
-  .tab { background: none; border: 0; color: var(--muted); padding: 8px 14px; cursor: pointer;
-         font: inherit; border-bottom: 2px solid transparent; }
-  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .wrap .tabs { margin-bottom: 18px; }
   .hp { max-width: 880px; font-size: 13.5px; line-height: 1.65; }
   .hp h2 { margin-top: 22px; }
   .hp table { border-collapse: collapse; width: 100%; margin: 8px 0; }
@@ -378,7 +386,9 @@
   }
   var lastEventsSig = "", lastTimelineSig = "";
 
+  var uiLinks = {};   // door → the board that owns its sessions (HOOKRELAY_UI_LINKS)
   function render(data) {
+    uiLinks = data.ui_links || uiLinks;
     document.getElementById("cQueued").textContent = data.queue.queued;
     document.getElementById("cSent").textContent = data.queue.sent;
     document.getElementById("cDead").textContent = data.queue.dead;
@@ -607,7 +617,10 @@
   if (location.hash === "#help") {
     document.querySelector('.tab[data-tab="help"]').click();
   }
-  if (location.hash === "#timeline") {
+  // `#chain=<hop id>`: the investigator's page links back to the chain one of
+  // its hops belongs to. Resolved by hop, since the chain's key is the ROOT id.
+  var wantedHop = (location.hash.match(/^#chain=(\d+)$/) || [])[1] || "";
+  if (location.hash === "#timeline" || wantedHop) {
     document.querySelector('.tab[data-tab="timeline"]').click();
   }
 
@@ -634,6 +647,8 @@
         var saved = rememberOpen(box);
         box.innerHTML = chains.map(chainRow).join("");
         restoreOpen(box, saved);
+        var hop = wantedHop && box.querySelector('[data-tl-trace="' + wantedHop + '"]');
+        if (hop) { wantedHop = ""; hop.closest("details").open = true; hop.closest("details").scrollIntoView({ block: "start" }); }
       })
       .catch(function () { box.innerHTML = '<div class="empty">timeline unavailable</div>'; });
   }
@@ -664,11 +679,14 @@
     }).join("") + "</div>" : "";
     var rows = hops.map(function (h) {
       var to = h.outcome === "routed" ? "→ " + esc((h.to || []).join(", ")) : '<span class="badge skipped">skipped · ' + esc(h.skip_code || "?") + "</span>";
+      if (h.sender) to += ' <span class="rel">from ' + esc(h.sender) + "</span>";
+      var board = h.session && uiLinks[h.door];
       return '<div class="hop">' +
         '<span class="etime" style="margin-left:0">' + esc(fmtTime(h.at)) + '</span><span class="rel">' + esc(rel(t0, h.at)) + "</span>" +
         '<span class="esrc">' + esc(h.door) + "</span>" +
         '<span class="hopto">' + to + "</span>" +
         '<span class="eid">' + esc(h.cost_usd ? money(h.cost_usd) : "") + "</span>" +
+        (board ? '<a class="btn tiny" href="' + esc(board) + "#session=" + encodeURIComponent(h.session) + '" target="_blank" rel="noopener">investigation</a>' : "") +
         '<button class="btn tiny" data-tl-trace="' + esc(h.id) + '">trace</button>' +
         '</div><div class="compare" id="tl-cmp-' + esc(h.id) + '" style="display:none"></div>';
     }).join("");

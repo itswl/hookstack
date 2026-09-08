@@ -28,6 +28,17 @@
   .rc .live.on { color: var(--ok); border-color: var(--ok); }
   .rc .live.off { color: var(--warn); border-color: var(--warn); }
   /* ── end design tokens ────────────────────────────────────────────────────── */
+  /* ── hookstack tab shell · keep this block identical in all three pages ── */
+  .tabs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  .tab { background: none; border: 0; color: var(--muted); padding: 8px 12px; cursor: pointer; font: inherit;
+         font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab-group { display: flex; align-items: center; gap: 2px; margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border); }
+  .tab-group-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding-right: 6px; }
+  .tab .count { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 4px; }
+  .tab.active .count { color: var(--accent); }
+  /* ── end tab shell ──────────────────────────────────────────────────────── */
   /* This page's older token names, aliased onto the shared set above. */
   :root {
     --panel: var(--surface); --line: var(--border); --dim: var(--muted);
@@ -37,6 +48,8 @@
 body{margin:0;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;
      font:var(--ui)}
 header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+nav.tabs{padding:0 12px;background:var(--panel)}
+.prov{font-size:12px;color:var(--dim);padding:2px 0 6px}.prov b{color:var(--text);font-weight:500}.prov a{color:var(--accent)}
 header h1{font-size:15px;margin:0;font-weight:600}
 header h1 span{color:var(--dim);font-weight:400}
 #token{margin-left:auto;background:var(--bg);border:1px solid var(--line);color:var(--text);
@@ -237,14 +250,6 @@ button.danger{color:var(--red);border-color:var(--red)}
 <header>
   <h1>hookprobe <span>· sessions</span></h1>
   <button id="new">+ new session</button>
-  <button id="skillsBtn">skills</button>
-  <button id="agentsBtn">agents</button>
-  <button id="memBtn">memory</button>
-  <button id="promptBtn">prompt</button>
-  <button id="sysBtn">system</button>
-  <button id="actionsBtn">actions</button>
-  <button id="auditBtn">audit</button>
-  <button id="helpBtn">help</button>
   <span id="budget" hidden></span>
   <span class="stamp" id="stamp"></span>
   <span class="rc">
@@ -253,6 +258,21 @@ button.danger{color:var(--red);border-color:var(--red)}
   </span>
   <input id="token" placeholder="bearer token" autocomplete="off">
 </header>
+<nav class="tabs">
+  <button class="tab active" id="sessionsTab">sessions</button>
+  <span class="tab-group"><span class="tab-group-label">knowledge</span>
+    <button class="tab" id="skillsBtn">skills</button>
+    <button class="tab" id="agentsBtn">agents</button>
+    <button class="tab" id="memBtn">memory</button>
+    <button class="tab" id="promptBtn">prompt</button>
+  </span>
+  <span class="tab-group"><span class="tab-group-label">runtime</span>
+    <button class="tab" id="sysBtn">system</button>
+    <button class="tab" id="actionsBtn">actions</button>
+    <button class="tab" id="auditBtn">audit</button>
+  </span>
+  <button class="tab" id="helpBtn" style="margin-left:auto">help</button>
+</nav>
 <main>
   <aside>
     <input id="q" placeholder="filter sessions…" autocomplete="off">
@@ -262,6 +282,7 @@ button.danger{color:var(--red);border-color:var(--red)}
   </aside>
   <section>
     <div id="meta"></div>
+    <div id="prov" class="prov"></div>
     <div id="turns"><div class="empty">select a session on the left, or start a new one</div></div>
     <div id="hint"></div>
     <form id="composer">
@@ -509,8 +530,28 @@ async function select(key) {
   await renderDetail(true);
 }
 
+function markTab(id) {
+  document.querySelectorAll("nav.tabs .tab").forEach((b) => b.classList.toggle("active", b.id === id));
+}
+
+// Where a run came from and where it answers to — a person in chat, an alert
+// through a door, a thread it keeps replying into, and the chain in the pipe.
+function provenanceHtml(run) {
+  const m = run.meta || {};
+  const bits = [];
+  if (m.asked_by) bits.push(`opened from chat by <b>${esc(m.asked_by)}</b>`);
+  else if (m.source) bits.push(`from door <b>${esc(m.source)}</b>${m.event_id != null ? ` · event ${esc(String(m.event_id))}` : ""}`);
+  if (m.thread_root) bits.push(`answers into thread <span class="mono">${esc(m.thread_root)}</span>`);
+  const n = (m.follow_ups || []).length;
+  if (n) bits.push(`${n} follow-up${n > 1 ? "s" : ""} from the thread${m.follow_up_by ? ` (last by <b>${esc(m.follow_up_by)}</b>)` : ""}`);
+  if (m.refires) bits.push(`re-fired ${m.refires}× · joined this session instead of a cold start`);
+  if ((run.links || {}).chain) bits.push(`<a href="${esc(run.links.chain)}" target="_blank" rel="noopener">chain in the pipe ↗</a>`);
+  return bits.join(" · ");
+}
+
 function sessionsMode() {
   viewMode = "sessions";
+  markTab("sessionsTab");
   $("#composer").style.display = "";
 }
 
@@ -858,6 +899,7 @@ async function renderDetail(startPolling) {
     (hit === null ? "" : ` · context reuse ${hit}% (read ${fmtTok(tok.cached)} · wrote ${fmtTok(tok.written)})`) +
     ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");
+  $("#prov").innerHTML = provenanceHtml(run);
   // Recorded prompt inputs are only legible next to the files as they are now.
   const now = run.inputs_now;
   const parts = (run.turns || []).map((t) => turnHtml(t, now));
@@ -958,6 +1000,7 @@ $("#new").onclick = () => {
   $("#msg").focus();
 };
 
+$("#sessionsTab").onclick = () => (sel ? select(sel) : $("#new").onclick());
 $("#skillsBtn").onclick = () => openSkills();
 $("#agentsBtn").onclick = () => openAgents();
 $("#memBtn").onclick = () => openMemory();
@@ -1017,11 +1060,13 @@ function leaveSessions(mode) {
 }
 
 async function openSkills() {
+  markTab("skillsBtn");
   leaveSessions("skills");
   await renderSkills();
 }
 
 async function openMemory() {
+  markTab("memBtn");
   leaveSessions("memory");
   try {
     const m = await (await api("/v1/memory")).json();
@@ -1277,6 +1322,7 @@ function editSkill(name, content) {
 
 // ── agents: the same layered, copy-on-write story as skills ─────────────
 async function openAgents() {
+  markTab("agentsBtn");
   leaveSessions("agents");
   await renderAgents();
 }
@@ -1359,6 +1405,7 @@ function editAgent(name, content) {
 
 // ── system prompt: the memory editor pattern, for methodology ───────────
 async function openPrompt() {
+  markTab("promptBtn");
   leaveSessions("prompt");
   try {
     const p = await (await api("/v1/system-prompt")).json();
@@ -1387,6 +1434,7 @@ function kvGrid(pairs) {
 }
 
 async function openSystem() {
+  markTab("sysBtn");
   leaveSessions("system");
   try {
     const [config, mcp, health, agents] = await Promise.all([
@@ -1437,6 +1485,7 @@ async function openSystem() {
 let auditReload = null;
 
 async function openActions() {
+  markTab("actionsBtn");
   leaveSessions("actions");
   try {
     const d = await (await api("/v1/remediations")).json();
@@ -1481,6 +1530,7 @@ async function openActions() {
 }
 
 async function openAudit(filter) {
+  markTab("auditBtn");
   leaveSessions("audit");
   $("#meta").textContent = "audit · every tool call in every run, subagents included · {workdir}/audit/*.jsonl";
   $("#turns").innerHTML = `
@@ -1512,6 +1562,7 @@ async function openAudit(filter) {
 
 // ── help: one page for a new operator or an AI driving the API ──────────
 function openHelp() {
+  markTab("helpBtn");
   leaveSessions("help");
   $("#meta").textContent = "help · what hookprobe is and how to use it · start here, human or AI";
   const base = "http://hookprobe:8088";
@@ -1688,7 +1739,10 @@ $("#composer").onsubmit = async (ev) => {
   }
 };
 
-if (location.hash.startsWith("#skills")) {
+if (location.hash.startsWith("#session=")) {
+  select(decodeURIComponent(location.hash.slice("#session=".length)));
+}
+else if (location.hash.startsWith("#skills")) {
   const deepLink = decodeURIComponent(location.hash.slice("#skills".length).replace(/^\//, ""));
   if (deepLink) { leaveSessions("skills"); renderSkill(deepLink); }
   else openSkills();

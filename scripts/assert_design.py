@@ -58,6 +58,15 @@ BLOCKS = (
         "/* ── hookstack token wiring · keep this block identical in all three pages ── */",
         "/* ── end token wiring ───────────────────────────────────────────────────── */",
     ),
+    # Added 2026-09-08. Same palette, three navigation idioms: the pipe had
+    # tabs, the judge a help link that unfolded a section, the investigator a
+    # row of eight buttons. One tab strip, pinned, so the next page gets it for
+    # free and the fourth idiom never appears.
+    (
+        "tab shell",
+        "/* ── hookstack tab shell · keep this block identical in all three pages ── */",
+        "/* ── end tab shell ──────────────────────────────────────────────────────── */",
+    ),
 )
 
 

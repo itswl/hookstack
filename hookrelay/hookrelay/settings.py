@@ -9,7 +9,7 @@ operator reviews in git, not a machine detail.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def _int(name: str, default: int) -> int:
@@ -69,6 +69,10 @@ class Settings:
     # carry no actions, which is the same fail-closed default as an empty
     # action_secret: a link nobody can reach is worse than no link.
     public_url: str = ""
+    # `door=url` pairs: where the board that owns a door's sessions lives, as a
+    # BROWSER reaches it, so a chain's hop can link to the investigation it
+    # names. The pipe never follows these; it hands them to the page.
+    ui_links: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls) -> Settings:
@@ -90,4 +94,9 @@ class Settings:
             action_ttl_seconds=_int("HOOKRELAY_ACTION_TTL_SECONDS", 24 * 3600),
             card_callback_secret=os.environ.get("HOOKRELAY_CARD_CALLBACK_SECRET", ""),
             public_url=os.environ.get("HOOKRELAY_PUBLIC_URL", "").rstrip("/"),
+            ui_links=dict(
+                (k.strip(), v.strip().rstrip("/"))
+                for k, _, v in (p.partition("=") for p in os.environ.get("HOOKRELAY_UI_LINKS", "").split(","))
+                if k.strip() and v.strip()
+            ),
         )

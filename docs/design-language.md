@@ -47,6 +47,24 @@ hookprobe's console additionally aliases its older token names
 (`--panel`, `--line`, `--dim`, `--green`, `--amber`, `--red`) onto the shared
 set, so its existing rules keep working without a sweeping rewrite.
 
+## Getting around
+
+One tab strip on every page, pinned by `assert_design.py` like the tokens: the
+pipe's board (events · timeline · config · help), the judge (board · review ·
+help, the review tab carrying its count so a disagreement queue is visible
+without being on screen), the investigator (sessions · **knowledge** skills,
+agents, memory, prompt · **runtime** system, actions, audit · help). Before this
+the same palette sat under three idioms — tabs, a help link that unfolded a
+section, a row of eight buttons — and the pages felt like three tools that
+happened to share a colour.
+
+The pages also point at each other, because an operation crosses all three. A
+hop in the pipe's timeline links to the investigation it names when the
+deployment says where that console is (`HOOKRELAY_UI_LINKS`, `door=url`); an
+investigation links back to its chain (`HOOKPROBE_RELAY_UI_URL`). The addresses
+are the operator's browser's, not the containers' — a tunnelled loopback port in
+both deployments here — which is why they are settings and not discovered.
+
 ## Staying current
 
 The boards do not keep a clock. What they show changes when a service writes,

@@ -114,7 +114,7 @@ def test_a_report_with_a_procedure_offers_it_by_name(tmp_path: Path) -> None:
     with client:
         run = _drain(client, "probe:inbound:5")
         proposal_id = run["meta"]["remediation_proposal"]
-        declared = actions.declare(Run(**{k: v for k, v in run.items() if k != "inputs_now"}), tmp_path)
+        declared = actions.declare(Run(**{k: v for k, v in run.items() if k not in ("inputs_now", "links")}), tmp_path)
 
     kinds = [action["kind"] for action in declared]
     assert kinds == ["followup", "approve", "useful", "useless"]
@@ -138,7 +138,7 @@ def test_a_failed_investigation_offers_no_approval(tmp_path: Path) -> None:
         client.post("/hooks/event", json=EVENT)
         run = _drain(client, "probe:inbound:5")
 
-    declared = actions.declare(Run(**{k: v for k, v in run.items() if k != "inputs_now"}), tmp_path)
+    declared = actions.declare(Run(**{k: v for k, v in run.items() if k not in ("inputs_now", "links")}), tmp_path)
     assert [action["kind"] for action in declared] == ["followup", "useful", "useless"]
     assert declared[0]["prompt"].startswith("This investigation did not finish")
 

@@ -202,6 +202,9 @@ class Settings:
     event_secret: str
     # The one door findings go back to.
     return_url: str
+    # Where the pipe's board is, as a BROWSER reaches it (not as this container
+    # does): a run then links to the chain it belongs to. Empty = no link.
+    relay_ui_url: str
     # Outbound HMAC secret; signs the finding on its way back.
     return_secret: str
     # Where a retrospective condition ruling goes, and the credential for that
@@ -336,6 +339,7 @@ class Settings:
             remediation_allowlist=_path_env("HOOKPROBE_REMEDIATION_ALLOWLIST"),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
+            relay_ui_url=os.environ.get("HOOKPROBE_RELAY_UI_URL", "").strip().rstrip("/"),
             return_secret=os.environ.get("HOOKPROBE_RETURN_SECRET", ""),
             ruling_url=os.environ.get("HOOKPROBE_RULING_URL", ""),
             ruling_secret=os.environ.get("HOOKPROBE_RULING_SECRET", ""),

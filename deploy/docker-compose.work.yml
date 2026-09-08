@@ -107,6 +107,8 @@ services:
       # answers anyone who can reach the port; empty ADMIN token fails CLOSED,
       # so the admin surface simply does not work until it is set.
       HOOKRELAY_READ_TOKEN: ${WORK_READ_TOKEN:-}
+      # Browser-facing console addresses (the ports published below); a hop links to its investigation.
+      HOOKRELAY_UI_LINKS: ${HOOKRELAY_UI_LINKS:-plan-notify=http://127.0.0.1:8088/ui,work-notify=http://127.0.0.1:8090/ui}
       HOOKRELAY_ADMIN_TOKEN: ${WORK_ADMIN_TOKEN:-}
     volumes:
       # The DIRECTORY, not the file: a single-file bind mount binds an inode,
@@ -167,6 +169,7 @@ services:
       # Who may continue this node's sessions by replying in the chat thread
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
@@ -304,6 +307,7 @@ services:
       # Who may continue this node's sessions by replying in the chat thread
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
@@ -464,6 +468,7 @@ services:
       # Who may continue this node's sessions by replying in the chat thread
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).

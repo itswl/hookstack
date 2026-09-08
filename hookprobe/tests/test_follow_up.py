@@ -190,7 +190,9 @@ def test_a_topic_someone_opened_starts_a_run_that_answers_into_the_topic(tmp_pat
         return 200
 
     monkeypatch.setattr(notify.ReturnDelivery, "_post_return", capture)
-    client, service, engine = _client(tmp_path, return_url="http://relay/hook/probe-notify")
+    client, service, engine = _client(
+        tmp_path, return_url="http://relay/hook/probe-notify", relay_ui_url="http://board:8100/"
+    )
     r = client.post(
         "/hooks/event",
         json={
@@ -210,10 +212,15 @@ def test_a_topic_someone_opened_starts_a_run_that_answers_into_the_topic(tmp_pat
     )
     assert r.status_code == 200 and r.json()["status"] == "accepted", r.text
     key = r.json()["sessionKey"]
-    _wait(client, key)
+    run = _wait(client, key)
     assert service.get(key).meta["thread_root"] == "om_mine"
     assert posted and posted[-1]["meta"]["thread_root"] == "om_mine", "the first report goes into the person's topic"
     assert "look at node-3" in engine.messages[-1]
+    # The console can say who opened it and where its chain lives in the pipe.
+    assert run["meta"]["asked_by"] == "ou_sre"
+    assert run["links"] == {"chain": "http://board:8100/#chain=61"}
+    alert = client.get(f"/v1/runs/{_alert(client)}", headers={"Authorization": f"Bearer {TOKEN}"}).json()
+    assert "asked_by" not in alert["meta"], "an alert has no asker"
 
 
 def test_a_stranger_cannot_open_a_paid_topic(tmp_path) -> None:

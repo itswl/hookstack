@@ -707,6 +707,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             "fuse": app.state.fuse.snapshot(),
             "breakers": app.state.breaker.snapshot(now),
             "silences": await app.state.store.list_silences(now),
+            "ui_links": app_settings.ui_links,
             "recent": await app.state.store.recent_events(
                 limit, source=source, outcome=outcome, skip_code=skip_code, query=q, before_id=before_id
             ),
