@@ -233,7 +233,7 @@ channels:
   - name: to-lark-watch
     # Chat-bridge protocol (docs/bridge-protocol.md): a card model to the
     # sidecar, which renders and posts as the app. To fall back to a custom-bot
-    # webhook, set type: feishu and point the URL at the webhook.
+    # webhook, run the bridge in webhook mode (LARK_WEBHOOK_URL) instead.
     type: bridge
     url: ${LARK_WATCH_URL}
     secret: ${LARK_WATCH_SECRET}

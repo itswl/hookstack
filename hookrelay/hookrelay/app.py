@@ -88,9 +88,10 @@ _ABSENCE_SOURCE = "absence"
 def _card_token(payload: dict[str, Any]) -> str:
     """Find our token in whatever envelope the IM platform wrapped it in.
 
-    Feishu posts the button's `value` under action.value; a plain caller may
-    post it at the top level. Both, rather than a per-platform parser: the
-    token is what carries the authority, so where it was nested is a detail.
+    The bridge protocol puts the token at the top level; a platform's own
+    callback pointed straight here nests it under action.value. Both, rather
+    than a per-platform parser: the token is what carries the authority, so
+    where it was nested is a detail.
     """
     for candidate in (payload, payload.get("action"), payload.get("event"), payload.get("value")):
         if isinstance(candidate, dict):
@@ -142,10 +143,10 @@ def _escalation_can_work(settings: Settings, cfg: Config) -> bool:
 
       a secret        — without it no card carries an action of any kind.
       an enabled kind — card_actions decides what is offered; empty offers none.
-      a channel that can carry one — a type declaring `callbacks` (feishu,
-        bridge) posts one back; a type declaring `links` (dingtalk, wecom)
-        carries a URL, which needs public_url to point anywhere. Asked of the
-        registry, so a plugin's type takes part by declaring, not by being named here.
+      a channel that can carry one — a type declaring `callbacks` (the bridge,
+        as an app) posts one back; a type declaring `links` (the markdown
+        plugins) carries a URL, which needs public_url to point anywhere. Asked
+        of the registry, so a type takes part by declaring, not by being named here.
 
     KNOWN LIMIT, stated because it is a real one: this is a per-DEPLOYMENT
     answer, not a per-alert one. A deployment whose critical route reaches only a
@@ -367,7 +368,8 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         logger.warning(
             "escalation is configured but disarmed: no card action can be pressed in this deployment "
             "(needs HOOKRELAY_ACTION_SECRET, a card_actions kind, and either a channel type with callbacks "
-            "— feishu, bridge — or HOOKRELAY_PUBLIC_URL for a dingtalk/wecom link). Every alert would look untouched."
+            "— a bridge — or HOOKRELAY_PUBLIC_URL for a channel type that carries links). "
+            "Every alert would look untouched."
         )
 
     # ── the page ──────────────────────────────────────────────────────────

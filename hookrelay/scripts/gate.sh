@@ -70,8 +70,15 @@ os.environ.setdefault("DINGTALK_WEBHOOK_URL", "https://example.invalid/hook")
 os.environ.setdefault("WECOM_WEBHOOK_URL", "https://example.invalid/hook")
 os.environ.setdefault("ARCHIVE_WEBHOOK_URL", "https://example.invalid/hook")
 
+from pathlib import Path
+
+from hookrelay import registry
 from hookrelay.config import Config
 
+# The example names the DingTalk and WeCom types, which are shipped PLUGINS
+# (examples/plugins/chat_markdown_channels.py) — a deployment mounts that
+# directory as HOOKRELAY_PLUGINS, so the check loads it the same way.
+registry.load_plugins(Path("examples/plugins"))
 cfg = Config.from_file("config.example.yaml")
 print(f"example config: {len(cfg.sources)} sources, {len(cfg.channels)} channels, {len(cfg.routes)} routes")
 PYEOF

@@ -251,12 +251,14 @@ channels:
   # normalized event, not a judged RESULT, so the card is built from
   # title/body/level/fields rather than a processed envelope.
   - name: to-me-watch
-    type: feishu
-    url: ${WATCH_FEISHU_WEBHOOK}
-    # Explicitly empty, not omitted: this bot has signature verification OFF
-    # (an unsigned POST to it succeeded on 2026-09-03). The URL is the whole
-    # credential, which is why it lives in .env and never in this file.
-    secret: ""
+    # The operator's personal watch bot is a custom-bot webhook: no app, no
+    # callbacks, no threads. It is reached through a SECOND bridge in webhook
+    # mode (lark-bridge-watch in the compose), so this file still names no
+    # platform — the webhook URL, which is the whole credential, lives in .env
+    # as that bridge's LARK_WEBHOOK_URL.
+    type: bridge
+    url: http://lark-bridge-watch:9100/
+    secret: ${LARK_BRIDGE_SECRET}
 
   - name: to-me
     # The chat-bridge protocol (docs/bridge-protocol.md): the pipe sends a card

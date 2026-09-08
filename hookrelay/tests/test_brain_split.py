@@ -4,7 +4,7 @@ Three promises this file pins:
   1. generic + payload:raw delivers the ORIGINAL inbound payload byte-for-
      byte in content — the brain behind the relay sees exactly what the
      monitoring system sent (transparent edge).
-  2. feishu + payload:raw delivers the brain's FINISHED message untouched
+  2. generic + payload:raw delivers the brain's FINISHED message untouched (a bridge takes a model instead)
      except for bot signing — interactive cards survive the hop.
   3. the ledger purges, and never deletes a promise still in flight.
 """
@@ -64,26 +64,6 @@ def test_generic_normalized_never_leaks_the_raw_payload():
     _url, body, _headers = build_request(channel, _msg(GRAFANA_RAW), now=0.0)
     sent = json.loads(body.decode())
     assert "payload" not in sent and sent["title"] == "Disk about to fill"
-
-
-def test_feishu_raw_preserves_the_brains_card_and_injects_signing():
-    card = {
-        "msg_type": "interactive",
-        "card": {
-            "header": {"title": {"tag": "plain_text", "content": "incident #12"}},
-            "elements": [{"tag": "action", "actions": [{"tag": "button", "value": {"incident_id": 12}}]}],
-        },
-    }
-    channel = Channel(
-        name="feishu-out",
-        type="feishu",
-        url="https://open.feishu.cn/hook/x",
-        secret="fsec",
-        options={"payload": "raw", "payload_path": "notification"},
-    )
-    _url, payload, _headers = build_request(channel, _msg({"notification": card, "other": 1}), now=1700000000.0)
-    assert payload["card"] == card["card"], "the interactive card must survive untouched"
-    assert payload["timestamp"] == "1700000000" and payload["sign"], "bot signing injected by the sender"
 
 
 async def test_raw_with_missing_path_fails_into_the_ledger():

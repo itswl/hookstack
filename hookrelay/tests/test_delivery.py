@@ -133,7 +133,6 @@ async def test_the_ledger_keeps_the_alert_but_not_what_signs_it(cfg):
     nobody's evidence."""
     from hookrelay import channels
 
-    signed = cfg.channels["feishu-main"]
     message = {
         "event_id": 7,
         "source": "grafana",
@@ -144,9 +143,9 @@ async def test_the_ledger_keeps_the_alert_but_not_what_signs_it(cfg):
         "received_at": 0.0,
         "payload": {},
     }
-    _url, payload, _headers = channels.build_feishu(signed, message, 1000.0)
-    payload.update(channels._feishu_sign_fields("bot-secret", 1000.0))
-    wire = json.dumps(payload, ensure_ascii=False).encode()
+    # A body that signs in-band, the way a custom bot's does (a bridge in webhook
+    # mode still posts one of these; the pipe never did after the feishu type left).
+    wire = json.dumps({**message, "timestamp": "1000", "sign": "c2lnbmF0dXJl"}, ensure_ascii=False).encode()
 
     # The bytes that leave the socket carry the signature; the ledger copy does not.
     assert b"sign" in wire

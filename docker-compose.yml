@@ -24,7 +24,9 @@ services:
       HOOKRELAY_DB: /data/hookrelay.db
       HOOKRELAY_CONFIG: /etc/hookrelay/config.yaml
       HOOKRELAY_WORKER_INTERVAL: "0.5"
-      HOOKRELAY_PLUGINS: /data/plugins
+      # The shipped example plugins, mounted read-only below: the DingTalk
+      # dialect the stack config uses is one of them (chat_markdown_channels.py).
+      HOOKRELAY_PLUGINS: /etc/hookrelay/plugins
       # Where the escalation route delivers. Default: the sink wearing a
       # /probe-standin path, so the plain stack shows the escalation shape
       # without a model key. With `--profile probe`, set in .env:
@@ -43,6 +45,7 @@ services:
       # Checked in and mounted read-only, so `up` needs no setup step. Point
       # HOOKRELAY_CONFIG at /data/config.yaml to use your own instead.
       - ${HOOKRELAY_CONFIG_FILE:-./hookrelay/examples/stack.yaml}:/etc/hookrelay/config.yaml:ro
+      - ./hookrelay/examples/plugins:/etc/hookrelay/plugins:ro
       - relay-data:/data
     # The whole .env is injected, so a new ${NAME} in the config only needs a
     # line in .env — no compose edit, no forgotten passthrough.
@@ -54,6 +57,7 @@ services:
     restart: unless-stopped
     depends_on:
       - sink
+      - lark-bridge
 
   hookjudge:
     build: ./hookjudge
@@ -89,6 +93,25 @@ services:
     restart: unless-stopped
     depends_on:
       - stub-ai
+
+  # The chat's adapter (docs/bridge-protocol.md). The pipe sends it a card
+  # MODEL; it renders the Feishu card. Here it runs in WEBHOOK mode with no
+  # Lark account: the rendered card is posted to the sink exactly as it would
+  # be to a custom bot's incoming URL. Point LARK_WEBHOOK_URL at a real bot and
+  # the same container notifies a real chat; give it an app instead
+  # (deploy/lark-bridge/README.md) and it gains buttons that call back and
+  # replies in threads.
+  lark-bridge:
+    build: ./deploy/lark-bridge
+    container_name: hs-lark-bridge
+    environment:
+      LARK_WEBHOOK_URL: ${LARK_WEBHOOK_URL:-http://sink:9000/feishu}
+      LARK_WEBHOOK_SECRET: ${LARK_WEBHOOK_SECRET:-}
+      # Same value as the channel's `secret` in hookrelay/examples/stack.yaml.
+      BRIDGE_INBOUND_SECRET: demo-bridge-secret
+    restart: unless-stopped
+    depends_on:
+      - sink
 
   # The last link, otherwise invisible: `docker compose logs -f sink` is what
   # an operator would actually have received. Lays out Feishu cards; prints

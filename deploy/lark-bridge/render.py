@@ -17,6 +17,7 @@ paged a whole company through a renderer that did not know this.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 # Header colour by tone. Red is reserved for high and critical — alarm colours
 # are earned, not decorative — and a recovery is green whatever it was before,
@@ -91,8 +92,40 @@ def _details(text: str) -> str:
     return "\n".join(rendered)
 
 
-def feishu_card(model: dict[str, Any]) -> dict[str, Any]:
-    """One card model → one Feishu interactive message body."""
+def _action_links(actions: list[dict[str, Any]], link_base: str) -> str:
+    """Actions as markdown links to the pipe's confirm page — for a delivery that
+    cannot call back (a custom-bot webhook). The GET only asks; the POST behind
+    it acts, because chat clients fetch links to build previews. No base, no
+    links: a link nobody can reach is worse than none."""
+    if not link_base:
+        return ""
+    rendered = []
+    for action in actions:
+        value = action.get("value")
+        token = (
+            str(value.get("hookrelay_action") or "") if isinstance(value, dict) else ""
+        )
+        if token:
+            rendered.append(
+                markdown_link(
+                    str(action.get("text") or "Action"),
+                    f"{link_base}/card-action?t={quote(token, safe='')}",
+                )
+            )
+    return " · ".join(r for r in rendered if r)
+
+
+def feishu_card(
+    model: dict[str, Any], *, actions: str = "buttons", link_base: str = ""
+) -> dict[str, Any]:
+    """One card model → one Feishu interactive message body.
+
+    `actions="buttons"` when this bridge sends as an application, whose button
+    presses come back as callbacks; `actions="links"` when it sends through a
+    custom-bot webhook, which cannot call back, so each action becomes a link
+    to `link_base` (the pipe's public address, `action_link_base` in the
+    envelope). Anything else drops the actions rather than draw dead buttons.
+    """
     elements: list[dict[str, Any]] = []
     lead = escape_markup(str(model.get("lead") or ""))
     summary = escape_markup(str(model.get("summary") or ""))
@@ -120,8 +153,12 @@ def feishu_card(model: dict[str, Any]) -> dict[str, Any]:
     )
     if lines:
         elements.append(_md(f"**Runbooks**\n{lines}"))
-    actions = [a for a in (model.get("actions") or []) if isinstance(a, dict)]
-    if actions:
+    declared = [a for a in (model.get("actions") or []) if isinstance(a, dict)]
+    if declared and actions == "links":
+        links_line = _action_links(declared, link_base)
+        if links_line:
+            elements.append(_md(links_line))
+    elif declared and actions == "buttons":
         # Values are opaque and already signed by whoever minted them; the
         # bridge carries them into the button and back out on a press.
         elements.append(
@@ -139,7 +176,7 @@ def feishu_card(model: dict[str, Any]) -> dict[str, Any]:
                         if isinstance(a.get("value"), dict)
                         else {},
                     }
-                    for a in actions
+                    for a in declared
                 ],
             }
         )

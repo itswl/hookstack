@@ -18,16 +18,17 @@ and `meta.alert_name` in practice):
       "actions":  [{"text": "Acknowledge", "value": {...}}]   # pre-signed by the brain
     }
 
-and every channel type renders it its own way. `actions` are carried but only
-by channels that HAVE interactive callbacks (feishu, bridge): the value is
-opaque and already signed by the brain, because a signature is judgement about
-identity, not formatting.
+and the pipe turns it into ONE thing: the card model (`card_model`,
+docs/bridge-protocol.md) — headline, state, lead, summary, identity crumb,
+impact, links, actions, footer, as plain facts. Who renders that into a
+platform's dialect is not this module's business: a bridge sidecar for a chat
+that calls back, a plugin (examples/plugins/chat_markdown_channels.py) for a
+markdown webhook. `actions` are carried as the brain signed them: the value is
+opaque, because a signature is judgement about identity, not formatting.
 
-Two kinds of output live below. The dialect renderers (`feishu_card`,
-`markdown`) are for channels that post a FINISHED payload to a platform's own
-webhook. `card_model` is for a bridge (docs/bridge-protocol.md): the same
-five blocks as facts in plain text, rendered by the sidecar that knows the
-platform — which is how the pipe stops knowing what a Feishu card looks like.
+The Feishu card renderer used to live here, then WeCom's and DingTalk's — the
+pipe knowing three platforms' schemas so that no brain had to know one. The
+protocol keeps the second half of that bargain without the first.
 
 Rendering lives here rather than in each builder so the five blocks stay in one
 place: headline, identity breadcrumb, impact, links, footer.
@@ -37,29 +38,6 @@ from __future__ import annotations
 
 import time
 from typing import Any
-from urllib.parse import quote
-
-from hookrelay.markup import escape_markup, markdown_link
-
-# Feishu card header colour by normalized level/importance. Red is reserved for
-# high — the family colour doctrine: alarm colours are earned, not decorative.
-# Green whenever the alert has ENDED, whatever its importance was: a recovery
-# card wearing a red header contradicts its own text.
-#
-# ONE table, exported. channels.py kept a second copy that disagreed about
-# `info`, so the same alert wore a different header depending on which of the two
-# paths rendered it — and a colour that means something different per code path
-# means nothing at all.
-FEISHU_LEVEL_COLOR = {
-    "critical": "red",
-    "high": "red",
-    "warning": "orange",
-    "medium": "orange",
-    "low": "wathet",
-    "info": "blue",
-}
-# Anything the vocabulary does not name: readable, and visibly not an alarm.
-FEISHU_FALLBACK_COLOR = "turquoise"
 
 _LEVEL_TAG = {
     "critical": "🔴 CRITICAL",
@@ -117,10 +95,6 @@ class Processed:
         return f"📡 {self.title}"
 
     @property
-    def color(self) -> str:
-        return "green" if self.is_recovery else FEISHU_LEVEL_COLOR.get(self.importance, FEISHU_FALLBACK_COLOR)
-
-    @property
     def level_tag(self) -> str:
         return _LEVEL_TAG.get(self.importance, self.importance)
 
@@ -160,18 +134,15 @@ class Processed:
         ]
         return " · ".join(b for b in bits if b)
 
-    # ── per-vendor rendering ─────────────────────────────────────────────
-
-    # ── the neutral model: what a bridge renders, in no dialect ─────────────
+    # ── the neutral model: what a bridge or a plugin renders, in no dialect ──
     def card_model(self) -> dict[str, Any]:
         """The card as facts, not markup — the shape in docs/bridge-protocol.md.
 
-        Plain text throughout: the bridge that renders this into its platform's
-        dialect is the one place that knows what needs escaping there (see
-        hookrelay/markup.py for why that boundary is per dialect). Actions
-        travel as the brain signed them. `tone` names the STATE; the colour it
-        earns is the bridge's decision, so a recovery is "recovery" here and
-        green wherever it lands.
+        Plain text throughout: whoever renders this into a platform's dialect is
+        the one place that knows what needs escaping there. Actions travel as the
+        brain signed them. `tone` names the STATE; the colour it earns is the
+        renderer's decision, so a recovery is "recovery" here and green wherever
+        it lands.
         """
         model: dict[str, Any] = {
             "title": self.headline,
@@ -192,121 +163,3 @@ class Processed:
             "footer": self.footer(),
         }
         return {key: value for key, value in model.items() if value not in ("", [], {})}
-
-    def feishu_card(self) -> dict[str, Any]:
-        elements: list[dict[str, Any]] = []
-        # Every block below is a `lark_md` element, so every piece of the brain's
-        # text is escaped on the way in — see hookrelay/markup.py for what one
-        # unescaped alert title did to a company's phones. The header title and
-        # the footer note are `plain_text`, which renders no markup, and stay
-        # verbatim: escaping them would only show operators our backslashes.
-        # 1) headline: how bad + what happened, the first thing the eye lands on.
-        tag = escape_markup(self.level_tag)
-        summary = escape_markup(self.summary)
-        lead = f"**{tag}**  {summary}" if summary else f"**{tag}**"
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": lead}})
-        # 2) identity breadcrumb
-        crumb = self.breadcrumb()
-        if crumb:
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": escape_markup(crumb)}})
-        # 3) impact, titled so it reads as secondary to the headline
-        impact = str(self.analysis.get("impact_scope") or "")
-        if impact:
-            content = f"**Impact**\n{escape_markup(impact)}"
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": content}})
-        # 4) runbooks at notification time, not after a dashboard visit
-        if self.links:
-            lines = "\n".join(rendered for rendered in map(self._link, self.links) if rendered)
-            if lines:
-                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**Runbooks**\n{lines}"}})
-        # 5) interactive actions — only Feishu has callbacks; values are opaque
-        #    and already signed by the brain.
-        if self.actions:
-            elements.append(
-                {
-                    "tag": "action",
-                    "actions": [
-                        {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": str(a.get("text") or "Action")},
-                            "type": str(a.get("style") or "default"),
-                            "value": a.get("value") or {},
-                        }
-                        for a in self.actions
-                    ],
-                }
-            )
-        # 6) metadata footer, de-emphasised so it does not compete with content
-        footer = self.footer()
-        if footer:
-            elements.append({"tag": "note", "elements": [{"tag": "plain_text", "content": footer}]})
-        return {
-            "msg_type": "interactive",
-            "card": {
-                "header": {
-                    "title": {"tag": "plain_text", "content": self.headline},
-                    "template": self.color,
-                },
-                "elements": elements,
-            },
-        }
-
-    @staticmethod
-    def _link(link: dict[str, Any]) -> str:
-        """One `links` entry, rendered only as far as its url earns."""
-        return markdown_link(str(link.get("text") or ""), str(link.get("url") or ""))
-
-    @staticmethod
-    def _action_link(action: dict[str, Any], base: str) -> str:
-        """One action as a clickable link, or nothing.
-
-        The link lands on a GET that only ASKS — chat clients fetch link
-        previews, and a GET that silenced an alert would fire on a preview
-        rather than on a decision. The confirming POST is behind that page.
-        """
-        if not base:
-            return ""
-        value = action.get("value")
-        if not isinstance(value, dict):
-            return ""
-        token = str(value.get("hookrelay_action") or "")
-        if not token:
-            return ""
-        return markdown_link(str(action.get("text") or "Action"), f"{base}/card-action?t={quote(token, safe='')}")
-
-    def markdown(self, *, heading: bool, action_base: str = "") -> str:
-        """DingTalk wants a `### heading`; WeCom renders bold instead.
-
-        Unlike the Feishu card, this dialect has no plain_text half — the
-        headline and the footer are markdown here too, so both are escaped.
-
-        `action_base` turns the declared actions into LINKS — see _action_link
-        for why these channels get a link where Feishu gets a button.
-        """
-        headline = escape_markup(self.headline)
-        lines = [f"### {headline}" if heading else f"**{headline}**"]
-        if self.summary:
-            lines.append(f"{escape_markup(self.level_tag)} {escape_markup(self.summary)}")
-        crumb = self.breadcrumb()
-        if crumb:
-            lines.append(escape_markup(crumb))
-        impact = str(self.analysis.get("impact_scope") or "")
-        if impact:
-            lines.append(f"**Impact**: {escape_markup(impact)}")
-        for link in self.links:
-            rendered = self._link(link)
-            if rendered:
-                lines.append(rendered)
-        # Actions as LINKS, not buttons. A DingTalk or WeCom webhook robot
-        # cannot call back — its ActionCard buttons are URL jumps — so a real
-        # button here would do nothing, which is worse than none. A link works,
-        # and without one these two channels can never take part in the feedback
-        # the rest of the family now depends on: `mattered_pct` would stay null
-        # forever and the escalation sweep would read every alert as untouched.
-        action_lines = [link for link in (self._action_link(a, action_base) for a in self.actions) if link]
-        if action_lines:
-            lines.append(" · ".join(action_lines))
-        footer = self.footer()
-        if footer:
-            lines.append(f"> {escape_markup(footer)}")
-        return "\n\n".join(lines)

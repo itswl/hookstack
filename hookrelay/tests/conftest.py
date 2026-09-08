@@ -38,9 +38,9 @@ def cfg() -> Config:
                 {"name": "ci", "secret": "", "title": "{job}", "body": "{detail}"},
             ],
             "channels": [
-                {"name": "feishu-main", "type": "feishu", "url": "https://feishu.example/hook"},
-                {"name": "ding-main", "type": "dingtalk", "url": "https://ding.example/hook", "secret": "dsec"},
-                {"name": "wecom-main", "type": "wecom", "url": "https://wecom.example/hook"},
+                {"name": "feishu-main", "type": "bridge", "url": "https://feishu.example/hook"},
+                {"name": "ding-main", "type": "generic", "url": "https://ding.example/hook", "secret": "dsec"},
+                {"name": "wecom-main", "type": "generic", "url": "https://wecom.example/hook"},
                 {"name": "mirror", "type": "generic", "url": "https://mirror.example/in", "max_per_minute": 1},
             ],
             "routes": [

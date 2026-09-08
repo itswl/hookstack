@@ -152,3 +152,33 @@ def test_the_legacy_feishu_body_still_passes_through_untouched(server) -> None:
     ).encode()
     assert _post(url, body, {}) == (200, {"ok": True, "message_id": "om_sent_1"})
     assert sent[0] == (card, "om_r", "")
+
+
+def test_webhook_mode_posts_the_rendered_card_with_actions_as_links(
+    server, monkeypatch
+) -> None:
+    """The same protocol, delivered through a custom bot's incoming webhook: no
+    message id comes back, hints are ignored, actions become links at the base
+    the pipe named."""
+    url, sent = server
+    posted: list[dict] = []
+    monkeypatch.setattr(bridge, "WEBHOOK_MODE", True)
+    monkeypatch.setattr(
+        bridge, "send_webhook", lambda card: posted.append(card) or (True, "")
+    )
+    # The fixture's action carries the brain's opaque value; a PIPE action carries
+    # `hookrelay_action`, and only those become links (a link needs a token).
+    card = {
+        **FIXTURE["card"],
+        "actions": [{"text": "Silence 1h", "value": {"hookrelay_action": "tok"}}],
+    }
+    body = _body(
+        card=card, action_link_base="https://relay.example", chat_id="oc_anyone"
+    )
+    assert _post(url, body, _signed(body)) == (200, {"ok": True, "message_id": ""})
+    assert sent == [], "not sent as the app"
+    (card,) = posted
+    assert not [e for e in card["elements"] if e["tag"] == "action"]
+    assert any("card-action?t=" in json.dumps(e) for e in card["elements"]), (
+        "actions rendered as links to the pipe"
+    )

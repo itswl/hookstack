@@ -53,9 +53,11 @@ upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
 | [`hookprobe/`](hookprobe) | the investigator | Runs one tool-using agent investigation per important alert, read-only by default and measured so at startup, and returns a root-cause report; sessions can be asked follow-ups, and experience accumulates | Receive alerts, or send notifications |
 
 The reason for the split: a brain that renders Feishu cards has to know
-Feishu's card schema, then WeCom's, then DingTalk's — and that work belongs to
-the pipe. Moving it there is what lets a brain be replaced or compared while
-both edges stay still; hookjudge is deliberately the smallest brain that can
+Feishu's card schema, then WeCom's, then DingTalk's — and that work belongs at
+the edge, not in a brain. The pipe turns a verdict into a neutral card model
+and a per-platform bridge renders it ([docs/bridge-protocol.md](docs/bridge-protocol.md)),
+so neither the brains nor the pipe name a chat platform. That is what lets a
+brain be replaced or compared while both edges stay still; hookjudge is deliberately the smallest brain that can
 hold up its end of that bargain. The judge and the investigator also answer
 different questions — the judge answers "is this worth interrupting a human
 for", the investigator answers "what actually happened" — which is why the

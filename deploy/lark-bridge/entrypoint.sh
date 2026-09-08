@@ -7,6 +7,12 @@
 #
 # The secret goes in on STDIN, never as an argv: a process list is readable.
 set -eu
+# Webhook mode (LARK_WEBHOOK_URL set, no app): nothing to configure and lark-cli
+# is never called — the bridge renders and posts to the custom bot's URL.
+if [ -n "${LARK_WEBHOOK_URL:-}" ] && [ -z "${LARK_APP_ID:-}" ]; then
+  echo "webhook mode: no Lark app configured, posting to the custom-bot webhook"
+  exec "$@"
+fi
 : "${LARK_APP_ID:?LARK_APP_ID is required}"
 : "${LARK_APP_SECRET:?LARK_APP_SECRET is required}"
 

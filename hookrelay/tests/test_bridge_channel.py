@@ -91,6 +91,19 @@ def test_a_finished_platform_payload_is_refused_by_name() -> None:
 
 
 def test_what_a_person_can_do_from_a_channel_is_declared_not_named() -> None:
-    assert registry.channel_can("bridge", "callbacks") and registry.channel_can("feishu", "callbacks")
-    assert registry.channel_can("dingtalk", "links") and registry.channel_can("wecom", "links")
-    assert not registry.channel_can("generic", "callbacks") and not registry.channel_can("unknown", "links")
+    assert registry.channel_can("bridge", "callbacks")
+    assert not registry.channel_can("generic", "callbacks") and not registry.channel_can("generic", "links")
+    assert not registry.channel_can("unknown", "links"), "a type nobody registered can do nothing"
+
+
+def test_a_channel_can_say_where_action_links_should_land() -> None:
+    """For a bridge that delivers somewhere that cannot call back (a custom-bot
+    webhook), the envelope carries the pipe's public address; the bridge turns
+    actions into links there. Absent by default — nothing here knows the far side."""
+    with_base = Channel(
+        name="chat", type="bridge", url="http://bridge:9100/", options={"action_link_base": "https://relay.example/"}
+    )
+    without = Channel(name="chat", type="bridge", url="http://bridge:9100/")
+    message = {"event_id": 1, "source": "s", "title": "t", "body": "", "level": "info", "fields": {}}
+    assert json.loads(build_request(with_base, message, now=0.0)[1])["action_link_base"] == "https://relay.example"
+    assert "action_link_base" not in json.loads(build_request(without, message, now=0.0)[1])

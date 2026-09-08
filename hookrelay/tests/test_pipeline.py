@@ -103,7 +103,7 @@ def test_a_judgment_stage_in_front_of_a_brain_says_so() -> None:
 
     base = {
         "sources": [{"name": "grafana", "secret": "", "title": "{title}", "body": "{message}"}],
-        "channels": [{"name": "ops", "type": "feishu", "url": "https://feishu.example/hook"}],
+        "channels": [{"name": "ops", "type": "bridge", "url": "https://feishu.example/hook"}],
         "routes": [{"name": "all", "source": "*", "send_to": ["ops"]}],
     }
 
@@ -130,7 +130,7 @@ def test_a_judgment_stage_in_front_of_a_brain_says_so() -> None:
             "channels": [
                 {
                     "name": "ops",
-                    "type": "feishu",
+                    "type": "bridge",
                     "url": "https://feishu.example/hook",
                     "options": {"payload": "processed"},
                 }
@@ -150,7 +150,7 @@ def test_a_judgment_stage_in_front_of_a_brain_says_so() -> None:
             "channels": [
                 {
                     "name": "ops",
-                    "type": "feishu",
+                    "type": "bridge",
                     "url": "https://feishu.example/hook",
                     "options": {"payload": "processed"},
                 }
@@ -174,7 +174,7 @@ def test_a_judgment_stage_in_front_of_a_brain_says_so() -> None:
             "channels": [
                 {
                     "name": "ops",
-                    "type": "feishu",
+                    "type": "bridge",
                     "url": "https://feishu.example/hook",
                     "options": {"payload": "processed"},
                 }
@@ -206,7 +206,7 @@ async def test_wake_no_quiets_and_everything_else_fails_open(store):
                     "fields": {"wake": "{meta.wake_someone}"},
                 }
             ],
-            "channels": [{"name": "to-me", "type": "feishu", "url": "http://bridge:9000/send"}],
+            "channels": [{"name": "to-me", "type": "bridge", "url": "http://bridge:9000/send"}],
             "routes": [{"name": "verdict-to-me", "source": "judge-notify", "send_to": ["to-me"]}],
             "pipeline": [
                 {
@@ -256,7 +256,7 @@ def _sampling_cfg(pct: int, banner: str = "") -> Config:
                     "fields": {"wake": "{meta.wake_someone}"},
                 }
             ],
-            "channels": [{"name": "to-me", "type": "feishu", "url": "http://bridge:9000/send"}],
+            "channels": [{"name": "to-me", "type": "bridge", "url": "http://bridge:9000/send"}],
             "routes": [{"name": "verdict-to-me", "source": "judge-notify", "send_to": ["to-me"]}],
             "pipeline": [stage, "routes"],
         }

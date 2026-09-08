@@ -89,7 +89,7 @@ def test_an_exit_no_route_feeds_is_named() -> None:
         [{"name": "watch-out", "source": "watch", "send_to": ["to-plan"], "priority": 100, "stop": True}],
         channels=[
             {"name": "to-plan", "type": "generic", "url": "http://probe-plan:8088/hooks/event"},
-            {"name": "to-nowhere", "type": "feishu", "url": "https://open.example/hook/abc"},
+            {"name": "to-nowhere", "type": "bridge", "url": "https://open.example/hook/abc"},
         ],
         sources=[{"name": "watch", "secret": "s", "title": "{t}", "body": "{d}", "level": "{l}"}],
     )
@@ -138,7 +138,7 @@ def test_a_webhook_token_never_reaches_the_graph() -> None:
         channels=[
             {
                 "name": "to-lark",
-                "type": "feishu",
+                "type": "bridge",
                 "url": "https://open.example/open-apis/bot/v2/hook/SECRET-TOKEN?key=ALSO-SECRET",
             }
         ],

@@ -1,10 +1,12 @@
-"""One judgement, four dialects — the dirty work lifted off the brain.
+"""One judgement, one model — the dirty work lifted off the brain AND off the pipe.
 
 A brain that renders Feishu cards must know Feishu's card schema, its colour
-names and its markdown dialect; then WeCom's; then DingTalk's. That is exactly
-what belongs in the pipe. Here the brain sends a RESULT and each channel type
-dresses it, so the same judgement reaches four downstreams in their own
-language without the brain knowing any of them.
+names and its markdown dialect; then WeCom's; then DingTalk's. First that work
+moved into the pipe; now the pipe turns a RESULT into a card MODEL and hands it
+to whoever knows a platform (a bridge, docs/bridge-protocol.md; a plugin for
+markdown webhooks). Here the brain sends a result and the pipe models it; the
+dialects are asserted where they live (deploy/lark-bridge/tests,
+test_chat_markdown_plugins.py).
 """
 
 from __future__ import annotations
@@ -63,58 +65,37 @@ def _message(result: dict = RESULT) -> dict:
     }
 
 
-def test_feishu_gets_a_card_with_every_block_and_the_buttons():
-    _url, payload, _headers = build_request(_channel("feishu"), _message(), now=0.0)
-
-    assert payload["msg_type"] == "interactive"
-    header = payload["card"]["header"]
-    assert header["template"] == "red", "high importance earns red"
-    assert "Single top-up over 500" in header["title"]["content"]
-
-    blocks = json.dumps(payload["card"]["elements"], ensure_ascii=False)
-    assert "three large top-ups in nine minutes" in blocks, "the headline carries the summary"
-    assert "demo-alarm · prod" in blocks, "identity reads as a breadcrumb, not a label grid"
-    assert "**Impact**" in blocks and "no direct service impact observed" in blocks
-    assert "Large top-up runbook" in blocks, "the runbook arrives WITH the alert"
-    assert "grafana · business" in blocks, "footer is de-emphasised metadata"
-
-    # Interactive callbacks are Feishu-only, and the value stays opaque —
-    # signing identity is the brain's judgement, not the pipe's formatting.
-    action = next(e for e in payload["card"]["elements"] if e.get("tag") == "action")
-    assert action["actions"][0]["text"]["content"] == "Acknowledge"
-    assert action["actions"][0]["value"] == {"signed": "opaque-token"}
+def _model(result: dict = RESULT) -> dict:
+    _url, body, _headers = build_request(_channel("bridge"), _message(result), now=0.0)
+    return json.loads(body)["card"]
 
 
-def test_a_recovery_is_green_and_says_so_first():
-    """A recovery card wearing a red header contradicts its own text."""
+def test_the_model_carries_every_block_as_facts():
+    card = _model()
+    assert card["tone"] == "high", "high importance is the state; the colour it earns is the renderer's"
+    assert card["title"] == "📡 Single top-up over 500"
+    assert card["lead"] == "🔴 HIGH"
+    assert card["summary"] == "three large top-ups in nine minutes across two accounts"
+    assert card["crumb"] == "demo-alarm · prod · Single top-up over 500", "identity as a breadcrumb, not a label grid"
+    assert card["impact"].startswith("limited to the notification itself")
+    assert card["links"] == [{"text": "Large top-up runbook", "url": "https://kb.example/runbook/42"}], (
+        "the runbook travels WITH the alert"
+    )
+    assert card["footer"] == "grafana · business · 2026-08-07 10:32:50"
+    # The action's value stays opaque — signing identity is the brain's judgement, not the pipe's formatting.
+    assert card["actions"] == [{"text": "Acknowledge", "style": "primary", "value": {"signed": "opaque-token"}}]
+    for key in ("title", "lead", "summary", "crumb", "impact", "footer"):
+        assert "\\" not in card[key], f"{key} is plain text — escaping is the renderer's, for its own dialect"
+
+
+def test_a_recovery_names_its_state_and_a_reminder_says_still_open():
     recovered = json.loads(json.dumps(RESULT))
     recovered["meta"]["is_recovery"] = True
-    _url, payload, _headers = build_request(_channel("feishu"), _message(recovered), now=0.0)
-
-    assert payload["card"]["header"]["template"] == "green"
-    assert payload["card"]["header"]["title"]["content"].startswith("✅ Resolved")
-
-
-def test_periodic_reminder_is_labelled_in_the_headline():
+    card = _model(recovered)
+    assert card["tone"] == "recovery" and card["title"].startswith("✅ Resolved")
     reminder = json.loads(json.dumps(RESULT))
     reminder["meta"]["is_periodic_reminder"] = True
-    _url, payload, _headers = build_request(_channel("feishu"), _message(reminder), now=0.0)
-    assert payload["card"]["header"]["title"]["content"].startswith("🔁 Still open")
-
-
-def test_dingtalk_and_wecom_get_their_own_markdown_without_dead_buttons():
-    _url, ding, _h = build_request(_channel("dingtalk"), _message(), now=1700000000.0)
-    assert ding["msgtype"] == "markdown"
-    text = ding["markdown"]["text"]
-    assert text.startswith("### 📡 Single top-up over 500"), "DingTalk wants a heading"
-    assert "🔴 HIGH" in text and "three large top-ups" in text
-    assert "Large top-up runbook" in text, "links survive where buttons cannot"
-    assert "signed" not in text, "a button with no callback channel is worse than none"
-
-    _url, wecom, _h = build_request(_channel("wecom"), _message(), now=0.0)
-    content = wecom["markdown"]["content"]
-    assert content.startswith("**📡 Single top-up over 500**"), "WeCom renders bold, not #"
-    assert "**Impact**" in content
+    assert _model(reminder)["title"].startswith("🔁 Still open")
 
 
 def test_generic_receives_the_structure_itself_signed():
@@ -135,19 +116,14 @@ def test_generic_receives_the_structure_itself_signed():
     assert headers["X-Hook-Signature"] == hmac_mod.new(b"s3", body, hashlib.sha256).hexdigest()
 
 
-def test_one_judgement_reaches_four_dialects_unchanged_in_meaning():
-    """The point of the split, asserted as one statement: the same result, four
-    formats, each carrying the summary and the runbook link."""
-    rendered = {}
-    for kind in ("feishu", "dingtalk", "wecom", "generic"):
+def test_one_judgement_reaches_people_and_machines_unchanged_in_meaning():
+    """The point of the split: the same result, as a model for a person's chat
+    and as itself for an archive, each carrying the summary and the runbook."""
+    for kind in ("bridge", "generic"):
         _url, payload, _headers = build_request(_channel(kind), _message(), now=0.0)
-        rendered[kind] = payload.decode() if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False)
-
-    for kind, text in rendered.items():
+        text = payload.decode()
         assert "three large top-ups in nine minutes" in text, f"{kind} lost the summary"
         assert "kb.example/runbook/42" in text, f"{kind} lost the runbook"
-    # And they are genuinely different renderings, not one shape reused.
-    assert len({rendered["feishu"], rendered["dingtalk"], rendered["wecom"]}) == 3
 
 
 async def test_a_non_object_payload_fails_into_the_ledger():
@@ -158,9 +134,8 @@ async def test_a_non_object_payload_fails_into_the_ledger():
     message = _message()
     message["payload"] = "not an object"
     with pytest.raises(TypeError, match="not an object"):
-        build_request(_channel("feishu"), message, now=0.0)
-
-    ok, detail, body, _ = await channels_mod.send(object(), _channel("feishu"), message)
+        build_request(_channel("bridge"), message, now=0.0)
+    ok, detail, body, _ = await channels_mod.send(object(), _channel("bridge"), message)
     assert ok is False and "build:" in detail
     assert body is None  # nothing was built, so there are no bytes to keep
 
@@ -170,7 +145,7 @@ def test_a_non_object_meta_is_not_a_poison_pill(bad: object):
     """A processed payload whose meta/analysis/identity is the wrong type used to
     reach an accessor as an AttributeError during build, escape send()'s narrow
     except, never dead-letter, and be retried every tick forever — head-of-line
-    blocking its channel. Coercion to {} means build renders (from whatever is
+    blocking its channel. Coercion to {} means build models (from whatever is
     left) instead of raising."""
     message = _message()
     payload = dict(message["payload"])
@@ -178,64 +153,35 @@ def test_a_non_object_meta_is_not_a_poison_pill(bad: object):
     payload["analysis"] = bad
     payload["identity"] = bad
     message = {**message, "payload": payload}
-    # The whole point: this does not raise. It renders a card from the defaults.
-    _url, built, _headers = build_request(_channel("feishu"), message, now=0.0)
-    assert built  # something was rendered, not an exception
+    _url, built, _headers = build_request(_channel("bridge"), message, now=0.0)
+    assert json.loads(built)["card"]["title"] == "📡 Alert"  # a model from the defaults, not an exception
 
 
-def test_a_supplied_link_label_cannot_hijack_the_card_link():
-    """A link label carrying `](…)` used to close the markdown link early, so the
-    payload's own target became the clickable one. Escaping `]` keeps the label
-    (evil URL and all) inside its brackets; the real target stays the only href."""
-    from hookrelay.markup import markdown_link
-
-    out = markdown_link("Runbook](https://evil.example) click", "https://kb.example/ok")
-    assert out.endswith("](https://kb.example/ok)")  # the only real link target
-    assert "Runbook\\](https://evil.example) click" in out  # evil is escaped label text
-
-
-def test_missing_optional_blocks_render_without_holes():
-    """Brains differ: a lite brain has no impact analysis and no KB. Its result must
-    still produce a clean card, not one with empty sections."""
+def test_missing_optional_blocks_are_absent_not_empty():
+    """Brains differ: a lite brain has no impact analysis and no KB. Its model
+    must simply lack those keys — a renderer then draws no empty sections."""
     lean = {
         "meta": {"alert_name": "Disk about to fill", "importance": "medium", "source": "lite"},
         "analysis": {"summary": "s"},
     }
-    _url, payload, _headers = build_request(_channel("feishu"), _message(lean), now=0.0)
-    blocks = json.dumps(payload["card"]["elements"], ensure_ascii=False)
-    assert "Impact" not in blocks and "Runbooks" not in blocks
-    assert "s" in blocks and payload["card"]["header"]["template"] == "orange"
+    card = _model(lean)
+    assert "impact" not in card and "links" not in card and "actions" not in card and "crumb" not in card
+    assert card["summary"] == "s" and card["tone"] == "medium"
 
 
 def test_the_footer_timestamp_reads_as_a_clock_not_an_epoch():
     """A brain sends an epoch; a person reads a clock.
 
     meta.timestamp went into the card as the float it arrived as, so a real
-    end-to-end run ended its Feishu card with "· 1786037727.669673". Same
-    format as the status page so one alert reads the same in both places.
-    """
+    end-to-end run ended its card with "· 1786037727.669673". Same format as
+    the status page so one alert reads the same in both places; a brain that
+    already formatted its own string keeps it; milliseconds are absorbed."""
     import re
-    import time
 
-    epoch = 1786037727.669673
-    card = Processed({"meta": {"source": "inbound", "timestamp": epoch}, "analysis": {"event_type": "business"}})
-    footer = card.footer()
+    def footer(stamp: object) -> str:
+        return Processed({"meta": {"alert_name": "x", "source": "s", "timestamp": stamp}}).footer()
 
-    assert "1786037727" not in footer, "an epoch is not a time a person can read"
-    assert re.search(r"\d{2}-\d{2} \d{2}:\d{2}:\d{2}", footer), footer
-    assert footer.endswith(time.strftime("%m-%d %H:%M:%S", time.localtime(epoch)))
-    assert footer.startswith("inbound · business · ")
-
-
-def test_the_footer_tolerates_what_brains_actually_send():
-    """Milliseconds, an already-formatted string, and nothing at all."""
-    ms = Processed({"meta": {"timestamp": 1786037727669}}).footer()
-    sec = Processed({"meta": {"timestamp": 1786037727}}).footer()
-    assert ms == sec, "milliseconds must not render as a date in the year 58000"
-
-    # A brain that formatted its own string keeps it — it knows its own room.
-    assert Processed({"meta": {"timestamp": "2026-08-06 17:35"}}).footer() == "2026-08-06 17:35"
-
-    assert Processed({"meta": {"source": "grafana"}}).footer() == "grafana"
-    assert Processed({"meta": {"timestamp": ""}}).footer() == ""
-    assert Processed({"meta": {"timestamp": None}}).footer() == ""
+    assert re.fullmatch(r"s · \d\d-\d\d \d\d:\d\d:\d\d", footer(1786037727.669673))
+    assert footer(1786037727669) == footer(1786037727.669673), "milliseconds are the same instant"
+    assert footer("2026-08-07 10:32:50") == "s · 2026-08-07 10:32:50"
+    assert footer(None) == "s" and footer("  ") == "s"

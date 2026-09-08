@@ -40,7 +40,7 @@ def _cfg_with_actions() -> Config:
         {
             "sources": [{"name": "judge-notify", "secret": "", "title": "{meta.alert_name}", "body": "{x}"}],
             "channels": [
-                {"name": "ops-feishu", "type": "feishu", "url": "https://feishu.example/hook"},
+                {"name": "ops-feishu", "type": "bridge", "url": "https://feishu.example/hook"},
                 {"name": "probe-action", "type": "generic", "url": "https://probe.example/hooks/action"},
             ],
             "routes": [{"name": "all", "source": "*", "send_to": ["ops-feishu"]}],
@@ -144,7 +144,7 @@ def test_an_unsignable_declaration_is_dropped_rather_than_rendered_inert() -> No
     bare = Config.from_dict(
         {
             "sources": [{"name": "judge-notify", "secret": "", "title": "{meta.alert_name}", "body": "{x}"}],
-            "channels": [{"name": "ops-feishu", "type": "feishu", "url": "https://feishu.example/hook"}],
+            "channels": [{"name": "ops-feishu", "type": "bridge", "url": "https://feishu.example/hook"}],
             "routes": [{"name": "all", "source": "*", "send_to": ["ops-feishu"]}],
         }
     )
@@ -276,35 +276,6 @@ async def test_a_refused_token_never_reaches_the_ledger(action_client):
     assert (await action_client.post("/card-action", content=b"not json")).status_code == 400
     assert await store.recent_actions() == []
     assert await store.active_silence("judge-notify", time.time()) is None
-
-
-# ── the channels that cannot call back ───────────────────────────────────────
-
-
-def test_dingtalk_and_wecom_carry_actions_as_links() -> None:
-    """Feishu gets buttons because it posts a callback. A DingTalk or WeCom
-    webhook robot cannot — its ActionCard buttons are URL jumps — so a real
-    button there would do nothing. Without a link these two channels could never
-    take part in the feedback the rest of the family now depends on:
-    `mattered_pct` would stay null forever and the escalation sweep would read
-    every alert as untouched."""
-    from hookrelay.processed import Processed
-
-    minted = actions.offered(
-        "card-s3cret",
-        [{"kind": "silence", "text": "Silence 1h", "minutes": 60}],
-        {"silence": {"params": {}}},
-        event_id=4,
-        correlation_id="hr-4",
-        now=time.time(),
-    )
-    processed = Processed({**PROCESSED, "actions": minted})
-
-    rendered = processed.markdown(heading=True, action_base="https://relay.example")
-    assert "[Silence 1h](https://relay.example/card-action?t=" in rendered
-
-    # No base configured — a link nobody can reach is worse than no link.
-    assert "card-action" not in processed.markdown(heading=True)
 
 
 async def test_the_link_only_asks_and_the_post_acts(action_client):

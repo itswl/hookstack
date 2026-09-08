@@ -35,12 +35,20 @@ sources:
       success: info
 
 channels:
-  - name: ops-feishu
-    type: feishu
-    url: ${FEISHU_WEBHOOK_URL}
-    secret: ${FEISHU_WEBHOOK_SECRET}   # empty if the bot has no signing
+  # People: a card MODEL to a chat bridge (docs/bridge-protocol.md), which
+  # renders it for its platform and posts it — as an app (buttons that call
+  # back, replies in threads) or through a custom bot's webhook. The pipe
+  # itself names no platform; swapping the chat is swapping the sidecar.
+  - name: ops-chat
+    type: bridge
+    url: http://lark-bridge:9100/
+    secret: ${BRIDGE_SECRET}           # same value as the bridge's BRIDGE_INBOUND_SECRET
     max_per_minute: 20
+    options: {thread_replies: true}    # a report naming fields.thread_root answers in that thread
 
+  # Markdown webhooks are dialects, and dialects are plugins: these two types
+  # come from examples/plugins/chat_markdown_channels.py, loaded from
+  # HOOKRELAY_PLUGINS. Actions on them are LINKS (HOOKRELAY_PUBLIC_URL).
   - name: ops-dingtalk
     type: dingtalk
     url: ${DINGTALK_WEBHOOK_URL}
@@ -85,12 +93,12 @@ routes:
     source: "*"
     when:
       level: [high, critical]
-    send_to: [ops-feishu, ops-dingtalk]
+    send_to: [ops-chat, ops-dingtalk]
     priority: 100
 
   - name: grafana-default
     source: grafana
-    send_to: [ops-feishu]
+    send_to: [ops-chat]
     priority: 10
 
   - name: everything-to-archive

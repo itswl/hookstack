@@ -47,6 +47,22 @@ read by the investigator, under the same read-only posture and guards as an
 alert, and only for senders in `HOOKPROBE_FOLLOW_UP_SENDERS`
 ([hookprobe/docs/configuration.md](../../hookprobe/docs/configuration.md)).
 
+## Two ways to deliver
+
+**As the application** (default): lark-cli, a chat id, buttons that call back,
+replies in threads, a message id back for every card. Needs the Lark app below.
+
+**Through a custom bot's webhook** (`LARK_WEBHOOK_URL` set, no app): the same
+protocol on the pipe's side; this bridge renders the card and POSTs it to the
+bot's incoming URL with the bot's own `{timestamp, sign}` when
+`LARK_WEBHOOK_SECRET` is set. No lark-cli, no chat id, no events consumed. What
+the platform does not allow is said, not faked: no message id comes back,
+`reply_to`/`chat_id` are ignored with a log line, and actions are rendered as
+**links** to the pipe's confirm page when the envelope names
+`action_link_base` — never as buttons that do nothing. The quickstart runs the
+bridge this way against its sink; production runs a second instance this way
+for the operator's personal watch bot.
+
 ## What it refuses, and what it does not keep
 
 - **Chats.** It posts into, and forwards from, exactly `LARK_CHAT_ID` plus
@@ -112,9 +128,10 @@ without `im:chat.members:write_only` cannot add another.
 
 | variable | default | meaning |
 |---|---|---|
-| `LARK_APP_ID`, `LARK_APP_SECRET` | *(required)* | the app; written into lark-cli's config on the `/config` volume on first start — see *Switching apps* |
+| `LARK_APP_ID`, `LARK_APP_SECRET` | *(required in app mode)* | the app; written into lark-cli's config on the `/config` volume on first start — see *Switching apps* |
+| `LARK_WEBHOOK_URL`, `LARK_WEBHOOK_SECRET` | *(empty = app mode)* | webhook mode: post rendered cards to this custom-bot URL, signed with the bot's secret if it has one |
 | `LARK_BRAND` | `lark` | `lark` or `feishu` |
-| `LARK_CHAT_ID` | *(required)* | the default chat: cards without `chat_id` go here, and replies from here are forwarded |
+| `LARK_CHAT_ID` | *(required in app mode)* | the default chat: cards without `chat_id` go here, and replies from here are forwarded |
 | `BRIDGE_CHAT_IDS` | *(empty)* | comma-separated further chats this bridge may post into and forward from (`options.chat_id` on a pipe channel names one) |
 | `BRIDGE_INBOUND_SECRET` | *(empty = accept every card)* | the pipe's channel secret, verified on protocol cards (headers) and legacy cards (body); set it — the port sits on a network shared with other stacks |
 | `RELAY_ACTION_URL` | `http://hookrelay:8100/card-action` | where a button press goes |

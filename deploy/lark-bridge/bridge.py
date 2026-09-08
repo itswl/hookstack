@@ -45,13 +45,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lark-bridge")
 
-CHAT_ID = os.environ["LARK_CHAT_ID"]
+# Two ways to deliver. As the APPLICATION (default): lark-cli, a chat id, button
+# callbacks, in-thread replies. Or through a custom-bot WEBHOOK
+# (LARK_WEBHOOK_URL): the same rendered card posted to the bot's incoming URL —
+# no app, no chat id, no message id back, no threads, and actions become links
+# because a custom bot cannot call back. Same protocol on the pipe's side.
+WEBHOOK_URL = os.environ.get("LARK_WEBHOOK_URL", "")
+WEBHOOK_SECRET = os.environ.get("LARK_WEBHOOK_SECRET", "")
+WEBHOOK_MODE = bool(WEBHOOK_URL)
+CHAT_ID = os.environ.get("LARK_CHAT_ID", "")
+if not WEBHOOK_MODE and not CHAT_ID:
+    raise SystemExit("LARK_CHAT_ID is required unless LARK_WEBHOOK_URL is set")
 # Every chat this bridge may post into and will forward replies from: the
 # default above plus BRIDGE_CHAT_IDS (comma-separated). A pipe channel names one
 # with `options: {chat_id: …}`; a request for a chat outside this set is refused
 # — the bridge's blast radius is written here, not decided by its callers.
 CHAT_IDS = {
-    CHAT_ID,
+    *([CHAT_ID] if CHAT_ID else []),
     *(c.strip() for c in os.environ.get("BRIDGE_CHAT_IDS", "").split(",") if c.strip()),
 }
 RELAY_ACTION_URL = os.environ.get(
@@ -185,6 +195,45 @@ def send_card(card: dict, reply_to: str = "", chat_id: str = "") -> tuple[bool, 
     return True, str((answer.get("data") or {}).get("message_id") or "")
 
 
+def send_webhook(card: dict) -> tuple[bool, str]:
+    """Post one rendered card to a custom bot's incoming webhook.
+
+    The bot's own signing when LARK_WEBHOOK_SECRET is set — {timestamp, sign},
+    sign = base64(HMAC-SHA256(key="{ts}\n{secret}", msg="")). Feishu answers
+    200 with an in-body code, and a 200 that says "invalid sign" is a failure.
+    No message id comes back: a custom bot's messages cannot be replied to.
+    """
+    body: dict = {"msg_type": "interactive", "card": card}
+    if WEBHOOK_SECRET:
+        ts = str(int(time.time()))
+        key = f"{ts}\n{WEBHOOK_SECRET}".encode()
+        body["timestamp"] = ts
+        body["sign"] = base64.b64encode(
+            hmac.new(key, b"", hashlib.sha256).digest()
+        ).decode()
+    request = urllib.request.Request(  # nosec B310 — a fixed https:// URL from env, not user input
+        WEBHOOK_URL,
+        data=json.dumps(body, ensure_ascii=False).encode(),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310
+            answer = json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as error:
+        return False, f"http {error.code}: {error.read()[:200]!r}"
+    except (urllib.error.URLError, TimeoutError, ValueError) as error:
+        return False, str(error)[:300]
+    code = (
+        answer.get("code", answer.get("StatusCode", 0))
+        if isinstance(answer, dict)
+        else 0
+    )
+    if code not in (0, None):
+        return False, json.dumps(answer, ensure_ascii=False)[:300]
+    return True, ""
+
+
 class Handler(BaseHTTPRequestHandler):
     """The pipe's cards, accepted and sent as the app — the protocol's card
     model rendered here, or a finished Feishu card passed through."""
@@ -233,17 +282,32 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if protocol:
-            card = render.feishu_card(card)["card"]
+            # As the app, actions are buttons that call back; through a webhook
+            # they are links to the pipe's confirm page, at the base the pipe
+            # named — or nothing, never a button that does nothing.
+            card = render.feishu_card(
+                card,
+                actions="links" if WEBHOOK_MODE else "buttons",
+                link_base=str(payload.get("action_link_base") or "")[:200],
+            )["card"]
         # `reply_to` is the pipe's request to answer inside a thread (see
         # hookrelay's feishu channel, `thread_replies`). Read here, never sent on.
         reply_to = str(payload.get("reply_to") or "")[:120]
         chat_id = str(payload.get("chat_id") or "")[:120]
-        if chat_id and chat_id not in CHAT_IDS:
+        if chat_id and chat_id not in CHAT_IDS and not WEBHOOK_MODE:
             logger.warning(
                 "card refused: chat %s is not one this bridge serves", chat_id[:12]
             )
             self._reply(400, {"ok": False, "error": "chat not served by this bridge"})
             return
+        if WEBHOOK_MODE and (reply_to or chat_id):
+            # A webhook has one destination and no threads; say so once per
+            # card instead of pretending. The card still goes out.
+            logger.info(
+                "webhook mode: thread/chat hints ignored (reply_to=%s chat_id=%s)",
+                bool(reply_to),
+                bool(chat_id),
+            )
         if protocol and self.headers.get(DRY_RUN_HEADER):
             # The conformance hook: everything but the send. A bridge for any
             # platform answers this the same way, with its own rendering.
@@ -252,12 +316,14 @@ class Handler(BaseHTTPRequestHandler):
                 200, {"ok": True, "dry_run": True, "message_id": "", "rendered": card}
             )
             return
-        ok, detail = send_card(card, reply_to, chat_id)
+        ok, detail = (
+            send_webhook(card) if WEBHOOK_MODE else send_card(card, reply_to, chat_id)
+        )
         if ok:
             logger.info(
-                "card delivered message_id=%s%s",
-                detail,
-                " (in thread)" if reply_to else "",
+                "card delivered %s%s",
+                "via webhook" if WEBHOOK_MODE else f"message_id={detail}",
+                " (in thread)" if reply_to and not WEBHOOK_MODE else "",
             )
             self._reply(200, {"ok": True, "message_id": detail})
         else:
@@ -579,12 +645,19 @@ def consume(event_key: str, handler, attach_only: bool = False) -> None:
 
 
 def main() -> None:
-    logger.info(
-        "bridge up: chat=%s relay=%s port=%s", CHAT_ID, RELAY_ACTION_URL, LISTEN_PORT
-    )
-    threading.Thread(target=consume_presses, daemon=True).start()
-    if RELAY_THREAD_URL:
-        threading.Thread(target=consume_messages, daemon=True).start()
+    if WEBHOOK_MODE:
+        # Nothing to consume: a custom bot has no events. Cards in, webhook out.
+        logger.info("bridge up (webhook mode): port=%s", LISTEN_PORT)
+    else:
+        logger.info(
+            "bridge up: chat=%s relay=%s port=%s",
+            CHAT_ID,
+            RELAY_ACTION_URL,
+            LISTEN_PORT,
+        )
+        threading.Thread(target=consume_presses, daemon=True).start()
+        if RELAY_THREAD_URL:
+            threading.Thread(target=consume_messages, daemon=True).start()
     # 0.0.0.0 inside a container network with no published port: only the pipe
     # beside it can reach this.
     server = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), Handler)  # nosec B104

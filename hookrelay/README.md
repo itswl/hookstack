@@ -8,12 +8,12 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 5,800 source lines, five dependencies) that takes JSON
+A pluggable router (under 5,500 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
-to Feishu / DingTalk / WeCom / generic HTTP — with retries, per-channel rate
+to a chat bridge / generic HTTP (DingTalk and WeCom as shipped plugins) — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 5,800 source lines is the
+Both numbers are **budgets, not descriptions**. 5,500 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
@@ -68,8 +68,8 @@ The response IS the decision trace:
  upstream                     pipeline                          downstream
 ┌──────────────┐   ┌──────────────────────────────┐   ┌──────────────────────┐
 │ source       │   │ dedup → silence → … → routes │   │ channel types        │
-│ ADAPTERS     │ → │ PROCESSORS (ordered, config) │ → │ feishu dingtalk      │
-│ default,     │   │ built-in: dedup silence      │   │ wecom generic        │
+│ ADAPTERS     │ → │ PROCESSORS (ordered, config) │ → │ bridge generic       │
+│ default,     │   │ built-in: dedup silence      │   │ + plugins            │
 │ github, …    │   │ routes set filter http       │   │ + your plugin        │
 └──────────────┘   └──────────────────────────────┘   └──────────────────────┘
 ```
@@ -235,8 +235,8 @@ Full field-by-field reference: **[docs/configuration.md](docs/configuration.md)*
 
 One YAML file (see `config.example.yaml`): `sources` (who may knock, how to
 extract `title`/`body`/`level`/`fields` via `{dotted.paths.0.into.json}`),
-`channels` (bridge / feishu / dingtalk / wecom / generic, each with optional signing and
-rate limit — `bridge` sends a card model to a chat sidecar, [docs/bridge-protocol.md](../docs/bridge-protocol.md)), `routes` (match on source + extracted fields → channels).
+`channels` (`bridge` for people, `generic` for machines, each with optional signing and
+rate limit — `bridge` sends a card model to a chat sidecar, [docs/bridge-protocol.md](../docs/bridge-protocol.md); DingTalk and WeCom markdown come from a shipped plugin), `routes` (match on source + extracted fields → channels).
 Secrets are written as `${ENV_NAME}` and resolve at startup; the file itself
 stays commit-safe.
 
@@ -304,5 +304,5 @@ without the other fails. CI also builds the image and boots it, because the
 container is how this actually ships.
 
 Gates order and trace shape, route semantics, per-channel wire formats
-(including DingTalk/Feishu signing), backoff → dead-letter, rate-limit
+(including the bridge's header signature and a plugin's DingTalk query signing), backoff → dead-letter, rate-limit
 deferral, and the HTTP surface with real signatures.

@@ -204,7 +204,12 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # three direct dialect builders (~250 lines) stay for custom-bot webhooks
     # and are what the next change moves to examples/plugins — the ceiling
     # comes back down with them.
-    "hookrelay": (5800, Path("hookrelay/README.md")),
+    # 5800 -> 5500 on 2026-09-08, the same day: it did. The Feishu card
+    # renderer moved into lark-bridge, DingTalk and WeCom became one plugin
+    # rendering the same card model, markup.py went with them. The pipe's
+    # outbound kinds are `generic` (machines) and `bridge` (people), and no
+    # line of it names a chat platform. Split: -~380 source, -~220 code.
+    "hookrelay": (5500, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

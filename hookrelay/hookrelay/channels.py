@@ -1,7 +1,10 @@
 """Channel adapters: pure request builders plus one thin sender.
 
-Builders are registry entries — the four built-ins register through the same
-decorator a plugin would use. A builder returns (url, payload, headers) and
+Builders are registry entries — the two built-ins (`generic` for machines,
+`bridge` for people, docs/bridge-protocol.md) register through the same
+decorator a plugin would use; the markdown dialects for DingTalk and WeCom are
+exactly such plugins (examples/plugins/chat_markdown_channels.py). No builder
+here knows what any chat platform's message looks like. A builder returns (url, payload, headers) and
 touches no network; payload is either a dict (serialized by httpx) or BYTES.
 
 Bytes matter when the payload is signed: the signature must cover the exact
@@ -13,21 +16,18 @@ have failed. Signed builders now emit the final bytes themselves.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
 import time
 from typing import Any
-from urllib.parse import quote_plus
 
 import httpx
 
 from hookrelay import registry
 from hookrelay.config import Channel
 from hookrelay.extract import resolve_path
-from hookrelay.markup import escape_markup
-from hookrelay.processed import FEISHU_FALLBACK_COLOR, FEISHU_LEVEL_COLOR, Processed
+from hookrelay.processed import Processed
 
 Payload = dict[str, Any] | bytes
 # The version a bridge checks before reading anything else (docs/bridge-protocol.md).
@@ -74,32 +74,11 @@ def _prebuilt(channel: Channel, message: dict[str, Any]) -> Any | None:
     return selected
 
 
-def _fields_lines(message: dict[str, Any]) -> str:
-    """Extracted fields as markdown lines — escaped, both halves.
-
-    Names as well as values: a field NAME is a config string, but its value came
-    from the payload and both land in the same markup (hookrelay/markup.py).
-    """
-    fields = message.get("fields") or {}
-    return "\n".join(
-        f"**{escape_markup(str(name))}**: {escape_markup(str(value))}" for name, value in fields.items() if value
-    )
-
-
-def _feishu_sign_fields(secret: str, now: float) -> dict[str, str]:
-    timestamp = str(int(now))
-    key = f"{timestamp}\n{secret}".encode()
-    sign = base64.b64encode(hmac.new(key, b"", hashlib.sha256).digest()).decode()
-    return {"timestamp": timestamp, "sign": sign}
-
-
-# Ledger hygiene. The schema promises "body only, never the headers: headers
-# carry signatures and tokens" — true for every dialect except Feishu's custom
-# bot, which signs in the BODY. So the ledger stored a live `sign`, /trace
-# served it under a read guard that is open until a token is configured, and
-# anyone who could reach the board could post into the group. The alert content
-# is what answers a receiver's dispute; the signature is derived, reproducible,
-# and nobody's evidence.
+# What the ledger's copy of a body must not keep. A custom bot's in-band `sign`
+# was stored and served under a read guard that is open until a token is
+# configured, so anyone who could reach the board could post into the group.
+# The alert content is what answers a receiver's dispute; the signature is
+# derived, reproducible, and nobody's evidence.
 _SIGNING_KEYS = ("sign",)
 
 
@@ -118,117 +97,6 @@ def redact_for_ledger(body: bytes | None) -> str | None:
         if key in parsed:
             parsed[key] = "[redacted]"
     return json.dumps(parsed, ensure_ascii=False)
-
-
-@registry.channel("feishu", capabilities=("callbacks",))
-def build_feishu(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
-    processed = _processed(channel, message)
-    if processed is not None:
-        payload = processed.feishu_card()
-        if channel.secret:
-            payload.update(_feishu_sign_fields(channel.secret, now))
-        return channel.url, payload, {}
-    prebuilt = _prebuilt(channel, message)
-    if prebuilt is not None:
-        # The brain's finished Feishu message (interactive cards with their
-        # callback buttons survive intact); only bot signing is injected here,
-        # because the SENDER owns the timestamp.
-        if not isinstance(prebuilt, dict):
-            raise ValueError(f"channel {channel.name}: raw feishu payload must be an object")
-        payload = dict(prebuilt)
-        if channel.secret:
-            payload.update(_feishu_sign_fields(channel.secret, now))
-        return channel.url, payload, {}
-    color = FEISHU_LEVEL_COLOR.get(str(message.get("level", "info")), FEISHU_FALLBACK_COLOR)
-    # The body element is `lark_md`, so the payload's text is escaped into it;
-    # the header title below is `plain_text` and stays verbatim.
-    body_lines = [part for part in (escape_markup(str(message.get("body", ""))), _fields_lines(message)) if part]
-    elements: list[dict[str, Any]] = [
-        {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(body_lines) or "(no body)"}},
-        {
-            "tag": "note",
-            "elements": [{"tag": "plain_text", "content": f"hookrelay · {message['source']} · #{message['event_id']}"}],
-        },
-    ]
-    payload = {
-        "msg_type": "interactive",
-        "card": {
-            "header": {"title": {"tag": "plain_text", "content": message["title"]}, "template": color},
-            "elements": elements,
-        },
-    }
-    # Feishu custom-bot signing: base64(HMAC-SHA256(key="{ts}\n{secret}", msg="")).
-    if channel.secret:
-        payload.update(_feishu_sign_fields(channel.secret, now))
-    return channel.url, payload, {}
-
-
-@registry.channel("dingtalk", capabilities=("links",))
-def build_dingtalk(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
-    processed = _processed(channel, message)
-    if processed is not None:
-        payload = {
-            "msgtype": "markdown",
-            "markdown": {
-                "title": processed.headline,
-                "text": processed.markdown(heading=True, action_base=str(message.get("_action_base") or "")),
-            },
-        }
-        return _dingtalk_signed_url(channel, now), payload, {}
-    prebuilt = _prebuilt(channel, message)
-    if prebuilt is not None:
-        if not isinstance(prebuilt, dict):
-            raise ValueError(f"channel {channel.name}: raw dingtalk payload must be an object")
-        return _dingtalk_signed_url(channel, now), prebuilt, {}
-    lines = [f"### {escape_markup(str(message['title']))}"]
-    if message.get("body"):
-        lines.append(escape_markup(str(message["body"])))
-    fields = _fields_lines(message)
-    if fields:
-        lines.append(fields)
-    lines.append(f"> hookrelay · {message['source']} · #{message['event_id']}")
-    # `markdown.title` is the push-notification summary, not a rendered block, so
-    # it takes the title verbatim while `text` above takes the escaped one.
-    payload = {"msgtype": "markdown", "markdown": {"title": message["title"], "text": "\n\n".join(lines)}}
-    return _dingtalk_signed_url(channel, now), payload, {}
-
-
-def _dingtalk_signed_url(channel: Channel, now: float) -> str:
-    """DingTalk signing rides the query string: sign of "{ts_ms}\n{secret}"."""
-    url = channel.url
-    if channel.secret:
-        timestamp = str(int(now * 1000))
-        digest = hmac.new(channel.secret.encode(), f"{timestamp}\n{channel.secret}".encode(), hashlib.sha256).digest()
-        sign = quote_plus(base64.b64encode(digest))
-        joiner = "&" if "?" in url else "?"
-        url = f"{url}{joiner}timestamp={timestamp}&sign={sign}"
-    return url
-
-
-@registry.channel("wecom", capabilities=("links",))
-def build_wecom(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
-    processed = _processed(channel, message)
-    if processed is not None:
-        content = {
-            "msgtype": "markdown",
-            "markdown": {
-                "content": processed.markdown(heading=False, action_base=str(message.get("_action_base") or ""))
-            },
-        }
-        return channel.url, content, {}
-    prebuilt = _prebuilt(channel, message)
-    if prebuilt is not None:
-        if not isinstance(prebuilt, dict):
-            raise ValueError(f"channel {channel.name}: raw wecom payload must be an object")
-        return channel.url, prebuilt, {}
-    lines = [f"**{escape_markup(str(message['title']))}**"]
-    if message.get("body"):
-        lines.append(escape_markup(str(message["body"])))
-    fields = _fields_lines(message)
-    if fields:
-        lines.append(fields)
-    lines.append(f'<font color="comment">hookrelay · {message["source"]} · #{message["event_id"]}</font>')
-    return channel.url, {"msgtype": "markdown", "markdown": {"content": "\n".join(lines)}}, {}
 
 
 @registry.channel("generic")
@@ -277,6 +145,31 @@ def build_generic(channel: Channel, message: dict[str, Any], now: float) -> Buil
     return channel.url, body, headers
 
 
+def card_model_for(channel: Channel, message: dict[str, Any]) -> dict[str, Any]:
+    """The card as facts (docs/bridge-protocol.md), from whatever this channel
+    was given: a brain's result under `payload: processed`, else the event
+    itself. Plain text, unescaped — whoever renders it into a dialect escapes
+    for that dialect. Shared with the markdown plugins in examples/plugins, so
+    a dialect rendered in-process reads the same model a bridge does.
+    """
+    processed = _processed(channel, message)
+    if processed is not None:
+        return processed.card_model()
+    if _prebuilt(channel, message) is not None:
+        raise ValueError(
+            f"channel {channel.name}: payload: raw is a finished platform payload; a card model is built here"
+        )
+    fields = message.get("fields") or {}
+    card = {
+        "title": str(message.get("title") or ""),
+        "tone": str(message.get("level") or "info").lower(),
+        "summary": str(message.get("body") or ""),
+        "details": "\n".join(f"{name}: {value}" for name, value in fields.items() if value),
+        "footer": f"hookrelay · {message.get('source')} · #{message.get('event_id')}",
+    }
+    return {key: value for key, value in card.items() if value}
+
+
 @registry.channel("bridge", capabilities=("callbacks",))
 def build_bridge(channel: Channel, message: dict[str, Any], now: float) -> BuiltRequest:
     """The chat-bridge protocol (docs/bridge-protocol.md): a card MODEL, signed
@@ -290,25 +183,14 @@ def build_bridge(channel: Channel, message: dict[str, Any], now: float) -> Built
     never by platform. The hints go in before signing, because the signature
     covers the exact bytes that leave — see the module docstring.
     """
-    processed = _processed(channel, message)
-    if processed is not None:
-        card = processed.card_model()
-    elif _prebuilt(channel, message) is not None:
-        raise ValueError(
-            f"channel {channel.name}: payload: raw is a finished platform payload; a bridge takes a card model"
-        )
-    else:
-        fields = message.get("fields") or {}
-        card = {
-            "title": str(message.get("title") or ""),
-            "tone": str(message.get("level") or "info").lower(),
-            "summary": str(message.get("body") or ""),
-            # Plain lines, unescaped: the bridge escapes for its own dialect.
-            "details": "\n".join(f"{name}: {value}" for name, value in fields.items() if value),
-            "footer": f"hookrelay · {message.get('source')} · #{message.get('event_id')}",
-        }
-        card = {key: value for key, value in card.items() if value}
+    card = card_model_for(channel, message)
     envelope = _bridge_hints(channel, message, {"protocol": BRIDGE_PROTOCOL, "card": card})
+    # For a bridge that delivers somewhere that cannot call back: where a link
+    # for an action should land (this pipe's public address). The channel says;
+    # nothing here knows what the bridge's far side is.
+    link_base = str(channel.options.get("action_link_base") or "").strip().rstrip("/")
+    if link_base:
+        envelope["action_link_base"] = link_base
     body = json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     headers = {"content-type": "application/json"}
     if channel.secret:

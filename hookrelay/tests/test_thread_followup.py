@@ -46,7 +46,7 @@ CFG = {
     "channels": [
         {
             "name": "to-me",
-            "type": "feishu",
+            "type": "bridge",
             "url": "http://bridge/",
             "options": {"payload": "normalized", "thread_replies": True},
         },
@@ -229,7 +229,7 @@ async def test_a_channel_can_name_the_chat_one_bridge_serves_several(cfg):
                 *CFG["channels"],
                 {
                     "name": "to-plan-chat",
-                    "type": "feishu",
+                    "type": "bridge",
                     "url": "http://bridge/",
                     "options": {"payload": "normalized", "thread_replies": True, "chat_id": "oc_plan"},
                 },

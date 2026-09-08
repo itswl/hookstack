@@ -100,11 +100,18 @@ channels:
     url: ${HOOKPROBE_EVENT_URL}
     options: {payload: normalized}   # the investigator wants the event too
 
+  # People. The pipe sends a card MODEL to the chat bridge (docs/bridge-protocol.md);
+  # the bridge renders the Feishu card and posts it — here, in webhook mode, to
+  # the sink the way it would to a custom bot's URL. The pipe names no platform.
   - name: ops-feishu
-    type: feishu
-    url: http://sink:9000/feishu
-    options: {payload: processed}    # the brain judged, the pipe dresses
+    type: bridge
+    url: http://lark-bridge:9100/
+    secret: demo-bridge-secret       # the bridge's BRIDGE_INBOUND_SECRET (compose)
+    options: {payload: processed}    # the brain judged, the pipe models, the bridge dresses
 
+  # A second dialect from the same judgement — a plugin: the compose mounts
+  # examples/plugins as HOOKRELAY_PLUGINS, and this type comes from
+  # chat_markdown_channels.py there. Actions on it are links (HOOKRELAY_PUBLIC_URL).
   - name: ops-dingtalk
     type: dingtalk
     url: http://sink:9000/dingtalk

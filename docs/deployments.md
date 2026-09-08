@@ -116,9 +116,11 @@ card model — title, tone, summary, links, actions as plain facts — and the
 sidecar renders, posts as the app, and carries presses and replies back
 ([docs/bridge-protocol.md](bridge-protocol.md)). Nothing in the pipe, the judge
 or the investigator names the platform; another IM is another sidecar, tested
-against the same fixture. The `to-me-watch` channel still posts a finished card
-to a custom-bot webhook (`type: feishu`), which is what the direct dialect types
-remain for.
+against the same fixture. The operator's personal watch bot is a custom-bot
+webhook, so it gets a second bridge in **webhook mode** (`lark-bridge-watch`):
+same image, no app, the rendered card posted to the bot's URL. The pipe has
+no Feishu channel type any more; DingTalk and WeCom markdown are a shipped
+plugin.
 
 **Follow-ups from the chat thread: alert deployment only, since 2026-09-08.**
 A person who replies under a verdict or report card in the group continues

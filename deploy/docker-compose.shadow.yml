@@ -278,6 +278,23 @@ services:
     depends_on:
       - hookrelay
 
+  # The same image in WEBHOOK mode for the operator's personal watch bot: no
+  # app, no chat id, no events — a card model in, the rendered card posted to
+  # the custom bot's URL. One bridge per destination keeps each one's blast
+  # radius exactly one chat, and keeps the pipe's config free of platform names
+  # (shadow.yaml `to-me-watch`).
+  lark-bridge-watch:
+    build: ./lark-bridge
+    image: lark-bridge:shadow
+    container_name: lark-bridge-watch
+    restart: unless-stopped
+    mem_limit: 128m
+    environment:
+      LARK_WEBHOOK_URL: ${WATCH_FEISHU_WEBHOOK:?set WATCH_FEISHU_WEBHOOK in .env}
+      BRIDGE_INBOUND_SECRET: ${LARK_BRIDGE_SECRET:-}
+    depends_on:
+      - hookrelay
+
 volumes:
   lark-bridge-config:
 

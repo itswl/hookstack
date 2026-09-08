@@ -259,7 +259,7 @@ point of running two brains side by side.
 ```yaml
 routes:
   - {name: fan-to-brains, source: inbound, send_to: [to-brain-a, to-brain-b], stop: true}
-  - {name: a-to-chat,     source: a-notify,    send_to: [ops-feishu], stop: true}
+  - {name: a-to-chat,     source: a-notify,    send_to: [ops-chat], stop: true}
   # The shadow brain is gathered and compared, never delivered onward —
   # comparing two brains must not double every notification an operator gets.
   - {name: lite-compare,  source: lite-notify, send_to: [compare-log], stop: true}
@@ -302,14 +302,11 @@ channels:
     type: bridge                       # a card MODEL to a chat sidecar (docs/bridge-protocol.md); secret = header signature
     url: http://lark-bridge:9100/
     secret: ${BRIDGE_SECRET}
+    max_per_minute: 20                 # rate limit DEFERS (reschedules), never drops
     options: {thread_replies: true}    # an event naming fields.thread_root goes out as a reply in that thread
 
-  - name: ops-feishu
-    type: feishu                       # a finished card to a custom-bot webhook; secret = bot signing (optional)
-    url: ${FEISHU_WEBHOOK_URL}
-    secret: ${FEISHU_WEBHOOK_SECRET}
-    max_per_minute: 20                 # rate limit DEFERS (reschedules), never drops
-
+  # Two markdown dialects from a SHIPPED PLUGIN (examples/plugins/chat_markdown_channels.py,
+  # loaded from HOOKRELAY_PLUGINS). Custom-bot webhooks: actions become links (HOOKRELAY_PUBLIC_URL).
   - name: ops-dingtalk
     type: dingtalk                     # markdown; secret = query-string signing
     url: ${DINGTALK_WEBHOOK_URL}
@@ -329,7 +326,7 @@ routes:                                # walked by priority, highest first
   - name: high-everywhere
     source: "*"                        # "*" or one source name
     when: {level: [high, critical]}
-    send_to: [ops-feishu, ops-dingtalk]
+    send_to: [ops-chat, ops-dingtalk]
     priority: 100
     stop: false                        # true = stop the walk after this match
 
@@ -345,8 +342,8 @@ a named outcome, visible on the page, not a mystery.
 
 Delivery semantics (all channel types): outbox row per (event × channel),
 exponential backoff 30s·2ⁿ capped at 10 min, 8 attempts, then a visible
-`dead` with the last error. Feishu/DingTalk/WeCom in-body error codes
-(`code`/`errcode` ≠ 0) count as failures even on HTTP 200.
+`dead` with the last error. A platform's in-body error codes (`code`/`errcode`
+≠ 0) count as failures even on HTTP 200.
 
 ### Raw mode — the transparent-edge split
 
@@ -381,22 +378,23 @@ sources:
     fingerprint_fields: [title, state]
 ```
 
-**Finished payloads out (brain → hookrelay → Feishu)** — the brain builds
-the exact message (interactive cards with their callback buttons survive);
-hookrelay owns retry / rate limit / dead letters and injects bot signing only:
+**Finished payloads out (brain → hookrelay → a webhook)** — the brain builds
+the exact message and hookrelay passes it through untouched, owning only retry /
+rate limit / dead letters (`generic` + `payload: raw`; a bot that wants its own
+in-body signing needs the brain to include it — a bridge takes a card model
+instead, never a finished payload):
 
 ```yaml
 sources:
   - name: brain-out
     secret: ${WW_OUT_SECRET}
 channels:
-  - name: feishu-final
-    type: feishu
-    url: ${FEISHU_WEBHOOK_URL}
-    secret: ${FEISHU_WEBHOOK_SECRET}
+  - name: webhook-final
+    type: generic
+    url: ${CHAT_WEBHOOK_URL}
     options: {payload: raw, payload_path: notification}
 routes:
-  - {name: brain-to-feishu, source: brain-out, send_to: [feishu-final]}
+  - {name: brain-to-webhook, source: brain-out, send_to: [webhook-final]}
 ```
 
 `payload: raw` with a missing/empty path fails INTO the delivery ledger with a
@@ -434,11 +432,13 @@ presses it is worse than no button.
 
 ### Buttons where a platform calls back, links where it cannot
 
-Only Feishu posts a callback. DingTalk and WeCom webhook robots cannot — their
-ActionCard buttons are URL jumps — so on those channels an action is rendered as
-a **link** instead, and that needs `HOOKRELAY_PUBLIC_URL` to point somewhere the
-operator's browser can reach. Empty means those channels carry no actions at all,
-which is the honest default: a link nobody can reach is worse than no link.
+A bridge sending as an application posts a callback, so its cards carry
+buttons. Custom-bot webhooks cannot call back — a bridge in webhook mode, the
+DingTalk and WeCom plugins — so there an action is rendered as a **link**
+instead, and that needs the pipe's public address: `HOOKRELAY_PUBLIC_URL` for the
+plugins, `options.action_link_base` on a `bridge` channel (the pipe puts it in
+the envelope). Empty means those channels carry no actions at all, which is the
+honest default: a link nobody can reach is worse than no link.
 
 The link lands on `GET /card-action`, which **performs nothing** — it shows a
 Confirm button whose POST is the real action. That indirection is not politeness:

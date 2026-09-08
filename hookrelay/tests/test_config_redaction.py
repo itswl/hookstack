@@ -26,7 +26,7 @@ CONFIG = """sources:
     secret: hunter2-the-real-one
 channels:
   - name: to-lark
-    type: feishu
+    type: bridge
     url: https://open.example/hook/URL-CARRIED-TOKEN
     secret: 'quoted-literal'
 """

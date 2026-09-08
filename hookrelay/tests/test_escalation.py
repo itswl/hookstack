@@ -39,7 +39,7 @@ def _cfg(escalation: dict | None = None) -> Config:
             }
         ],
         "channels": [
-            {"name": "ops-feishu", "type": "feishu", "url": "https://feishu.example/hook"},
+            {"name": "ops-feishu", "type": "bridge", "url": "https://feishu.example/hook"},
             {"name": "pager", "type": "generic", "url": "https://pager.example/in"},
         ],
         "routes": [{"name": "all", "source": "*", "send_to": ["ops-feishu"]}],
@@ -202,6 +202,18 @@ async def test_the_worker_escalates_and_the_delivery_is_an_ordinary_one(settings
 # ── it cannot fire where nobody can press anything ──────────────────────────
 
 
+@pytest.fixture(scope="module", autouse=True)
+def load_example_plugins():
+    """`dingtalk` is a shipped plugin now (a channel that carries LINKS, not
+    callbacks) — the case this guard exists for needs one loaded."""
+    from pathlib import Path
+
+    from hookrelay import registry
+
+    if "dingtalk" not in registry.CHANNEL_BUILDERS:
+        registry.load_plugins(Path(__file__).resolve().parent.parent / "examples" / "plugins")
+
+
 def test_escalation_disarms_itself_when_no_press_is_possible() -> None:
     """The sweep asks "did any human touch this?" and a card action press is the
     only evidence there is. On a deployment where no press can ever happen it
@@ -229,7 +241,7 @@ def test_escalation_disarms_itself_when_no_press_is_possible() -> None:
         return dataclasses.replace(base, **kw)
 
     feishu = _cfg({"after_minutes": 15, "send_to": ["pager"]})
-    assert _escalation_can_work(settings_with(action_secret="s"), feishu), "feishu posts a callback"
+    assert _escalation_can_work(settings_with(action_secret="s"), feishu), "a bridge posts a callback"
 
     # No secret: no card carries an action of any kind.
     assert not _escalation_can_work(settings_with(), feishu)
@@ -255,7 +267,7 @@ def test_escalation_disarms_itself_when_no_press_is_possible() -> None:
     no_kinds = Config.from_dict(
         {
             "sources": [{"name": "grafana", "secret": "", "title": "{title}", "body": "{message}"}],
-            "channels": [{"name": "ops-feishu", "type": "feishu", "url": "https://feishu.example/hook"}],
+            "channels": [{"name": "ops-feishu", "type": "bridge", "url": "https://feishu.example/hook"}],
             "routes": [{"name": "all", "source": "*", "send_to": ["ops-feishu"]}],
         }
     )

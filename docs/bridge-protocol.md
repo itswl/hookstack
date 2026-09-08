@@ -35,7 +35,8 @@ bridge's URL:
     "footer":  "grafana · business · 2026-08-07 10:32:50"
   },
   "reply_to": "om_… (optional: post as a reply in this message's thread)",
-  "chat_id":  "oc_… (optional: post to this chat, if the bridge serves it)"
+  "chat_id":  "oc_… (optional: post to this chat, if the bridge serves it)",
+  "action_link_base": "https://… (optional: where an action LINK should land, for a delivery that cannot call back)"
 }
 ```
 
@@ -69,6 +70,18 @@ authenticates and renders but does not send, answering
 This is the conformance hook: a deployment can prove the whole path except the
 last hop from inside its own network, and a new bridge can be tested without
 an account on its platform.
+
+**Webhook delivery.** A bridge may deliver through a platform's *incoming
+webhook* (a custom bot) instead of as an application. The protocol is the same;
+what changes is what the platform allows: no message id comes back
+(`"message_id": ""`), `reply_to` and `chat_id` are ignored with a log line (a
+webhook has one destination and no threads), and `actions` are rendered as
+**links** to `{action_link_base}/card-action?t=<token>` — the pipe's confirm
+page — because a custom bot's buttons cannot call back. No base, no links; a
+button that does nothing is never drawn. The pipe puts `action_link_base` in
+the envelope when the channel's `options.action_link_base` says so (its own
+`HOOKRELAY_PUBLIC_URL`, as a browser reaches it). lark-bridge switches to this
+mode with `LARK_WEBHOOK_URL`; the quickstart runs it that way against its sink.
 
 ## 2. Inbound: a message
 
@@ -140,6 +153,9 @@ route, deliver, account — do not include knowing a platform's card schema, and
 they cannot include a platform's websocket. Before this protocol the pipe had
 a `feishu` channel type that rendered Feishu JSON and posted it to the bridge,
 which only forwarded; adding Slack would have meant a Slack channel type in the
-pipe **and** a Slack bridge. Now it means a Slack bridge. The three direct
-dialect types (`feishu`, `dingtalk`, `wecom`) remain for custom-bot webhooks,
-which take a finished payload and can neither call back nor reply in a thread.
+pipe **and** a Slack bridge. Now it means a Slack bridge. The pipe's outbound
+kinds are exactly two: `generic` (signed JSON, for machines) and `bridge` (a
+card model, for people). Custom-bot webhooks are the bridge in webhook mode
+for Feishu, and a shipped plugin (`examples/plugins/chat_markdown_channels.py`)
+for the DingTalk and WeCom markdown dialects — an in-process bridge, rendering
+the same model.

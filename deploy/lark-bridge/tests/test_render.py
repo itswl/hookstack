@@ -99,3 +99,37 @@ def test_details_lead_summary_and_actions_render() -> None:
         "a value that is not an object is carried as nothing, not as a crash"
     )
     assert json.dumps(card, ensure_ascii=False).count("lark_md") == 4
+
+
+def test_actions_become_links_for_a_delivery_that_cannot_call_back() -> None:
+    model = {
+        "title": "t",
+        "actions": [
+            {"text": "Silence 1h", "value": {"hookrelay_action": "tok/en"}},
+            {"text": "no token", "value": {}},
+        ],
+    }
+    as_links = render.feishu_card(
+        model, actions="links", link_base="https://relay.example"
+    )["card"]
+    (line,) = [e["text"]["content"] for e in as_links["elements"] if e["tag"] == "div"]
+    assert line == "[Silence 1h](https://relay.example/card-action?t=tok%2Fen)", (
+        "one link per action that carries a token"
+    )
+    assert not [e for e in as_links["elements"] if e["tag"] == "action"], (
+        "no dead buttons beside the links"
+    )
+    assert render.feishu_card(model, actions="links")["card"]["elements"] == [], (
+        "no base, no links — never a link nobody can reach"
+    )
+    assert render.feishu_card(model, actions="none")["card"]["elements"] == []
+
+
+def test_a_link_label_cannot_hijack_the_link() -> None:
+    out = render.markdown_link(
+        "Runbook](https://evil.example) click", "https://kb.example/ok"
+    )
+    assert (
+        out.endswith("](https://kb.example/ok)")
+        and "Runbook\\](https://evil.example) click" in out
+    )
