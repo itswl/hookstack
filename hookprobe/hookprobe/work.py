@@ -35,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from hookprobe.remediation import stale as proposal_stale
 from hookprobe.runs import FAILED, RUNNING, Run
 
 # The states a work item can be in. `received` is not among them on purpose:
@@ -230,7 +231,13 @@ def resolve(
             # A proposal at all means a person had to decide, whichever way they
             # decided — that is what `hands_on` measures.
             item.hands_on = True
-            if status == "proposed":
+            # A proposal past its window is not something a person can act on:
+            # the gate refuses it (remediation.approve). Offering it here would
+            # put an item in `blocked` that nobody can clear, which is the same
+            # dead weight the abandoned column exists to keep out.
+            if status == "proposed" and proposal_stale(row, now):
+                item.artifacts[-1]["name"] = f"{len(steps)} step(s) · expired unapproved"
+            elif status == "proposed":
                 first = steps[0] if steps else {}
                 item.open.append(
                     {

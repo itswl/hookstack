@@ -228,3 +228,40 @@ def test_a_failure_nobody_came_back_to_leaves_the_blocked_count(tmp_path=None) -
     counts = work.counts(list(items.values()))
     assert counts["needs_human"] == 1 and counts["abandoned"] == 1
     assert counts["blocked"] == 1, "abandoned work is a count, not a queue"
+
+
+def test_a_proposal_past_its_window_cannot_be_approved_and_stops_asking(tmp_path) -> None:
+    """A procedure is commands chosen from evidence gathered at one moment.
+    Approving it a week later runs a decision about a system that has moved,
+    and the person pressing cannot see that. The card's button expires after a
+    day; the console had no equivalent, so a three-week-old proposal was one
+    click from a shell."""
+    import time as _time
+
+    import pytest
+
+    from hookprobe import remediation
+
+    workdir = tmp_path
+    fresh_id = remediation.propose(workdir, "probe:ww:1", [{"command": "echo ok", "action": "look", "risk": "low"}])
+    old_id = remediation.propose(workdir, "probe:ww:2", [{"command": "echo ok", "action": "look", "risk": "low"}])
+    old = remediation.load(workdir, old_id)
+    old["created_at"] = _time.time() - 3 * 86400
+    remediation.save(workdir, old)
+
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo ok\n", encoding="utf-8")  # patterns are full-match regexes, not globs
+
+    # The gate refuses, and says why in words an operator can act on.
+    with pytest.raises(ValueError, match="past the 24h window"):
+        remediation.approve(workdir, old_id, allowlist=allow)
+    assert remediation.load(workdir, old_id)["status"] == "proposed", "refused, not silently resolved"
+    assert remediation.approve(workdir, fresh_id, allowlist=allow)["status"] == "running"
+
+    # And the board stops offering it, so `blocked` keeps meaning "somebody can
+    # clear this now".
+    runs = [_run("probe:ww:1", meta={"work_id": "w1"}), _run("probe:ww:2", meta={"work_id": "w2"})]
+    items = {i.work_id: i for i in work.resolve(runs, proposals=[remediation.load(workdir, old_id)])}
+    assert items["w2"].state == work.DONE
+    assert not [o for o in items["w2"].open if o["kind"] == "approve"]
+    assert any("expired unapproved" in a["name"] for a in items["w2"].artifacts), "still visible, just not offered"

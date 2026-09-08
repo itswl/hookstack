@@ -295,6 +295,19 @@ memory line an investigation proposed, and every report nobody has ruled on, wit
 the buttons. It answers "what do I owe", which is deliberately wider than "what is
 blocked" — a memory line blocks nothing and still waits for a person.
 
+**A procedure expires after a day.** Approving one runs commands chosen from
+evidence gathered at one moment — *suppress this address*, *restart that unit* —
+and approving it a week later runs a decision about a system that has since
+moved, which the person pressing cannot see from the card. The card's action
+token has always expired after 24 hours; the console had no equivalent, so a
+three-week-old proposal was one click from a shell. `remediation.approve` now
+refuses past the same 24 hours and says how old it was, and the board stops
+offering it: a stale proposal leaves `blocked`, because `blocked` has to mean
+work somebody can clear now. It stays visible on the work item, marked
+*expired unapproved*. Getting the procedure run means asking for a fresh look,
+which is the honest answer — the investigation is what has gone stale, not the
+button.
+
 `GET /v1/agent` says what this node is — name, role, runtime, policy, health — so
 a deployment running an investigator, a planner and a work runner can tell them
 apart by something other than a port. Set `HOOKPROBE_AGENT_NAME` and

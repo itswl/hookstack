@@ -250,6 +250,26 @@ def deny_reason(command: str, patterns: list[str]) -> str | None:
     return "command matches no allowlist pattern"
 
 
+# How long a proposal stays runnable. The same 24 hours the pipe gives a card's
+# action token, deliberately one number rather than two: a button that has
+# expired in chat and a console that would still run it is the kind of
+# disagreement nobody discovers until it matters.
+#
+# The reason is not tidiness. A procedure is a set of commands chosen from
+# evidence gathered at one moment — "suppress this bounce address", "restart
+# that unit". Approving it a week later runs a decision made about a system
+# that has since moved, and the operator pressing the button cannot see that
+# from the card. Production carried four proposals waiting at once, the oldest
+# eighteen hours old, with nothing between them and a shell but a click.
+APPROVAL_WINDOW_SECONDS = 24 * 3600
+
+
+def stale(row: dict[str, Any], now: float | None = None) -> bool:
+    """Whether this proposal is past the window in which it may still be run."""
+    created = float(row.get("created_at") or 0.0)
+    return (now or time.time()) - created > APPROVAL_WINDOW_SECONDS
+
+
 def approve(workdir: Path, proposal_id: str, *, allowlist: Path | None, note: str = "") -> dict[str, Any]:
     """The operator's click. Gate-checks EVERY step against the allowlist
     before anything runs — a proposal that is half executable is refused
@@ -260,6 +280,12 @@ def approve(workdir: Path, proposal_id: str, *, allowlist: Path | None, note: st
         raise LookupError("no such proposal")
     if row.get("status") != "proposed":
         raise ValueError(f"proposal is {row.get('status')}, not proposed")
+    if stale(row):
+        age_h = (time.time() - float(row.get("created_at") or 0.0)) / 3600
+        raise ValueError(
+            f"proposed {age_h:.0f}h ago, past the {APPROVAL_WINDOW_SECONDS // 3600}h window: "
+            "these commands were chosen from evidence that has since moved. Ask for a fresh look."
+        )
     patterns = allowlist_patterns(allowlist)
     for step in row.get("steps", []):
         reason = deny_reason(str(step.get("command") or ""), patterns)
