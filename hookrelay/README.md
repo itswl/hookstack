@@ -132,6 +132,15 @@ carried, not read.
     skip_code: unknown_thread
 ```
 
+A top-level @-message opens a topic: the bridge roots it at itself and marks
+`topic: new`. With no card behind it the stage would skip it, unless the
+deployment says what a new topic starts — `on_new_topic: {kind: task, level:
+high}` shapes it as a work item for the planner, `{kind: brief, level: high}`
+as a question for the investigator — and writes `fields.thread_root` (the
+person's message) so the report lands inside the topic. A later reply in that
+topic has the person's message as its root, not a card; the lookup then finds
+the chain through the report that carried the same `thread_root`.
+
 The other half is on the channel: `options: {thread_replies: true}` on a `feishu`
 channel that sends through the bridge makes a delivery whose event carries
 `fields.thread_root` go out as a reply in that thread (`reply_to` in the body

@@ -518,9 +518,25 @@ class Store:
             (platform_message_id,),
         )
         row = await cursor.fetchone()
-        if row is None:
-            return None
-        trip = await self.round_trip(int(row["event_id"]))
+        if row is not None:
+            card_event_id, channel = int(row["event_id"]), str(row["channel"])
+        else:
+            # Not a card we sent — but a topic a person opened has the person's
+            # message as its root, and the report we posted INTO that topic
+            # carries the root as `fields.thread_root`. Find the newest such
+            # report with a session and read the chain from there.
+            cursor = await self.read.execute(
+                "SELECT id FROM events"
+                " WHERE json_extract(fields_json, '$.thread_root') = ?"
+                "   AND COALESCE(json_extract(fields_json, '$.session'), '') != ''"
+                " ORDER BY id DESC LIMIT 1",
+                (platform_message_id,),
+            )
+            topic_row = await cursor.fetchone()
+            if topic_row is None:
+                return None
+            card_event_id, channel = int(topic_row["id"]), "(topic)"
+        trip = await self.round_trip(card_event_id)
         if trip is None:
             return None
         session = return_source = ""
@@ -533,10 +549,10 @@ class Store:
                 session, return_source = candidate, str(item.get("source") or "")
                 break
         return {
-            "card_event_id": int(row["event_id"]),
-            "channel": str(row["channel"]),
+            "card_event_id": card_event_id,
+            "channel": channel,
             "origin_event_id": int(trip["origin"]["id"]),
-            "quote": f"hr-{int(row['event_id'])}",
+            "quote": f"hr-{card_event_id}",
             "session": session,
             "return_source": return_source,
             "title": str(trip["origin"].get("title") or ""),

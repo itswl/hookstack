@@ -213,6 +213,8 @@ sources:
     fields:
       root_message_id: "{root_message_id}"
       message_id: "{message_id}"
+      # "reply" under something, or "new": a top-level @-message that opens a topic.
+      topic: "{topic}"
       sender: "{sender}"
       chat_id: "{chat_id}"
     # Distinct replies must never dedup into each other: the message id is the identity.
@@ -381,6 +383,14 @@ routes:
   # A reply resolved to a plan's chain goes back to the planner; one resolved
   # to a work node's chain goes to the work node. Unresolved replies never get
   # here: the stage skips them as unknown_thread.
+  # A topic someone opened has no session yet: it goes to the planner as a
+  # work item, and the plan card lands inside the topic.
+  - name: topic-to-plan
+    source: lark-thread
+    when: {topic: new}
+    send_to: [to-plan]
+    priority: 110
+    stop: true
   - name: thread-to-plan
     source: lark-thread
     when: {return_source: plan-notify}
@@ -402,6 +412,9 @@ pipeline:
     when: {source: lark-thread}
     from: root_message_id
     skip_code: unknown_thread
+    # A new topic (an @-mention with no card behind it) starts a work item the planner plans;
+    # the report goes back into the topic. Without this, new topics are skipped.
+    on_new_topic: {kind: task, level: high}
   - routes
 
 # No card_actions: no bridge, so no callback can reach this pipe, and an

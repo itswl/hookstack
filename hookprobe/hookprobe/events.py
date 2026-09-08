@@ -239,6 +239,13 @@ _FOLLOW_UP_TEXT_MAX = 4000
 _MAX_FOLLOW_UPS_PER_RUN = 20
 
 
+def _sender_allowed(settings: Settings, sender: str) -> bool:
+    """Who may spend a turn from chat: HOOKPROBE_FOLLOW_UP_SENDERS, `*` for anyone
+    the bridge forwards, empty for nobody."""
+    allowed = settings.follow_up_senders
+    return bool(allowed) and bool(sender) and ("*" in allowed or sender in allowed)
+
+
 def _follow_up(
     service: RunService, settings: Settings, event: dict[str, Any], fields: dict[str, Any]
 ) -> dict[str, Any]:
@@ -257,8 +264,7 @@ def _follow_up(
     `thread_root` in its meta so the pipe posts it as a reply, not a new card.
     """
     sender = str(fields.get("sender") or "").strip()[:_ACTOR_MAX]
-    allowed = settings.follow_up_senders
-    if not allowed or not (sender and ("*" in allowed or sender in allowed)):
+    if not _sender_allowed(settings, sender):
         return {"status": "skipped", "reason": "sender not allowed to continue investigations from chat"}
     session_key = str(fields.get("session") or "").strip()[: _EVENT_ID_MAX + 80]
     run = service.get(session_key) if session_key else None
@@ -535,6 +541,12 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
         fields = raw_fields if isinstance(raw_fields, dict) else {}
         if str(fields.get("kind") or "").strip().lower() == "follow_up":
             return _follow_up(service, settings, event, fields)
+        # A run a PERSON started from chat (the pipe forwards their message with
+        # `fields.sender`) passes the same gate as a follow-up: anyone in the
+        # group can type, and a run is a paid turn.
+        chat_sender = str(fields.get("sender") or "").strip()
+        if chat_sender and not _sender_allowed(settings, chat_sender):
+            return {"status": "skipped", "reason": "sender not allowed to start investigations from chat"}
 
         level = str(event.get("level") or "").lower()[:_LEVEL_MAX]
         title = str(event.get("title") or "").strip()[:_TITLE_MAX]
@@ -564,11 +576,13 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
             body=str(event.get("body") or "")[: _BRIEF_BODY_MAX if kind == "brief" else _BODY_MAX],
             fields=_fenced_fields(event.get("fields")),
         ) + _verdict_instruction(settings.verdicts)
-        payload = {
-            "message": message,
-            "sessionKey": session_key,
-            "_meta": {"title": title, "level": level, "source": source, "event_id": event_id},
-        }
+        meta: dict[str, Any] = {"title": title, "level": level, "source": source, "event_id": event_id}
+        # A run opened from a chat topic answers INTO that topic: the pipe hands
+        # the topic's root along, and the report carries it back (notify.py).
+        topic_root = str(fields.get("thread_root") or "").strip()[:120]
+        if topic_root:
+            meta["thread_root"] = topic_root
+        payload: dict[str, Any] = {"message": message, "sessionKey": session_key, "_meta": meta}
 
         # Storm coalescing: a re-fire of the same condition (same source+title,
         # NEW event id — redelivery of the same id stays idempotent below)

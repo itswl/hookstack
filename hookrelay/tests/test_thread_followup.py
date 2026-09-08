@@ -39,6 +39,7 @@ CFG = {
                 "root_message_id": "{root_message_id}",
                 "sender": "{sender}",
                 "message_id": "{message_id}",
+                "topic": "{topic}",
             },
         },
     ],
@@ -255,3 +256,98 @@ async def test_lark_api_shape_is_understood_too():
     assert channels._platform_message_id({"code": 0, "data": {"message_id": "om_x"}}) == "om_x"
     assert channels._platform_message_id({"ok": True}) == ""
     assert channels._platform_message_id("nonsense") == ""
+
+
+def _with_new_topics(shape: dict) -> Config:
+    cfg = json.loads(json.dumps(CFG))
+    cfg["pipeline"][0]["on_new_topic"] = shape
+    cfg["routes"].insert(
+        0,
+        {"name": "topic", "source": "lark-thread", "when": {"topic": "new"}, "send_to": ["to-probe"], "priority": 110},
+    )
+    return Config.from_dict(cfg)
+
+
+async def test_a_new_topic_is_skipped_unless_the_deployment_says_what_it_starts(store, cfg):
+    result = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lark-thread"],
+        {
+            "root_message_id": "om_mine",
+            "topic": "new",
+            "sender": "ou_sre",
+            "message_id": "om_mine",
+            "text": "look at node-3",
+        },
+        now=300.0,
+    )
+    assert result["outcome"] == "skipped" and result["skip_code"] == "unknown_thread"
+
+
+async def test_a_new_topic_takes_the_configured_shape_and_answers_into_itself(store):
+    cfg = _with_new_topics({"kind": "brief", "level": "high"})
+    result = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lark-thread"],
+        {
+            "root_message_id": "om_mine",
+            "topic": "new",
+            "sender": "ou_sre",
+            "message_id": "om_mine",
+            "text": "look at node-3",
+        },
+        now=300.0,
+    )
+    assert result["outcome"] == "routed" and result["channels"] == ["to-probe"]
+    step = next(s for s in result["steps"] if s.get("gate") == "thread-lookup")
+    assert step["result"] == "new_topic"
+    ev = await store._event_row(result["event_id"])
+    assert ev["level"] == "high" and ev["fields"]["kind"] == "brief" and ev["fields"]["thread_root"] == "om_mine"
+    assert "session" not in ev["fields"], "a new topic has no session yet"
+    # The investigator answers into the topic: its report quotes the topic event
+    # and carries the root. A later reply under the person's message — whose
+    # root is that message, not any card — finds the chain through the report.
+    report = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["probe-notify"],
+        {
+            "meta": {
+                "alert_name": "look at node-3 · investigation",
+                "importance": "high",
+                "session_key": "probe:lark-thread:9",
+                "event_id": result["event_id"],
+                "thread_root": "om_mine",
+            },
+            "report": {"summary": "nothing wrong on node-3"},
+        },
+        now=360.0,
+    )
+    # CFG's probe-notify door maps only session and correlation; the deployed
+    # configs map thread_root too — written onto the row here to stand in for that.
+    await store.db.execute(
+        "UPDATE events SET fields_json = json_set(fields_json, '$.thread_root', ?) WHERE id = ?",
+        ("om_mine", report["event_id"]),
+    )
+    await store.db.commit()
+    found = await store.thread_context("om_mine")
+    assert found is not None and found["session"] == "probe:lark-thread:9" and found["channel"] == "(topic)"
+    assert found["quote"] == f"hr-{report['event_id']}" and found["origin_event_id"] == result["event_id"]
+    reply = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lark-thread"],
+        {
+            "root_message_id": "om_mine",
+            "topic": "reply",
+            "sender": "ou_sre",
+            "message_id": "om_r2",
+            "text": "and node-4?",
+        },
+        now=400.0,
+    )
+    assert reply["outcome"] == "routed"
+    trip = await store.round_trip(result["event_id"])
+    assert reply["event_id"] in [r["id"] for r in trip["returns"]], "the follow-up is a hop of the topic's chain"

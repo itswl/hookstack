@@ -180,3 +180,61 @@ def test_the_question_is_carried_in_the_body_not_read_from_the_title(tmp_path) -
         },
     )
     assert r.json() == {"status": "skipped", "reason": "empty question"}
+
+
+def test_a_topic_someone_opened_starts_a_run_that_answers_into_the_topic(tmp_path, monkeypatch) -> None:
+    posted: list[dict[str, Any]] = []
+
+    def capture(self: Any, body: bytes) -> int:
+        posted.append(json.loads(body))
+        return 200
+
+    monkeypatch.setattr(notify.ReturnDelivery, "_post_return", capture)
+    client, service, engine = _client(tmp_path, return_url="http://relay/hook/probe-notify")
+    r = client.post(
+        "/hooks/event",
+        json={
+            "source": "lark-thread",
+            "title": "look at node-3",
+            "body": "look at node-3",
+            "level": "high",
+            "event_id": 61,
+            "fields": {
+                "kind": "brief",
+                "topic": "new",
+                "thread_root": "om_mine",
+                "message_id": "om_mine",
+                "sender": "ou_sre",
+            },
+        },
+    )
+    assert r.status_code == 200 and r.json()["status"] == "accepted", r.text
+    key = r.json()["sessionKey"]
+    _wait(client, key)
+    assert service.get(key).meta["thread_root"] == "om_mine"
+    assert posted and posted[-1]["meta"]["thread_root"] == "om_mine", "the first report goes into the person's topic"
+    assert "look at node-3" in engine.messages[-1]
+
+
+def test_a_stranger_cannot_open_a_paid_topic(tmp_path) -> None:
+    client, _, engine = _client(tmp_path)
+    r = client.post(
+        "/hooks/event",
+        json={
+            "source": "lark-thread",
+            "title": "do something expensive",
+            "body": "do something expensive",
+            "level": "high",
+            "event_id": 62,
+            "fields": {
+                "kind": "brief",
+                "topic": "new",
+                "thread_root": "om_x",
+                "message_id": "om_x",
+                "sender": "ou_stranger",
+            },
+        },
+    )
+    assert r.json()["status"] == "skipped" and "sender" in r.json()["reason"] and engine.calls == 0
+    # An event with no sender is not from chat and is not gated by the allowlist.
+    assert _alert(client)

@@ -173,6 +173,8 @@ sources:
     fields:
       root_message_id: "{root_message_id}"
       message_id: "{message_id}"
+      # "reply" under something, or "new": a top-level @-message that opens a topic.
+      topic: "{topic}"
       sender: "{sender}"
       chat_id: "{chat_id}"
 
@@ -366,6 +368,9 @@ pipeline:
     when: {source: lark-thread}
     from: root_message_id
     skip_code: unknown_thread
+    # A new topic (an @-mention with no card behind it) starts a question the investigator answers;
+    # the report goes back into the topic. Without this, new topics are skipped.
+    on_new_topic: {kind: brief, level: high}
   - routes
 
 # The buttons a card carries. hookjudge DECLARES which ones a verdict deserves

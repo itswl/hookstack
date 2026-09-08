@@ -396,13 +396,23 @@ def forward_message(event: dict) -> None:
         return
     if str(event.get("sender_type") or "user") != "user":
         return
+    message_id = str(event.get("message_id") or event.get("id") or "")
+    mentions = event.get("mentions") or []
     root = str(event.get("root_id") or event.get("reply_to") or "")
-    if not root:
+    # A reply under something continues that something. A top-level message
+    # that mentions the bot OPENS a topic: the message itself becomes the root,
+    # and the pipe decides what a new topic starts (`on_new_topic` on its
+    # thread_lookup stage). A top-level message mentioning nobody is chatter.
+    if root:
+        topic = "reply"
+    elif mentions and message_id:
+        topic, root = "new", message_id
+    else:
         return
     text = str(event.get("content") or "").strip()
     # Lark renders mentions as @_user_N placeholders in `content`; the bot being
     # addressed is not part of the question.
-    for mention in event.get("mentions") or []:
+    for mention in mentions:
         key = str((mention or {}).get("key") or "")
         if key:
             text = text.replace(key, "").strip()
@@ -411,7 +421,8 @@ def forward_message(event: dict) -> None:
     body = json.dumps(
         {
             "root_message_id": root,
-            "message_id": str(event.get("message_id") or event.get("id") or ""),
+            "topic": topic,
+            "message_id": message_id,
             "sender": str(event.get("sender_id") or ""),
             "chat_id": chat_id,
             "text": text[:4000],

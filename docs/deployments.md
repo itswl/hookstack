@@ -143,7 +143,11 @@ with `options.chat_id`). Its two Feishu channels keep posting to the custom-bot
 webhooks until `LARK_WATCH_URL` / `LARK_PLAN_URL` point at the bridge and the
 channel secrets equal `LARK_BRIDGE_SECRET`; a reply is then routed by
 `return_source` to the node that holds the session — `plan-notify` to the
-planner, `work-notify` to the work node.
+planner, `work-notify` to the work node. And a person can open a topic
+instead of waiting for a card: a top-level @-mention in the group starts a work
+item on this deployment (`on_new_topic: {kind: task}`) and an investigation on
+the alert deployment (`{kind: brief}`: the message is the question); the first
+card lands inside the topic and the conversation continues there.
 
 **Timer: host crontab, or a container.** The work deployment ships its own,
 after the host version could not read its own brief: macOS keeps `~/Documents`

@@ -197,6 +197,22 @@ class ThreadLookupProcessor:
         root = str(ctx.extracted["fields"].get(field) or "").strip()
         found = await rt.store.thread_context(root) if root else None
         if found is None:
+            # A message that opens a topic (the bridge marks it `topic: new`
+            # and roots it at itself) has no card behind it by definition.
+            # Whether that starts anything is the deployment's decision, made
+            # here in config: `on_new_topic: {kind: task, level: high}` shapes
+            # it as a work item for the planner; `{kind: brief}` as a question
+            # for the investigator; absent, a new topic is skipped like any
+            # reply under a card nobody here sent.
+            shape = options.get("on_new_topic")
+            if root and str(ctx.extracted["fields"].get("topic") or "") == "new" and isinstance(shape, dict):
+                ctx.extracted["fields"]["thread_root"] = root
+                if shape.get("kind"):
+                    ctx.extracted["fields"]["kind"] = str(shape["kind"])
+                if shape.get("level"):
+                    ctx.extracted["level"] = str(shape["level"])
+                ctx.steps.append({"gate": name, "result": "new_topic", "root": root[:80]})
+                return PASS
             code = str(options.get("skip_code") or "unknown_thread")
             ctx.steps.append({"gate": name, "result": "dropped", "skip_code": code, "root": root[:80]})
             return ("skip", code)
