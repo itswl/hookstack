@@ -238,12 +238,28 @@ reading the page:
 | **verifying** | a procedure ran and every step exited 0, and nobody has said the condition cleared |
 | **done** | finished with nothing blocked |
 
-Three numbers sit above it. `blocked` is the first two columns. `verified` counts
-work a ruling called useful or whose own procedure came back clean — the only two
-signals this node can check without a person. `closed without anyone stepping in`
-is the strict one: done, verified, and it never had to stop and ask. On an
-unattended deployment that number is often zero, and that is the true reading —
-it says the verification loop is not closed, not that nothing happened.
+Three numbers sit above it. `blocked` is the first two columns.
+`closed without anyone stepping in` is the strict one: done, verified, and it
+never had to stop and ask.
+
+**Verified** means one of three things, and the board says which:
+
+| `verified_by` | what happened | how strong |
+|---|---|---|
+| `ruling` | a person pressed *found the cause* | a human read the report and agreed |
+| `remediation` | the procedure the report proposed was approved, ran, and every step exited 0 | the work's own actions succeeded |
+| `recovery` | the condition the alert was about has since ended | the episode is over — **not** proof the investigation was right, or that the agent caused it |
+
+The third is the only one that needs nobody, which is what makes the number mean
+anything on an unattended deployment. It arrives on its own: the judge sends a
+recovery verdict for the ended condition, the event door recognises the stated
+`is_recovery` flag and records it on the investigation of the same condition
+instead of starting one. That costs nothing and replaces what used to happen —
+the recovery was read as a RE-FIRE and bought a turn telling the model the alert
+had fired again when it had in fact cleared. A recovery is matched by condition
+name within a day, which works because the judge strips the "it ended"
+decoration before sending, so a firing and its recovery arrive under one name.
+A recovery for a condition this node never investigated is a named skip.
 
 `/ui#approvals` is the other half: every procedure waiting for approval, every
 memory line an investigation proposed, and every report nobody has ruled on, with

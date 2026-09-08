@@ -240,6 +240,36 @@ _FOLLOW_UP_TEXT_MAX = 4000
 _MAX_FOLLOW_UPS_PER_RUN = 20
 
 
+def _is_recovery(event: dict[str, Any], fields: dict[str, Any]) -> bool:
+    """Whether the caller SAID this event is a condition ending.
+
+    Top level first, because that is where the pipe puts it: `is_recovery` is a
+    fact about the event, not one of its extracted fields, and the pipe only
+    sets it when a source template stated it. `fields` as a fallback for a door
+    configured the other way round.
+
+    Never inferred from the text. A keyword guess at "resolved" in a title is a
+    judgement about content, which belongs to the brain that owns it — and the
+    judge already makes it, which is why what arrives here is a stated fact.
+    """
+    for value in (event.get("is_recovery"), fields.get("is_recovery")):
+        if isinstance(value, bool) and value:
+            return True
+        if isinstance(value, str) and value.strip().lower() in ("true", "1", "yes", "resolved", "ok"):
+            return True
+    return False
+
+
+def _recovered(service: RunService, event: dict[str, Any]) -> dict[str, Any]:
+    """Record that the condition ended, and spend nothing doing it."""
+    title = str(event.get("title") or "").strip()[:_TITLE_MAX]
+    source = str(event.get("source") or "unknown")[:_SOURCE_MAX]
+    run = service.record_recovery(source, title, event_id=event.get("event_id")) if title else None
+    if run is None:
+        return {"status": "skipped", "reason": "recovery with no investigation of this condition to verify"}
+    return {"status": "verified", "by": "recovery", "sessionKey": run.session_key}
+
+
 def _work_id(fields: dict[str, Any], request: Request, session_key: str) -> str:
     """Which piece of work this run belongs to (hookprobe/work.py).
 
@@ -561,6 +591,21 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
         fields = raw_fields if isinstance(raw_fields, dict) else {}
         if str(fields.get("kind") or "").strip().lower() == "follow_up":
             return _follow_up(service, settings, event, fields)
+        # A condition that ENDED is not an investigation request. The judge
+        # refuses to analyse one on its own ("the question how bad is it is moot
+        # once it is over"), and this door used to treat it as a RE-FIRE of the
+        # same condition — a paid turn telling the model the alert had fired
+        # again when it had in fact cleared, or, outside the coalescing window,
+        # a whole new investigation of something already over. It is a fact
+        # about work already done, so it is recorded on that work for nothing.
+        #
+        # Before the level check on purpose: a recovery inherits its firing's
+        # importance, which is often below the escalation bar (18 of them on the
+        # production deployment, every one below it), and the fact is worth
+        # recording whatever that number says.
+        if _is_recovery(event, fields):
+            return _recovered(service, event)
+
         # A run a PERSON started from chat (the pipe forwards their message with
         # `fields.sender`) passes the same gate as a follow-up: anyone in the
         # group can type, and a run is a paid turn.

@@ -49,6 +49,13 @@ def _inferred_actor(session_key: str) -> str:
     return f"{INFERRED_BY_PREFIX}{session_key}"
 
 
+# How far back a recovery may reach for the investigation it verifies. A day,
+# fixed rather than configurable: a condition that ends within a day of being
+# investigated is plainly the same episode, and one that ends three days later
+# is verifying an investigation nobody is still reading. If a deployment ever
+# needs a different number, it needs it for a reason worth writing down here.
+_RECOVERY_WINDOW_SECONDS = 24 * 3600
+
 # One continuation per run, ever. The counter is persisted on the run, so a
 # process that crashes on every boot settles the second time instead of buying
 # a turn on each restart.
@@ -878,6 +885,46 @@ class RunService:
 
     def get(self, session_key: str) -> Run | None:
         return self._store.get(session_key)
+
+    def record_recovery(self, source: str, title: str, *, event_id: Any = None) -> Run | None:
+        """The condition an investigation was about has ended. Record it, spend nothing.
+
+        This is the only verification this service can make without a person and
+        without running anything: the alert that opened the work is over. It says
+        the condition cleared — NOT that the investigation was right, and not
+        that the agent caused it. A flapping alert clears on its own, which the
+        judge's own self-heal figures already track; the value here is that on an
+        unattended deployment "did this end well?" stops being unanswerable.
+
+        Identity is (source, title), which works because the judge strips the
+        "it ended" decoration before sending: a recovery and its firing arrive
+        here under the same condition name. Unlike `same_alert` below, an
+        unresumable or failed run still counts — this is not looking for
+        something to continue, it is looking for the work this fact is about.
+
+        Idempotent: the pipe retries deliveries, and a condition ends once.
+        """
+        cutoff = time.time() - _RECOVERY_WINDOW_SECONDS
+        best: Run | None = None
+        for run in self._store.list_runs(limit=200):
+            meta = run.meta or {}
+            if str(meta.get("source") or "") != source or str(meta.get("title") or "") != title:
+                continue
+            when = run.finished_at or run.created_at
+            if when < cutoff:
+                continue
+            if best is None or when > (best.finished_at or best.created_at):
+                best = run
+        if best is None:
+            return None
+        if not best.meta.get("recovered_at"):
+            best.meta["recovered_at"] = time.time()
+            if event_id is not None:
+                best.meta["recovered_by_event"] = event_id
+            self._store.annotate(best)
+            self._board_changed()
+            logger.info("condition recovered session=%s title=%s", best.session_key, title[:80])
+        return best
 
     def same_alert(self, source: str, title: str, window_seconds: int) -> Run | None:
         """The session already investigating this condition, if one is claimable.

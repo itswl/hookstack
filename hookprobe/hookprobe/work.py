@@ -75,6 +75,9 @@ class WorkItem:
     # What the work produced: {kind, ref, name}. Reports, runbooks, procedures.
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     # Whether anybody says it worked, and what said so.
+    # Whether anybody or anything says this ended well, and what said so:
+    # `ruling` (a person), `remediation` (its own procedure ran clean),
+    # `recovery` (the condition cleared), in that order of strength.
     verified: bool = False
     verified_by: str = ""
     # Whether the work needed a person to proceed — an approval to press, or a
@@ -223,6 +226,14 @@ def resolve(
             if _applied_cleanly(row) and not item.verified:
                 item.verified, item.verified_by = True, "remediation"
             item.updated_at = max(item.updated_at, float(row.get("created_at") or 0.0))
+
+        # The weakest of the three, and the only one that needs nobody: the
+        # condition this work was about has ended. It does not say the
+        # investigation was right or that the agent caused the ending — a
+        # flapping alert clears on its own — so a ruling or a clean procedure
+        # outranks it and this only fills the gap they leave.
+        if run.meta.get("recovered_at") and not item.verified:
+            item.verified, item.verified_by = True, "recovery"
 
         for row in by_session_suggestions.get(run.session_key, []):
             item.open.append(
