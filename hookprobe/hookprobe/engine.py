@@ -9,6 +9,7 @@ method.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -1083,7 +1084,10 @@ class ClaudeAgentEngine:
         # already produced a report.
         context: dict[str, Any] | None = None
         try:
-            context = _context_facts(await client.get_context_usage())
+            # Bounded. This is an extra request to the CLI on the hot path of
+            # every turn, and an observation that can HANG is not an observation
+            # — it is an outage waiting for the runtime to stop answering.
+            context = _context_facts(await asyncio.wait_for(client.get_context_usage(), timeout=10))
         except Exception:  # noqa: BLE001 — an observation is not worth a failed run
             logger.debug("context usage unavailable", exc_info=True)
         return EngineResult(
