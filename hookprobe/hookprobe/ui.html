@@ -170,7 +170,10 @@ button.danger{color:var(--red);border-color:var(--red)}
 .ev-todos{font-family:inherit;padding:4px 0}
 /* the run's own telemetry: model and tool calls on one time axis */
 .wf{border-left:2px solid var(--line);margin:6px 0 8px 6px;padding-left:10px}
-.wf-row{display:grid;grid-template-columns:40px minmax(120px,1fr) minmax(200px,42%);gap:10px;align-items:center;padding:2px 0;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.wf-row{display:grid;grid-template-columns:30px minmax(120px,1fr) minmax(240px,48%);gap:10px;align-items:center;padding:2px 0;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.wf-split{display:flex;height:6px;margin:8px 0 2px 6px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)}
+.wf-seg.model{background:var(--accent)}.wf-seg.tool{background:var(--amber)}.wf-seg.gap{background:transparent}
+.wf-then{color:var(--amber)}.wf-label.failed{color:var(--bad)}
 .wf-label.model{color:var(--accent)}.wf-label.tool{color:var(--amber)}
 .wf-track{position:relative;height:9px;border-radius:3px;background:rgba(255,255,255,.05)}
 .wf-bar{position:absolute;top:0;bottom:0;border-radius:3px;background:var(--accent);opacity:.85}
@@ -649,39 +652,86 @@ function turnHtml(t, now) {
   return `<div class="turn">${qHtml(t.message)}${tamperHtml(t.input_changes)}${inputsHtml(t.inputs, now)}${proc}
     <div class="a ${t.error ? "err" : ""}">${answerHtml(t.text)}</div>${statsHtml(t)}</div>`;
 }
-// Where the time went. The CLI reports every model call and tool result with a
-// duration to this service (telemetry.py); drawn on one axis, the gaps between
-// the bars are the part no bill itemises — thinking, queueing, the harness.
+// Where the time and the money went. The CLI reports every model call and tool
+// result with a duration and a bill; shown as ROUNDS — one model call and the
+// tools it asked for — because that is the unit a person reasons in, and
+// twenty-five bars are not. Closed by default: the record above is the answer;
+// this is for when the answer took too long or cost too much, and it says which
+// round did it.
 function waterfallHtml(w) {
-  const items = (w && w.waterfall) || [];
+  const items = ((w && w.waterfall) || []).slice().sort((a, b) => a.start - b.start || a.end - b.end);
   const s = (w && w.summary) || {};
   if (!items.length) return "";
   const t0 = Math.min(...items.map((i) => i.start));
   const span = Math.max(Math.max(...items.map((i) => i.end)) - t0, 0.001);
-  const rows = items.map((i) => {
-    const left = ((100 * (i.start - t0)) / span).toFixed(2);
-    const width = Math.max((100 * (i.end - i.start)) / span, 0.4).toFixed(2);
-    const text = i.kind === "model"
-      ? `${i.name} · ${fmtMs(i.duration_ms)}` +
-        (i.success === false ? ` · failed${i.status_code ? " " + i.status_code : ""}` : "") +
-        (i.cost_usd != null ? ` · $${Number(i.cost_usd).toFixed(4)}` : "") +
-        (i.input_tokens != null ? ` · in ${fmtTok(i.input_tokens)}` : "") +
-        (i.output_tokens != null ? ` · out ${fmtTok(i.output_tokens)}` : "") +
-        (i.cache_read_tokens ? ` · cache ${fmtTok(i.cache_read_tokens)}r` : "")
-      : `${i.name} · ${fmtMs(i.duration_ms)}${i.success === false ? " · failed" : ""}`;
-    const cls = i.kind + (i.success === false ? " failed" : "");
-    return `<div class="wf-row"><span class="wf-label ${i.kind}">${i.kind}</span>` +
-      `<div class="wf-track"><div class="wf-bar ${cls}" style="left:${left}%;width:${width}%"></div></div>` +
-      `<span class="wf-text">${esc(text)}</span></div>`;
+  // Union of everything on the axis; what is left is the run thinking, or the harness.
+  let covered = 0, cursor = -Infinity;
+  for (const i of items) {
+    const a = Math.max(i.start, cursor), b = i.end;
+    if (b > a) covered += b - a;
+    cursor = Math.max(cursor, b);
+  }
+  const modelBusy = (s.model_busy_ms != null ? s.model_busy_ms : s.model_ms || 0) / 1000;
+  const toolBusy = Math.max(0, Math.min(covered, span) - Math.min(modelBusy, span));
+  const between = Math.max(0, span - Math.min(covered, span));
+  const pct = (x) => `${Math.round((100 * x) / span)}%`;
+  const rounds = [];
+  for (const i of items) {
+    if (i.kind === "model") rounds.push({ model: i, tools: [] });
+    else if (rounds.length) rounds[rounds.length - 1].tools.push(i);
+    else rounds.push({ model: null, tools: [i] });
+  }
+  const cost = (r) => Number((r.model && r.model.cost_usd) || 0);
+  const totalCost = rounds.reduce((acc, r) => acc + cost(r), 0);
+  const x = (v) => ((100 * (v - t0)) / span).toFixed(2);
+  const wd = (a, b) => Math.max((100 * (b - a)) / span, 0.4).toFixed(2);
+  const rows = rounds.map((r, n) => {
+    const m = r.model;
+    const toolMs = r.tools.reduce((acc, t) => acc + (t.duration_ms || 0), 0);
+    const names = {};
+    r.tools.forEach((t) => { names[t.name] = (names[t.name] || 0) + 1; });
+    const then = r.tools.length
+      ? `then ${r.tools.length} tool${r.tools.length > 1 ? "s" : ""} ${fmtMs(toolMs)} · ` +
+        Object.entries(names).map(([k, v]) => (v > 1 ? `${k} ×${v}` : k)).join(", ")
+      : "";
+    const share = totalCost ? Math.round((100 * cost(r)) / totalCost) : 0;
+    const bits = [];
+    if (m) {
+      bits.push(fmtMs(m.duration_ms));
+      bits.push(`$${cost(r).toFixed(4)}${share >= 25 ? ` (${share}% of the run)` : ""}`);
+      if (m.output_tokens != null) bits.push(`out ${fmtTok(m.output_tokens)}`);
+      if (m.cache_creation_tokens) bits.push(`wrote ${fmtTok(m.cache_creation_tokens)} to cache`);
+      else if (m.cache_read_tokens) bits.push(`cache ${fmtTok(m.cache_read_tokens)}`);
+      if (m.success === false) bits.push(`failed${m.status_code ? " " + m.status_code : ""}`);
+    }
+    const bars =
+      (m ? `<div class="wf-bar model${m.success === false ? " failed" : ""}" style="left:${x(m.start)}%;width:${wd(m.start, m.end)}%"></div>` : "") +
+      (r.tools.length ? `<div class="wf-bar tool" style="left:${x(r.tools[0].start)}%;width:${wd(r.tools[0].start, r.tools[r.tools.length - 1].end)}%"></div>` : "");
+    return `<div class="wf-row"><span class="wf-label ${m && m.success === false ? "failed" : "model"}">#${n + 1}</span>` +
+      `<div class="wf-track">${bars}</div>` +
+      `<span class="wf-text">${esc(bits.join(" · "))}${then ? ` <span class="wf-then">${esc(then)}</span>` : ""}</span></div>`;
   });
-  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
-  const head = `waterfall · ${n(s.model_calls || 0, "model call", "model calls")} · ` +
-    `${n(s.tool_calls || 0, "tool call", "tool calls")} · ` +
-    `${fmtMs(Math.round(s.model_busy_ms != null ? s.model_busy_ms : s.model_ms || 0))} of ${fmtMs(Math.round((s.span_s || 0) * 1000))} waiting on the model` +
-    (s.api_errors ? ` · ${n(s.api_errors, "api error", "api errors")}` : "");
-  const models = Object.entries(s.models || {}).map(([m, v]) => `${m}: ${v.calls} calls, ${fmtMs(v.ms)}, $${Number(v.cost_usd || 0).toFixed(4)}`);
-  return `<details class="proc-past" open><summary>${esc(head)}</summary><div class="wf">${rows.join("")}</div>` +
-    (models.length ? `<div class="stats">${esc(models.join("  ·  "))}</div>` : "") + `</details>`;
+  const models = items.filter((i) => i.kind === "model");
+  const slowestModel = models.slice().sort((a, b) => b.duration_ms - a.duration_ms)[0];
+  const slowestTool = items.filter((i) => i.kind === "tool").sort((a, b) => b.duration_ms - a.duration_ms)[0];
+  const costly = rounds.map((r, n) => ({ n: n + 1, c: cost(r) })).filter((r) => r.c > 0).sort((a, b) => b.c - a.c).slice(0, 2);
+  const costlyShare = totalCost ? Math.round((100 * costly.reduce((a, r) => a + r.c, 0)) / totalCost) : 0;
+  const head = `where the time went · ${fmtMs(Math.round(span * 1000))}: ${pct(modelBusy)} waiting on the model, ` +
+    `${pct(toolBusy)} in tools, ${pct(between)} between · ${models.length} round${models.length === 1 ? "" : "s"}` +
+    (s.api_errors ? ` · ${s.api_errors} failed call${s.api_errors > 1 ? "s" : ""}` : "");
+  const facts = [];
+  if (slowestModel) {
+    facts.push(`slowest model call: #${rounds.findIndex((r) => r.model === slowestModel) + 1}, ${fmtMs(slowestModel.duration_ms)}` +
+      (slowestModel.output_tokens != null ? ` for ${fmtTok(slowestModel.output_tokens)} out` : ""));
+  }
+  if (slowestTool) facts.push(`slowest tool: ${slowestTool.name} ${fmtMs(slowestTool.duration_ms)}`);
+  if (costly.length) facts.push(`costliest: ${costly.map((r) => `#${r.n} $${r.c.toFixed(2)}`).join(", ")} — ${costlyShare}% of $${totalCost.toFixed(2)}`);
+  return `<details class="proc-past"><summary>${esc(head)}</summary>` +
+    `<div class="wf-split"><span class="wf-seg model" style="width:${pct(modelBusy)}" title="model"></span>` +
+    `<span class="wf-seg tool" style="width:${pct(toolBusy)}" title="tools"></span>` +
+    `<span class="wf-seg gap" style="width:${pct(between)}" title="between"></span></div>` +
+    `<div class="stats">${esc(facts.join("  ·  "))}</div>` +
+    `<div class="wf">${rows.join("")}</div></details>`;
 }
 
 // The open run's steps, pushed rather than polled. The shared refresh control
