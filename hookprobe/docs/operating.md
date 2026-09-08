@@ -207,7 +207,25 @@ billed whatever it billed and no result ever came back to say. It counts in the
 unpriced-turn figure, where it belongs, rather than being quietly dropped or
 recorded as free.
 
-For the failures nothing automatic picks up — a timeout, a provider error, a
+**A provider blip is retried once, at the moment it happens.** Two real alert
+investigations on this deployment died on `API Error: 524` — a gateway timeout
+— and sat in the board's "needs a human" column for four days; by the time
+anybody read it, re-investigating meant paying for a question whose answer had
+stopped mattering. A failure the engine reports is now classified, and a
+transient one buys one more attempt after five seconds, continuing the session
+if the first attempt left one.
+
+What counts as transient is a short list (`engine.transient`) and the default is
+**permanent**: a status code that means "later" — 408, 429, 5xx, Cloudflare's
+52x — plus overload, rate-limit and connection-reset wording. Not on it: a
+context-window limit, an insufficient balance, an auth failure, and the words
+"timeout"/"timed out" on their own, because a wall-clock timeout is this
+service's own limit rather than a provider blip and the second attempt would
+want the same extra time the first one did. Both attempts are turns in the
+record with what each cost, so a failure that burned tokens before the gateway
+gave up is in the ledger and the budget breaker sees it.
+
+For the failures nothing automatic picks up — a timeout, a second blip, a
 restart with no session to continue — `POST /v1/runs/{key}/retry` is the human
 takeover, and the work board's **needs a human** column has the button. It
 continues the engine session when there is one, re-asks the opening question

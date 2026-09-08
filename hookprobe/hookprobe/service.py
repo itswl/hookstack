@@ -33,7 +33,7 @@ from typing import Any, Protocol
 
 from hookprobe import actions, automation, distill, distill_loop, remediation, rulings, run_rulings, suggestions
 from hookprobe.distill import CASES_MARKER, slug
-from hookprobe.engine import EngineResult
+from hookprobe.engine import EngineResult, transient
 from hookprobe.notify import ReturnDelivery
 from hookprobe.reports import budget_report, failure_report
 from hookprobe.runs import COMPLETED, FAILED, INFERRED_BY_PREFIX, RUNNING, Run, RunStore
@@ -48,6 +48,20 @@ def _inferred_actor(session_key: str) -> str:
         return session_key
     return f"{INFERRED_BY_PREFIX}{session_key}"
 
+
+# One automatic retry per turn, and five seconds before it. A provider blip is
+# over in seconds; a second failure means it was not a blip, and a third attempt
+# is a bill rather than a diagnosis.
+_MAX_AUTO_RETRIES = 1
+_RETRY_BACKOFF_SECONDS = 5.0
+
+# What a retried turn is told when the runtime kept a session. Without one the
+# original question is simply asked again.
+_RETRY_MESSAGE = (
+    "The previous attempt was cut off by a provider error, not by anything you did. "
+    "Everything you had gathered is still in this session. Continue from where you stopped "
+    "and produce the report — do not start the investigation over."
+)
 
 # How far back a recovery may reach for the investigation it verifies. A day,
 # fixed rather than configurable: a condition that ends within a day of being
@@ -192,6 +206,10 @@ class RunService:
         self._returns = ReturnDelivery(settings, store)
         # Return-retry pacing, an instance attr so tests can collapse it.
         self._return_delays: tuple[float, ...] = (0.0, 2.0, 5.0)
+        # The same, for the pause before one more attempt at a provider blip.
+        # Not a setting: five seconds is not a number anyone tunes, and a test
+        # that had to wait it out would be five seconds slower for nothing.
+        self.retry_backoff_seconds: float = _RETRY_BACKOFF_SECONDS
 
     def start(self, payload: dict[str, Any], *, origin: str = "") -> Run:
         """Idempotent per sessionKey: re-triggering an existing run returns it."""
@@ -1069,7 +1087,10 @@ class RunService:
             raise
         except Exception as exc:  # noqa: BLE001 — the run must always reach a final state
             logger.exception("run crashed session=%s", run.session_key)
-            self._fail(run, f"{type(exc).__name__}: {exc}")
+            crash = f"{type(exc).__name__}: {exc}"
+            if await self._retry_transient(run, crash, None, timeout_s, resume):
+                return
+            self._fail(run, crash)
             return
 
         run.message_count = result.message_count
@@ -1077,6 +1098,10 @@ class RunService:
         if result.session_id:
             run.engine_session_id = result.session_id
         if result.error:
+            # A provider blip is not a verdict on the investigation. One more
+            # attempt, now, rather than a failure somebody reads days later.
+            if await self._retry_transient(run, result.error, result, timeout_s, resume):
+                return
             self._fail(run, result.error, result)
             return
 
@@ -1227,6 +1252,56 @@ class RunService:
             allowlist=self._settings.remediation_allowlist,
         )
         self._board_changed()
+
+    async def _retry_transient(
+        self, run: Run, error: str, result: EngineResult | None, timeout_s: int, resume: str | None
+    ) -> bool:
+        """One more attempt at a failure that was about the moment, not the request.
+
+        Two real alert investigations died on `API Error: 524` — a gateway
+        timeout — and sat in the board's "needs a human" column for four days.
+        By the time anybody read it, re-investigating meant paying for a
+        question whose answer had stopped mattering. The moment to try again is
+        the moment.
+
+        The same three bounds as every other path that spends unasked: one
+        retry per turn (counted on the run), the budget breaker, and a
+        classification that defaults to "permanent" — `engine.transient` lists
+        what is worth trying again, and a context-window limit or an
+        insufficient balance is not on it.
+
+        The lost attempt is recorded as its own turn with whatever cost the
+        engine reported, so a failure that ran for a minute before the gateway
+        gave up is in the ledger rather than erased by the attempt that
+        succeeded. Returns True when a replacement turn is now in flight.
+        """
+        if int(run.meta.get("auto_retries") or 0) >= _MAX_AUTO_RETRIES or not transient(error):
+            return False
+        state = self.budget_state()
+        if state is not None and state[0] >= state[1]:
+            return False
+        asked = run.current_message
+        run.error = error
+        run.text = ""
+        run.cost_usd = result.cost_usd if result is not None else None
+        self._record_turn(run, result)
+        run.meta["auto_retries"] = int(run.meta.get("auto_retries") or 0) + 1
+        resume_id = run.engine_session_id or resume
+        message = _RETRY_MESSAGE if resume_id else asked
+        run.error = None
+        run.status = RUNNING
+        run.run_id = uuid.uuid4().hex[:12]
+        run.finished_at = None
+        run.cost_usd = None
+        run.current_message = message
+        logger.warning("transient failure, retrying once session=%s error=%s", run.session_key, error[:120])
+        self._publish(
+            run.session_key,
+            {"type": "text", "text": f"provider error, trying once more: {error[:160]}", "ts": time.time()},
+        )
+        await asyncio.sleep(self.retry_backoff_seconds)
+        self._spawn(run, message, timeout_s, resume=resume_id)
+        return True
 
     def _fail(self, run: Run, reason: str, result: EngineResult | None = None) -> None:
         run.status = FAILED

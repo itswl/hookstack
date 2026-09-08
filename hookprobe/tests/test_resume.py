@@ -198,3 +198,83 @@ def test_only_a_failed_run_can_be_retried(tmp_path) -> None:
             service.retry("probe:nobody:1")
 
     asyncio.run(scenario())
+
+
+def test_a_provider_blip_is_retried_once_at_the_moment_not_left_for_a_human(tmp_path) -> None:
+    """Two real alert investigations died on `API Error: 524` and sat in the
+    board's "needs a human" column for four days. By then re-investigating meant
+    paying for a question whose answer had stopped mattering."""
+    from hookprobe.engine import EngineResult
+
+    class Flaky(FakeEngine):
+        def __init__(self) -> None:
+            super().__init__()
+            self.attempts = 0
+
+        async def run(self, *, message, session_key, resume=None, on_event=None, **kw):  # type: ignore[override]
+            self.attempts += 1
+            self.messages.append(message)
+            self.resumes.append(resume)
+            if self.attempts == 1:
+                return EngineResult(
+                    text="",
+                    message_count=1,
+                    cost_usd=0.2,
+                    session_id="sdk-session-1",
+                    error='API Error: 524 {"type":"cloudflare"}',
+                )
+            return self.result
+
+    async def scenario() -> None:
+        engine = Flaky()
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.retry_backoff_seconds = 0
+        service.start({"message": "why is the gateway 5xx?", "sessionKey": "probe:inbound:8"})
+        run = await _settled(service, "probe:inbound:8")
+
+        assert engine.attempts == 2 and run.status == "completed"
+        assert run.meta["auto_retries"] == 1
+        assert engine.resumes[-1] == "sdk-session-1", "the second attempt continued what the first had"
+        assert "cut off by a provider error" in engine.messages[-1]
+        # The blip is in the ledger with what it cost, not erased by the attempt
+        # that worked: a failure that burned tokens before the gateway gave up
+        # is spend, and the budget breaker has to see it.
+        assert [t["cost_usd"] for t in run.turns] == [0.2, 0.5]
+        assert run.turns[0]["error"].startswith("API Error: 524")
+
+    asyncio.run(scenario())
+
+
+def test_a_permanent_failure_is_not_retried_and_one_blip_is_the_limit(tmp_path) -> None:
+    from hookprobe.engine import EngineResult
+
+    class Always(FakeEngine):
+        def __init__(self, error: str) -> None:
+            super().__init__()
+            self.error = error
+            self.attempts = 0
+
+        async def run(self, *, message, session_key, resume=None, on_event=None, **kw):  # type: ignore[override]
+            self.attempts += 1
+            return EngineResult(text="", message_count=1, cost_usd=0.1, session_id="s", error=self.error)
+
+    async def scenario() -> None:
+        # A context-window limit will fail identically forever; retrying is a
+        # second bill for the same answer.
+        permanent = Always("API Error: The model has reached its context window limit.")
+        service = RunService(make_settings(tmp_path), permanent, RunStore(tmp_path / "results"))
+        service.retry_backoff_seconds = 0
+        service.start({"message": "look", "sessionKey": "probe:inbound:11"})
+        run = await _settled(service, "probe:inbound:11")
+        assert permanent.attempts == 1 and run.status == FAILED and "auto_retries" not in run.meta
+
+        # A blip that is not a blip: the second failure settles it.
+        flaky = Always("API Error: 503 service unavailable")
+        service2 = RunService(make_settings(tmp_path / "two"), flaky, RunStore(tmp_path / "two" / "results"))
+        service2.retry_backoff_seconds = 0
+        service2.start({"message": "look", "sessionKey": "probe:inbound:12"})
+        run2 = await _settled(service2, "probe:inbound:12")
+        assert flaky.attempts == 2 and run2.status == FAILED and run2.meta["auto_retries"] == 1
+        assert len(run2.turns) == 2, "both attempts are in the record"
+
+    asyncio.run(scenario())

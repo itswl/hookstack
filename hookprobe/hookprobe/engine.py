@@ -488,6 +488,69 @@ _CUTOFF_SUBTYPES = {
 }
 
 
+# Failures that are about the moment rather than the request. Matched on the
+# text the engine reported, because that is what this service is given — the
+# SDK has no error taxonomy to ask. The list is deliberately short and the
+# default is "permanent": trying a permanent failure again buys nothing and
+# spends a turn, while missing a transient one costs only what it costs today,
+# which is a failure an operator can retry by hand.
+_TRANSIENT_MARKERS = (
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "520",
+    "521",
+    "522",
+    "524",
+    "408",
+    "overloaded",
+    "rate limit",
+    "connection reset",
+    "connection error",
+    "temporarily unavailable",
+    "service unavailable",
+    "internal server error",
+)
+# Deliberately NOT here: the words "timeout" and "timed out" on their own. A
+# wall-clock timeout is this service's own limit, not a provider blip — the
+# investigation wanted more time than it was given, and the second attempt will
+# want it too. Gateway timeouts, which ARE momentary, arrive with a status code
+# (408, 504, 524) and are caught by those.
+#
+# Checked first: these read as transient by the markers above and are not.
+# "The model has reached its context window limit" carries "limit"; a 402 is a
+# balance, not a blip; an auth failure will fail identically forever. Retrying
+# any of them is a second bill for the same answer.
+_PERMANENT_MARKERS = (
+    "context window",
+    "insufficient balance",
+    "401",
+    "403",
+    "invalid api key",
+    "authentication",
+    "not found",
+    "invalid_request",
+    "messageparseerror",
+)
+
+
+def transient(error: str) -> bool:
+    """Whether this failure is worth one more attempt, right now.
+
+    Production evidence for the shape of this: two real alert investigations on
+    2026-09-04 died on `API Error: 524` — a gateway timeout — and sat in the
+    board's "needs a human" column for four days until somebody read it. By
+    then re-investigating was spending money on a question whose answer had
+    stopped mattering. The moment to try again is the moment, not four days on.
+    """
+    lowered = " ".join(str(error or "").split()).lower()
+    if not lowered or any(marker in lowered for marker in _PERMANENT_MARKERS):
+        return False
+    return any(marker in lowered for marker in _TRANSIENT_MARKERS)
+
+
 def engine_error(result: Any, text: str) -> str | None:
     """Why a finished run failed, in words the operator can act on.
 
@@ -514,7 +577,14 @@ def engine_error(result: Any, text: str) -> str | None:
 
 
 class ClaudeAgentEngine:
-    """Runs one unattended analysis per call. No sessions, no resume."""
+    """The one runtime adapter: the Claude Code SDK, driven per turn.
+
+    Sessions and resume are the whole point now — a follow-up continues what the
+    first pass gathered, and a restart continues what a killed process left (see
+    `RunService.recover_orphans`). The obligations this has to meet, including
+    the two that are invisible in the Protocol's signatures, are written on
+    `service.Engine`.
+    """
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
