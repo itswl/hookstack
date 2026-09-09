@@ -1294,6 +1294,11 @@ class RunService:
         run = self._store.get(str((row or {}).get("session_key") or "")) if row else None
         return remediation.cursor(run) if run is not None else {}
 
+    # What a notice needs from the run it is about: enough for the pipe to name
+    # the alert, put the card in the right conversation and file it under the
+    # right work. Everything else on a run's meta describes work this did none of.
+    _NOTICE_META = ("title", "source", "level", "event_id", "kind", "work_id", "thread_root")
+
     def report_superseded(self, proposal_id: str, reason: str) -> Run | None:
         """Say in the chat that a pressed procedure did not run, and why.
 
@@ -1323,11 +1328,24 @@ class RunService:
             model_endpoint=self._settings.model_endpoint,
             origin="relay",
         )
-        # The original's meta, so the card carries the same alert name and lands
-        # in the same thread — this is an answer to that conversation, not a new
-        # one. The work id rides along for the same reason.
-        notice.meta = dict(run.meta or {})
-        notice.meta["superseded"] = str(row.get("id") or "")
+        # The DELIVERY fields of the original's meta and nothing else, so the
+        # card carries the same alert name and lands in the same conversation.
+        # Copying the whole dict was wrong and briefly shipped: `refires` and
+        # `follow_ups` are counters the work board SUMS across a work item's
+        # runs, so a notice carrying them counted every re-fire twice.
+        notice.meta = {
+            key: value
+            for key, value in (run.meta or {}).items()
+            if key in self._NOTICE_META and value not in (None, "")
+        }
+        # A message, not an investigation. The work board reads this and folds
+        # the notice out: it opened no work, answered no question, and the
+        # supersede is already on the item as the proposal's own artifact. Left
+        # in, it was the item's newest FAILED run, which read as `needs_human`
+        # on work that a recovery had just closed — and it collected a "was this
+        # worth it?" the way a real report does.
+        notice.meta["notice"] = "superseded"
+        notice.meta["proposal"] = str(row.get("id") or "")
         self._store.create(notice)
         notice.status = FAILED
         notice.error = f"not executed: {reason}"

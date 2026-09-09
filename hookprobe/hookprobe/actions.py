@@ -107,6 +107,12 @@ def declare(run: Run, workdir: Path) -> list[dict[str, Any]]:
       count that quietly excluded the disappointing runs would not answer it.
     """
     declared: list[dict[str, Any]] = []
+    # A notice is this service explaining itself, not a report. There is nothing
+    # to continue, nothing to approve, and its worth is not the question the
+    # ruling pair exists to answer — that number is about whether paying a model
+    # per alert pays off, and this one cost nothing and investigated nothing.
+    if (run.meta or {}).get("notice"):
+        return declared
     if run.engine_session_id:
         declared.append(
             {

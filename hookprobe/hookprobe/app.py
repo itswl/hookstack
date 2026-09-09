@@ -314,8 +314,12 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         """
         runs = service.list_runs(limit=limit)
         if unruled:
-            # A run still in flight has not earned a verdict yet.
-            runs = [run for run in runs if not run.ruling and run.status != RUNNING]
+            # A run still in flight has not earned a verdict yet, and a notice
+            # never will: it is this service explaining itself, and "was it
+            # worth it" is a question about investigations.
+            runs = [
+                run for run in runs if not run.ruling and run.status != RUNNING and not (run.meta or {}).get("notice")
+            ]
         return [_summary(run) for run in runs]
 
     @app.post("/v1/runs/{session_key}/ruling", dependencies=[Depends(require_token)])

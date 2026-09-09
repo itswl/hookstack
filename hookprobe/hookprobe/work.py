@@ -192,6 +192,18 @@ def resolve(
     is the thing a person has to answer for.
     """
     now = now or time.time()
+    # Notices out FIRST, before anything reads this list, because two things
+    # read it: the fold below and `_state`, which re-derives its own view from
+    # the same argument. Filtering inside the loop left the state machine
+    # looking at the unfiltered set — the same defect one layer down.
+    #
+    # A notice is a message this service sent ABOUT the work, not a run of it:
+    # it asked no question, investigated nothing, and carries a copy of another
+    # run's delivery fields so the card lands in the right conversation. Folded
+    # in, it was the item's newest failed run — reading as `needs_human` on work
+    # a recovery had just closed — and it collected a "was this worth it?". What
+    # it reports is already on the item, as the artifact of its own proposal.
+    runs = [run for run in runs if not (run.meta or {}).get("notice")]
     by_session_proposals: dict[str, list[dict[str, Any]]] = {}
     for row in proposals or []:
         by_session_proposals.setdefault(str(row.get("session_key") or ""), []).append(row)

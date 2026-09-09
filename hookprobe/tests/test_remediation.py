@@ -536,7 +536,7 @@ def test_the_chat_is_told_a_pressed_procedure_did_not_run(tmp_path):
     # The original's meta, so the card names the same alert and lands in the
     # same conversation — this is an answer to it, not a new one.
     assert notice.meta["title"] == "t" and notice.meta["source"] == "alerts"
-    assert notice.meta["superseded"] == pid
+    assert notice.meta["proposal"] == pid and notice.meta["notice"] == "superseded"
     assert "did NOT run" in notice.text and "echo remediated" in notice.text
 
 
@@ -545,3 +545,58 @@ def test_a_console_born_run_gets_no_chat_notice(tmp_path, monkeypatch):
     run, service = _proposed(tmp_path)
     run.origin = ""
     assert service.report_superseded(run.meta["remediation_proposal"], "whatever") is None
+
+
+def test_the_notice_does_not_masquerade_as_work(tmp_path):
+    """Caught after the first push, and it is the shape AGENTS.md warns about:
+    the value was computed correctly and wrong at the point of consumption.
+
+    The notice carried a COPY of the investigation's meta, so the work board —
+    which sums `refires` and `follow_ups` across an item's runs and reads the
+    newest run's status — saw a second re-fire that never happened and a failed
+    run on work a recovery had just closed.
+    """
+    from hookprobe import work
+
+    run, service = _proposed(tmp_path)
+    run.meta["refires"] = 1
+    run.meta["follow_ups"] = ["om_1"]
+    run.meta["work_id"] = "hr-99"
+    pid = run.meta["remediation_proposal"]
+    service.record_recovery("alerts", "t")
+    with pytest.raises(remediation.Moved):
+        service.approve_remediation(pid)
+    notice = service.report_superseded(pid, "the condition ended after these steps were written")
+    assert notice is not None
+
+    # It goes to the same conversation and the same work — and carries none of
+    # the counters that belong to the run that did the work.
+    assert notice.meta["work_id"] == "hr-99"
+    assert "refires" not in notice.meta and "follow_ups" not in notice.meta
+    assert "remediation_proposal" not in notice.meta
+
+    items = work.resolve([run, notice], proposals=remediation.list_all(tmp_path), suggestions=[])
+    assert len(items) == 1, "a notice must not open a work item of its own"
+    item = items[0]
+    assert item.refires == 1, "the notice counted the re-fire a second time"
+    assert item.sessions == [run.session_key], "the notice folded in as a run of the work"
+    assert item.state != work.NEEDS_HUMAN, "a notice made closed work look like it needs somebody"
+    assert not [o for o in item.open if o["ref"] == notice.session_key]
+    # The supersede is still visible — on the proposal, where it happened.
+    assert any("superseded" in a["name"] for a in item.artifacts if a["kind"] == "procedure")
+
+
+def test_a_notice_earns_no_buttons(tmp_path):
+    """ "Was this worth it?" is a question about investigations. This one cost
+    nothing and investigated nothing; a card asking it would be collecting an
+    opinion on the service's own apology."""
+    from hookprobe import actions
+
+    run, service = _proposed(tmp_path)
+    pid = run.meta["remediation_proposal"]
+    service.record_recovery("alerts", "t")
+    with pytest.raises(remediation.Moved):
+        service.approve_remediation(pid)
+    notice = service.report_superseded(pid, "the condition ended after these steps were written")
+    assert notice is not None
+    assert actions.declare(notice, tmp_path) == []

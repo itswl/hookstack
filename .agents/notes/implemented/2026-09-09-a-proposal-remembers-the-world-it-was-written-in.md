@@ -103,6 +103,21 @@ than it was.
   was the silent refusal above, which is not a trade worth making.
 * Twenty-second containment boundary. The "Approval window" row's *does not stop*
   column now points at it instead of describing an open gap.
+* **A notice is not a run of the work, and getting that wrong shipped once.**
+  It first carried a COPY of the investigation's meta and folded into the work
+  item like any other run: `refires` and `follow_ups` are summed across an
+  item's runs, so every re-fire counted twice, and the notice was the item's
+  newest FAILED run — reading as `needs_human` on work a recovery had just
+  closed, and collecting a "was this worth it?" for a refusal. It now carries
+  only the delivery fields plus `meta.notice`, and `work.resolve`,
+  `actions.declare` and the unruled list all fold it out.
+
+  The fix itself repeated the lesson one layer down. Filtering notices inside
+  `resolve`'s fold loop looked right and was not: `_state` re-derives its own
+  view from the same `runs` argument, so the state machine still saw the
+  unfiltered set. It is filtered once now, at the top, before anything reads
+  the list — which is `verify at the point of consumption` in AGENTS.md, found
+  the way that rule says it is found.
 * What is still not covered: two proposals from the same session, where approving
   the second after the first ran is unchanged behaviour. `_MAX_APPROVE = 3` bounds
   it and they are genuinely different procedures.
