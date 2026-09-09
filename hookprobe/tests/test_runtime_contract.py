@@ -23,11 +23,13 @@ out should not cost a paid model run.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -37,6 +39,7 @@ from hookprobe.engine_codex import _Turn as _CodexTurn
 from hookprobe.engine_pi import GATE_EXTENSION, PiEngine
 from hookprobe.engine_pi import _Turn as _PiTurn
 from hookprobe.runtimes import ADAPTERS, build_engine
+from hookprobe.settings import Settings
 from tests.helpers import make_settings
 
 # Captured from a real turn: `codex exec --json` asked to run one shell command.
@@ -519,6 +522,208 @@ def test_pi_resume_names_the_session(tmp_path: Path) -> None:
 def test_pi_keeps_its_transcripts_on_the_persistent_volume(tmp_path: Path) -> None:
     engine = PiEngine(make_settings(tmp_path, runtime="pi"))
     assert Path(engine._env("k")["PI_CODING_AGENT_SESSION_DIR"]).is_relative_to(tmp_path)
+
+
+# ------------------ the incumbent, held to the same five as the newcomers
+#
+# This section is the correction to an inversion. The suite was written to stop a
+# NEW adapter satisfying the signatures and none of the obligations, and it did
+# that: 30 assertions against codex, 17 against pi. It never once instantiated
+# `ClaudeAgentEngine` — the default, and the only adapter any deployment
+# actually runs. Obligation 1 had a claude test (`_bash_guard_hook`, above);
+# obligations 2 through 5 were pinned only on the two engines nobody deploys, so
+# breaking obligation 4 on the deployed path would have failed nothing.
+#
+# It needs the SDK's message classes, which is the same exception
+# `tests/test_engine_loop.py` documents and for the same reason: a declared
+# dependency in this venv, no subprocess, no model, no credential. The fake
+# client is local rather than shared with that file — the authority should not
+# depend on a behaviour suite that can change for unrelated reasons.
+
+
+class _FakeClaudeClient:
+    scripted: list[Any] = []
+
+    def __init__(self, options: Any = None) -> None:
+        type(self).options = options
+
+    async def connect(self) -> None: ...
+
+    async def disconnect(self) -> None: ...
+
+    async def query(self, message: str) -> None: ...
+
+    # Present because the engine reaches for it on the stop path; a client
+    # without it turns an interrupt into an AttributeError mid-turn.
+    async def interrupt(self) -> None: ...
+
+    async def receive_response(self):
+        for message in type(self).scripted:
+            yield message
+
+
+def _drive_claude(
+    tmp_path: Path, messages: list[Any], monkeypatch: pytest.MonkeyPatch, **kw: Any
+) -> tuple[Any, list[dict]]:
+    import claude_agent_sdk
+
+    from hookprobe.engine import ClaudeAgentEngine
+
+    monkeypatch.setattr(claude_agent_sdk, "ClaudeSDKClient", _FakeClaudeClient)
+    _FakeClaudeClient.scripted = messages
+    engine = ClaudeAgentEngine(make_settings(tmp_path, workdir=tmp_path))
+    seen: list[dict] = []
+    result = asyncio.run(
+        engine.run(message="investigate", session_key="probe:conformance:1", on_event=seen.append, **kw)
+    )
+    return result, seen
+
+
+def _claude_result(**over: Any) -> Any:
+    from claude_agent_sdk import ResultMessage
+
+    base: dict[str, Any] = {
+        "subtype": "success",
+        "duration_ms": 1200,
+        "duration_api_ms": 900,
+        "is_error": False,
+        "num_turns": 1,
+        "session_id": "01a081ff-claude",
+        "total_cost_usd": 0.25,
+        "result": "the report",
+        "usage": {"input_tokens": 10, "output_tokens": 20},
+    }
+    return ResultMessage(**{**base, **over})
+
+
+def test_the_claude_adapter_records_every_tool_call_where_the_agent_cannot(tmp_path: Path) -> None:
+    """Obligation 2, on the incumbent. Codex has had this since it landed.
+
+    The hook is what writes it, which is why this drives the hook rather than a
+    turn: the same mechanism fires inside subagents, whose calls never appear in
+    the message stream at all.
+    """
+    from hookprobe.engine import _audit_hook
+
+    audit = tmp_path / "audit"
+    hook = _audit_hook(audit, "probe:conformance:1")
+    asyncio.run(hook({"tool_name": "Bash", "tool_input": {"command": "kubectl get pods"}}, None, None))
+    asyncio.run(
+        hook(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "kubectl delete pod x"},
+                "tool_response": {"is_error": True},
+            },
+            None,
+            None,
+        )
+    )
+
+    # Read the way the codex audit tests read it: one day-file of JSONL.
+    written = sorted(audit.glob("*.jsonl"))
+    assert len(written) == 1, "the flight recorder writes one file per day, or nothing is being recorded"
+    lines = [json.loads(raw) for raw in written[0].read_text(encoding="utf-8").splitlines() if raw.strip()]
+    assert [entry["tool"] for entry in lines] == ["Bash", "Bash"]
+    assert [entry["error"] for entry in lines] == [False, True], "a refusal is recorded too, or the account is partial"
+    assert all(entry["session"] == "probe:conformance:1" for entry in lines)
+
+
+def test_the_claude_adapter_puts_the_session_id_first_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Obligation 4, on the incumbent, and the one whose absence cost real money.
+
+    An id read off the RESULT leaves a turn killed mid-flight with nothing to
+    continue; the service then failed the run and an operator paid for the whole
+    investigation twice. All three adapters emit it the moment the runtime first
+    says it — engine.py:962, engine_codex.py:345, engine_pi.py:259 — and until
+    now only the two that nobody deploys had a test saying so.
+    """
+    from claude_agent_sdk import AssistantMessage, StreamEvent, TextBlock
+
+    # A real turn's first message is a token delta, and on this SDK the delta is
+    # what carries the id: `AssistantMessage` has no `session_id` field at all,
+    # so the emission depends on `include_partial_messages=True` (engine.py:884)
+    # being on. Pinned below, because turning it off to save bandwidth would
+    # silently move this adapter back to result-only ids and take mid-turn
+    # recovery with it — the exact regression that cost a double-paid
+    # investigation the first time.
+    delta = StreamEvent(
+        uuid="u",
+        session_id="01a081ff-claude",
+        event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": "look"}},
+    )
+    _, seen = _drive_claude(
+        tmp_path,
+        [delta, AssistantMessage(content=[TextBlock(text="looking")], model="m"), _claude_result()],
+        monkeypatch,
+    )
+    kinds = [event["type"] for event in seen]
+    assert kinds[0] == "session", f"the id has to arrive before anything else, got {kinds}"
+    assert seen[0]["id"] == "01a081ff-claude"
+    assert getattr(_FakeClaudeClient.options, "include_partial_messages", None) is True, (
+        "this adapter's mid-turn id rides the partial-message stream; without it the id is result-only"
+    )
+
+    # And with no deltas at all the id still arrives, late, with the result — a
+    # turn that got that far is recoverable afterwards even though it was never
+    # recoverable DURING.
+    _, late = _drive_claude(
+        tmp_path, [AssistantMessage(content=[TextBlock(text="looking")], model="m"), _claude_result()], monkeypatch
+    )
+    assert [event["type"] for event in late].index("session") >= 0
+
+
+def test_the_claude_adapter_carries_a_session_across_a_boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Obligation 3, on the incumbent: the id comes back on the result, and a
+    resume is handed to the runtime rather than quietly dropped."""
+    result, _ = _drive_claude(tmp_path, [_claude_result()], monkeypatch, resume="01a081ff-claude")
+    assert result.session_id == "01a081ff-claude"
+    assert getattr(_FakeClaudeClient.options, "resume", None) == "01a081ff-claude", (
+        "an adapter that accepts `resume` and does not pass it on satisfies the type and loses the feature"
+    )
+
+
+def test_the_claude_adapter_does_not_report_a_zero_it_cannot_stand_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Obligation 5, on the incumbent — pi's correction, applied before it bites.
+
+    This adapter passed `total_cost_usd` through raw and had never been seen
+    reporting a zero: 89 runs on the work deployment, every one priced. It also
+    runs a gateway model the CLI does not price, which is precisely the condition
+    that produced pi's `totalTokens: 6397` with `cost.total: 0`. The rule is one
+    function (`engine.priced`) for both, because a rule about money written twice
+    is how `cost_usd` comes to mean two things.
+    """
+    unpriced, _ = _drive_claude(tmp_path, [_claude_result(total_cost_usd=0.0)], monkeypatch)
+    assert unpriced.cost_usd is None, "0.0 with 30 tokens behind it is 'nobody priced this', not 'this was free'"
+
+    priced_turn, _ = _drive_claude(tmp_path, [_claude_result(total_cost_usd=0.25)], monkeypatch)
+    assert priced_turn.cost_usd == 0.25, "a real price still passes through"
+
+    free, _ = _drive_claude(
+        tmp_path, [_claude_result(total_cost_usd=0.0, usage={"input_tokens": 0, "output_tokens": 0})], monkeypatch
+    )
+    assert free.cost_usd == 0.0, "and a zero with nothing behind it is allowed to mean free"
+
+
+def test_the_node_reports_a_runtime_this_build_can_actually_run(tmp_path: Path) -> None:
+    """What `/v1/agent` says it runs must be a name the registry dispatches on.
+
+    Written because it was not: the field arrived hard-coded to the literal
+    `"claude-code"` when there was one adapter and no registry to name
+    (d6b6826), and became `settings.runtime` the day the second one landed
+    (fc18863). Nodes deployed in between still answer `claude-code` — a name
+    `build_engine` now refuses outright. A comment beside the field says a node
+    reporting one runtime while running another is the claim this contract
+    exists to keep honest; this is that claim as an assertion.
+    """
+    settings = make_settings(tmp_path, runtime="claude")
+    assert settings.runtime in ADAPTERS
+    # And the default, for a deployment that sets no HOOKPROBE_RUNTIME at all —
+    # which is every deployment in this repository today.
+    default = Settings.__dataclass_fields__["runtime"].default
+    assert default in ADAPTERS, f"the field's default {default!r} is not a runtime this build has an adapter for"
 
 
 # ------------------ the check that verify() alone could not make: was it ASKED?

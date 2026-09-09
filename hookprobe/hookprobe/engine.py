@@ -538,6 +538,35 @@ _PERMANENT_MARKERS = (
 )
 
 
+def priced(total: Any, tokens: Any) -> float | None:
+    """A turn's cost, or `None` — and a zero with tokens behind it is `None`.
+
+    Obligation five of the runtime contract, as ONE function rather than one per
+    adapter, for the reason the gate is one module: a rule about money written
+    twice means `cost_usd` says slightly different things depending which engine
+    a node runs, and nothing in either suite notices the day they diverge.
+
+    pi is where this was measured. It prices a turn from its own model
+    catalogue, this deployment's model is not in that catalogue, and the first
+    real turn came back with `totalTokens: 6397` and `cost.total: 0`. A budget
+    breaker fed that watches an unattended node spend all week and sees nothing
+    wrong — worse than a runtime that admits it cannot count, because nothing
+    ever looks wrong. So tokens spent with a price of zero is UNPRICED, and only
+    a zero with nothing behind it may mean free.
+
+    The Claude adapter passed `total_cost_usd` through raw until 2026-09-09 and
+    had never been observed reporting a zero — 89 runs on the work deployment,
+    all priced. It runs a gateway model the CLI does not price, though, which is
+    exactly pi's condition, so it asks the same question now instead of waiting
+    to find out.
+    """
+    if not isinstance(total, int | float) or isinstance(total, bool):
+        return None
+    if total == 0 and isinstance(tokens, int | float) and tokens > 0:
+        return None
+    return float(total)
+
+
 def transient(error: str) -> bool:
     """Whether this failure is worth one more attempt, right now.
 
@@ -1042,7 +1071,15 @@ class ClaudeAgentEngine:
         return EngineResult(
             text=text,
             message_count=message_count,
-            cost_usd=getattr(result, "total_cost_usd", None),
+            # Obligation five, through the shared rule: the CLI prices from its
+            # own table for a model it is not the one billing, so a zero here is
+            # "could not price this" far more likely than "this was free".
+            cost_usd=priced(
+                getattr(result, "total_cost_usd", None),
+                sum(v for k, v in (usage or {}).items() if isinstance(v, int | float) and "token" in k)
+                if isinstance(usage, dict)
+                else None,
+            ),
             error=error,
             session_id=getattr(result, "session_id", None),
             usage=dict(usage) if isinstance(usage, dict) else None,

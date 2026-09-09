@@ -42,7 +42,7 @@ from typing import Any
 
 import hookprobe
 from hookprobe import gate
-from hookprobe.engine import EngineResult, engine_error, file_fact
+from hookprobe.engine import EngineResult, engine_error, file_fact, priced
 from hookprobe.gate import tool_detail
 from hookprobe.settings import Settings
 
@@ -301,19 +301,17 @@ class _Turn:
             self._emit({"type": "text", "text": text[:500]})
 
     def cost(self) -> float | None:
-        """Money, or None — see the module docstring for why this is not `or 0.0`."""
+        """Money, or None — see the module docstring for why this is not `or 0.0`.
+
+        The zero-with-tokens rule itself is `engine.priced`, shared with the
+        Claude adapter: this is where it was measured, and a rule about money
+        living in two places is how `cost_usd` comes to mean two things.
+        """
         usage = self.usage or {}
-        priced = usage.get("cost")
-        if not isinstance(priced, dict):
+        reported = usage.get("cost")
+        if not isinstance(reported, dict):
             return None
-        total = priced.get("total")
-        if not isinstance(total, int | float):
-            return None
-        if total == 0 and (usage.get("totalTokens") or 0) > 0:
-            # Tokens were spent and pi had no price for this model. "Free" and
-            # "unpriced" are different facts and the ledger keeps them apart.
-            return None
-        return float(total)
+        return priced(reported.get("total"), usage.get("totalTokens"))
 
     def result(self, *, duration_ms: int, returncode: int | None, stderr: str) -> EngineResult:
         return EngineResult(
