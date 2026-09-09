@@ -45,6 +45,7 @@ from hookprobe import (
     automation,
     describe,
     events,
+    gate,
     handoff,
     library,
     ops,
@@ -154,6 +155,12 @@ def _summary(run: Run) -> dict[str, Any]:
         "ruled_by": run.ruled_by,
         "ruled_at": run.ruled_at,
         "inferred": run.ruled_by.startswith(INFERRED_BY_PREFIX),
+        # How often the posture refused this session, summed over its turns.
+        # On the SUMMARY and not only the detail, for the reason the ruling is:
+        # a number recorded where nobody looks is a number nobody acts on, and
+        # this one was added the same afternoon its own note complained about
+        # exactly that.
+        "guard_trips": sum(int(t.get("guard_trips") or 0) for t in run.turns),
     }
 
 
@@ -391,6 +398,10 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             **asdict(run),
             "inputs_now": _prompt_digests_now(settings),
             "links": _run_links(settings.relay_ui_url, run.meta),
+            # What this run's tool output appeared to contain. Read from the
+            # audit on the DETAIL and not the list: one file scan for one run a
+            # person opened, rather than one per row of a 200-row board.
+            "output_secrets": gate.output_secrets(settings.workdir / "audit", session_key),
         }
 
     @app.get("/v1/posture", dependencies=[Depends(require_token)])

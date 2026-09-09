@@ -485,6 +485,16 @@ function returnFlag(x) {
 // A person's ruling on this investigation, pressed on the card it arrived as.
 // Absent until somebody says: an unruled run is unrated, never "not useful",
 // and the aggregate under the spend bars counts it the same way.
+// How often the posture had to refuse this run. Absent at zero, which is the
+// healthy case and most of them — a chip that shows on every row is furniture.
+// A number here is the difference between an agent narrowing a query and an
+// agent being steered into the guard, which was invisible until it was counted.
+function guardFlag(x) {
+  const n = Number(x.guard_trips || 0);
+  if (!n) return "";
+  return `<span class="flag retfail" title="the read-only guard refused ${n} call${n > 1 ? "s" : ""} in this run">refused ${n}</span>`;
+}
+
 function rulingFlag(x) {
   if (x.ruling === "useful") return '<span class="flag sent">found the cause</span>';
   if (x.ruling === "useless") return '<span class="flag retfail">missed it</span>';
@@ -536,6 +546,7 @@ async function refreshList() {
           <span class="badge ${esc(x.status)}">${esc(x.status)}</span>
           ${returnFlag(x)}
           ${rulingFlag(x)}
+          ${guardFlag(x)}
           <span>${x.turn_count} turn${x.turn_count > 1 ? "s" : ""}</span>
           ${x.model ? `<span>${esc(modelWithEndpoint(x.model, x.model_endpoint))}</span>` : ""}
           ${x.cost_usd ? `<span>$${Number(x.cost_usd).toFixed(3)}</span>` : ""}
@@ -940,6 +951,18 @@ async function renderDetail(startPolling) {
     ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");
   $("#prov").innerHTML = provenanceHtml(run);
+  // What this run's tool output appeared to contain. Loud, and above the
+  // transcript rather than in the audit tab: to learn that a run's context had
+  // been filled with a live credential you used to have to SSH in and grep,
+  // which is exactly when you no longer need to know. Deciding to discard the
+  // report or rotate the key needs it on the same screen as the report.
+  const leaked = run.output_secrets || [];
+  $("#prov").innerHTML +=
+    leaked.length
+      ? `<div class="flag retfail" style="display:block;margin-top:6px">tool output in this run contained ` +
+        `${leaked.map(esc).join(", ")} — the model saw it, and so does this record. ` +
+        `Consider the report unsafe to forward and the credential worth rotating.</div>`
+      : "";
   // Recorded prompt inputs are only legible next to the files as they are now.
   const now = run.inputs_now;
   const parts = (run.turns || []).map((t) => turnHtml(t, now));

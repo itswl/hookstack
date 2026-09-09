@@ -529,6 +529,32 @@ def trips(audit_dir: Path, session_key: str, *, since: float) -> int:
     return seen
 
 
+def output_secrets(audit_dir: Path, session_key: str) -> list[str]:
+    """Which kinds of credential this session's tool output appeared to contain.
+
+    The detector writes `output_secret` beside the call; this is the read. It
+    exists because the flag was landing in a JSONL nobody opens — to find out
+    that a run's context had been filled with a live key you had to SSH in and
+    grep, which is exactly when you no longer need to know. Whole file, not a
+    time window: contamination is a fact about the session, not about one turn.
+    """
+    day_glob = sorted(audit_dir.glob("*.jsonl")) if audit_dir.is_dir() else []
+    found: list[str] = []
+    for path in day_glob:
+        try:
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    line = json.loads(raw)
+                except ValueError:
+                    continue
+                kind = line.get("output_secret")
+                if kind and line.get("session") == session_key and kind not in found:
+                    found.append(str(kind))
+        except OSError:
+            continue
+    return sorted(found)
+
+
 def consulted(audit_dir: Path, session_key: str, *, since: float) -> bool:
     """Did the gate actually record anything for this session during this turn?
 

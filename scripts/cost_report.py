@@ -240,6 +240,12 @@ def compute(
             "ruled_useful": sum(1 for r in week if r.get("ruling") == "useful"),
             "ruled_useless": sum(1 for r in week if r.get("ruling") == "useless"),
             "unruled": sum(1 for r in week if not r.get("ruling")),
+            # How often the posture had to refuse. Reported because the number
+            # was recorded and unread, which is the failure this page exists to
+            # avoid: a run refused twenty times is an agent being steered, and
+            # it used to leave the same trace as one refused once.
+            "guard_trips": sum(int(r.get("guard_trips") or 0) for r in week),
+            "runs_refused": sum(1 for r in week if int(r.get("guard_trips") or 0) > 0),
             # Only a real risk when the listing hit its cap AND its oldest row is
             # still inside the window — then older in-window runs may exist unseen.
             "listing_truncated": len(runs) >= 200
@@ -506,6 +512,14 @@ def render(r: dict[str, Any]) -> str:
             "estimate at its own table, for a model it is not the one billing",
             f"- **Counterfactual**: {inv['answered_from_runbook']} re-fires answered from a runbook at $0 ≈ **{_money(inv['avoided_cost'])} avoided**",
             f"- **Worth**: useful {inv['ruled_useful']} · useless {inv['ruled_useless']} · **unruled {inv['unruled']}** — the half only a person can fill",
+            (
+                f"- **The posture refused** {inv['guard_trips']} call"
+                f"{'' if inv['guard_trips'] == 1 else 's'} across {inv['runs_refused']} run"
+                f"{'' if inv['runs_refused'] == 1 else 's'} — a run refused repeatedly is an agent being "
+                "steered, not one narrowing a query"
+                if inv.get("guard_trips")
+                else "- **The posture refused nothing** this window"
+            ),
         ]
         if inv.get("listing_truncated"):
             out.append("- _The run listing was capped; counts above may be low._")

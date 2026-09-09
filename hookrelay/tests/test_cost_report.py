@@ -385,3 +385,19 @@ def test_a_ceiling_that_cannot_bind_is_not_printed_as_headroom() -> None:
     page = cost_report.render(cost_report.compute(None, None, measured, None, hours=168, now=NOW))
     assert "$0.4000 of $1.00 spent, $0.6000 left" in page
     assert "floor" not in page.split("**Budget**")[1].split("\n")[0]
+
+
+def test_the_posture_refusals_are_reported_rather_than_recorded_and_unread() -> None:
+    """`guard_trips` was added to the run record and then read by nothing —
+    which is the exact failure this page exists to avoid."""
+    steered = [
+        {"session_key": "probe:a", "status": "completed", "finished_at": NOW - 60, "cost_usd": 0.4, "guard_trips": 7},
+        {"session_key": "probe:b", "status": "completed", "finished_at": NOW - 60, "cost_usd": 0.4, "guard_trips": 0},
+    ]
+    page = cost_report.render(cost_report.compute(None, None, None, steered, hours=168, now=NOW))
+    assert "**The posture refused** 7 calls across 1 run" in page
+    assert "being steered, not one narrowing a query" in page
+
+    quiet = [{"session_key": "probe:c", "status": "completed", "finished_at": NOW - 60, "cost_usd": 0.4}]
+    page = cost_report.render(cost_report.compute(None, None, None, quiet, hours=168, now=NOW))
+    assert "**The posture refused nothing** this window" in page, "a quiet window says so, not '0 calls across 0 runs'"

@@ -122,3 +122,58 @@ def test_repeated_refusals_are_counted_where_one_refusal_used_to_look_the_same(
     # Scoped to the session and the turn, or a busy node's counts would bleed.
     assert gate.trips(audit, "probe:other:1", since=started) == 0
     assert gate.trips(audit, "probe:steered:1", since=started + 3600) == 0
+
+
+def test_both_new_numbers_have_a_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The complaint this file's own note made, applied to this file's own work.
+
+    `guard_trips` and `output_secret` were both landing somewhere nobody looks
+    — a turn record and a JSONL. To learn that a run's context had been filled
+    with a live key you had to SSH in and grep, which is exactly when you no
+    longer need to know. The count is on the run SUMMARY (so the board can show
+    it) and the kinds are on the DETAIL (one file scan for one run somebody
+    opened, not one per row).
+    """
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    settings = make_settings(tmp_path, token="secret-token", workdir=tmp_path)
+    service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+    auth = {"Authorization": "Bearer secret-token"}
+
+    with TestClient(create_app(settings, service)) as client:
+        client.post("/hooks/agent", json={"message": "m", "sessionKey": "probe:seen:1"}, headers=auth)
+        for _ in range(300):
+            if client.get("/v1/runs/probe:seen:1", headers=auth).json().get("finished"):
+                break
+
+        # The gate writes both kinds of line for this session, as it would mid-run.
+        env = {
+            "HOOKPROBE_GATE_AUDIT": str(tmp_path / "audit"),
+            "HOOKPROBE_GATE_MODE": "readonly",
+            "HOOKPROBE_GATE_WORKDIR": str(tmp_path),
+            "HOOKPROBE_SESSION_KEY": "probe:seen:1",
+        }
+        gate.decide(
+            {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "kubectl delete pod a"}},
+            env,
+        )
+        gate.decide(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": "kubectl get secret x -o yaml"},
+                "tool_response": {"stdout": "AKIAIOSFODNN7EXAMPLE"},
+            },
+            env,
+        )
+
+        detail = client.get("/v1/runs/probe:seen:1", headers=auth).json()
+        assert detail["output_secrets"] == ["aws access key id"], "on the detail, where a person opened the run"
+        listed = client.get("/v1/runs", headers=auth).json()
+        rows = listed["runs"] if isinstance(listed, dict) else listed
+        assert "guard_trips" in rows[0], "on the summary, so a board can show it without opening every run"

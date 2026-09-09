@@ -10,6 +10,7 @@ it refuses the console.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import time
 from pathlib import Path
@@ -52,6 +53,17 @@ def _client(tmp_path: Path, engine: Any, **overrides: Any) -> TestClient:
     settings = make_settings(tmp_path, token=TOKEN, **overrides)
     service = RunService(settings, engine, RunStore(tmp_path / "results"))
     return TestClient(create_app(settings, service))
+
+
+def _as_run(detail: dict) -> Run:
+    """A `Run` from a `/v1/runs/{key}` body, keeping only its own fields.
+
+    Was a hand-maintained exclusion list, so every field the detail response
+    grew broke these tests for a reason that had nothing to do with cards.
+    Derived from the dataclass instead.
+    """
+    fields = {f.name for f in dataclasses.fields(Run)}
+    return Run(**{k: v for k, v in detail.items() if k in fields})
 
 
 def _drain(client: TestClient, key: str) -> dict[str, Any]:
@@ -114,7 +126,7 @@ def test_a_report_with_a_procedure_offers_it_by_name(tmp_path: Path) -> None:
     with client:
         run = _drain(client, "probe:inbound:5")
         proposal_id = run["meta"]["remediation_proposal"]
-        declared = actions.declare(Run(**{k: v for k, v in run.items() if k not in ("inputs_now", "links")}), tmp_path)
+        declared = actions.declare(_as_run(run), tmp_path)
 
     kinds = [action["kind"] for action in declared]
     assert kinds == ["followup", "approve", "useful", "useless"]
@@ -138,7 +150,7 @@ def test_a_failed_investigation_offers_no_approval(tmp_path: Path) -> None:
         client.post("/hooks/event", json=EVENT)
         run = _drain(client, "probe:inbound:5")
 
-    declared = actions.declare(Run(**{k: v for k, v in run.items() if k not in ("inputs_now", "links")}), tmp_path)
+    declared = actions.declare(_as_run(run), tmp_path)
     assert [action["kind"] for action in declared] == ["followup", "useful", "useless"]
     assert declared[0]["prompt"].startswith("This investigation did not finish")
 
