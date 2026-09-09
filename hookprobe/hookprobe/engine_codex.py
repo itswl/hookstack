@@ -10,10 +10,27 @@ about the runtime, not about the Claude SDK.
 
 Four decisions worth keeping, because each was a fork in the road:
 
-**A subprocess reading JSONL, not the app-server.** `codex exec --json` already
-emits everything the contract asks for, `thread.started` first. The app-server
-is a JSON-RPC daemon with a lifecycle to supervise, a second thing to restart,
-and no answer this stream does not already give.
+**`codex exec`, not the official Python SDK — and the reason is the gate.** The
+SDK (`openai-codex` on PyPI) is better on every axis this adapter had to work
+for: `thread.id` before the turn instead of parsed out of the first line, a real
+`interrupt()` instead of SIGTERM, `model_context_window` arriving beside the
+token usage, and the CLI binary shipped as a pip dependency. It drives
+`codex app-server`, and **hooks do not run under app-server**. Measured, twice,
+against the same `CODEX_HOME` and the same `hooks.json` that work here: under
+`exec` the guard refuses `kubectl delete` and writes its audit line; under
+app-server the command runs, nothing is recorded, and no `hook/started`
+notification appears in the stream. Tried with codex-cli 0.147.0 and 0.153.4,
+and with `--dangerously-bypass-hook-trust` on the launch arguments.
+
+The only client-side gate the SDK offers is its `approval_handler`, which
+answers `item/commandExecution/requestApproval` — a sandbox-escalation prompt
+raised for the calls the sandbox alone cannot decide, not a hook before every
+tool. It cannot carry a per-verb posture, and its default implementation
+accepts. So the SDK buys ergonomics with obligation one, which the Runtime
+Contract says is a finding rather than a trade to make.
+
+Revisit when a codex release emits `hook/started` from an app-server stream.
+Everything else about the SDK is worth having.
 
 **The gate is `hookprobe.gate`, spawned per tool call.** Not a second copy of
 the posture: the same module the Claude adapter calls in-process, reached
@@ -95,6 +112,9 @@ class CodexEngine:
         # per-turn path that spawns an interpreter is a cost paid on every turn
         # forever, and the answer cannot change without a restart.
         self._gate_proven = False
+        # Set when a turn is found to have run ungated; see
+        # _check_gate_was_consulted. Once set, this node takes no more turns.
+        self._gate_broken: str | None = None
 
     # ------------------------------------------------------------------ setup
 
@@ -135,6 +155,8 @@ class CodexEngine:
         reaches the gate by spawning it. What is checked here first is the thing
         only this adapter can know: whether there is a CLI to drive at all.
         """
+        if self._gate_broken is not None:
+            raise RuntimeError(self._gate_broken)
         if self._gate_proven:
             return
         if shutil.which(self._binary) is None and not Path(self._binary).is_file():
@@ -199,6 +221,8 @@ class CodexEngine:
         self.prepare_home()
         self.verify_gate()
         started = time.monotonic()
+        # Wall clock, because the audit lines are stamped with it.
+        wall_started = time.time()
         proc = await asyncio.create_subprocess_exec(
             *self._argv(resume),
             stdin=asyncio.subprocess.PIPE,
@@ -224,11 +248,31 @@ class CodexEngine:
         finally:
             self._proc = None
         stderr = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr else ""
+        self._check_gate_was_consulted(state, session_key, since=wall_started)
         return state.result(
             duration_ms=int((time.monotonic() - started) * 1000),
             returncode=proc.returncode,
             stderr=stderr,
         )
+
+    def _check_gate_was_consulted(self, state: _Turn, session_key: str, *, since: float) -> None:
+        """A turn that ran tools and left no audit line ran without a posture.
+
+        The node stops taking turns when this happens. It is not a warning: the
+        service is telling operators, /v1/agent and every report that this
+        investigation ran read-only, and one of those statements is now false.
+        Refusing is the only answer that does not keep saying it.
+        """
+        if not state.tool_calls:
+            return
+        if gate.consulted(self._workdir / "audit", session_key, since=since):
+            return
+        self._gate_proven = False
+        self._gate_broken = (
+            f"{state.tool_calls} tool call(s) ran and the gate recorded none of them. "
+            "This node's posture was not enforced for that turn."
+        )
+        logger.error("POSTURE NOT ENFORCED: %s", self._gate_broken)
 
     async def stop(self) -> bool:
         """Ask the running turn to wind down; False if there was nothing to ask.
@@ -274,6 +318,7 @@ class _Turn:
         self.usage: dict[str, Any] | None = None
         self.errors: list[str] = []
         self.session_was_first = False
+        self.tool_calls = 0
         self._seen_any = False
 
     def feed(self, line: str) -> None:
@@ -315,6 +360,7 @@ class _Turn:
         name = _TOOL_ITEMS.get(str(item.get("type") or ""))
         if name is None:
             return
+        self.tool_calls += 1
         self._emit(
             {
                 "type": "tool_use",

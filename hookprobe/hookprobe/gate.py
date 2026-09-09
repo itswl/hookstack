@@ -297,6 +297,37 @@ def verify(python: str, env: dict[str, str]) -> None:
         )
 
 
+def consulted(audit_dir: Path, session_key: str, *, since: float) -> bool:
+    """Did the gate actually record anything for this session during this turn?
+
+    `verify()` proves the gate ANSWERS. It does not prove the runtime ASKS, and
+    those are different claims that look identical from inside this process.
+    The difference was measured: driving codex through its app-server leaves a
+    perfectly working gate command sitting unused, so `verify()` passes, the
+    posture is reported, and `kubectl delete` runs. Nothing anywhere noticed.
+
+    So a turn that ran tools and left no line here is a turn that ran ungated,
+    and the caller treats that as a broken node rather than a quiet oddity.
+    """
+    # The recorder stamps `round(time.time(), 3)`, which can land a hair BELOW
+    # the caller's unrounded start. Half a millisecond of slack, so a line
+    # written the instant the turn began still counts as written during it.
+    since -= 0.001
+    day_file = audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")
+    try:
+        with day_file.open(encoding="utf-8") as handle:
+            for raw in handle:
+                try:
+                    line = json.loads(raw)
+                except ValueError:
+                    continue
+                if line.get("session") == session_key and float(line.get("ts") or 0) >= since:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 def main() -> int:
     """Read one payload, print one decision.
 

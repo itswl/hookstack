@@ -67,6 +67,10 @@ class PiEngine:
         self._home = settings.workdir / "pi-home"
         self._proc: asyncio.subprocess.Process | None = None
         self._gate_proven = False
+        # Set when a turn is found to have run ungated; see the codex adapter's
+        # note on why this is a stop rather than a warning. pi has no sandbox at
+        # all, so an unenforced posture here means nothing was holding.
+        self._gate_broken: str | None = None
 
     # ------------------------------------------------------------------ setup
 
@@ -101,6 +105,8 @@ class PiEngine:
 
     def verify_gate(self) -> None:
         """Prove this node can gate a tool before it runs one, or refuse to run."""
+        if self._gate_broken is not None:
+            raise RuntimeError(self._gate_broken)
         if self._gate_proven:
             return
         if shutil.which(self._binary) is None and not Path(self._binary).is_file():
@@ -155,6 +161,8 @@ class PiEngine:
         self.prepare_home()
         self.verify_gate()
         started = time.monotonic()
+        # Wall clock, because the audit lines are stamped with it.
+        wall_started = time.time()
         proc = await asyncio.create_subprocess_exec(
             *self._argv(message, resume),
             stdin=asyncio.subprocess.DEVNULL,
@@ -176,11 +184,25 @@ class PiEngine:
         finally:
             self._proc = None
         stderr = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr else ""
+        self._check_gate_was_consulted(state, session_key, since=wall_started)
         return state.result(
             duration_ms=int((time.monotonic() - started) * 1000),
             returncode=proc.returncode,
             stderr=stderr,
         )
+
+    def _check_gate_was_consulted(self, state: _Turn, session_key: str, *, since: float) -> None:
+        """A turn that ran tools and left no audit line ran without a posture."""
+        if not state.tool_calls:
+            return
+        if gate.consulted(self._workdir / "audit", session_key, since=since):
+            return
+        self._gate_proven = False
+        self._gate_broken = (
+            f"{state.tool_calls} tool call(s) ran and the gate recorded none of them. "
+            "This node's posture was not enforced for that turn."
+        )
+        logger.error("POSTURE NOT ENFORCED: %s", self._gate_broken)
 
     async def stop(self) -> bool:
         proc = self._proc
@@ -213,6 +235,7 @@ class _Turn:
         self.usage: dict[str, Any] | None = None
         self.errors: list[str] = []
         self.session_was_first = False
+        self.tool_calls = 0
         self._seen_any = False
 
     def feed(self, line: str) -> None:
@@ -239,6 +262,7 @@ class _Turn:
 
         self._seen_any = True
         if kind == "tool_execution_start":
+            self.tool_calls += 1
             self._emit(
                 {
                     "type": "tool_use",

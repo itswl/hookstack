@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -460,3 +461,48 @@ def test_pi_resume_names_the_session(tmp_path: Path) -> None:
 def test_pi_keeps_its_transcripts_on_the_persistent_volume(tmp_path: Path) -> None:
     engine = PiEngine(make_settings(tmp_path, runtime="pi"))
     assert Path(engine._env("k")["PI_CODING_AGENT_SESSION_DIR"]).is_relative_to(tmp_path)
+
+
+# ------------------ the check that verify() alone could not make: was it ASKED?
+
+
+def test_a_turn_that_ran_tools_without_a_gate_record_stops_the_node(tmp_path: Path) -> None:
+    """`verify()` proves the gate ANSWERS; this proves the runtime ASKED it.
+
+    They look identical from inside the process and they are not. Driving codex
+    through its app-server leaves a perfectly working gate command unused: the
+    self-test passes, /v1/agent reports the posture, and `kubectl delete` runs.
+    Measured, and the reason this check exists.
+    """
+    engine = CodexEngine(make_settings(tmp_path, runtime="codex", codex_python=sys.executable))
+    state = _CodexTurn(lambda event: None)
+    state.tool_calls = 3  # a turn that used tools
+    engine._check_gate_was_consulted(state, "probe:ungated:1", since=time.time())
+    assert engine._gate_broken is not None
+    with pytest.raises(RuntimeError, match="posture was not enforced"):
+        engine.verify_gate()
+
+
+def test_a_turn_with_no_tools_is_not_accused(tmp_path: Path) -> None:
+    engine = CodexEngine(make_settings(tmp_path, runtime="codex"))
+    state = _CodexTurn(lambda event: None)
+    engine._check_gate_was_consulted(state, "probe:quiet:1", since=time.time())
+    assert engine._gate_broken is None
+
+
+def test_a_recorded_call_clears_the_check(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, runtime="codex")
+    since = time.time()
+    gate.decide(
+        {"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}},
+        CodexEngine(settings)._env("probe:gated:1"),
+    )
+    assert gate.consulted(tmp_path / "audit", "probe:gated:1", since=since)
+
+
+def test_the_pi_adapter_makes_the_same_check(tmp_path: Path) -> None:
+    engine = PiEngine(make_settings(tmp_path, runtime="pi"))
+    state = _PiTurn(lambda event: None)
+    state.tool_calls = 1
+    engine._check_gate_was_consulted(state, "probe:ungated:pi", since=time.time())
+    assert engine._gate_broken is not None

@@ -68,13 +68,23 @@ Every spawned-gate runtime proves its gate before its first turn: see
 
 ### Every node proves its gate
 
-**Before its first turn a node proves its gate.** It spawns the gate exactly as
-the runtime will and hands it a call no posture permits; if the answer is not a
-refusal, the node does not start. This is not ceremony. The first live run of
-this adapter had no gate at all: the hook command could not import hookprobe,
-codex logged the failure and carried on, and a `kubectl delete` ran to
-completion on a node whose `/v1/agent` was reporting `bash_guard: readonly`.
-Every layer behaved reasonably and the posture was simply absent.
+Two checks, because they answer two different questions that look like one.
+
+**Before its first turn a node proves the gate ANSWERS.** It spawns the gate
+exactly as the runtime will and hands it a call no posture permits; if the
+answer is not a refusal, the node does not start. This is not ceremony. The
+first live run of the Codex adapter had no gate at all: the hook command could
+not import hookprobe, codex logged the failure and carried on, and a `kubectl
+delete` ran to completion on a node whose `/v1/agent` was reporting `bash_guard:
+readonly`. Every layer behaved reasonably and the posture was simply absent.
+
+**After a turn, a node checks the gate was ASKED.** A turn that ran tools and
+left no line on the flight recorder ran ungated, and the node stops taking
+turns. This is a separate check because a working gate that nobody consults
+passes the first one perfectly — measured while evaluating the Codex Python
+SDK, where the gate command was fine, the self-test passed, `/v1/agent` reported
+the posture, and `kubectl delete` ran anyway. Refusing further turns is the only
+answer that does not keep repeating a claim that has become false.
 
 Two things to know before running one:
 
@@ -92,6 +102,34 @@ difference, so a plausible 0.0 would corrupt both. Token counts are kept in
 `usage`, where the weekly account can price them the day it learns how. A node
 on codex is a node whose spend the breaker cannot see — run it under a provider
 that has its own ceiling.
+
+### Why not the official Python SDK
+
+There is one: `openai-codex` on PyPI, from the `openai/codex` repository. It is
+better than this adapter on every axis the adapter had to work for. `thread.id`
+exists before the turn instead of being parsed out of the first line of output.
+`interrupt()` is a real interrupt rather than SIGTERM, which is the difference
+the contract's `stop()` is about. Token usage arrives with
+`model_context_window` beside it, so the context reading the Claude adapter has
+to ask for and latch is simply present. And `pip install` puts the CLI binary in
+the image, which is the one thing keeping this adapter out of a deployment.
+
+It drives `codex app-server`, and **hooks do not run under app-server**.
+Measured against the same `CODEX_HOME` and the same `hooks.json`: under `exec`
+the guard refuses `kubectl delete` and writes its audit line; under app-server
+the command runs, nothing is recorded, and no `hook/started` notification
+appears in the stream. Tried with codex-cli 0.147.0 and 0.153.4, and with
+`--dangerously-bypass-hook-trust` on the launch arguments.
+
+The only client-side gate the SDK offers is its `approval_handler`, which
+answers `item/commandExecution/requestApproval`. That is a sandbox-escalation
+prompt for calls the sandbox alone cannot decide, not a hook before every tool,
+so it cannot carry a per-verb posture; its default implementation accepts.
+
+So the SDK buys ergonomics with obligation one, and the contract says that is a
+finding rather than a trade. Worth revisiting the day a codex release emits
+`hook/started` from an app-server stream.
+
 
 ## pi
 
