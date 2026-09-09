@@ -8,13 +8,30 @@ document where an approximate figure is worse than none. So this asks the
 three read APIs and does the arithmetic itself; no model is paid to summarise
 a ledger, and the same inputs always give the same page.
 
-Two kinds of number are kept apart and labelled:
+Three kinds of number are kept apart and labelled:
 
-  measured       what was actually billed and delivered
+  measured       counts, shares and durations — verdicts served, runs, hops,
+                 latency, who ruled what. Read off a ledger; no price table is
+                 involved and none can be wrong.
+  priced         dollars. A measured quantity times a price table, and on this
+                 stack that table is NOT the gateway's: the judge multiplies
+                 tokens by two constants an operator set
+                 (HOOKJUDGE_AI_PRICE_IN_PER_1K and ..._OUT_PER_1K), and the
+                 investigator passes on the agent CLI's own estimate for a
+                 model the CLI is not the one billing. Real arithmetic over a
+                 rate nobody has confirmed.
   counterfactual what the cost policy AVOIDED — free verdicts (recovery,
                  reuse, rule-reuse) and runbook answers, priced at this week's
                  average paid call. An estimate of a bill that did not happen,
                  and it says so.
+
+The middle row used to be called "measured" and the shadow arms are what
+disproved it: two judges, the same model, the same 31 paid calls, and costs 15%
+apart because their price constants differed and nothing else did. Saying
+"billed" of a figure two configurations disagree about by 15% is the failure
+this page exists to avoid, so it now says what it actually did. Getting from
+priced to billed needs the gateway's own price list, which nothing in this
+repository has; the arithmetic is ready for it.
 
     HOOKRELAY_READ_TOKEN=... HOOKJUDGE_READ_TOKEN=... HOOKPROBE_TOKEN=... \\
       python3 scripts/cost_report.py --relay http://127.0.0.1:8100 \\
@@ -351,7 +368,7 @@ def render(r: dict[str, Any]) -> str:
     out = [
         f"# hookstack · cost & attention · last {days:.0f} days",
         "",
-        f"_Generated {time.strftime('%Y-%m-%d %H:%M %Z', time.localtime(r['generated_at']))}. Measured figures are what was billed and delivered; counterfactuals are what the cost policy avoided, priced at this week's average paid call, and are estimates of a bill that did not happen._",
+        f"_Generated {time.strftime('%Y-%m-%d %H:%M %Z', time.localtime(r['generated_at']))}. Measured figures are counts read off the ledgers. **Priced figures are dollars, and not a bill** — a measured quantity times a price table that is not the gateway's, so read them as a shape. Counterfactuals are what the cost policy avoided, priced at this week's average paid call, and are estimates of a bill that did not happen._",
         "",
     ]
 
@@ -458,7 +475,9 @@ def render(r: dict[str, Any]) -> str:
     else:
         fr = j["free_routes"]
         out += [
-            f"- **Measured**: {j['judged']} verdicts, {j['paid']} paid ({j['paid_ratio_pct']}%), **{_money(j['cost'])}** · {_money(j['avg_paid'])} per paid verdict",
+            f"- **Measured**: {j['judged']} verdicts, {j['paid']} paid ({j['paid_ratio_pct']}%)",
+            f"- **Priced**: **{_money(j['cost'])}** · {_money(j['avg_paid'])} per paid verdict — tokens times "
+            "this deployment's own `HOOKJUDGE_AI_PRICE_IN_PER_1K` / `..._OUT_PER_1K`",
             "- **Free routes**: "
             + ", ".join(f"{k} {v}" for k, v in fr.items())
             + (f" · rule floor {j['rule_floor']} (a degradation, not a saving)" if j["rule_floor"] else ""),
@@ -482,7 +501,9 @@ def render(r: dict[str, Any]) -> str:
         out.append("_Not read (no investigator URL/token, or unreachable)._")
     else:
         out += [
-            f"- **Measured**: {inv['runs']} runs, **{_money(inv['cost'])}** · {_money(inv['avg_run'])} per paid run",
+            f"- **Measured**: {inv['runs']} runs",
+            f"- **Priced**: **{_money(inv['cost'])}** · {_money(inv['avg_run'])} per paid run — the agent CLI's own "
+            "estimate at its own table, for a model it is not the one billing",
             f"- **Counterfactual**: {inv['answered_from_runbook']} re-fires answered from a runbook at $0 ≈ **{_money(inv['avoided_cost'])} avoided**",
             f"- **Worth**: useful {inv['ruled_useful']} · useless {inv['ruled_useless']} · **unruled {inv['unruled']}** — the half only a person can fill",
         ]
@@ -547,7 +568,9 @@ def render(r: dict[str, Any]) -> str:
         "",
         "## One line",
         "",
-        f"**Billed {_money(total)}; the cost policy avoided ≈ {_money(avoided)} more.** "
+        f"**Priced at {_money(total)}; the cost policy avoided ≈ {_money(avoided)} more.** "
+        "Neither is a bill: both are measured quantities times price tables nobody has checked against "
+        "the gateway, and two such tables were once 15% apart on identical traffic. "
         + (
             "Delivered cards per condition: " + str(a["delivered_per_condition"]) + "."
             if a and a.get("delivered_per_condition") is not None

@@ -116,11 +116,30 @@ def test_a_service_not_read_is_a_sentence_not_a_zero() -> None:
 
 def test_the_page_states_what_is_measured_and_what_is_not() -> None:
     page = cost_report.render(cost_report.compute(JUDGE, TIMELINE, None, RUNS, hours=168, now=NOW))
-    assert "counterfactuals are what the cost policy avoided" in page
+    assert "Counterfactuals are what the cost policy avoided" in page
     assert "**Measured**: 320 verdicts, 150 paid (46.9%)" in page
     assert "166 verdicts answered without a model call" in page
     assert "| burst-1 | 3 |" in page and "solo:9" not in page, "only priced incidents make the table"
     assert "unruled 2" in page
+
+
+def test_a_dollar_on_this_page_is_priced_and_never_called_billed() -> None:
+    """The two shadow arms are what disproved the old label: the same model on
+    the same 31 paid calls, costs 15% apart, because their per-1k constants
+    differed and nothing else did. A figure two configurations disagree about by
+    15% is not a bill, and this page is the one place it gets quoted.
+    """
+    page = cost_report.render(cost_report.compute(JUDGE, TIMELINE, None, RUNS, hours=168, now=NOW))
+    # The counts and the dollars are separate bullets, because one of them is
+    # read off a ledger and the other is arithmetic over an unconfirmed rate.
+    assert "**Measured**: 320 verdicts, 150 paid (46.9%)" in page
+    assert "**Priced**: **$0.0900**" in page
+    assert "HOOKJUDGE_AI_PRICE_IN_PER_1K" in page, "a reader can check the constants it was priced from"
+    assert "**Priced figures are dollars, and not a bill**" in page
+    # The sentence that gets quoted out of context is the one that must not lie.
+    assert "**Priced at $" in page
+    assert "Billed" not in page, "no figure on this page was ever billed to anybody"
+    assert "15% apart on identical traffic" in page
 
 
 def test_a_capped_listing_only_counts_as_truncated_when_the_window_might_extend_past_it() -> None:
