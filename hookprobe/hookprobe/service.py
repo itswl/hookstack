@@ -88,21 +88,47 @@ _RESUME_MESSAGE = (
 class Engine(Protocol):
     """The runtime contract: what this service needs from whatever runs a turn.
 
-    One adapter exists (hookprobe/engine.py, the Claude Code SDK). This is the
-    shape a second one has to fill, and it is written down because two of the
-    obligations are invisible in the signatures below and losing either would
-    take this service's claims with it:
+    THREE adapters exist — `hookprobe/runtimes.py` is the registry and the list
+    is `claude`, `codex`, `pi`. This docstring was written when there was one,
+    against the question "what does a second have to fill", and each of the two
+    that followed corrected it on a point its author could not have known:
+    codex, that a gate which cannot LAUNCH is not a gate, and pi, that a
+    runtime reporting a price is more dangerous than one reporting nothing.
+    Both corrections are below, in the obligations they belong to, because a
+    contract that only records what its first implementation happened to do is a
+    description of that implementation.
+
+    Two of the five obligations are invisible in the signatures below, and
+    losing either would take this service's claims with it:
 
     * **A tool gate that runs BEFORE a tool does.** The read-only posture is not
-      a prompt; it is a PreToolUse hook that refuses mutating verbs, and the
-      posture check at startup measures credentials against what the node
-      declared. A runtime that can only be asked nicely not to write cannot be
-      run under `readonly`, and a deployment swapping one in would keep the
-      word and lose the boundary.
+      a prompt, and — since codex — it is not a mechanism either. It is one
+      DECISION, in `hookprobe/gate.py`: which call is refused, why, and what
+      gets recorded. An adapter's job is to reach that decision before the shell
+      runs, by whatever route its runtime offers (in-process hooks for `claude`,
+      a spawned `python -m hookprobe.gate` for `codex`, a shipped extension
+      shelling out to the same command for `pi`). Writing the policy twice
+      instead is the failure this arrangement exists to prevent: `readonly`
+      would mean one thing per engine and nothing in either suite would notice
+      the day they diverged. A runtime that can only be *asked* nicely not to
+      write cannot be run under `readonly` at all.
+
+      **And an adapter that reaches the gate by spawning must prove the spawn
+      works before its first turn.** Codex's first live run had no gate — the
+      hook command could not import hookprobe, codex logged that and carried
+      on, and `kubectl delete pod` ran to completion on a node whose
+      `/v1/agent` said `bash_guard: readonly`, with an empty audit file. Every
+      layer behaved reasonably and the boundary was simply absent. So the
+      spawning adapters carry `verify_gate()`: hand the gate a call no posture
+      permits and refuse to start unless it is refused. It is deliberately NOT
+      in this Protocol, because the in-process adapter has no spawn that can
+      fail and a signature it cannot meaningfully implement would be ceremony;
+      what the contract requires is the PROOF, not the method.
     * **A per-call audit record the agent cannot edit.** `/v1/runs/{key}/audit`
-      and the flight recorder under `{workdir}/audit` are written from the same
-      hooks, including inside subagents, whose calls never appear in the message
-      stream. Without them a run's account of itself is the run's own word.
+      and the flight recorder under `{workdir}/audit`, written from whatever
+      mechanism reaches the gate — including inside subagents, whose calls never
+      appear in the message stream. Without them a run's account of itself is
+      the run's own word.
 
     And three that are visible, but easy to satisfy shallowly:
 
@@ -117,6 +143,16 @@ class Engine(Protocol):
       unknown. The ledger keeps "nobody counted" and "this was free" apart, and
       a runtime that reports 0.0 for an unpriced turn corrupts both the budget
       breaker and the weekly account.
+
+      **A zero with tokens behind it is unpriced, not free** — pi's correction,
+      and the sharper rule, because the original wording is satisfied by a
+      runtime that sincerely believes 0.0. pi prices a turn from its own model
+      catalogue, this deployment's model is not in it, and the first real turn
+      returned `totalTokens: 6397` with `cost.total: 0`. A budget breaker fed
+      that would watch an unattended node spend all week and see nothing wrong,
+      which is worse than a runtime admitting it cannot count. Only a zero with
+      nothing spent behind it may mean free; assume a reported price of zero is
+      unpriced until you have seen it be right.
     """
 
     async def run(

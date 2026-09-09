@@ -104,6 +104,25 @@ def test_every_adapter_is_covered_by_this_suite() -> None:
     assert set(ADAPTERS) == {"claude", "codex", "pi"}
 
 
+def test_the_contract_names_every_adapter_it_is_the_authority_for() -> None:
+    """`hookprobe/docs/runtimes.md` calls the Engine docstring the authority, and
+    for two days it was the authority on a world with one adapter in it: it
+    still opened "One adapter exists ... the shape a second one has to fill"
+    after codex and pi had both landed and both corrected it on a point its
+    author could not have known.
+
+    The test above pins the registry. This pins the RECORD to the registry, so a
+    fourth adapter cannot arrive without the contract mentioning it — which is
+    the only mechanism here that survives the person who wrote the contract
+    forgetting about it.
+    """
+    from hookprobe.service import Engine
+
+    doc = Engine.__doc__ or ""
+    for name in ADAPTERS:
+        assert f"`{name}`" in doc, f"the contract does not name the {name!r} adapter it governs"
+
+
 def test_an_unknown_runtime_is_refused_rather_than_defaulted(tmp_path: Path) -> None:
     settings = make_settings(tmp_path, runtime="codx")
     with pytest.raises(ValueError, match="not a runtime"):
