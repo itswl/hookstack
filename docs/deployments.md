@@ -147,8 +147,14 @@ the bot must be a member of the group — added by a person; no bot can add
 itself and the old app lacked the scope to add another. Then `.env`:
 `LARK_THREAD_SECRET` (the door and the bridge share it) and
 `HOOKPROBE_FOLLOW_UP_SENDERS` (who may spend a turn from chat; empty refuses
-everyone). Switching the bridge's app also means clearing the CLI config on
-its volume (`lark-cli config remove`); the entrypoint keeps an existing one.
+everyone). Switching the bridge's app means changing `LARK_APP_ID` /
+`LARK_APP_SECRET` and **recreating** the container: the bridge keeps no state,
+so a fresh one re-derives the CLI config from the environment. A bare
+`docker restart` reuses the writable layer, where the old config still is, and
+that is the case needing `lark-cli config remove` first. Check the new app
+against the chat BEFORE cutting over: an app and a chat in different tenants
+are refused outright (`232010`) and no membership change fixes it, so a new app
+can force a new chat id as well.
 The work deployment gets the same path through its `bridge` profile: a
 lark-bridge of its own (a third Lark app — one connection per app, and the
 alert deployment's bridge holds the second), serving both of its chats
