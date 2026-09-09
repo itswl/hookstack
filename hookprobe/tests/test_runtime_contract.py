@@ -581,6 +581,64 @@ def test_the_withheld_list_is_one_list() -> None:
     assert ClaudeAgentEngine._SECRETS_WITHHELD_FROM_AGENT is gate.SECRETS_WITHHELD_FROM_AGENT
 
 
+# ------------------ the bearer the agent holds is not the one the service holds
+
+
+def test_no_adapter_hands_the_agent_the_consoles_bearer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """It reaches PUT /v1/memory with no shape check, PUT /v1/skills, the system
+    prompt, remediation approval and POST /hooks/agent, which spends money."""
+    from hookprobe.engine import ClaudeAgentEngine
+
+    monkeypatch.setenv("HOOKPROBE_TOKEN", "the-console-bearer")
+    settings = make_settings(tmp_path, workdir=tmp_path, token="the-console-bearer", agent_token="lesser")
+    spawned = gate.environment(settings, "probe:conformance:1", package_root=str(tmp_path))
+    in_process = ClaudeAgentEngine(settings)._subprocess_env("probe:conformance:1")
+    for env in (spawned, in_process):
+        assert env["HOOKPROBE_TOKEN"] == ""
+        assert env["HOOKPROBE_AGENT_TOKEN"] == "lesser"
+
+
+def test_the_lesser_bearer_reads_and_cannot_write(tmp_path: Path) -> None:
+    """The whole bargain, through the real door: the run-rulings patrol has to
+    READ /v1/runs, and nothing the agent does needs to write through this API —
+    it proposes RUN-RULING lines and the service lifts them out."""
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+
+    settings = make_settings(tmp_path, workdir=tmp_path, token="console", agent_token="lesser")
+    client = TestClient(create_app(settings, RunService(settings, _NoEngine(), RunStore(tmp_path / "results"))))
+    agent = {"Authorization": "Bearer lesser"}
+    console = {"Authorization": "Bearer console"}
+
+    assert client.get("/v1/runs?unruled=1", headers=agent).status_code == 200
+    assert client.get("/v1/budget", headers=agent).status_code == 200
+    # And every door that changes something, refused — including the one that
+    # spends money and the one that rewrites what steers the next run.
+    for method, path in (
+        ("post", "/hooks/agent"),
+        ("put", "/v1/memory"),
+        ("post", "/v1/remediations/abcdef0123/approve"),
+    ):
+        assert getattr(client, method)(path, json={}, headers=agent).status_code == 401, path
+        assert getattr(client, method)(path, json={}, headers=console).status_code != 401, path
+
+
+class _NoEngine:
+    """Enough of the Protocol to build a service; no turn is taken here."""
+
+    async def run(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - never called
+        raise AssertionError("this suite takes no turns")
+
+    async def stop(self) -> bool:  # pragma: no cover - never called
+        return False
+
+    def describe_inputs(self, *, resume: str | None = None) -> dict[str, Any]:
+        return {}
+
+
 # ------------------ the run's identity, in the format a foreign tool reads
 #
 # Not one of the five obligations, and it is here anyway for the reason the

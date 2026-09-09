@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,6 +63,23 @@ class Settings:
     # anyone, which is a decision for a private compose network, never a
     # default to drift into.
     token: str
+
+    # The bearer the AGENT holds, which is deliberately not the one above.
+    #
+    # The agent runs in this service's container and used to find
+    # `HOOKPROBE_TOKEN` in its environment, because the run-rulings patrol has
+    # it read `/v1/runs?unruled=1`. That token is the console's: it also opens
+    # `PUT /v1/memory` (no shape check, unlike the suggestion path),
+    # `PUT /v1/skills`, `/v1/system-prompt`, `POST /v1/remediations/{id}/approve`
+    # and `POST /hooks/agent`, which spends money. An injected instruction that
+    # reached a Bash step could use every one of them — recorded as a known
+    # residual on 2026-09-02 and closed here.
+    #
+    # This one is refused on every method but GET (see `require_token`). Empty
+    # HOOKPROBE_AGENT_TOKEN generates one per process: nothing to configure,
+    # nothing on disk, and it rotates on restart. Set it only if something
+    # outside the container needs the read-only surface.
+    agent_token: str
 
     # Engine: which Claude model runs the investigation and how hard the
     # runtime caps it. max_turns is the hard loop budget backing the prompt's
@@ -358,6 +376,7 @@ class Settings:
         )
         return cls(
             token=os.environ.get("HOOKPROBE_TOKEN", ""),
+            agent_token=os.environ.get("HOOKPROBE_AGENT_TOKEN", "") or secrets.token_urlsafe(24),
             model=os.environ.get("HOOKPROBE_MODEL", "claude-opus-5"),
             model_endpoint=_endpoint_host(os.environ.get("ANTHROPIC_BASE_URL", "")),
             runtime=(os.environ.get("HOOKPROBE_RUNTIME") or "").strip().lower() or "claude",

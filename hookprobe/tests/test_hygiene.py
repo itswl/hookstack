@@ -152,8 +152,7 @@ def test_service_secrets_are_withheld_from_the_agent_subprocess(tmp_path: Path) 
     """The CLI subprocess inherits os.environ, so the family HMAC keys and the
     sibling-service secrets that share the deployment .env are blanked in the
     env overrides — a Bash step cannot read them back. The model keys and the
-    service's own bearer are left to be inherited (the model call and the
-    run-rulings self-call need them)."""
+    provider key is left to be inherited (the model call needs it)."""
     from hookprobe.engine import ClaudeAgentEngine
     from tests.helpers import make_settings
 
@@ -168,10 +167,15 @@ def test_service_secrets_are_withheld_from_the_agent_subprocess(tmp_path: Path) 
         "WW_RELAY_SECRET",
     ):
         assert env[name] == "", name
-    # Not blanked → inherited from os.environ, which is where they must reach the
-    # model call and the agent's own API self-call.
+    # Not blanked → inherited from os.environ, which is where it must reach the
+    # model call.
     assert "ANTHROPIC_API_KEY" not in env
-    assert "HOOKPROBE_TOKEN" not in env
+    # The console's bearer IS blanked now, and the agent gets a lesser one that
+    # this API refuses on every method but GET. It used to be inherited on the
+    # strength of a comment claiming the run-rulings patrol POSTs with it — the
+    # patrol's own brief says "you hold no token for it".
+    assert env["HOOKPROBE_TOKEN"] == ""
+    assert env["HOOKPROBE_AGENT_TOKEN"] == "agent-token"
     # The deadlines still ride alongside the scrub.
     assert env["BASH_DEFAULT_TIMEOUT_MS"] == "30000"
 

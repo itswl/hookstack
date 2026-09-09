@@ -222,12 +222,33 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         lifespan=lifespan,
     )
 
-    def require_token(authorization: str | None = Header(default=None)) -> None:
+    def require_token(request: Request, authorization: str | None = Header(default=None)) -> None:
+        """Two bearers, and the difference between them is the method.
+
+        `settings.token` is the console's and opens everything. `agent_token` is
+        the one the AGENT holds, and it is refused on every method but GET —
+        because the run-rulings patrol needs to READ `/v1/runs`, and nothing the
+        agent does needs to write through this API at all: it proposes its
+        rulings as lines in its report and the service files them.
+
+        The rule is the method rather than a route list on purpose. A list is a
+        thing to forget to add to: every write route added after this would have
+        defaulted to reachable, which is the wrong direction for a door whose
+        whole point is what it refuses. GET is a claim this codebase already
+        keeps elsewhere — no handler here mutates on a read.
+        """
         if not settings.token:
             return  # explicitly unauthenticated deployment (private network only)
-        expected = f"Bearer {settings.token}"
-        if not (authorization and constant_time_eq(expected, authorization)):
-            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+        if authorization and constant_time_eq(f"Bearer {settings.token}", authorization):
+            return
+        if (
+            request.method == "GET"
+            and settings.agent_token
+            and authorization
+            and constant_time_eq(f"Bearer {settings.agent_token}", authorization)
+        ):
+            return
+        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
     @app.post("/hooks/agent", dependencies=[Depends(require_token)])
     async def trigger(payload: dict[str, Any], request: Request) -> dict[str, Any]:

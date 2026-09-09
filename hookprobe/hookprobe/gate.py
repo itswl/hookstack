@@ -408,6 +408,9 @@ def decide(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
 # absent on the two that came later — the same shape as the posture that meant
 # one thing per engine, and the reason that decision now lives in one module.
 SECRETS_WITHHELD_FROM_AGENT = (
+    # The console's bearer. The agent gets `HOOKPROBE_AGENT_TOKEN` instead —
+    # see `agent_credentials`, and settings.agent_token for what that costs it.
+    "HOOKPROBE_TOKEN",
     "HOOKPROBE_EVENT_SECRET",
     "HOOKPROBE_RETURN_SECRET",
     "HOOKPROBE_RULING_SECRET",
@@ -430,6 +433,18 @@ SECRETS_WITHHELD_FROM_AGENT = (
 # specifies a HEADER and says nothing about environments.
 _TRACE_HEADER_VERSION = "00"
 _TRACE_SAMPLED = "01"
+
+
+def agent_credentials(settings: Any) -> dict[str, str]:
+    """The bearer the agent may hold, which is not the one the service holds.
+
+    Here rather than in each adapter for the reason the withheld list is here:
+    the list moved into this module after two later adapters inherited every
+    secret it named, and a credential handed down by two code paths is the same
+    shape of bug waiting to happen. The read-only half of this bargain is
+    enforced in `app.require_token`, not here — this only decides what travels.
+    """
+    return {"HOOKPROBE_AGENT_TOKEN": str(getattr(settings, "agent_token", "") or "")}
 
 
 def trace_environment(session_key: str) -> dict[str, str]:
@@ -493,6 +508,7 @@ def environment(settings: Any, session_key: str, *, package_root: str) -> dict[s
     env["HOOKPROBE_GATE_AUDIT"] = str(settings.workdir / "audit")
     env["HOOKPROBE_GATE_WORKDIR"] = str(settings.workdir)
     env["HOOKPROBE_GATE_HOME"] = str(Path.home())
+    env.update(agent_credentials(settings))
     env.update(trace_environment(session_key))
     return env
 

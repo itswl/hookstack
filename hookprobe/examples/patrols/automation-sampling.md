@@ -24,14 +24,14 @@ merely something you would have phrased differently.
 WHAT TO SAMPLE
 
 1. Read the record:
-   curl -sS "http://127.0.0.1:8088/v1/automation" -H "Authorization: Bearer $HOOKPROBE_TOKEN"
+   curl -sS "http://127.0.0.1:8088/v1/automation" -H "Authorization: Bearer $HOOKPROBE_AGENT_TOKEN"
    Each class carries its ceiling, its counters, and `record_would_support`.
    The classes worth your time are the ones at `auto_apply` — they acted without
    a human, so they are the ones a human now has to.
 
 2. For each `auto_apply` class, pull the actions it took on its own since the
    last sampling. For `memory`, that is the lines under the unverified heading:
-   curl -sS "http://127.0.0.1:8088/v1/memory" -H "Authorization: Bearer $HOOKPROBE_TOKEN"
+   curl -sS "http://127.0.0.1:8088/v1/memory" -H "Authorization: Bearer $HOOKPROBE_AGENT_TOKEN"
    Read the ones added since your last run. You are checking a claim of FACT
    against what you can verify now — "the api gateway is behind cloudflare" is
    checkable; go check it.
@@ -44,15 +44,21 @@ WHAT TO SAMPLE
 
 WHAT TO FILE
 
-For an item that was wrong, file a regret against its class and id:
-   curl -sS -X POST "http://127.0.0.1:8088/v1/automation/<class>/<id>/regret" \
-     -H "Authorization: Bearer $HOOKPROBE_TOKEN" \
-     -H "content-type: application/json" \
-     -d '{"note": "why it was wrong, in one line a future reader can act on"}'
+You do not file the regret yourself, and the reason is the same one that keeps
+you out of every other write on this service: a regret is a LABEL on automation,
+and a label the automation writes about itself is not a label. Your bearer
+(`$HOOKPROBE_AGENT_TOKEN`) reads only — the service refuses it on every method
+but GET.
+
+So NAME the wrong items, one per line, precisely enough that a person can file
+them without repeating your work:
+
+   REGRET-CANDIDATE: <class>/<id> — why it was wrong, in one line
 
 The id is the one in the record's ledger for that class. If you cannot tie a
-wrong action back to a specific id, say so in your answer rather than filing a
-regret against a guess — a regret on the wrong id resets the wrong argument.
+wrong action back to a specific id, say so rather than naming a guess — a regret
+filed on the wrong id resets the wrong argument, and that is worse than a
+sentence saying you could not tell.
 
 YOUR ANSWER
 

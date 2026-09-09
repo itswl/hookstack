@@ -26,6 +26,7 @@ from hookprobe.files import system_prompt_path
 from hookprobe.gate import (
     _WRITE_PATH_KEYS,
     SECRETS_WITHHELD_FROM_AGENT,
+    agent_credentials,
     mcp_deny_reason,
     shell_write_target,
     trace_environment,
@@ -767,11 +768,13 @@ class ClaudeAgentEngine:
     # (Lark app, the shadow ingest secret that can forge judgements, the admin
     # token). The service already read what it needs at startup.
     #
-    # HOOKPROBE_TOKEN is deliberately NOT blanked: the run-rulings patrol has the
-    # agent POST to this service's OWN API with it. That the agent holds a bearer
-    # to its own write surface is a real residual; narrowing it to a lesser,
-    # read-or-rulings-only credential is a separate change, recorded in
-    # .agents/notes/proposed/2026-09-02-the-agent-shares-the-services-secrets.md.
+    # HOOKPROBE_TOKEN IS blanked, since 2026-09-10, and the agent gets
+    # HOOKPROBE_AGENT_TOKEN instead — a bearer this API refuses on every method
+    # but GET. The comment here used to say the opposite ("the run-rulings patrol
+    # has the agent POST with it"), and it had been wrong for a while: that
+    # patrol proposes RUN-RULING lines in its report and the service lifts them
+    # out, which its own brief states as "you hold no token for it". What it
+    # actually needs is to read /v1/runs.
     # ANTHROPIC_*/model keys are left intact — the model call needs them.
     # One list, in gate.py, shared with every adapter that spawns its gate. It
     # was a private tuple here until 2026-09-09, and being private is how two
@@ -812,6 +815,7 @@ class ClaudeAgentEngine:
         # recognises. gate.trace_environment is the shared half: the two
         # spawning adapters get it from gate.environment, this one from here,
         # and all three derive it the same way or the derivation is worthless.
+        env.update(agent_credentials(self._settings))
         env.update(trace_environment(session_key))
         return env
 

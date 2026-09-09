@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (70)
+## Environment (71)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -33,6 +33,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS` | `600` | Floor between two alarm sends, so a storm cannot page repeatedly |
 | `HOOKPROBE_HOST` | `0.0.0.0` | Address the service binds to |
 | `HOOKPROBE_PORT` | `8088` | Port the service listens on |
+| `HOOKPROBE_AGENT_TOKEN` | *(empty)* | The bearer the AGENT holds, which is deliberately not the one above |
 | `ANTHROPIC_BASE_URL` | *(empty)* | WHERE that model name is sent |
 | `HOOKPROBE_MAX_TURNS` | `32` | Ceiling on engine turns in one investigation |
 | `HOOKPROBE_MAX_CONCURRENT` | `2` | How many investigations may run at once |

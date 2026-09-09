@@ -15,6 +15,9 @@ from hookprobe.settings import Settings
 def make_settings(tmp_path: Path, **overrides: object) -> Settings:
     defaults: dict[str, object] = {
         "token": "secret-token",
+        # A DIFFERENT value on purpose: a test that passes with the two equal
+        # would prove nothing about the split.
+        "agent_token": "agent-token",
         "model": "claude-opus-5",
         "max_turns": 8,
         "max_concurrent": 2,
