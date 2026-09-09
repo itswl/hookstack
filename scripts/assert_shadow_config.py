@@ -321,10 +321,24 @@ def main(argv: list[str]) -> int:
             if unset:
                 model_check += f"; {', '.join(unset)} unset (compose refuses to start)"
 
-    if len(brains) < 2:
+    # The floor is ONE, and it used to be two. It was two because this
+    # deployment was a comparison: two arms judging the same traffic, and losing
+    # one silently would have left the ledger looking full while measuring
+    # nothing. Both arms were retired on 2026-09-09 for reasons that are in
+    # implemented/2026-09-09-the-shadow-arms-are-retired.md, so "at least two"
+    # became a premise the deployment no longer holds — and a check that fails
+    # on a deliberate change teaches people to bypass it.
+    #
+    # What did NOT move: the flattening check above still refuses two brains on
+    # one model, the fan-out check still refuses a partial fan-out, and the
+    # starvation check still refuses a brain nobody routes to. Those are the
+    # invariants that catch an accident; they hold at one brain and at five. A
+    # pipe with NO brain is still an error, because every route here that judges
+    # anything sends to one.
+    if len(brains) < 1:
         problems.append(
-            f"only {len(brains)} brain channel(s) found ({', '.join(brains) or 'none'}) — "
-            f"a shadow run with one brain is not comparing anything"
+            "no brain channel found — every route that judges anything sends to one, "
+            "so a config with none is a pipe that cannot judge"
         )
 
     # The wake contract. The judge answers "does a person need to act NOW" per
@@ -369,7 +383,8 @@ def main(argv: list[str]) -> int:
     )
     print(
         f"shadow config: {path.name} boots — {len(cfg.sources)} door(s), "
-        f"{len(cfg.channels)} channel(s) all in-network, {len(brains)} brains fed, "
+        f"{len(cfg.channels)} channel(s) all in-network, "
+        f"{len(brains)} brain{'' if len(brains) == 1 else 's'} fed, "
         f"{model_check}, {reach}"
     )
     return 0
