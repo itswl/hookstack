@@ -356,6 +356,27 @@ deliberately so — this node holds no credentials for the systems it writes
 procedures about, and a freshness check that opened one would be a second,
 unaudited way of touching them.
 
+**What happens if somebody just keeps replying.** Not what most people expect:
+the conversation hits the **follow-up cap** long before the context window. Each
+reply continues the same engine session — which is the cheap direction, measured
+at $0.0156 against $0.1490 for a fresh investigation on the same context — and
+after `_MAX_FOLLOW_UPS_PER_RUN` (20) answers, the next one is declined.
+
+Every refusal in that door used to be silent. It returned a 200 with a reason,
+the pipe recorded the reason in its ledger, and the chat learned nothing, so the
+twenty-first question looked exactly like a broken bot. Three of them now answer
+in the thread — the cap, a spent budget, and a session that can no longer be
+resumed — because those are the three a person can act on. An unknown thread, a
+redelivery and an unlisted sender stay quiet on purpose.
+
+Before the cap, the runtime folds its own context away when it fills. That has
+always been recorded and shown on the console's turn line (`context folded 2×`);
+the card now says it too, in one line under the summary. It is not a claim that
+the answer is wrong — a folded conversation is usually fine — it removes the
+assumption that the answer saw everything. Note that context *fullness* is
+unavailable on this deployment: the CLI does not answer the usage request, so
+`run.context` is null and the fold count is the only signal.
+
 `GET /v1/agent` says what this node is — name, role, runtime, policy, health — so
 a deployment running an investigator, a planner and a work runner can tell them
 apart by something other than a port. Set `HOOKPROBE_AGENT_NAME` and

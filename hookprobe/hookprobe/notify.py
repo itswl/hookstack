@@ -33,7 +33,7 @@ import time
 import urllib.request
 
 from hookprobe import actions
-from hookprobe.reports import report_summary, verdict
+from hookprobe.reports import folded, report_summary, verdict, with_fold_note
 from hookprobe.runs import Run, RunStore
 from hookprobe.settings import Settings
 from hookprobe.wire import sign_timestamped
@@ -52,7 +52,8 @@ class ReturnDelivery:
         self._alarm_suppressed = 0
 
     async def deliver(self, run: Run, delays: tuple[float, ...]) -> None:
-        summary = report_summary(run.text)
+        # The answer, plus the one thing the answer cannot say about itself.
+        summary = with_fold_note(report_summary(run.text), folded(run.turns))
         alert_title = str(run.meta.get("title") or run.session_key)
         body = json.dumps(
             {

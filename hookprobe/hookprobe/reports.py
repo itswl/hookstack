@@ -94,6 +94,34 @@ def _clipped(text: str) -> str:
     return f"{head}\n\n… {len(body) - len(head)} more characters — the full report is on the run below."
 
 
+def folded(turns: list[dict[str, Any]]) -> int:
+    """How many times this session's context was folded away by the runtime."""
+    return sum(len(turn.get("compactions") or []) for turn in turns or [])
+
+
+def with_fold_note(summary: str, folds: int) -> str:
+    """`summary`, admitting that the context behind it was folded, if it was.
+
+    A compaction is the runtime deciding, mid-conversation, which of its own
+    history to keep — and the engine's hook says why that matters afterwards:
+    "a report with a gap in the middle of a long investigation has no other
+    explanation available". The fact was recorded from the day the hook was
+    written and shown only on the console's turn line, which is the surface
+    nobody is looking at while they read the answer in a chat window.
+
+    It is deliberately not a warning about correctness. A folded conversation is
+    usually fine; what a reader loses is the ability to assume the answer saw
+    everything, and that assumption is the one worth taking away.
+    """
+    if folds <= 0:
+        return summary
+    times = "once" if folds == 1 else f"{folds} times"
+    return (
+        f"{summary}\n\n_Context folded {times} during this conversation: the runtime summarised its own "
+        "earlier turns to stay inside the window, so detail from before the fold may not be behind this answer._"
+    )
+
+
 def report_summary(text: str) -> str:
     """The one paragraph a channel card shows; the full text stays on the run."""
     try:
@@ -152,6 +180,54 @@ def failure_report(reason: str, produced: str = "") -> str:
                 }
             ],
             "unknowns": ["The investigation did not run to completion."],
+            "assumptions": [],
+            "next_checks": [],
+            "confidence": 0.0,
+        },
+        ensure_ascii=False,
+    )
+
+
+def unanswered_report(reason: str) -> str:
+    """A report-shaped answer for a question this service declined to spend on.
+
+    The follow-up door refuses four ways and every one of them was silent. Its
+    own docstring says a refusal is "a 200 with a reason: the pipe records it" —
+    and the pipe records it in a ledger, because a 2xx from this service is a
+    delivered delivery. Nothing reaches the person who typed. They watch the bot
+    stop answering and cannot tell being declined from being broken.
+
+    The reason travels; the remedy travels with it. A conversation that has hit
+    its ceiling is not a failure, it is a conversation that has to start again
+    somewhere — and saying which is the difference between a wall and a door.
+    """
+    summary = (
+        f"This reply was not answered: {reason}. Nothing was spent on it, and the "
+        "investigation above still stands. Raise a new alert or open a new question if "
+        "this needs more work — a fresh investigation reads the case files this one left behind."
+    )
+    return json.dumps(
+        {
+            "summary": summary,
+            "root_cause": {
+                "status": "not_answered",
+                "description": f"A chat reply reached this investigation and was declined: {reason}.",
+            },
+            "evidence": [],
+            "impact": {
+                "scope": "this conversation",
+                "severity": "none",
+                "description": "No turn was taken and no tool ran. The delivered report is unchanged.",
+            },
+            "timeline": [],
+            "recommendations": [
+                {
+                    "priority": "P3",
+                    "action": "Start a fresh investigation if the question still matters",
+                    "reason": "A new session reads the case files this one wrote, without carrying its context.",
+                }
+            ],
+            "unknowns": ["Whether the question still needs answering."],
             "assumptions": [],
             "next_checks": [],
             "confidence": 0.0,

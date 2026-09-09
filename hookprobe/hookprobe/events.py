@@ -296,6 +296,24 @@ def _sender_allowed(settings: Settings, sender: str) -> bool:
     return bool(allowed) and bool(sender) and ("*" in allowed or sender in allowed)
 
 
+def _declined(service: RunService, run: Run, reason: str, *, message_id: str = "") -> dict[str, Any]:
+    """Refuse a reply, and say so where the reply was typed.
+
+    Not every refusal in this door gets one, and the line is whether the person
+    could act on knowing. These three can: a conversation at its ceiling, a
+    window with no budget left, a session that can no longer be resumed. The
+    other three cannot and stay quiet — an unknown thread and a redelivery are
+    both the expected steady state, and telling an unlisted sender that they are
+    unlisted answers a question they should have to ask a person.
+
+    The notice costs no turn. It is a report-shaped message returned through the
+    family loop, which is the one dialect a channel renderer can dress, and it
+    carries the thread root so it lands as a reply rather than a new card.
+    """
+    service.report_unanswered(run, reason, message_id=message_id)
+    return {"status": "declined", "reason": reason, "sessionKey": run.session_key}
+
+
 def _follow_up(
     service: RunService, settings: Settings, event: dict[str, Any], fields: dict[str, Any]
 ) -> dict[str, Any]:
@@ -326,17 +344,18 @@ def _follow_up(
     if message_id and message_id in handled:
         return {"status": "already_done", "sessionKey": run.session_key}
     if len(handled) >= _MAX_FOLLOW_UPS_PER_RUN:
-        return {"status": "skipped", "reason": "this investigation has answered enough follow-ups"}
+        return _declined(
+            service,
+            run,
+            f"this investigation has answered its {_MAX_FOLLOW_UPS_PER_RUN} follow-ups",
+            message_id=message_id,
+        )
     text = str(event.get("body") or event.get("title") or "").strip()[:_FOLLOW_UP_TEXT_MAX]
     if not text:
         return {"status": "skipped", "reason": "empty question"}
     state = service.budget_state()
     if state is not None and state[0] >= state[1]:
-        return {
-            "status": "skipped",
-            "reason": "budget exhausted; the previous report stands",
-            "sessionKey": run.session_key,
-        }
+        return _declined(service, run, "the investigation budget for this window is spent", message_id=message_id)
     try:
         run = service.continue_run(run.session_key, {"message": _FOLLOW_UP_MESSAGE.format(text=text)})
     except RunBusyError:
@@ -346,11 +365,7 @@ def _follow_up(
             "sessionKey": run.session_key,
         }
     except NotResumableError:
-        return {
-            "status": "skipped",
-            "reason": "this investigation left no session to continue",
-            "sessionKey": run.session_key,
-        }
+        return _declined(service, run, "this investigation left no session to continue", message_id=message_id)
     run.meta["follow_ups"] = [*handled, message_id] if message_id else handled
     run.meta["follow_up_by"] = sender
     root = str(fields.get("thread_root") or "").strip()[:120]

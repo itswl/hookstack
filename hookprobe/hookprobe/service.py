@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import re
@@ -35,7 +36,7 @@ from hookprobe import actions, automation, distill, distill_loop, remediation, r
 from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult, price_tokens, transient
 from hookprobe.notify import ReturnDelivery
-from hookprobe.reports import budget_report, failure_report, superseded_report
+from hookprobe.reports import budget_report, failure_report, superseded_report, unanswered_report
 from hookprobe.runs import COMPLETED, FAILED, INFERRED_BY_PREFIX, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
 
@@ -1319,10 +1320,62 @@ class RunService:
         if row is None:
             return None
         run = self._store.get(str(row.get("session_key") or ""))
-        if run is None or run.origin != "relay":
+        if run is None:
+            return None
+        return self._notice(
+            run,
+            key=f"probe:superseded:{row.get('id')}",
+            kind="superseded",
+            error=f"not executed: {reason}",
+            text=superseded_report(reason, list(row.get("steps") or [])),
+            extra={"proposal": str(row.get("id") or "")},
+        )
+
+    def report_unanswered(self, run: Run, reason: str, *, message_id: str = "") -> Run | None:
+        """Say in the thread that a reply got no answer, and why.
+
+        The same hole as `report_superseded`, found by being asked what happens
+        when somebody just keeps typing. Every refusal in the follow-up door is
+        a 200 with a reason, and the pipe's own comment says what that buys:
+        "the pipe records it". It records it in a LEDGER. The channel records
+        nothing, because a 2xx from this service is a delivered delivery — so
+        the person who asked the question watches the bot go quiet and has no
+        way to learn that it heard them and declined.
+
+        Keyed off the message so the platform's redeliveries collapse onto one
+        notice instead of one per attempt.
+        """
+        digest = hashlib.sha256((message_id or uuid.uuid4().hex).encode()).hexdigest()[:10]
+        return self._notice(
+            run,
+            key=f"probe:unanswered:{digest}",
+            kind="unanswered",
+            error=f"not answered: {reason}",
+            text=unanswered_report(reason),
+        )
+
+    def _notice(
+        self,
+        about: Run,
+        *,
+        key: str,
+        kind: str,
+        error: str,
+        text: str,
+        extra: dict[str, Any] | None = None,
+    ) -> Run | None:
+        """One report-shaped message about work, delivered where that work lives.
+
+        Relay-born runs only: a console-started run has no chat to answer into,
+        and the console shows the state directly. Idempotent on the key, because
+        the two callers are both on redelivery paths.
+        """
+        if about.origin != "relay":
+            return None
+        if self._store.get(key) is not None:
             return None
         notice = Run(
-            session_key=f"probe:superseded:{row.get('id')}",
+            session_key=key,
             run_id=uuid.uuid4().hex[:12],
             model=self._settings.model,
             model_endpoint=self._settings.model_endpoint,
@@ -1333,28 +1386,23 @@ class RunService:
         # Copying the whole dict was wrong and briefly shipped: `refires` and
         # `follow_ups` are counters the work board SUMS across a work item's
         # runs, so a notice carrying them counted every re-fire twice.
-        notice.meta = {
-            key: value
-            for key, value in (run.meta or {}).items()
-            if key in self._NOTICE_META and value not in (None, "")
-        }
+        notice.meta = {k: v for k, v in (about.meta or {}).items() if k in self._NOTICE_META and v not in (None, "")}
         # A message, not an investigation. The work board reads this and folds
-        # the notice out: it opened no work, answered no question, and the
-        # supersede is already on the item as the proposal's own artifact. Left
-        # in, it was the item's newest FAILED run, which read as `needs_human`
-        # on work that a recovery had just closed — and it collected a "was this
-        # worth it?" the way a real report does.
-        notice.meta["notice"] = "superseded"
-        notice.meta["proposal"] = str(row.get("id") or "")
+        # the notice out: it opened no work and answered no question. Left in, a
+        # notice was its item's newest FAILED run — reading as `needs_human` on
+        # work a recovery had just closed — and it collected a "was this worth
+        # it?" the way a real report does.
+        notice.meta["notice"] = kind
+        notice.meta.update(extra or {})
         self._store.create(notice)
         notice.status = FAILED
-        notice.error = f"not executed: {reason}"
+        notice.error = error
         notice.cost_usd = 0.0
-        notice.text = superseded_report(reason, list(row.get("steps") or []))
+        notice.text = text
         self._record_turn(notice, None)
         self._store.finish(notice)
         self._schedule_return(notice)
-        logger.warning("procedure superseded id=%s reason=%s", row.get("id"), reason)
+        logger.warning("notice %s about=%s reason=%s", kind, about.session_key, error)
         return notice
 
     def reject_remediation(self, proposal_id: str) -> dict[str, Any]:

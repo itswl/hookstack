@@ -245,3 +245,125 @@ def test_a_stranger_cannot_open_a_paid_topic(tmp_path) -> None:
     assert r.json()["status"] == "skipped" and "sender" in r.json()["reason"] and engine.calls == 0
     # An event with no sender is not from chat and is not gated by the allowlist.
     assert _alert(client)
+
+
+# ── a refusal the person who typed can actually see ───────────────────────────
+#
+# Every refusal in this door was a 200 with a reason, and the docstring's claim
+# for that — "the pipe records it" — is true and beside the point: the pipe
+# records it in a LEDGER, because a 2xx from this service is a delivered
+# delivery. Nothing reached the chat. Somebody who keeps typing watched the bot
+# go quiet with no way to tell being declined from being broken.
+
+
+def _returns(monkeypatch: Any) -> list[dict[str, Any]]:
+    posted: list[dict[str, Any]] = []
+
+    def capture(self: Any, body: bytes) -> int:
+        posted.append(json.loads(body))
+        return 200
+
+    monkeypatch.setattr(notify.ReturnDelivery, "_post_return", capture)
+    return posted
+
+
+def test_a_conversation_at_its_ceiling_says_so_in_the_thread(tmp_path, monkeypatch) -> None:
+    """The wall a person actually hits. Twenty answers, and the twenty-first
+    question used to vanish — no answer, no reason, no record they could see."""
+    posted = _returns(monkeypatch)
+    client, service, _ = _client(tmp_path, return_url="http://relay/hook/probe-notify")
+    key = _alert(client)
+    for i in range(20):
+        assert _reply(client, key, f"q{i}", message_id=f"om_{i}")["status"] == "accepted"
+        _wait(client, key)
+    assert len(service.get(key).meta["follow_ups"]) == 20
+
+    before = len(posted)
+    out = _reply(client, key, "one more thing", message_id="om_21")
+    assert out["status"] == "declined"
+    assert "20 follow-ups" in out["reason"]
+
+    notice = [p for p in posted[before:] if p["meta"]["session_key"].startswith("probe:unanswered:")]
+    assert notice, "the twenty-first question was refused into a log line again"
+    body = notice[-1]
+    assert body["meta"]["thread_root"] == "om_report", "a reply must answer in the thread it was typed in"
+    assert body["meta"]["alert_name"].startswith("disk 94% on node-3")
+    assert "not answered" in (body["meta"]["error"] or "")
+    # It says what to do instead. A wall and a door differ by exactly that.
+    assert "fresh investigation" in body["analysis"]["summary"]
+    # And it spent nothing.
+    assert body["meta"]["cost_usd"] == 0.0
+
+
+def test_the_platforms_redeliveries_collapse_onto_one_notice(tmp_path, monkeypatch) -> None:
+    """A declined message is never marked handled, so without a key of its own
+    every retry of it would post another card into somebody's chat."""
+    posted = _returns(monkeypatch)
+    client, service, _ = _client(tmp_path, return_url="http://relay/hook/probe-notify")
+    key = _alert(client)
+    for i in range(20):
+        _reply(client, key, f"q{i}", message_id=f"om_{i}")
+        _wait(client, key)
+
+    before = len(posted)
+    for _ in range(3):
+        assert _reply(client, key, "one more thing", message_id="om_21")["status"] == "declined"
+    notices = [p for p in posted[before:] if p["meta"]["session_key"].startswith("probe:unanswered:")]
+    assert len(notices) == 1, f"{len(notices)} cards for one question"
+
+
+def test_a_spent_budget_says_so_too(tmp_path, monkeypatch) -> None:
+    """The other refusal a person can act on: nothing is wrong, the window is
+    just out of money, and that is a fact with a knob behind it."""
+    posted = _returns(monkeypatch)
+    client, service, _ = _client(
+        tmp_path, return_url="http://relay/hook/probe-notify", budget_usd=0.0001, budget_window_hours=24
+    )
+    key = _alert(client)
+    before = len(posted)
+    out = _reply(client, key, "why?", message_id="om_broke")
+    assert out["status"] == "declined" and "budget" in out["reason"]
+    notice = [p for p in posted[before:] if p["meta"]["session_key"].startswith("probe:unanswered:")]
+    assert notice and "budget" in notice[-1]["analysis"]["summary"]
+
+
+def test_the_refusals_a_person_cannot_act_on_stay_quiet(tmp_path, monkeypatch) -> None:
+    """An unknown thread and a redelivery are the expected steady state, and
+    telling an unlisted sender that they are unlisted answers a question they
+    should have to ask a person."""
+    posted = _returns(monkeypatch)
+    client, service, _ = _client(tmp_path, return_url="http://relay/hook/probe-notify")
+    key = _alert(client)
+    before = len(posted)
+
+    assert _reply(client, key, "hi", sender="ou_stranger")["status"] == "skipped"
+    assert _reply(client, "probe:ww:nosuch", "hi", message_id="om_x")["status"] == "skipped"
+    assert _reply(client, key, "hi", message_id="om_dup")["status"] == "accepted"
+    _wait(client, key)
+    assert _reply(client, key, "hi", message_id="om_dup")["status"] == "already_done"
+
+    assert not [p for p in posted[before:] if p["meta"]["session_key"].startswith("probe:unanswered:")]
+
+
+def test_a_folded_conversation_admits_it_on_the_card(tmp_path, monkeypatch) -> None:
+    """The fact was recorded from the day the PreCompact hook was written and
+    shown only on the console's turn line — which is not the surface anybody is
+    looking at while they read the answer in a chat window."""
+    posted = _returns(monkeypatch)
+    client, service, _ = _client(tmp_path, return_url="http://relay/hook/probe-notify")
+    key = _alert(client)
+    assert "Context folded" not in posted[-1]["analysis"]["summary"], "an unfolded run must not cry wolf"
+
+    run = service.get(key)
+    run.turns[-1]["compactions"] = [{"type": "compacted", "trigger": "auto"}]
+    before = len(posted)
+    _reply(client, key, "and now?", message_id="om_fold")
+    _wait(client, key)
+
+    card = posted[-1]
+    assert len(posted) > before
+    note = card["analysis"]["summary"]
+    assert "Context folded once" in note
+    assert "may not be behind this answer" in note
+    # The same string reaches both fields a renderer might read.
+    assert card["report"]["summary"] == note
