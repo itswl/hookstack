@@ -23,7 +23,7 @@ from typing import Any, Literal, cast
 
 from hookprobe import inputs, telemetry
 from hookprobe.files import system_prompt_path
-from hookprobe.gate import _WRITE_PATH_KEYS, mcp_deny_reason, shell_write_target
+from hookprobe.gate import _WRITE_PATH_KEYS, SECRETS_WITHHELD_FROM_AGENT, mcp_deny_reason, shell_write_target
 from hookprobe.gate import WRITE_TOOLS as _WRITE_TOOLS
 from hookprobe.gate import append_audit as _append_audit
 from hookprobe.gate import tool_detail as _tool_detail
@@ -708,21 +708,10 @@ class ClaudeAgentEngine:
     # read-or-rulings-only credential is a separate change, recorded in
     # .agents/notes/proposed/2026-09-02-the-agent-shares-the-services-secrets.md.
     # ANTHROPIC_*/model keys are left intact — the model call needs them.
-    _SECRETS_WITHHELD_FROM_AGENT = (
-        "HOOKPROBE_EVENT_SECRET",
-        "HOOKPROBE_RETURN_SECRET",
-        "HOOKPROBE_RULING_SECRET",
-        "LARK_APP_ID",
-        "LARK_APP_SECRET",
-        "LARK_CHAT_ID",
-        "SHADOW_INGEST_SECRET",
-        "SHADOW_ADMIN_TOKEN",
-        "SHADOW_READ_TOKEN",
-        "SHADOW_ACTION_SECRET",
-        "SHADOW_RULING_SECRET",
-        "SHADOW_RETURN_URL",
-        "WW_RELAY_SECRET",
-    )
+    # One list, in gate.py, shared with every adapter that spawns its gate. It
+    # was a private tuple here until 2026-09-09, and being private is how two
+    # later adapters came to inherit every secret it names.
+    _SECRETS_WITHHELD_FROM_AGENT = SECRETS_WITHHELD_FROM_AGENT
 
     def _subprocess_env(self, session_key: str = "") -> dict[str, str]:
         """The env overrides for the agent's CLI subprocess: per-command

@@ -333,15 +333,53 @@ def decide(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
     return {}
 
 
+# The service's own secrets, blanked out of everything an agent's subprocess can
+# read. Decided 2026-09-02 (`.agents/notes/implemented/`) after the production
+# compose was found injecting the whole deployment `.env` into the container: a
+# Bash step, or an injected instruction that reaches one, could read the pipe's
+# HMAC keys — which forge a signed event — and the chat app's credentials, which
+# post as the bot. None of these are provider credentials, so blanking them
+# costs no adapter its model.
+#
+# It lives HERE, next to the environment every spawned runtime is built from,
+# because it did not: the decision was implemented as a private tuple on the
+# Claude adapter, and when the codex and pi adapters arrived they built their
+# env from `dict(os.environ)` through this function and inherited every one of
+# them. The boundary held on the adapter it was written for and was simply
+# absent on the two that came later — the same shape as the posture that meant
+# one thing per engine, and the reason that decision now lives in one module.
+SECRETS_WITHHELD_FROM_AGENT = (
+    "HOOKPROBE_EVENT_SECRET",
+    "HOOKPROBE_RETURN_SECRET",
+    "HOOKPROBE_RULING_SECRET",
+    "LARK_APP_ID",
+    "LARK_APP_SECRET",
+    "LARK_CHAT_ID",
+    "SHADOW_INGEST_SECRET",
+    "SHADOW_ADMIN_TOKEN",
+    "SHADOW_READ_TOKEN",
+    "SHADOW_ACTION_SECRET",
+    "SHADOW_RULING_SECRET",
+    "SHADOW_RETURN_URL",
+    "WW_RELAY_SECRET",
+)
+
+
 def environment(settings: Any, session_key: str, *, package_root: str) -> dict[str, str]:
     """The environment a spawned runtime passes down to this gate.
 
     Shared by every adapter that reaches the gate by spawning it, because the
     alternative is each of them deciding separately what the gate is allowed to
     know — and one of them getting it slightly wrong is a node holding a posture
-    nobody asked for.
+    nobody asked for. The same argument applies to what the runtime may READ,
+    which is why the withholding below is here and not in a caller.
     """
     env = dict(os.environ)
+    # Overridden to "" rather than deleted: a spawned process inherits the
+    # parent's environment, and an empty value is what a door treats as
+    # unconfigured — which is refused rather than open.
+    for name in SECRETS_WITHHELD_FROM_AGENT:
+        env[name] = ""
     # The gate IS this package, so the interpreter spawning it has to be able to
     # import it. Learned the hard way: without this the hook died on
     # ModuleNotFoundError, the runtime carried on, and a `kubectl delete` ran on

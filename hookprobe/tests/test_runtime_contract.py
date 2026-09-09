@@ -524,6 +524,62 @@ def test_pi_keeps_its_transcripts_on_the_persistent_volume(tmp_path: Path) -> No
     assert Path(engine._env("k")["PI_CODING_AGENT_SESSION_DIR"]).is_relative_to(tmp_path)
 
 
+# ------------------ what an adapter may let the agent READ
+#
+# Not one of the five, and it should have been. `_subprocess_env` blanks the
+# service's own secrets from the agent's environment — decided 2026-09-02, after
+# the production compose was found injecting the whole deployment `.env` into
+# the container — and it was implemented as a PRIVATE tuple on the adapter that
+# existed at the time. codex and pi build their environment from
+# `dict(os.environ)` through `gate.environment`, so both inherited every secret
+# that decision was written to withhold: the pipe's HMAC keys, which forge a
+# signed event, and the chat credentials, which post as the bot.
+#
+# It is exactly the failure the shared gate module exists to prevent, one level
+# over: a boundary that held on the engine it was written for and was absent on
+# the two that came later, with nothing in any suite noticing. So the list moved
+# to gate.py and these assertions are what keep it one list.
+
+
+def test_no_adapter_hands_the_agent_the_services_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The spawned path, which is every adapter that reaches its gate as a
+    subprocess — and every future one, since the environment is built here."""
+    for name in gate.SECRETS_WITHHELD_FROM_AGENT:
+        monkeypatch.setenv(name, "the-real-secret")
+    env = gate.environment(make_settings(tmp_path, runtime="codex"), "probe:conformance:1", package_root=str(tmp_path))
+    leaked = sorted(name for name in gate.SECRETS_WITHHELD_FROM_AGENT if env.get(name))
+    assert not leaked, f"a Bash step on this node could read {leaked}"
+    # Blanked, not deleted: a door reads an empty secret as unconfigured, which
+    # it refuses, where an absent variable can fall back to a default.
+    assert all(name in env for name in gate.SECRETS_WITHHELD_FROM_AGENT)
+    # And the provider credential is NOT withheld, or the node cannot work.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-provider")
+    again = gate.environment(
+        make_settings(tmp_path, runtime="codex"), "probe:conformance:1", package_root=str(tmp_path)
+    )
+    assert again["ANTHROPIC_AUTH_TOKEN"] == "sk-provider"
+
+
+def test_the_in_process_adapter_withholds_the_same_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Claude adapter has its own env path, so it gets its own assertion —
+    and the identity check below is what stops the two lists drifting."""
+    from hookprobe.engine import ClaudeAgentEngine
+
+    for name in gate.SECRETS_WITHHELD_FROM_AGENT:
+        monkeypatch.setenv(name, "the-real-secret")
+    engine = ClaudeAgentEngine(make_settings(tmp_path, workdir=tmp_path))
+    env = engine._subprocess_env("probe:conformance:1")
+    leaked = sorted(name for name in gate.SECRETS_WITHHELD_FROM_AGENT if env.get(name))
+    assert not leaked, f"a Bash step on this node could read {leaked}"
+
+
+def test_the_withheld_list_is_one_list() -> None:
+    """Two copies of a rule about secrets is how one of them stops being true."""
+    from hookprobe.engine import ClaudeAgentEngine
+
+    assert ClaudeAgentEngine._SECRETS_WITHHELD_FROM_AGENT is gate.SECRETS_WITHHELD_FROM_AGENT
+
+
 # ------------------ the incumbent, held to the same five as the newcomers
 #
 # This section is the correction to an inversion. The suite was written to stop a
