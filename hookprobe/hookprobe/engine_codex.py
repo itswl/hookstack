@@ -15,12 +15,15 @@ SDK (`openai-codex` on PyPI) is better on every axis this adapter had to work
 for: `thread.id` before the turn instead of parsed out of the first line, a real
 `interrupt()` instead of SIGTERM, `model_context_window` arriving beside the
 token usage, and the CLI binary shipped as a pip dependency. It drives
-`codex app-server`, and **hooks do not run under app-server**. Measured, twice,
-against the same `CODEX_HOME` and the same `hooks.json` that work here: under
-`exec` the guard refuses `kubectl delete` and writes its audit line; under
-app-server the command runs, nothing is recorded, and no `hook/started`
-notification appears in the stream. Tried with codex-cli 0.147.0 and 0.153.4,
-and with `--dangerously-bypass-hook-trust` on the launch arguments.
+`codex app-server`, and **hooks did not run under app-server** on either version
+tested — against the same `CODEX_HOME` and the same hook definition that works
+here, through both `hooks.json` and the inline `[hooks]` form, with the feature
+pinned on and hook trust bypassed. Under `exec` the guard refuses `kubectl
+delete` and writes its audit line; under app-server the command runs, nothing is
+recorded, and no `hook/started` appears in the stream. The official
+documentation says the app-server emits that notification, so this is a gap
+between documented and observed behaviour rather than a limitation to design
+around.
 
 The only client-side gate the SDK offers is its `approval_handler`, which
 answers `item/commandExecution/requestApproval` — a sandbox-escalation prompt

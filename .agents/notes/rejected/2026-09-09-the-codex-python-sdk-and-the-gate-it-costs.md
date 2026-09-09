@@ -44,11 +44,25 @@ binary:
 | `codex exec` | refused | written | n/a |
 | `codex app-server` | ran | none | absent |
 
-Tried with codex-cli 0.147.0 (the version the SDK pins) and 0.153.4, and with
-`--dangerously-bypass-hook-trust` passed through `launch_args_override`. The
-app-server protocol does carry hook types — `hook/started`, `hook/completed`,
-`HookMetadata.trust_status` — so this reads as not-yet-wired rather than
-never-going-to-be.
+What was tried, all of it against both codex-cli 0.147.0 (the version the SDK
+pins) and 0.153.4: `hooks.json` in `CODEX_HOME`; the inline `[hooks]` form in
+`config.toml` with `type = "command"`; `[features] hooks = true` in that file;
+`--config features.hooks=true` on the launch; and
+`--dangerously-bypass-hook-trust` through `launch_args_override`. The same
+config fires under `exec` every single time.
+
+**The official documentation says this should work.** `learn.chatgpt.com/docs/
+app-server` states that the app-server emits `hook/started` and `hook/completed`
+"when a synchronous lifecycle hook starts and when its final run summary is
+available", and the protocol carries the types to match. So this is a gap
+between documented and observed behaviour rather than a documented limitation —
+which is a better thing to have found, because it will close.
+
+An open upstream issue is consistent with it without being the same report:
+`openai/codex#21639`, "Hooks no longer run after Codex Desktop update", open
+since 2026-05-08, where the app-server-backed desktop stopped running both
+`SessionStart` and `PreToolUse` hooks. Nothing found describing the
+exec-versus-app-server split directly.
 
 **The approval handler is not a substitute.** The SDK exposes one client-side
 decision point, `approval_handler`, answering
@@ -81,7 +95,20 @@ check; the containment row covers both halves.
 
 **Revisit on a codex release that emits `hook/started` from an app-server
 stream.** That single observation flips this decision, and everything else about
-the SDK is worth having.
+the SDK is worth having. The check costs one turn: run one command the guard
+refuses and look for a `hook/` method in the stream.
+
+**Two things the official documentation corrected while checking this**, both in
+this adapter's favour. `PreToolUse` fires for "Bash, file edits performed
+through `apply_patch`, MCP tool calls, and other local function tools" — so the
+MCP and input guards are reachable under codex, not only the bash one. And a
+hook may also block by exiting 2 with the reason on stderr, which is a second
+route this gate does not need but a future one might.
+
+**Only the bash guard has been proven under codex.** The live drills refuse
+`kubectl delete`; nothing here has yet watched the input guard refuse a write to
+a steering file or the MCP guard refuse a tool, on this runtime. The
+documentation says they will fire. That is not the same as having seen it.
 
 **The deployment gap stands.** No image ships the codex binary, and the SDK was
 the clean answer to that. Shipping it now means installing the CLI in the image

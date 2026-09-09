@@ -114,12 +114,19 @@ the contract's `stop()` is about. Token usage arrives with
 to ask for and latch is simply present. And `pip install` puts the CLI binary in
 the image, which is the one thing keeping this adapter out of a deployment.
 
-It drives `codex app-server`, and **hooks do not run under app-server**.
-Measured against the same `CODEX_HOME` and the same `hooks.json`: under `exec`
-the guard refuses `kubectl delete` and writes its audit line; under app-server
-the command runs, nothing is recorded, and no `hook/started` notification
-appears in the stream. Tried with codex-cli 0.147.0 and 0.153.4, and with
-`--dangerously-bypass-hook-trust` on the launch arguments.
+It drives `codex app-server`, and **hooks did not run under app-server** on
+either version tested. Measured against the same `CODEX_HOME` and the same hook
+definition: under `exec` the guard refuses `kubectl delete` and writes its audit
+line; under app-server the command runs, nothing is recorded, and no
+`hook/started` notification appears in the stream. Tried both `hooks.json` and
+the inline `[hooks]` form in `config.toml`, with `[features] hooks = true`, with
+`--config features.hooks=true`, and with `--dangerously-bypass-hook-trust`, on
+codex-cli 0.147.0 and 0.153.4.
+
+The official documentation says the app-server does emit `hook/started` and
+`hook/completed`, so this is a gap between documented and observed behaviour
+rather than a limitation to design around. It will close. Until it does, a node
+driven through the SDK has no gate.
 
 The only client-side gate the SDK offers is its `approval_handler`, which
 answers `item/commandExecution/requestApproval`. That is a sandbox-escalation
