@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,17 @@ from typing import Any
 # this is the one place this checker is coupled to a particular node's signal
 # format, and a node that names its subject differently changes THIS line.
 ORIGIN_SEPARATOR = " / "
+
+# The producer half of an origin, for signals THIS CHECK posts. A violation
+# travels as a signal on the same source the node uses, so `patrol-timer /
+# contract` arrives in the ledger looking exactly like a conversation the node
+# reported — and `contract` is never a conversation any scan offered, so the
+# next round accuses it, and the round after that accuses that one.
+#
+# Measured on 2026-09-09: one false positive at 12:20 became two subjects at
+# 12:40 and stayed there, firing every twenty minutes. A detector whose own
+# output is its next input does not report a problem, it becomes one.
+SELF_PRODUCER = "patrol-timer"
 
 FAILURES: list[str] = []
 RAN: list[str] = []
@@ -85,6 +97,14 @@ def _opt(name: str, default: str = "") -> str:
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
 
 
+def _clock(epoch: float) -> str:
+    """An epoch as a time a person reads, for the notes this prints."""
+    try:
+        return time.strftime("%H:%M:%S", time.localtime(epoch))
+    except (OverflowError, OSError, ValueError):
+        return str(epoch)
+
+
 def _subjects(ledger: dict[str, Any], source: str, since: float) -> dict[str, float]:
     """Conversations this node produced a signal for, newest signal time each.
 
@@ -97,6 +117,8 @@ def _subjects(ledger: dict[str, Any], source: str, since: float) -> dict[str, fl
         if row.get("source") != source or float(row.get("received_at") or 0) <= since:
             continue
         origin = str((row.get("fields") or {}).get("origin") or "")
+        if origin.split(ORIGIN_SEPARATOR, 1)[0].strip() == SELF_PRODUCER:
+            continue  # our own violation signal; see SELF_PRODUCER
         subject = origin.split(ORIGIN_SEPARATOR, 1)[1].strip() if ORIGIN_SEPARATOR in origin else ""
         if subject:
             out[subject] = max(out.get(subject, 0.0), float(row.get("received_at") or 0))
@@ -162,7 +184,29 @@ def main() -> int:
     #    Skipped, not asserted, when the scan file carries no `offered`: a node
     #    that still keeps one state file has no scan to be handed anything by,
     #    and checking it against an empty set would fail every round it works.
-    if offered is not None:
+    #
+    #    Skipped ALSO when the scan has run again since the snapshot was taken.
+    #    `scan.json` has one slot and every tick overwrites it, including the
+    #    ticks whose round is skipped — so the moment a round is skipped, the
+    #    offered set that justified the PREVIOUS round's signals is gone, and
+    #    what remains describes a round that posted nothing. Comparing one
+    #    round's signals against another round's offer is not a promise the node
+    #    broke; it is two different questions asked as one.
+    #
+    #    Measured on 2026-09-09: a real round fired at 11:40 and reported a
+    #    conversation. The next three ticks all had nothing to do, so all three
+    #    rewrote `offered` to empty while the snapshot stayed at 11:40 — and the
+    #    check accused that 11:40 round once every twenty minutes, against an
+    #    offer made eighty-nine minutes after it.
+    round_at = float(cursors.get("round_at") or 0)
+    stale_offer = round_at > since > 0
+    if offered is not None and stale_offer:
+        print(
+            "  note  the scan has run again since the snapshot "
+            f"({_clock(round_at)} > {_clock(since)}); its offer describes a later round, "
+            "so the promise that needs it is skipped"
+        )
+    elif offered is not None:
         invented = [name for name in signalled if name not in offered]
         check(
             not invented,

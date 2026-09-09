@@ -115,3 +115,68 @@ def test_a_quiet_round_is_not_a_violation() -> None:
     every one of them would be switched off within a day."""
     out = run("ok-after.json", "ok-after.json", "stalled-ledger.json", "9999999999")
     assert out.returncode == 0, out.stdout
+
+
+def test_a_stale_offer_is_a_skipped_promise_not_a_broken_one() -> None:
+    """`scan.json` has one slot and every tick overwrites it, including ticks
+    whose round is skipped — so the moment a round is skipped, the offer that
+    justified the previous round's signals is gone and what remains describes a
+    round that posted nothing.
+
+    Measured on 2026-09-09: a round fired at 11:40 and reported a conversation,
+    the next three ticks had nothing to do and rewrote `offered` to empty, and
+    the check accused that one round once every twenty minutes against an offer
+    made eighty-nine minutes after it.
+    """
+    scan = FIX / "_tmp-scan-stale.json"
+    scan.write_text(json.dumps({"feeds": {"BCP-SRE": 1788510031.0}, "offered": {}, "round_at": 1788599999.0}))
+    try:
+        out = run("ok-before.json", "ok-after.json", "ok-ledger.json", "1788509000", "_tmp-scan-stale.json")
+        assert out.returncode == 0, out.stdout
+        assert "describes a later round" in out.stdout, "and it says why it skipped, rather than going quiet"
+        assert "the scan offered it" not in out.stdout
+    finally:
+        scan.unlink()
+
+
+def test_an_offer_from_the_same_round_is_still_checked() -> None:
+    """The other half: skipping on staleness must not skip everything."""
+    scan = FIX / "_tmp-scan-fresh.json"
+    scan.write_text(json.dumps({"feeds": {"BCP-SRE": 1788510031.0}, "offered": {}, "round_at": 1788508000.0}))
+    try:
+        out = run("ok-before.json", "ok-after.json", "ok-ledger.json", "1788509000", "_tmp-scan-fresh.json")
+        assert out.returncode == 1, out.stdout
+        assert "the scan offered it" in out.stdout
+    finally:
+        scan.unlink()
+
+
+def test_the_checker_does_not_read_its_own_violations_as_conversations() -> None:
+    """A violation travels as a signal on the same source the node uses, so
+    `patrol-timer / contract` lands in the ledger looking like a conversation
+    the node reported — and `contract` is never a conversation any scan offered.
+
+    Left alone, one false positive became two subjects at the next tick and
+    stayed there: a detector whose own output is its next input does not report
+    a problem, it becomes one.
+    """
+    ledger = FIX / "_tmp-ledger-self.json"
+    ledger.write_text(
+        json.dumps(
+            {
+                "recent": [
+                    {"source": "watch", "received_at": 1788510031.0, "fields": {"origin": "chat / BCP-SRE"}},
+                    {"source": "watch", "received_at": 1788510040.0, "fields": {"origin": "patrol-timer / contract"}},
+                ]
+            }
+        )
+    )
+    scan = FIX / "_tmp-scan-self.json"
+    scan.write_text(json.dumps({"feeds": {"BCP-SRE": 1788510031.0}, "offered": {"BCP-SRE": 1788510031.0}}))
+    try:
+        out = run("ok-before.json", "ok-after.json", "_tmp-ledger-self.json", "1788509000", "_tmp-scan-self.json")
+        assert "contract" not in out.stdout.split("promise")[0], "its own signal is not a conversation"
+        assert "1 signal(s) across 1 conversation(s)" in out.stdout
+    finally:
+        ledger.unlink()
+        scan.unlink()
