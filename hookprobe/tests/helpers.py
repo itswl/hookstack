@@ -43,6 +43,8 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "event_secret": "",
         "return_url": "",
         "relay_ui_url": "",
+        # Empty like every deployment: a node here has no reachable address.
+        "public_url": "",
         "resume_interrupted": True,
         "agent_name": "hookprobe",
         "agent_role": "",

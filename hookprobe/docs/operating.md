@@ -330,6 +330,20 @@ a deployment running an investigator, a planner and a work runner can tell them
 apart by something other than a port. Set `HOOKPROBE_AGENT_NAME` and
 `HOOKPROBE_AGENT_ROLE` per service.
 
+`GET /v1/agent/description` answers a different reader. Same node, in ANP's
+Agent Description dialect: what a caller can ASK for, and — in that schema's own
+`humanAuthorization` field — which doors will not move without a person. It
+says strictly less than `/v1/agent`, on purpose: no model, no gateway endpoint,
+no workspace, no budget, because a document meant to be crawled is the wrong
+place to widen what a caller learns, and one of those is an estate identifier.
+`HOOKPROBE_PUBLIC_URL` is where this node can be reached from outside; unset —
+the default, and true of every deployment here — the interfaces carry paths and
+the document says `reachable: false` rather than publish a loopback address that
+would resolve to the caller's own machine. The route is token-guarded like
+every other, which for a node with no reachable address costs nothing. Why the
+rest of ANP was not adopted is in
+[`.agents/notes/proposed/2026-09-09-anp-evaluated-the-identity-layer-needs-a-public-origin.md`](../../.agents/notes/proposed/2026-09-09-anp-evaluated-the-identity-layer-needs-a-public-origin.md).
+
 ## Parallel subagents
 
 The engine's Task tool is enabled: a cascading incident can fan out into

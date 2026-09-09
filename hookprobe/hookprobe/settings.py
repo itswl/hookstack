@@ -206,6 +206,13 @@ class Settings:
     # Where the pipe's board is, as a BROWSER reaches it (not as this container
     # does): a run then links to the chain it belongs to. Empty = no link.
     relay_ui_url: str
+    # Where this node can be reached from OUTSIDE, if anywhere. Empty by
+    # default and empty on every deployment here: the nodes bind to loopback
+    # behind the host firewall. It exists because a document meant to be read
+    # by somebody else needs absolute URLs, and a node cannot honestly invent
+    # one — see describe.py, and the status-write-back note, which is blocked on
+    # this same missing fact.
+    public_url: str
     # Whether a run this process finds mid-flight at startup — left by a crash,
     # an OOM kill or a redeploy — is CONTINUED in its own engine session or
     # settled as a failure. On, because the alternative throws away everything
@@ -369,6 +376,7 @@ class Settings:
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             relay_ui_url=os.environ.get("HOOKPROBE_RELAY_UI_URL", "").strip().rstrip("/"),
+            public_url=os.environ.get("HOOKPROBE_PUBLIC_URL", "").strip().rstrip("/"),
             resume_interrupted=(os.environ.get("HOOKPROBE_RESUME_INTERRUPTED", "on").strip().lower() != "off"),
             agent_name=os.environ.get("HOOKPROBE_AGENT_NAME", "").strip()[:60] or "hookprobe",
             agent_role=os.environ.get("HOOKPROBE_AGENT_ROLE", "").strip()[:160],

@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (65)
+## Environment (66)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -61,6 +61,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_HANDOFF_URL` | *(empty)* | Where a finished run's report goes when an operator clicks "hand off", and the credential for that one door |
 | `HOOKPROBE_AGENT_ROLE` | *(empty)* | One line saying what this agent is FOR, shown wherever its work is listed |
 | `HOOKPROBE_RELAY_UI_URL` | *(empty)* | Where the pipe's board is, as a BROWSER reaches it (not as this container does): a run then links to the chain it belongs to |
+| `HOOKPROBE_PUBLIC_URL` | *(empty)* | Where this node can be reached from OUTSIDE, if anywhere |
 | `HOOKPROBE_AGENT_NAME` | *(empty)* | Who this node is |
 | `HOOKPROBE_MCP_TOOLS` | *(empty)* | Which MCP tools this instance may actually call, as a closed set — mcp__chat__chat_search_messages or mcp__chat__* for a whole server |
 | `HOOKPROBE_FOLLOW_UP_SENDERS` | *(empty)* | Who may continue an investigation by replying in its chat thread (events.py, kind: follow_up): platform sender ids, * for anyone the bridge forwards, empty for nobody — the default… |
@@ -77,7 +78,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_GATE_HOME` | *(empty)* | The agent's home, whose settings and skills are inputs too |
 | `HOOKPROBE_GATE_MCP` | *(empty)* | The MCP tools this node may call, from mcp_tools |
 
-## Routes (58)
+## Routes (59)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -93,6 +94,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/sessions/{session_key}/stop` | Cancel the in-flight turn; it settles as a failed turn within a poll |
 | GET | `/ui` | The operator board |
 | GET | `/v1/agent` | What this node IS: identity, runtime, the policy it runs under, health |
+| GET | `/v1/agent/description` | The same node in ANP's dialect: what it can be asked, and what stops for a person |
 | GET | `/v1/agents` | The subagent roles the engine is offered |
 | DELETE | `/v1/agents/{name}` | Remove a role; the engine stops being offered it on the next run |
 | GET | `/v1/agents/{name}` | One role's definition, whole |

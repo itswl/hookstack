@@ -43,6 +43,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from hookprobe import (
     __version__,
     automation,
+    describe,
     events,
     handoff,
     library,
@@ -714,6 +715,20 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                 "return_failures": service.return_failure_count(),
             },
         }
+
+    @app.get("/v1/agent/description", dependencies=[Depends(require_token)])
+    async def agent_description() -> dict[str, Any]:
+        """The same node in ANP's dialect: what it can be asked, and what stops for a person.
+
+        Token-guarded like everything else, deliberately. An Agent Description
+        is *meant* to be crawlable, and on a deployment with a reachable
+        address that is the point — but these nodes are loopback-bound, so
+        opening a door to publish a document nobody outside can fetch would
+        widen the surface and buy nothing. The document itself withholds the
+        model, the gateway endpoint and the workspace for the same reason; see
+        describe.py.
+        """
+        return describe.agent_description(settings, version=__version__)
 
     @app.get("/v1/remediations", dependencies=[Depends(require_token)])
     async def remediations_list() -> dict[str, Any]:
