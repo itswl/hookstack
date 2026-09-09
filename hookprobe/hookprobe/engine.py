@@ -27,6 +27,7 @@ from hookprobe.gate import _WRITE_PATH_KEYS, SECRETS_WITHHELD_FROM_AGENT, mcp_de
 from hookprobe.gate import WRITE_TOOLS as _WRITE_TOOLS
 from hookprobe.gate import append_audit as _append_audit
 from hookprobe.gate import tool_detail as _tool_detail
+from hookprobe.gate import trips as _guard_trips
 from hookprobe.guard import bash_deny_reason
 from hookprobe.hygiene import post_tool_hook
 from hookprobe.settings import Settings
@@ -82,6 +83,17 @@ class EngineResult:
     # can only be told.
     context: dict[str, Any] | None = None
     compactions: tuple[dict[str, Any], ...] = ()
+    # How many times the guard refused this turn. The third outcome the gate did
+    # not have: refusing and continuing was the only thing it could do, so a run
+    # that argued with the posture twenty times left the same trace as one
+    # refused once and rephrased — and those are different runs. Counted from
+    # the audit, because the gate is stateless on the spawned runtimes.
+    #
+    # Recorded, not acted on. Failing a turn on a threshold would change
+    # behaviour on upgrade for every deployment, and a legitimate narrowing of
+    # a query is refused a few times on the way; the number has to be readable
+    # before anybody can pick a limit honestly. See gate.trips.
+    guard_trips: int = 0
 
 
 def _bash_guard_hook(
@@ -945,6 +957,8 @@ class ClaudeAgentEngine:
         message_count = 0
         session_seen = ""
         result: Any = None
+        # Wall clock, because the audit lines are stamped with it.
+        wall_started = time.time()
         # None on every path that never reaches the probe below.
         context: dict[str, Any] | None = None
         # ClaudeSDKClient rather than query(), and the reason is the bill.
@@ -1087,6 +1101,7 @@ class ClaudeAgentEngine:
             input_changes=input_changes,
             context=context,
             compactions=tuple(compactions),
+            guard_trips=_guard_trips(self._workdir / "audit", session_key, since=wall_started),
         )
 
     async def _context_usage(self, client: Any) -> dict[str, Any] | None:

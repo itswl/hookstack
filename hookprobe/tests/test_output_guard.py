@@ -88,3 +88,37 @@ def test_a_flagged_answer_lands_in_the_audit_beside_the_call(tmp_path: Path, mon
     assert all(line["tool"] == "Bash" for line in lines)
     # The command is recorded as before — the flag is added, nothing replaced.
     assert "kubectl get secret" in lines[0]["detail"]
+
+
+def test_repeated_refusals_are_counted_where_one_refusal_used_to_look_the_same(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The third outcome the gate did not have.
+
+    `deny_reason` could refuse and continue, and that was all — so a turn the
+    posture refused twenty times left the same trace as one refused once and
+    rephrased. Those are different runs: the first is an agent being steered,
+    the second is an agent narrowing a query. Counted from the audit because
+    the gate is stateless on the spawned runtimes, where it is a fresh process
+    per tool call.
+    """
+    audit = tmp_path / "audit"
+    env = {
+        "HOOKPROBE_GATE_AUDIT": str(audit),
+        "HOOKPROBE_GATE_MODE": "readonly",
+        "HOOKPROBE_GATE_WORKDIR": str(tmp_path),
+        "HOOKPROBE_SESSION_KEY": "probe:steered:1",
+    }
+    started = __import__("time").time()
+    assert gate.trips(audit, "probe:steered:1", since=started) == 0, "nothing refused yet"
+
+    for command in ("kubectl delete pod a", "kubectl apply -f x.yaml", "kubectl get pods"):
+        gate.decide(
+            {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}},
+            env,
+        )
+
+    assert gate.trips(audit, "probe:steered:1", since=started) == 2, "two refused, one allowed"
+    # Scoped to the session and the turn, or a busy node's counts would bleed.
+    assert gate.trips(audit, "probe:other:1", since=started) == 0
+    assert gate.trips(audit, "probe:steered:1", since=started + 3600) == 0

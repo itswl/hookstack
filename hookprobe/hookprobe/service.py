@@ -1455,5 +1455,10 @@ class RunService:
                 # and nothing asked for it.
                 "context": result.context if result else None,
                 "compactions": list(result.compactions) if result else [],
+                # How often the posture refused this turn. Zero on a healthy
+                # run; a number here says the run kept asking for what it may
+                # not have, which is a different run from one refused once and
+                # rephrased — and until now the two looked identical.
+                "guard_trips": result.guard_trips if result else 0,
             }
         )

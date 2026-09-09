@@ -189,6 +189,9 @@ class PiEngine:
             duration_ms=int((time.monotonic() - started) * 1000),
             returncode=proc.returncode,
             stderr=stderr,
+            # Read from the audit rather than counted in this process: the gate
+            # is spawned per tool call here, so it has nowhere to keep a tally.
+            guard_trips=gate.trips(self._workdir / "audit", session_key, since=wall_started),
         )
 
     def _check_gate_was_consulted(self, state: _Turn, session_key: str, *, since: float) -> None:
@@ -313,7 +316,7 @@ class _Turn:
             return None
         return priced(reported.get("total"), usage.get("totalTokens"))
 
-    def result(self, *, duration_ms: int, returncode: int | None, stderr: str) -> EngineResult:
+    def result(self, *, duration_ms: int, returncode: int | None, stderr: str, guard_trips: int = 0) -> EngineResult:
         return EngineResult(
             text=self.text,
             message_count=self.messages,
@@ -322,6 +325,7 @@ class _Turn:
             session_id=self.session_id,
             usage=self.usage,
             duration_ms=duration_ms,
+            guard_trips=guard_trips,
         )
 
     def _error(self, returncode: int | None, stderr: str) -> str | None:

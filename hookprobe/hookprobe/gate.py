@@ -492,6 +492,43 @@ def verify(python: str, env: dict[str, str]) -> None:
         )
 
 
+def trips(audit_dir: Path, session_key: str, *, since: float) -> int:
+    """How many times this turn was refused by the guard.
+
+    Borrowed in idea from `ToolGuardrailFunctionOutput`, which has three
+    outcomes where this stack had two: allow, and reject-with-a-reason. There
+    was no third — nothing escalated, so a run that argued with the guard
+    twenty times left exactly the same trace as one that was refused once and
+    rephrased. That is the difference between an agent narrowing a query and an
+    agent being steered, and it was invisible.
+
+    Counted from the audit rather than kept in memory, because the gate is
+    STATELESS on two of the three runtimes: codex spawns
+    `python -m hookprobe.gate` per tool call and pi shells out to the same
+    command, so a counter in a process would reset between every call. The
+    record already exists and is already append-only; this reads it.
+    """
+    since -= 0.001
+    day_file = audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")
+    seen = 0
+    try:
+        with day_file.open(encoding="utf-8") as handle:
+            for raw in handle:
+                try:
+                    line = json.loads(raw)
+                except ValueError:
+                    continue
+                if (
+                    line.get("session") == session_key
+                    and line.get("denied") is True
+                    and float(line.get("ts") or 0) >= since
+                ):
+                    seen += 1
+    except OSError:
+        return 0
+    return seen
+
+
 def consulted(audit_dir: Path, session_key: str, *, since: float) -> bool:
     """Did the gate actually record anything for this session during this turn?
 

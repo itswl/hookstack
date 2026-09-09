@@ -256,6 +256,9 @@ class CodexEngine:
             duration_ms=int((time.monotonic() - started) * 1000),
             returncode=proc.returncode,
             stderr=stderr,
+            # Read from the audit rather than counted in this process: the gate
+            # is spawned per tool call here, so it has nowhere to keep a tally.
+            guard_trips=gate.trips(self._workdir / "audit", session_key, since=wall_started),
         )
 
     def _check_gate_was_consulted(self, state: _Turn, session_key: str, *, since: float) -> None:
@@ -389,7 +392,7 @@ class _Turn:
             failed = item.get("exit_code") not in (0, None) or bool(item.get("is_error"))
             self._emit({"type": "tool_done", "id": str(item.get("id") or ""), **({"error": True} if failed else {})})
 
-    def result(self, *, duration_ms: int, returncode: int | None, stderr: str) -> EngineResult:
+    def result(self, *, duration_ms: int, returncode: int | None, stderr: str, guard_trips: int = 0) -> EngineResult:
         error = self._error(returncode, stderr)
         return EngineResult(
             text=self.text,
@@ -401,6 +404,7 @@ class _Turn:
             session_id=self.session_id,
             usage=self.usage,
             duration_ms=duration_ms,
+            guard_trips=guard_trips,
         )
 
     def _error(self, returncode: int | None, stderr: str) -> str | None:
