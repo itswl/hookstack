@@ -18,21 +18,21 @@
 # Pinned by tag on purpose. `latest` moves under you between two `up`s and
 # turns "it worked yesterday" into a question nobody can answer.
 #
-# 0.2.0 predates the chat bridge: in these images the pipe still renders the
-# Feishu card itself, and the stack.yaml baked into the pipe's image says so.
-# The NEXT release changes this file, because the baked stack.yaml then needs
-# two things this one does not have: a `lark-bridge` service in webhook mode
-# (docs/bridge-protocol.md — the pipe sends a card model, the sidecar renders
-# it and posts to the sink; release.yml publishes ghcr.io/itswl/lark-bridge
-# from the next tag on) and HOOKRELAY_PLUGINS=/app/examples/plugins for the
-# DingTalk dialect. The source compose (docker-compose.yml) already runs that
-# shape.
+# 0.3.0 is the release that closed the gap this file used to describe. Up to
+# 0.2.0 the pipe rendered the Feishu card itself; the stack.yaml baked into the
+# pipe's image now sends a neutral card model to a bridge, so this file grew the
+# two things the old comment said the next release would need: a `lark-bridge`
+# service in webhook mode (docs/bridge-protocol.md — the pipe models, the
+# sidecar dresses, the sink receives) and HOOKRELAY_PLUGINS so the DingTalk
+# dialect resolves. Neither needs a Lark account: the bridge posts a rendered
+# card at the sink and `docker compose logs -f sink` is what an operator would
+# have received.
 
 name: hookstack
 
 services:
   hookrelay:
-    image: ghcr.io/itswl/hookrelay:0.2.0
+    image: ghcr.io/itswl/hookrelay:0.3.0
     container_name: hs-hookrelay
     restart: unless-stopped
     environment:
@@ -41,6 +41,17 @@ services:
       HOOKRELAY_DB: /data/hookrelay.db
       # The demo wiring, from inside the image.
       HOOKRELAY_CONFIG: /app/examples/stack.yaml
+      # `ops-dingtalk` in that config is a plugin channel type, not a built-in.
+      # Without this the config loads, the channel does not resolve, and one of
+      # the two dialects the demo exists to show is silently missing.
+      HOOKRELAY_PLUGINS: /app/examples/plugins
+      # The baked config declares card buttons (`card_actions`), and a button is
+      # a signed token: without a key the pipe logs an error at startup and
+      # every button renders and does nothing. Published since 0.1.0 that way —
+      # found by actually running this file rather than reading it. Same demo
+      # values as docker-compose.yml, which has always set both.
+      HOOKRELAY_ACTION_SECRET: demo-card-secret
+      HOOKRELAY_PUBLIC_URL: ${HOOKRELAY_PUBLIC_URL:-http://127.0.0.1:8100}
       HOOKRELAY_WORKER_INTERVAL: "0.5"
       # Where the escalation route delivers. Without --profile probe this is
       # the sink wearing a /probe-standin path, so the escalation SHAPE is
@@ -54,7 +65,7 @@ services:
       - sink
 
   hookjudge:
-    image: ghcr.io/itswl/hookjudge:0.2.0
+    image: ghcr.io/itswl/hookjudge:0.3.0
     container_name: hs-hookjudge
     restart: unless-stopped
     environment:
@@ -84,19 +95,38 @@ services:
   # operator would actually have received. It runs from the pipe's own image
   # because that image now carries it — one fewer thing to pull, and no mount.
   sink:
-    image: ghcr.io/itswl/hookrelay:0.2.0
+    image: ghcr.io/itswl/hookrelay:0.3.0
     container_name: hs-sink
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/sink.py"]
     healthcheck:
       disable: true
 
+  # The pipe stopped knowing any chat platform's card schema in 0.3.0: it sends
+  # a neutral card model and this sidecar renders it. In webhook mode — no Lark
+  # app, no credential — it dresses the card and posts it at the sink, which is
+  # exactly the hop a real deployment makes to a custom bot's incoming URL.
+  # `ops-feishu` in the baked config is `type: bridge` and points here.
+  lark-bridge:
+    image: ghcr.io/itswl/lark-bridge:0.3.0
+    container_name: hs-lark-bridge
+    restart: unless-stopped
+    environment:
+      LARK_WEBHOOK_URL: ${LARK_WEBHOOK_URL:-http://sink:9000/feishu}
+      LARK_WEBHOOK_SECRET: ${LARK_WEBHOOK_SECRET:-}
+      # The value `ops-feishu`'s `secret:` carries in the baked stack.yaml. A
+      # bridge that accepted an unsigned card would take one from anything that
+      # could reach the port.
+      BRIDGE_INBOUND_SECRET: demo-bridge-secret
+    depends_on:
+      - sink
+
   # Canned verdicts over a real OpenAI-compatible endpoint, so the client, the
   # JSON-in-content convention and the token accounting are all exercised. It is
   # not a model: it reports itself as `stub-4o-mini`. Point the judge's AI vars
   # at a real provider and this stops being used.
   stub-ai:
-    image: ghcr.io/itswl/hookjudge:0.2.0
+    image: ghcr.io/itswl/hookjudge:0.3.0
     container_name: hs-stub-ai
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/stub_ai.py"]
@@ -107,7 +137,7 @@ services:
   # stays hermetic. High/critical alerts then ALSO get a deep read-only
   # investigation, whose report returns through the pipe to the same channels.
   hookprobe:
-    image: ghcr.io/itswl/hookprobe:0.2.0
+    image: ghcr.io/itswl/hookprobe:0.3.0
     container_name: hs-hookprobe
     profiles: ["probe"]
     restart: unless-stopped
