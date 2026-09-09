@@ -506,3 +506,82 @@ def test_the_pi_adapter_makes_the_same_check(tmp_path: Path) -> None:
     state.tool_calls = 1
     engine._check_gate_was_consulted(state, "probe:ungated:pi", since=time.time())
     assert engine._gate_broken is not None
+
+
+# --------------- the guards nothing had watched fire on these runtimes
+
+
+def test_the_input_guard_reads_a_codex_patch_envelope(tmp_path: Path) -> None:
+    """Codex does not edit through a tool with a path argument.
+
+    It sends one `apply_patch` call whose whole patch is a string, so a guard
+    reading argument keys sees an unknown tool carrying no path and lets it
+    through. Measured against a real turn: the call arrived as
+    `tool_name='apply_patch'`, `tool_input={'command': '*** Begin Patch…'}`.
+    """
+    (tmp_path / "CLAUDE.md").write_text("steering", encoding="utf-8")
+    patch = f"*** Begin Patch\n*** Update File: {tmp_path / 'CLAUDE.md'}\n@@\n-steering\n+mine\n*** End Patch"
+    verdict = gate.deny_reason("apply_patch", {"command": patch}, workdir=tmp_path)
+    assert verdict is not None and verdict[0] == "input"
+
+
+def test_a_patch_that_touches_nothing_protected_is_allowed(tmp_path: Path) -> None:
+    patch = f"*** Begin Patch\n*** Add File: {tmp_path / 'notes.md'}\n+hello\n*** End Patch"
+    assert gate.deny_reason("apply_patch", {"command": patch}, workdir=tmp_path) is None
+
+
+def test_agents_md_steers_the_next_run_too(tmp_path: Path) -> None:
+    """The guard protected 'the files that steer the next run' on one runtime.
+
+    Codex and pi both read AGENTS.md as standing instructions, so leaving it out
+    meant a run on either could rewrite what the next one is told.
+    """
+    (tmp_path / "AGENTS.md").write_text("standing instructions", encoding="utf-8")
+    verdict = gate.deny_reason("Edit", {"path": str(tmp_path / "AGENTS.md")}, workdir=tmp_path)
+    assert verdict is not None and verdict[0] == "input"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "printf 'x' >> CLAUDE.md",
+        "echo x > AGENTS.md",
+        "tee CLAUDE.md",
+        "sed -i '' s/a/b/ CLAUDE.md",
+        "sed --in-place s/a/b/ AGENTS.md",
+        "cp /tmp/evil CLAUDE.md",
+        "mv /tmp/evil .claude/skills/x",
+    ],
+)
+def test_a_shell_redirect_is_not_a_way_around_the_input_guard(tmp_path: Path, command: str) -> None:
+    """It was, on every runtime and under both postures, until it was measured.
+
+    The input guard reads the arguments of Write and Edit. A Bash call has no
+    path argument, so nothing looked at where the bytes were going.
+    """
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        (tmp_path / name).write_text("x", encoding="utf-8")
+    verdict = gate.deny_reason("Bash", {"command": command}, bash_mode="danger-only", workdir=tmp_path)
+    assert verdict is not None and verdict[0] == "input", f"{command!r} reached a steering file"
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["echo hi > notes.md", "cat CLAUDE.md", "grep x CLAUDE.md | head -3", "ls -la", "kubectl get pods"],
+)
+def test_reading_a_steering_file_is_still_allowed(tmp_path: Path, command: str) -> None:
+    """`Paths this runner may read but never write` — the reading half matters."""
+    (tmp_path / "CLAUDE.md").write_text("x", encoding="utf-8")
+    assert gate.deny_reason("Bash", {"command": command}, bash_mode="danger-only", workdir=tmp_path) is None
+
+
+def test_the_claude_adapter_asks_the_same_question(tmp_path: Path) -> None:
+    """One decision, three runtimes. The in-process hook takes the workdir now."""
+    import asyncio
+
+    from hookprobe.engine import _bash_guard_hook
+
+    (tmp_path / "CLAUDE.md").write_text("x", encoding="utf-8")
+    hook = _bash_guard_hook("danger-only", None, tmp_path, None)
+    answer = asyncio.run(hook({"tool_input": {"command": "echo x > CLAUDE.md"}}, None, None))
+    assert answer["hookSpecificOutput"]["permissionDecision"] == "deny"

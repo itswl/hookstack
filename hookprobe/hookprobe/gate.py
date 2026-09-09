@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -112,6 +113,87 @@ def mcp_deny_reason(tool_name: str, allowed: frozenset[str]) -> str | None:
     )
 
 
+# `*** Update File: path`, and the three siblings codex's patch envelope uses.
+_PATCH_TARGET = re.compile(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$|^\*\*\* Move to: (.+)$", re.MULTILINE)
+# A shell segment that puts bytes into a named file: a redirect, `tee`, or an
+# in-place edit. Deliberately not a shell parser — see _shell_write_target.
+_REDIRECT = re.compile(r">>?\s*['\"]?([^\s'\"|;&>]+)")
+
+
+def patch_targets(command: str) -> list[str]:
+    """Every path a codex `apply_patch` envelope would write.
+
+    Codex does not edit through a tool with a `file_path` argument. It sends one
+    `apply_patch` call whose whole patch is a string, and the paths are lines
+    inside it — so a guard that reads argument keys sees a tool it does not
+    recognise carrying no path at all, and lets it through. Measured: an
+    `apply_patch` rewriting CLAUDE.md reached this gate as
+    `tool_name='apply_patch'` with `tool_input={'command': '*** Begin Patch…'}`.
+    """
+    found: list[str] = []
+    for update, move in _PATCH_TARGET.findall(command or ""):
+        target = (update or move).strip()
+        if target:
+            found.append(target)
+    return found
+
+
+def shell_write_target(command: str, roots: tuple[Path, ...], workdir: Path | None) -> str | None:
+    """A protected path this shell command puts bytes into, or None.
+
+    The input guard is tool-shaped: it reads the arguments of Write and Edit. A
+    shell redirect goes straight around it, and did on every runtime and both
+    postures — `printf 'x' >> CLAUDE.md` was allowed by the bash guard and never
+    reached the input guard, because it is a Bash call and Bash has no path
+    argument to inspect.
+
+    Two shapes are checked. A redirect or a `tee`, where the target follows the
+    operator; and a segment whose command writes a file named in its arguments
+    (`sed -i`, `cp`, `mv`, `install`, `dd`), where every argument is a
+    candidate. Segments are split on the shell's own separators so a target in
+    one does not answer for another.
+
+    This closes the obvious forms and not a determined adversary, which is the
+    same honesty the bash guard's rules are written with: a redirect assembled
+    at runtime out of two variables gets through. It stops the over-eager model,
+    which is the case that actually happens.
+    """
+    for segment in re.split(r"[|;&\n]+", command or ""):
+        words = segment.split()
+        candidates = [target for target in _REDIRECT.findall(segment)]
+        if words and _writes_a_named_file(words):
+            candidates += [word for word in words[1:] if not word.startswith("-")]
+        for candidate in candidates:
+            hit = candidate.strip("\"'")
+            if not hit:
+                continue
+            target = Path(hit)
+            if not target.is_absolute() and workdir is not None:
+                target = workdir / target
+            resolved = _resolve_quietly(target)
+            for root in roots:
+                if resolved == root or root in resolved.parents:
+                    return hit
+    return None
+
+
+def _writes_a_named_file(words: list[str]) -> bool:
+    """Commands that write a path given as an argument rather than a redirect."""
+    head = Path(words[0]).name
+    if head in ("cp", "mv", "install", "dd", "truncate", "tee"):
+        return True
+    # `sed` only writes with -i, and BSD's takes a separate suffix argument, so
+    # the target is not at a fixed position. Every argument is a candidate.
+    return head == "sed" and any(word.startswith("-i") or word == "--in-place" for word in words)
+
+
+def _resolve_quietly(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
 def deny_reason(
     tool_name: str,
     tool_input: Any,
@@ -134,6 +216,23 @@ def deny_reason(
         reason = bash_deny_reason(command, bash_mode)
         if reason is not None:
             return ("bash", reason, command[:300])
+        if workdir is not None:
+            hit = shell_write_target(command, inputs.protected_paths(workdir, home), workdir)
+            if hit is not None:
+                return (
+                    "input",
+                    f"input guard: this command writes {hit}, which steers the next run. "
+                    "A shell redirect is not a way around the guard on the edit tools.",
+                    command[:300],
+                )
+
+    # Codex sends one `apply_patch` call whose paths live inside the patch text
+    # rather than in an argument, so the key-reading branch below cannot see it.
+    if name == "apply_patch" and workdir is not None:
+        for target in patch_targets(str(data.get("command") or data.get("input") or "")):
+            reason = inputs.write_deny_reason(target, workdir=workdir, home=home)
+            if reason is not None:
+                return ("input", reason, target[:300])
 
     if name.startswith("mcp__"):
         reason = mcp_deny_reason(name, mcp_allowed)

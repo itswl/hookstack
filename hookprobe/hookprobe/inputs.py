@@ -54,6 +54,11 @@ from pathlib import Path
 _PROTECTED = (
     ".claude",
     "CLAUDE.md",
+    # The same file under the name every other runtime reads it by. Codex and
+    # pi both load AGENTS.md as the standing instructions for the next run, so
+    # leaving it out meant this guard protected "the files that steer the next
+    # run" only on the runtime it was written for.
+    "AGENTS.md",
     "system-prompt.md",
     "audit",
     "memory-suggestions.jsonl",

@@ -23,7 +23,7 @@ from typing import Any, Literal, cast
 
 from hookprobe import inputs, telemetry
 from hookprobe.files import system_prompt_path
-from hookprobe.gate import _WRITE_PATH_KEYS, mcp_deny_reason
+from hookprobe.gate import _WRITE_PATH_KEYS, mcp_deny_reason, shell_write_target
 from hookprobe.gate import WRITE_TOOLS as _WRITE_TOOLS
 from hookprobe.gate import append_audit as _append_audit
 from hookprobe.gate import tool_detail as _tool_detail
@@ -84,17 +84,37 @@ class EngineResult:
     compactions: tuple[dict[str, Any], ...] = ()
 
 
-def _bash_guard_hook(mode: str, record: Callable[[dict[str, Any]], None] | None = None) -> Callable[..., Any]:
+def _bash_guard_hook(
+    mode: str,
+    record: Callable[[dict[str, Any]], None] | None = None,
+    workdir: Path | None = None,
+    home: Path | None = None,
+) -> Callable[..., Any]:
     """PreToolUse: refuse a command this runner's posture does not allow.
 
     Built per instance rather than read from a global, like the MCP guard beside
     it: which posture a runner takes is a property of that runner, and two of
     them share this process in the tests.
+
+    `workdir` brings a second question with it: does this command write a file
+    that steers the next run. The input guard cannot answer it, because it reads
+    the arguments of Write and Edit and a shell redirect has none — which is how
+    `printf 'x' >> CLAUDE.md` got past both guards, on every runtime and under
+    both postures, until somebody measured it.
     """
 
     async def hook(input_data: dict[str, Any], tool_use_id: str | None, context: Any) -> dict[str, Any]:
         command = str((input_data.get("tool_input") or {}).get("command") or "")
         reason = bash_deny_reason(command, mode)
+        guard = "bash"
+        if reason is None and workdir is not None:
+            hit = shell_write_target(command, inputs.protected_paths(workdir, home), workdir)
+            if hit is not None:
+                guard = "input"
+                reason = (
+                    f"input guard: this command writes {hit}, which steers the next run. "
+                    "A shell redirect is not a way around the guard on the edit tools."
+                )
         if reason is None:
             return {}
         logger.warning("bash command denied (%s): %s", mode, command)
@@ -104,7 +124,7 @@ def _bash_guard_hook(mode: str, record: Callable[[dict[str, Any]], None] | None 
                     "tool": "Bash",
                     "detail": command[:300],
                     "denied": True,
-                    "guard": "bash",
+                    "guard": guard,
                     "mode": mode,
                     "reason": reason,
                 }
@@ -855,7 +875,10 @@ class ClaudeAgentEngine:
             hooks={
                 "PreToolUse": [
                     HookMatcher(
-                        matcher="Bash", hooks=_hook_list(_bash_guard_hook(self._settings.bash_guard, recorder))
+                        matcher="Bash",
+                        hooks=_hook_list(
+                            _bash_guard_hook(self._settings.bash_guard, recorder, self._workdir, self._home)
+                        ),
                     ),
                     # Matched on every tool, filtered by name inside: the guard
                     # must not depend on how the SDK interprets a matcher

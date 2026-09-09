@@ -121,10 +121,9 @@ MCP and input guards are reachable under codex, not only the bash one. And a
 hook may also block by exiting 2 with the reason on stderr, which is a second
 route this gate does not need but a future one might.
 
-**Only the bash guard has been proven under codex.** The live drills refuse
-`kubectl delete`; nothing here has yet watched the input guard refuse a write to
-a steering file or the MCP guard refuse a tool, on this runtime. The
-documentation says they will fire. That is not the same as having seen it.
+**Since resolved.** All three guards have now been watched refusing on both
+codex and pi, and doing it turned up three real holes — see
+`.agents/notes/proposed/2026-09-09-three-shapes-of-a-write.md`.
 
 **The deployment gap stands.** No image ships the codex binary, and the SDK was
 the clean answer to that. Shipping it now means installing the CLI in the image

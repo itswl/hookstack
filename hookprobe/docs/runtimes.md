@@ -38,6 +38,11 @@ that import on every tool call.
 | `codex` | `hooks.json` spawning `python -m hookprobe.gate`, one line of JSON each way |
 | `pi` | a shipped extension, `pi_gate.ts`, shelling out to the same command |
 
+All three guards have been watched refusing on all three runtimes: the bash guard, the MCP
+allowlist, and the input guard in each of the three shapes a write arrives in. Tool names
+differ and the gate knows the differences — codex calls an MCP tool `mcp__server__tool` and
+edits through `apply_patch`, pi calls its edit tool `edit` and has no MCP surface at all.
+
 The mechanisms differ; the decision does not. Two copies of it would mean
 `readonly` quietly meaning one thing on one node and something else on another,
 with nothing in either test suite noticing.
