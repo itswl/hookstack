@@ -138,6 +138,7 @@ without `im:chat.members:write_only` cannot add another.
 | `RELAY_THREAD_URL` | *(empty = do not listen for messages)* | the pipe's `lark-thread` door, e.g. `http://hookrelay:8100/hook/lark-thread` |
 | `THREAD_SECRET` | *(empty)* | signs message forwards for that door (`X-Hook-Timestamp`, `X-Hook-Signature` = hex HMAC-SHA256 over `"{ts}.{body}"`) — the door's `${LARK_THREAD_SECRET}` |
 | `BRIDGE_PORT` | `9100` | where the pipe posts cards |
+| `BRIDGE_IDLE_RECYCLE_SECONDS` | `21600` (6h) | after this long with no event on ANY stream, stop the bus so the consumers rebuild it — see *Preventive recycling*; `0` = off |
 
 The image pins `@larksuite/cli` (`ARG LARK_CLI_VERSION`).
 
@@ -173,6 +174,29 @@ the way to prove the wiring from inside a deployment.
   running`, `Active consumers: 2` (presses and messages). The log shows
   `listening for events (key=…)` for each, and `remote connection check:
   online_instance_cnt=0` on connect.
+- **Preventive recycling.** The bridge does not hold the long connection —
+  lark-cli's `event _bus` daemon does, and the two `event consume` processes
+  attach to it over a unix socket. So a bus whose socket has silently died looks
+  from in here exactly like a quiet night: nothing ended, no line arrives, and
+  the reconnect loop below never fires because it only fires when a process
+  *ends*. There is no keepalive line to count and no ping RTT to read.
+
+  So after `BRIDGE_IDLE_RECYCLE_SECONDS` with no event on **either** stream, the
+  bridge runs `lark-cli event stop --force` and lets its own reconnect loop
+  rebuild everything. Measured on the work deployment on 2026-09-09: both
+  consumers ended within 250 ms, the app's connection slot was already free
+  (`online_instance_cnt=0`), a fresh daemon was up 7 s after the stop and the
+  second consumer had reattached by 10 s.
+
+  This is **prevention, not detection** — it cannot tell a zombie from a
+  weekend, so most recycles are ones it did not need, and the cost of each is
+  that ~10 s window plus the risk of finding the app's one slot briefly still
+  held (then it is the 60 s backoff below). That is why the default is hours.
+  Idleness is measured across both streams together because they share one
+  connection: production's press stream went 28 h with zero presses while the
+  message stream took twelve, and per-stream idleness would have recycled a
+  provably healthy bus nightly.
+
 - **"another event bus is already connected to this app (1 remote event
   connection)"** — something else holds this app's one connection: another
   bridge, a laptop's `lark-cli event consume`, another deployment. Not a

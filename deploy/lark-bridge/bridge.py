@@ -86,6 +86,86 @@ MAX_BODY = 256 * 1024
 INBOUND_SECRET = os.environ.get("BRIDGE_INBOUND_SECRET", "")
 _SIGN_SKEW_SECONDS = 300
 
+# Preventive reconnect, and the honest name for it is a RECYCLE.
+#
+# The bridge does not hold the long connection — lark-cli's `event _bus` daemon
+# does, and the bridge's two `event consume` processes attach to it over a unix
+# socket. So a bus whose socket has silently died looks from here exactly like a
+# quiet night: the consumer is alive, nothing has ended, and no line ever
+# arrives. There is no keepalive line to count and no ping RTT to read; the
+# reconnect loop below only fires when a process ENDS, which a zombie never does.
+#
+# What is left is blunt and cheap: after a long silence, stop the bus and let
+# the loop that already exists rebuild it. This is prevention, not detection —
+# it cannot tell a zombie from a weekend, so it pays a reconnect it usually did
+# not need, and the cost of that reconnect is a sub-second window plus the risk
+# of finding the app's one connection slot briefly still held (60s backoff).
+# That trade is why the default is hours rather than minutes, and why 0 is a
+# supported answer.
+IDLE_RECYCLE_SECONDS = int(os.environ.get("BRIDGE_IDLE_RECYCLE_SECONDS", str(6 * 3600)))
+_IDLE_CHECK_SECONDS = 60
+# Monotonic: a container clock step must not trigger a recycle or suppress one.
+_last_event_at = time.monotonic()
+
+
+def note_event() -> None:
+    """Proof the bus is alive, from any stream.
+
+    Not per-consumer, and that is the point: the two consumers share ONE
+    connection, so a message in the group proves the press stream's socket
+    exactly as much as a press does. Per-consumer idleness would have recycled a
+    healthy bus every night — production's press stream went 28 hours with zero
+    presses while the message stream took twelve.
+    """
+    global _last_event_at
+    _last_event_at = time.monotonic()
+
+
+def idle_seconds() -> float:
+    """How long since anything at all arrived over the bus."""
+    return time.monotonic() - _last_event_at
+
+
+def recycle_bus() -> None:
+    """Stop the bus daemon; the reconnect loop rebuilds it from there.
+
+    Measured on the work deployment, 2026-09-09: both consumers ended within
+    250ms (`reason: signal`, rc=0), the app's connection slot was already free
+    (`online_instance_cnt=0`), a new daemon was up 7s after the stop and the
+    second consumer had reattached by 10s. The bus also self-cleans — lark-cli
+    says it "auto-exits 30s after last consumer" — so nothing here has to.
+    """
+    try:
+        # --force because our own consumers are attached, which is the normal
+        # state and the only one worth recycling from: without it the CLI
+        # refuses with exit 2 and the silence continues undisturbed.
+        result = _lark(["event", "stop", "--force", "--json"], timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("could not recycle the event bus: %s", exc)
+        return
+    if result.returncode != 0:
+        logger.warning("bus recycle refused rc=%s %s", result.returncode, (result.stderr or result.stdout)[:200])
+    else:
+        logger.info("event bus stopped; the consumers reconnect from here")
+
+
+def recycle_when_idle() -> None:
+    """Recycle after a long silence, forever. Off when the interval is 0."""
+    if IDLE_RECYCLE_SECONDS <= 0:
+        logger.info("preventive bus recycling is off")
+        return
+    while True:
+        threading.Event().wait(_IDLE_CHECK_SECONDS)
+        idle = idle_seconds()
+        if idle < IDLE_RECYCLE_SECONDS:
+            continue
+        logger.info("no event on any stream for %.0fs — recycling the event bus", idle)
+        recycle_bus()
+        # The clock restarts whatever happened. A recycle that was refused must
+        # not be re-attempted every minute for the rest of the silence — that
+        # turns one ineffective command into an hourly log flood.
+        note_event()
+
 
 PROTOCOL = "hookstack-bridge/1"
 DRY_RUN_HEADER = "x-hookstack-dry-run"
@@ -566,6 +646,10 @@ def consume(event_key: str, handler, attach_only: bool = False) -> None:
             while not bus_running():
                 threading.Event().wait(5)
         logger.info("connecting the event stream for %s", event_key)
+        # A fresh connection is proof of life too, and resetting here is what
+        # stops one recycle from becoming a storm: both consumers come back
+        # within seconds of the stop, and neither should immediately qualify.
+        note_event()
         process = subprocess.Popen(  # nosec B603 — fixed argv, no shell
             ["lark-cli", "event", "consume", event_key, "--as", "bot"],
             stdout=subprocess.PIPE,
@@ -590,6 +674,9 @@ def consume(event_key: str, handler, attach_only: bool = False) -> None:
                 event = json.loads(line)
             except ValueError:
                 continue
+            # Before the type filter: anything the bus delivered proves the
+            # socket, whether or not this consumer is the one that wanted it.
+            note_event()
             if event.get("type") in (event_key, None) or event_key.startswith("im.message"):
                 handler(event)
                 backoff = 2  # a working stream resets the penalty
@@ -618,6 +705,8 @@ def main() -> None:
         threading.Thread(target=consume_presses, daemon=True).start()
         if RELAY_THREAD_URL:
             threading.Thread(target=consume_messages, daemon=True).start()
+        # Only in app mode: a custom bot has no bus to recycle.
+        threading.Thread(target=recycle_when_idle, daemon=True).start()
     # 0.0.0.0 inside a container network with no published port: only the pipe
     # beside it can reach this.
     server = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), Handler)  # nosec B104
