@@ -51,19 +51,42 @@ live judge, and it is buying a second opinion nobody reads.
 
 ## The finding b leaves behind, which is worth more than b was
 
-A and B ran the same model on the same 31 calls and reported costs 15% apart,
-because their per-1k price constants differ:
+**Corrected the same day.** This section first claimed the two brains ran the
+same model on the same calls and reported costs 15% apart, so one of two price
+sheets had to be wrong and the weekly bill was wrong by up to 15%. That was
+wrong, and it was wrong because I read the host `.env` with a regex —
+`HOOKJUDGE_AI_[A-Z_]*=` — that cannot match a name containing a digit, so
+`HOOKJUDGE_AI_PRICE_IN_PER_1K` looked absent when it was not.
 
-```
-hookjudge    in 0.0002   out 0.0012
-hookjudge-b  in 0.00028  out 0.00042
-```
+What was actually there:
 
-Identical traffic cannot cost two different amounts. One of those price sheets
-is wrong, and the live judge's is the one feeding `scripts/cost_report.py`, so
-the weekly bill is wrong by up to 15% in a direction nobody has established.
-**That is now an open question with no instrument attached to it**, and settling
-it needs the gateway's real price list, not a second container.
+| | reads | set in `.env`? | got |
+| --- | --- | --- | --- |
+| `hookjudge` | `HOOKJUDGE_AI_PRICE_*` | yes | 0.0002 / 0.0012 |
+| `hookjudge-b` | `HOOKJUDGE_B_AI_PRICE_*` | **no** | the compose default, 0.00028 / 0.00042 |
+
+Not two competing price sheets. One stated value and one unset variable falling
+through to a default that has not moved since the shadow's first commit and
+names the previous vendor's rate card. The live judge has always billed at the
+number the operator wrote down, and the weekly page has always read that number.
+
+**The real finding is the class, not the number.** Chasing it turned up three
+more of the same shape on the live judge, and these were worse than a wrong
+price: `HOOKJUDGE_AI_BASE_URL`, `HOOKJUDGE_AI_API_KEY` and `HOOKJUDGE_AI_MODEL`
+also had defaults, and they pointed at `api.deepseek.com` and `deepseek-chat` —
+a vendor this deployment left. A missing variable would have sent the platform's
+alert text to it with every container healthy, because `judge.py` does not fail
+on a bad AI config: it falls through to its rule route and keeps answering. The
+symptom would have been suspiciously rule-shaped verdicts, not an error.
+
+All five are now `:?` required. That is the posture `hookjudge-c` already had,
+written into it when the third brain was added and never applied to the first.
+`stack-smoke.sh`'s `seed_required` finds `${VAR:?` generically, so CI needed no
+change.
+
+**What is still open** is only the ordinary question: whether 0.0002 / 0.0012
+matches what the gateway actually charges for this model. Nothing here
+establishes that, and no second container was ever going to.
 
 ## Consequences
 

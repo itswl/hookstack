@@ -138,13 +138,28 @@ services:
       # The investigator's DeepSeek key, on the OpenAI dialect this time. The
       # judge negotiates structured output per model at first use (json_schema
       # is 400 on this endpoint; tools-with-auto works — measured 2026-08-15).
-      HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:-https://api.deepseek.com/v1}
-      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:-${ANTHROPIC_AUTH_TOKEN:-}}
-      HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_AI_MODEL:-deepseek-chat}
+      # REQUIRED, not defaulted, and this is the only brain now — which is what
+      # changed the answer. A default here is not a convenience, it is a second
+      # destination for production alert text: these three used to fall back to
+      # api.deepseek.com and `deepseek-chat`, a vendor this deployment left, so
+      # a missing variable would have sent the platform's alerts to it while
+      # every container stayed healthy. `judge.py` does not fail on a bad AI
+      # config either — it falls through to its rule route and keeps answering,
+      # so the symptom would have been suspiciously rule-shaped verdicts rather
+      # than an error. Refusing to start is the louder, cheaper failure, and it
+      # is the posture hookjudge-c already had before it was retired.
+      HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:?set HOOKJUDGE_AI_BASE_URL in .env}
+      HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:?set HOOKJUDGE_AI_API_KEY in .env}
+      HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_AI_MODEL:?set HOOKJUDGE_AI_MODEL in .env}
       # deepseek-chat list price as of the v3.2 cut (USD per 1k tokens); the
       # ledger prices verdicts with these, so re-check on a model change.
-      HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:-0.00028}
-      HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:-0.00042}
+      # Required for the same reason, one step milder: a wrong price does not
+      # leak anything, it just makes the weekly page confidently wrong. These
+      # defaults were the previous vendor's rate card and have not moved since
+      # the shadow's first commit, so a deployment that forgot to state its own
+      # would have billed itself at a price nobody chose.
+      HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:?set HOOKJUDGE_AI_PRICE_IN_PER_1K in .env}
+      HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:?set HOOKJUDGE_AI_PRICE_OUT_PER_1K in .env}
       HOOKJUDGE_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
     volumes:
       - ../shadow-data/hookjudge:/data
