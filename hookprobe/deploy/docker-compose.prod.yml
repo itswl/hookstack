@@ -113,6 +113,23 @@ services:
       # escalations, each refusal reporting itself to the channels. 0 = off.
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
       HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-}
+      # What a turn's tokens COST. Empty means no rates configured, and the
+      # ledger falls back to whatever the runtime reported rather than pricing
+      # a turn at zero — the same "nobody counted" that unpriced_turns exists
+      # for. Per MILLION tokens, matching how gateways quote.
+      #
+      # Declared here because the code reading them shipped without any compose
+      # passing them through: `dbf0c51` added the knob, `Settings.load` reads
+      # `HOOKPROBE_PRICE_*` from the environment, and no deployment file put
+      # them there. Setting them in .env looked like it worked — /v1/budget went
+      # on saying `measured`, because it already was — and the container had no
+      # such variable at all.
+      HOOKPROBE_PRICE_IN_PER_1M: ${HOOKPROBE_PRICE_IN_PER_1M:-}
+      HOOKPROBE_PRICE_OUT_PER_1M: ${HOOKPROBE_PRICE_OUT_PER_1M:-}
+      HOOKPROBE_PRICE_CACHE_READ_PER_1M: ${HOOKPROBE_PRICE_CACHE_READ_PER_1M:-}
+      # Unset falls back to the input rate, which is what a cache write costs on
+      # most gateways; set it only where that is untrue.
+      HOOKPROBE_PRICE_CACHE_WRITE_PER_1M: ${HOOKPROBE_PRICE_CACHE_WRITE_PER_1M:-}
       # Case files and transcripts older than this are pruned daily. 0 keeps
       # everything — the case files are the agent's episodic memory.
       HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}

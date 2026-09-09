@@ -220,6 +220,13 @@ services:
       # refusal reports itself, so the failure is visible rather than silent.
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-10}
       HOOKPROBE_BUDGET_WINDOW_HOURS: ${HOOKPROBE_BUDGET_WINDOW_HOURS:-24}
+      # Token rates for this node's ledger, per MILLION. All three probes talk
+      # to the same gateway, so they take the same rates; empty means no rates
+      # configured and the ledger keeps whatever the runtime reported.
+      HOOKPROBE_PRICE_IN_PER_1M: ${HOOKPROBE_PRICE_IN_PER_1M:-}
+      HOOKPROBE_PRICE_OUT_PER_1M: ${HOOKPROBE_PRICE_OUT_PER_1M:-}
+      HOOKPROBE_PRICE_CACHE_READ_PER_1M: ${HOOKPROBE_PRICE_CACHE_READ_PER_1M:-}
+      HOOKPROBE_PRICE_CACHE_WRITE_PER_1M: ${HOOKPROBE_PRICE_CACHE_WRITE_PER_1M:-}
       HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
       # Operator methodology appended to the system prompt, re-read every run —
       # edit it and the next run uses it, no restart. That file is how this
@@ -340,6 +347,13 @@ services:
       # `GET /v1/budget` after a day and set it from the arithmetic.
       HOOKPROBE_BUDGET_USD: ${WATCH_BUDGET_USD:-15}
       HOOKPROBE_BUDGET_WINDOW_HOURS: ${WATCH_BUDGET_WINDOW_HOURS:-24}
+      # Token rates for this node's ledger, per MILLION. All three probes talk
+      # to the same gateway, so they take the same rates; empty means no rates
+      # configured and the ledger keeps whatever the runtime reported.
+      HOOKPROBE_PRICE_IN_PER_1M: ${HOOKPROBE_PRICE_IN_PER_1M:-}
+      HOOKPROBE_PRICE_OUT_PER_1M: ${HOOKPROBE_PRICE_OUT_PER_1M:-}
+      HOOKPROBE_PRICE_CACHE_READ_PER_1M: ${HOOKPROBE_PRICE_CACHE_READ_PER_1M:-}
+      HOOKPROBE_PRICE_CACHE_WRITE_PER_1M: ${HOOKPROBE_PRICE_CACHE_WRITE_PER_1M:-}
       HOOKPROBE_MCP_CONFIG: /data/mcp.json
       # Read-only chat tools ONLY. This instance reads colleagues' messages for
       # a living, so the list is the difference between "it can see the thread"
@@ -504,6 +518,13 @@ services:
       # over in one click, which is worth being told about.
       HOOKPROBE_BUDGET_USD: ${WORK_BUDGET_USD:-5}
       HOOKPROBE_BUDGET_WINDOW_HOURS: ${WORK_BUDGET_WINDOW_HOURS:-24}
+      # Token rates for this node's ledger, per MILLION. All three probes talk
+      # to the same gateway, so they take the same rates; empty means no rates
+      # configured and the ledger keeps whatever the runtime reported.
+      HOOKPROBE_PRICE_IN_PER_1M: ${HOOKPROBE_PRICE_IN_PER_1M:-}
+      HOOKPROBE_PRICE_OUT_PER_1M: ${HOOKPROBE_PRICE_OUT_PER_1M:-}
+      HOOKPROBE_PRICE_CACHE_READ_PER_1M: ${HOOKPROBE_PRICE_CACHE_READ_PER_1M:-}
+      HOOKPROBE_PRICE_CACHE_WRITE_PER_1M: ${HOOKPROBE_PRICE_CACHE_WRITE_PER_1M:-}
       # No MCP config at all, so the closed set is empty and every MCP tool is
       # refused. Stated rather than omitted: an empty allowlist here IS the
       # policy, and a future reader should see that it was chosen.
