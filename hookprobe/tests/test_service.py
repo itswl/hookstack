@@ -554,3 +554,31 @@ def test_a_failure_keeps_what_the_run_managed_to_say() -> None:
     # Capped, so a failure card does not become a wall.
     huge = _json.loads(failure_report("x", produced="y " * 5000))
     assert len(huge["root_cause"]["description"]) < 4200
+
+
+def test_a_card_admits_it_when_it_could_not_carry_the_whole_answer() -> None:
+    """A card showing part of an answer without saying so is the worse failure.
+
+    Measured: a 2,296-character investigation was delivered as 787 characters,
+    cut mid-word, and the recommended order of work was in the part that never
+    arrived. Nothing on the card said anything was missing.
+    """
+    from hookprobe.reports import report_summary
+
+    whole = "\n".join(f"- finding number {i}, written long enough to matter" for i in range(1, 12))
+    assert report_summary(whole) == whole, "an answer that fits is delivered untouched"
+
+    huge = "\n".join(f"- finding number {i}, written long enough to push past the cap" for i in range(1, 200))
+    card = report_summary(huge)
+    assert len(card) < len(huge)
+    assert "more characters" in card, "a truncated card has to say that it was truncated"
+    assert card.splitlines()[-3].endswith("cap"), "and it cuts on a line boundary, not mid-word"
+
+
+def test_a_first_line_longer_than_the_cap_still_reaches_the_reader() -> None:
+    """The boundary is honoured only in the second half, or one long opening
+    line would clip a whole report down to almost nothing."""
+    from hookprobe.reports import report_summary
+
+    card = report_summary("x" * 5000)
+    assert len(card) > 2000 and "more characters" in card

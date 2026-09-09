@@ -58,15 +58,46 @@ def verdict(text: str, allowed: Iterable[str]) -> str:
     return ""
 
 
+# What a card carries before it becomes a wall somebody scrolls past. It was
+# 800 — a paragraph — and the field it caps turned out not to hold paragraphs.
+# A real investigation came back 2,296 characters and the card delivered 787 of
+# them, cut mid-word, with nothing saying so: the operator read a confirmed
+# finding and a list of gaps, and never saw that the recommended order of work
+# was in the part that did not arrive.
+_SUMMARY_MAX = 2400
+
+
+def _clipped(text: str) -> str:
+    """`text`, or as much of it as a card should carry, admitting when it cuts.
+
+    Two things the old cap did not do. It cuts on a line boundary, so a card
+    ends on a thought rather than half a word. And it says how much is missing,
+    because a card showing part of an answer without admitting it is worse than
+    one showing less: the full text is on the run either way, and only one of
+    these tells the reader there is a reason to go and read it.
+    """
+    body = text.strip()
+    if len(body) <= _SUMMARY_MAX:
+        return body
+    head = body[:_SUMMARY_MAX]
+    # Only honour a boundary in the second half; a report whose first line runs
+    # past the cap would otherwise be clipped to almost nothing.
+    boundary = head.rfind("\n")
+    if boundary > _SUMMARY_MAX // 2:
+        head = head[:boundary]
+    head = head.rstrip()
+    return f"{head}\n\n… {len(body) - len(head)} more characters — the full report is on the run below."
+
+
 def report_summary(text: str) -> str:
     """The one paragraph a channel card shows; the full text stays on the run."""
     try:
         parsed = json.loads(text)
         if isinstance(parsed, dict) and parsed.get("summary"):
-            return str(parsed["summary"])[:800]
+            return _clipped(str(parsed["summary"]))
     except (TypeError, ValueError):
         pass
-    return text.strip()[:800]
+    return _clipped(text)
 
 
 # Enough of a partial answer to be worth reading, capped so a failure card does
