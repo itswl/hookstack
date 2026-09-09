@@ -34,7 +34,7 @@ hookstack 是一个面向 Agent 的工作执行平台。它把团队本来就有
 - **修复，人在环里。** 调查员提出方案；一次签名的批准才会逐步对照允许清单执行，以 argv 而非 shell 运行，落在一个凭证就是全部爆炸半径的节点上。
 - **每次判定都计价，每周都算账。** 一页读三份账本，把实测和反事实并排放：路由省掉了什么、runbook 答掉了什么、线上臂和影子臂比起来如何 —— 量不出来的，用文字说明。
 - **每个事件一页。** `/audit/{event_id}` 列出每一跳的摘要、决策步骤、投递和人的动作；`/trace/{id}` 回放正文；`/timeline` 把链条归成事件。
-- **关得住的 agent。** 默认只读并在启动时实测、工具闭集清单、会出声拒绝的预算上限，以及二十一条结构性边界，每一条都写明它**挡不住**什么（[containment](https://github.com/itswl/hookstack/blob/main/docs/containment.md)）。
+- **关得住的 agent。** 默认只读并在启动时实测、工具闭集清单、会出声拒绝的预算上限，以及二十二条结构性边界，每一条都写明它**挡不住**什么（[containment](https://github.com/itswl/hookstack/blob/main/docs/containment.md)）。
 - **你的模型，你的群。** 调查员接任何 Anthropic 方言的端点，判官接任何 OpenAI 兼容的端点，包括本地模型；影子臂在真实流量上对比 prompt 或模型，再决定是否上线。卡片经管道与桥之间的一个小协议送达聊天工具（[docs/bridge-protocol.md](https://github.com/itswl/hookstack/blob/main/docs/bridge-protocol.md)）—— 今天是飞书，钉钉、企微是自带插件，换一个平台就是再写一个桥 —— 或者作为签名 JSON 送到任意 webhook；OpenTelemetry 默认开启，而且由调查器自己接收：每次运行的时间瀑布就在它自己的页面上，不用部署任何 collector；指定了 collector 就原样再转发一份。
 
 ## 十分钟，不要 key，不花钱

@@ -41,7 +41,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from hookprobe import actions
+from hookprobe import actions, remediation
 from hookprobe.runs import Run
 from hookprobe.service import NotResumableError, RunBusyError, RunService
 from hookprobe.settings import Settings
@@ -478,6 +478,16 @@ def _approve(service: RunService, params: dict[str, Any], *, actor: str, correla
         row = service.approve_remediation(ref, note=note)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="no such proposal") from exc
+    except remediation.Moved as exc:
+        # The freshness cursor: the condition moved between the card being sent
+        # and this press. Caught before the ValueError it subclasses, because
+        # this is the one refusal the operator cannot see for themselves — the
+        # bridge repainted their card "accepted and passed on" the moment the
+        # PIPE took the press, and it stripped the buttons on the way. So the
+        # answer goes back as a report through the family loop, and the status
+        # is not `stale`: nothing here is unfixable, the fix is a fresh look.
+        service.report_superseded(ref, str(exc))
+        return {"status": "superseded", "kind": "approve", "ref": ref, "detail": str(exc)}
     except ValueError as exc:
         # Already approved, rejected, or settled by the boot sweep. Not an error
         # the presser can fix, and not a second execution either.

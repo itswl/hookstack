@@ -560,3 +560,43 @@ def test_the_remember_button_offers_only_what_the_shape_check_refused(tmp_path) 
     # And a second press finds nothing, rather than accepting twice.
     assert service.accept_suggestion(remember[0]["ref"]) is None
     assert not [row for row in actions.declare(run, tmp_path) if row["kind"] == "remember"]
+
+
+def test_a_press_that_arrives_after_the_condition_ended_runs_nothing(tmp_path: Path) -> None:
+    """The race the card cannot see. A procedure is a decision about a moment;
+    between the card being sent and somebody pressing it, the pipe delivered
+    "it ended" — and a press is the only signal this service gets that anybody
+    is still asking for those commands.
+
+    The whole path, because the interesting part is the delivery: the answer is
+    `superseded` rather than `stale` (nothing here is unfixable — the fix is a
+    fresh look), and it comes back as a REPORT, because the bridge repainted
+    the operator's card "accepted and passed on" the moment the pipe took the
+    press and stripped the buttons on the way out.
+    """
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    report = 'ok\n```remediation\n[{"action":"probe","command":"echo repaired","risk":"low"}]\n```\n'
+    client, _ = _investigated(tmp_path, text=report, remediation_allowlist=allow)
+    with client:
+        run = _drain(client, "probe:inbound:5")
+        proposal_id = run["meta"]["remediation_proposal"]
+
+        recovery = json.dumps({**EVENT, "event_id": 6, "is_recovery": True}).encode()
+        headers = {"Content-Type": "application/json", **sign_timestamped("", recovery)}
+        answered = client.post("/hooks/event", content=recovery, headers=headers).json()
+        assert answered["status"] == "verified", answered
+
+        answer = _press(client, "approve", params={"ref": proposal_id}).json()
+        assert answer["status"] == "superseded"
+        assert "the condition ended" in answer["detail"]
+
+        row = remediation.load(tmp_path, proposal_id)
+        assert row["status"] == "superseded"
+        assert not row["results"], "nothing ran"
+
+        # And the operator is told, on the surface they are actually looking at.
+        listed = client.get("/v1/runs", headers={"Authorization": f"Bearer {TOKEN}"}).json()
+        superseded = [r for r in listed if r["session_key"] == f"probe:superseded:{proposal_id}"]
+        assert superseded, "the refusal reached no chat and no board"
+        assert superseded[0]["cost_usd"] == 0.0

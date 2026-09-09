@@ -325,6 +325,37 @@ work somebody can clear now. It stays visible on the work item, marked
 which is the honest answer — the investigation is what has gone stale, not the
 button.
 
+**And a procedure the condition outran is retired, whatever the clock says.**
+The window above is a proxy: it assumes the world moves at a rate. The cursor is
+the world itself, as far as this node can honestly see it. Every proposal records
+two things about its condition at the moment the steps were chosen — whether it
+had ENDED, and which turn of the investigation wrote them — and both are read
+again when somebody approves. A recovery arriving in between is the case this
+exists for: the alert cleared, nobody watching the chat can tell, and the button
+still says *approve & run*. Then the row goes to `superseded` and nothing
+executes.
+
+It is checked in two places because they catch different things. The button is
+not drawn at all when the cursor has already moved — a follow-up report is
+delivered under a new turn, so every proposal from the turn before it is
+automatically past — and `remediation.approve` refuses the race the card cannot
+see, between the card being sent and the press arriving.
+
+A refusal at that point has nowhere obvious to go, which is worth knowing if you
+are reading a chat and not a board: the bridge repaints a pressed card
+"accepted and passed on" the moment the PIPE takes the press, and strips the
+buttons on the way out, because their token is single-use. So the refusal comes
+back the way the budget breaker's does — as a report through the family loop,
+into the same conversation, saying what moved and that nothing ran. The way to
+get the work done from there is the follow-up button beside it: it
+re-investigates and proposes against the world as it is now.
+
+What it does not see: anything that did not come through this pipe. Somebody
+fixing the target by hand and saying nothing in chat is invisible to it, and
+deliberately so — this node holds no credentials for the systems it writes
+procedures about, and a freshness check that opened one would be a second,
+unaudited way of touching them.
+
 `GET /v1/agent` says what this node is — name, role, runtime, policy, health — so
 a deployment running an investigator, a planner and a work runner can tell them
 apart by something other than a port. Set `HOOKPROBE_AGENT_NAME` and

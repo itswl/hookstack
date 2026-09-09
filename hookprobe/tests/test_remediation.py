@@ -384,3 +384,164 @@ def test_an_approved_command_still_runs(tmp_path):
     assert row["status"] == "executed"
     assert row["results"][0]["exit"] == 0
     assert "hello" in row["results"][0]["output"]
+
+
+# ── the freshness cursor ──────────────────────────────────────────────────────
+#
+# The 24h window is a clock and a clock is a proxy. These are about the world:
+# a procedure approved after its condition ended, or after the investigation
+# that wrote it has moved on, runs commands chosen from evidence nobody has
+# looked at since — and the operator pressing the button cannot see any of that
+# from the card.
+
+
+def _run(run_id="r1", **meta):
+    from hookprobe.runs import Run
+
+    run = Run(session_key="probe:alerts:99", run_id=run_id)
+    run.meta = dict(meta)
+    return run
+
+
+def test_the_cursor_is_two_fields_and_each_moves_on_its_own() -> None:
+    assert remediation.cursor(_run()) == {"run_id": "r1", "recovered": False, "refires": 0}
+    # A recovery annotates the run and starts no turn, so it moves `recovered`
+    # and nothing else. That is exactly why it has to be in the cursor.
+    assert remediation.cursor(_run(recovered_at=1.0))["recovered"] is True
+    assert remediation.cursor(_run(recovered_at=1.0))["run_id"] == "r1"
+    # A garbage refire count reads as none rather than raising on a click.
+    assert remediation.cursor(_run(refires="lots"))["refires"] == 0
+
+
+def test_nothing_moving_is_not_a_conflict() -> None:
+    now = remediation.cursor(_run())
+    assert remediation.moved(now, now) == ""
+
+
+def test_a_condition_that_ended_is_named_first() -> None:
+    before = remediation.cursor(_run())
+    after = remediation.cursor(_run(recovered_at=1.0, refires=3))
+    # Both fields moved; the operator hears the one that decides whether to act.
+    assert remediation.moved(before, after) == "the condition ended after these steps were written"
+
+
+def test_another_turn_and_a_re_fire_read_differently() -> None:
+    before = remediation.cursor(_run())
+    assert "taken another turn" in remediation.moved(before, remediation.cursor(_run(run_id="r2")))
+    assert "fired again" in remediation.moved(before, remediation.cursor(_run(run_id="r2", refires=1)))
+
+
+def test_a_proposal_stamped_before_this_existed_never_moved() -> None:
+    """Absent is not stale. A row carrying no cursor gets the behaviour every
+    row had before the cursor did, rather than a refusal invented from a
+    missing field — an upgrade must not retire what is already waiting."""
+    assert remediation.moved({}, remediation.cursor(_run(recovered_at=1.0, run_id="r9"))) == ""
+    assert remediation.moved(remediation.cursor(_run()), {}) == ""
+
+
+def _proposed(tmp_path, allow="echo .*\n"):
+    """One run that proposed one allowlisted step, and its service."""
+    report = 'ok\n```remediation\n[{"action":"probe","command":"echo remediated","risk":"low"}]\n```\n'
+
+    async def scenario():
+        from hookprobe.engine import EngineResult
+        from hookprobe.runs import RunStore
+        from hookprobe.service import RunService
+        from tests.helpers import FakeEngine, make_settings
+
+        allowlist = tmp_path / "allow.txt"
+        allowlist.write_text(allow)
+        settings = make_settings(tmp_path, remediation_allowlist=allowlist)
+        service = RunService(
+            settings, FakeEngine(result=EngineResult(text=report, message_count=1)), RunStore(tmp_path / "results")
+        )
+        service.start(
+            {"message": "Title: t\ngo", "sessionKey": "probe:alerts:99", "_meta": {"source": "alerts", "title": "t"}},
+            origin="relay",
+        )
+        for _ in range(300):
+            run = service.get("probe:alerts:99")
+            if run and run.finished:
+                return run, service
+            await asyncio.sleep(0.01)
+        raise AssertionError("never finished")
+
+    return asyncio.run(scenario())
+
+
+def test_a_proposal_records_the_condition_it_was_written_about(tmp_path):
+    run, _ = _proposed(tmp_path)
+    row = remediation.load(tmp_path, run.meta["remediation_proposal"])
+    assert row["cursor"] == {"run_id": run.run_id, "recovered": False, "refires": 0}
+
+
+def test_a_procedure_approved_after_the_condition_ended_does_not_run(tmp_path):
+    run, service = _proposed(tmp_path)
+    pid = run.meta["remediation_proposal"]
+    # The real recovery path: the pipe delivers "it ended" and this service
+    # annotates the investigation. No turn, no cost, no new run id.
+    assert service.record_recovery("alerts", "t") is not None
+    with pytest.raises(remediation.Moved) as caught:
+        service.approve_remediation(pid)
+    assert "the condition ended" in str(caught.value)
+    row = remediation.load(tmp_path, pid)
+    assert row["status"] == "superseded"
+    assert row["results"] == [], "a superseded procedure must not have executed anything"
+    # Terminal: approve and reject both require `proposed`, so the retired row
+    # cannot be walked back into running by a second press.
+    with pytest.raises(ValueError):
+        service.approve_remediation(pid)
+
+
+def test_a_superseded_procedure_is_not_counted_as_a_human_dismissal(tmp_path):
+    """The automation ledger measures what a PERSON decided. Counting a
+    procedure the condition outran as a dismissal would make the machine look
+    more often overruled than it was, and that number feeds graduation."""
+    from hookprobe import automation
+
+    run, service = _proposed(tmp_path)
+    service.record_recovery("alerts", "t")
+    with pytest.raises(remediation.Moved):
+        service.approve_remediation(run.meta["remediation_proposal"])
+    events = [r.get("event") for r in automation.ledger(tmp_path, "remediation")]
+    assert "dismissed" not in events and "approved" not in events
+
+
+def test_the_button_is_not_offered_once_the_condition_has_moved(tmp_path):
+    """Two layers, and this is the one that stops a doomed button being drawn.
+    A follow-up report is delivered under a NEW run id, so every proposal from
+    the turn before it has by definition already moved."""
+    from hookprobe import actions
+
+    run, _ = _proposed(tmp_path)
+    offered = [a for a in actions.declare(run, tmp_path) if a["kind"] == "approve"]
+    assert len(offered) == 1
+    run.run_id = "a-later-turn"
+    assert [a for a in actions.declare(run, tmp_path) if a["kind"] == "approve"] == []
+
+
+def test_the_chat_is_told_a_pressed_procedure_did_not_run(tmp_path):
+    """The refusal is decided here and the operator is looking at a card the
+    bridge already repainted "accepted and passed on", with the buttons gone.
+    Without a return, the procedure did not run AND nobody knows."""
+    run, service = _proposed(tmp_path)
+    pid = run.meta["remediation_proposal"]
+    service.record_recovery("alerts", "t")
+    with pytest.raises(remediation.Moved):
+        service.approve_remediation(pid)
+    notice = service.report_superseded(pid, "the condition ended after these steps were written")
+    assert notice is not None
+    assert notice.origin == "relay", "a notice that does not return is a log line"
+    assert notice.cost_usd == 0.0
+    # The original's meta, so the card names the same alert and lands in the
+    # same conversation — this is an answer to it, not a new one.
+    assert notice.meta["title"] == "t" and notice.meta["source"] == "alerts"
+    assert notice.meta["superseded"] == pid
+    assert "did NOT run" in notice.text and "echo remediated" in notice.text
+
+
+def test_a_console_born_run_gets_no_chat_notice(tmp_path, monkeypatch):
+    """No chat to answer into, and the console shows the row's status directly."""
+    run, service = _proposed(tmp_path)
+    run.origin = ""
+    assert service.report_superseded(run.meta["remediation_proposal"], "whatever") is None

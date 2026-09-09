@@ -13,6 +13,10 @@ pipe at the far end, so the refusal travels the family loop as a report whose
 summary an operator can read: what the window has spent, what the ceiling is,
 and which knob raises it.
 
+The superseded refusal is the same move again, for a press instead of an alert:
+the freshness cursor retired a procedure the condition had outrun, and the card
+that carried the button had already told its operator the press landed.
+
 These live outside the service because they are text, not orchestration. Every
 string here is read by whoever is looking at a channel card, and the module that
 schedules turns is not where their wording should be maintained.
@@ -23,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable
+from typing import Any
 
 # Anchored like suggestions._MARKER, and for the same reason: reading structure
 # out of a model's prose is done with one explicit line the prompt asks for, not
@@ -147,6 +152,57 @@ def failure_report(reason: str, produced: str = "") -> str:
                 }
             ],
             "unknowns": ["The investigation did not run to completion."],
+            "assumptions": [],
+            "next_checks": [],
+            "confidence": 0.0,
+        },
+        ensure_ascii=False,
+    )
+
+
+def superseded_report(reason: str, steps: list[dict[str, Any]]) -> str:
+    """A report-shaped refusal for a press that arrived after the world moved.
+
+    It exists because the honest answer had nowhere to go. A press is forwarded
+    by the bridge, enqueued by the pipe and answered "accepted and passed on"
+    before this service has looked at it — and the card's buttons are stripped
+    on the way, because their token is single-use. So a refusal decided here
+    reaches the operator through NO existing path: the card says it landed, the
+    procedure never ran, and the only trace is a line in a log.
+
+    The budget breaker had the same problem and the same answer, which is why
+    this is shaped like `budget_report`: refuse, then say so as a report and let
+    the family loop carry it into the chat the press came from.
+    """
+    commands = [str(step.get("command") or "") for step in steps[:3] if step.get("command")]
+    summary = (
+        f"The approved procedure did NOT run: {reason}. It is retired rather than queued — "
+        "these commands were chosen from evidence this condition has since moved past, and "
+        "running them now would act on a system nobody has looked at since. "
+        "Ask this investigation for a fresh look if it still needs one."
+    )
+    return json.dumps(
+        {
+            "summary": summary,
+            "root_cause": {
+                "status": "not_executed",
+                "description": f"A remediation proposal was approved after {reason}.",
+            },
+            "evidence": [{"what": "the steps that did not run", "detail": command} for command in commands],
+            "impact": {
+                "scope": "remediation",
+                "severity": "none",
+                "description": "Nothing was executed against the target. No step ran and none is pending.",
+            },
+            "timeline": [],
+            "recommendations": [
+                {
+                    "priority": "P2",
+                    "action": "Ask the investigation for a fresh look, and approve what it proposes then",
+                    "reason": "A procedure is a decision about a moment; this one outlived its moment.",
+                }
+            ],
+            "unknowns": ["Whether the condition still needs any of these steps."],
             "assumptions": [],
             "next_checks": [],
             "confidence": 0.0,

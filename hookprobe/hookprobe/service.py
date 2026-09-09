@@ -35,7 +35,7 @@ from hookprobe import actions, automation, distill, distill_loop, remediation, r
 from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult, price_tokens, transient
 from hookprobe.notify import ReturnDelivery
-from hookprobe.reports import budget_report, failure_report
+from hookprobe.reports import budget_report, failure_report, superseded_report
 from hookprobe.runs import COMPLETED, FAILED, INFERRED_BY_PREFIX, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
 
@@ -1203,7 +1203,9 @@ class RunService:
         steps = remediation.extract(run.text)
         if steps:
             try:
-                proposal_id = remediation.propose(self._settings.workdir, run.session_key, steps)
+                proposal_id = remediation.propose(
+                    self._settings.workdir, run.session_key, steps, remediation.cursor(run)
+                )
                 run.meta["remediation_proposal"] = proposal_id
                 logger.info("remediation proposed session=%s id=%s steps=%s", run.session_key, proposal_id, len(steps))
             except OSError:
@@ -1260,18 +1262,82 @@ class RunService:
     def approve_remediation(self, proposal_id: str, note: str = "") -> dict[str, Any]:
         """The operator's click, and the only path that runs anything. The gate
         checks and the execution are hookprobe.remediation's; what belongs here
-        is the task the sequence runs in, because shutdown has to wait for it."""
+        is the task the sequence runs in, because shutdown has to wait for it.
+
+        The freshness cursor is read HERE rather than inside remediation, for
+        the reason the allowlist file is passed in rather than found: this is
+        the object that holds the runs, and a module that persists proposals
+        should not also be reaching for the store to decide about them.
+        """
         row = remediation.approve(
             self._settings.workdir,
             proposal_id,
             allowlist=self._settings.remediation_allowlist,
             note=note,
+            at=self.proposal_cursor(proposal_id),
         )
         task = asyncio.create_task(self._apply_remediation(row))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         self._board_changed()
         return row
+
+    def proposal_cursor(self, proposal_id: str) -> dict[str, Any]:
+        """The condition this proposal is about, as it stands right now.
+
+        Empty when the proposal or its run is gone — which reads as "nothing
+        moved" rather than as a refusal, and that is the intended direction. A
+        run pruned by retention must not turn a valid procedure into one nobody
+        can run; the 24h window already stops anything that old.
+        """
+        row = remediation.load(self._settings.workdir, proposal_id)
+        run = self._store.get(str((row or {}).get("session_key") or "")) if row else None
+        return remediation.cursor(run) if run is not None else {}
+
+    def report_superseded(self, proposal_id: str, reason: str) -> Run | None:
+        """Say in the chat that a pressed procedure did not run, and why.
+
+        Without this the refusal is decided correctly and lands nowhere. The
+        bridge repaints the pressed card "accepted and passed on" the moment the
+        PIPE takes the press — it cannot wait for this service, and it has
+        already stripped the buttons, whose token is single-use — so by the time
+        the cursor refuses, the one surface the operator is looking at has told
+        them the opposite. A gate whose refusal is invisible is worse than no
+        gate: the procedure did not run AND nobody knows.
+
+        Report-shaped and returned through the family loop, the same way the
+        budget breaker answers, because that is the one dialect every channel
+        renderer can dress. Relay-born runs only: a console-started run has no
+        chat to answer into, and the console shows the row's status directly.
+        """
+        row = remediation.load(self._settings.workdir, proposal_id)
+        if row is None:
+            return None
+        run = self._store.get(str(row.get("session_key") or ""))
+        if run is None or run.origin != "relay":
+            return None
+        notice = Run(
+            session_key=f"probe:superseded:{row.get('id')}",
+            run_id=uuid.uuid4().hex[:12],
+            model=self._settings.model,
+            model_endpoint=self._settings.model_endpoint,
+            origin="relay",
+        )
+        # The original's meta, so the card carries the same alert name and lands
+        # in the same thread — this is an answer to that conversation, not a new
+        # one. The work id rides along for the same reason.
+        notice.meta = dict(run.meta or {})
+        notice.meta["superseded"] = str(row.get("id") or "")
+        self._store.create(notice)
+        notice.status = FAILED
+        notice.error = f"not executed: {reason}"
+        notice.cost_usd = 0.0
+        notice.text = superseded_report(reason, list(row.get("steps") or []))
+        self._record_turn(notice, None)
+        self._store.finish(notice)
+        self._schedule_return(notice)
+        logger.warning("procedure superseded id=%s reason=%s", row.get("id"), reason)
+        return notice
 
     def reject_remediation(self, proposal_id: str) -> dict[str, Any]:
         row = remediation.reject(self._settings.workdir, proposal_id)

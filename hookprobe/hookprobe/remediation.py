@@ -7,7 +7,8 @@ SERVICE lifts that block into a proposal file. From there every transition is
 an operator's:
 
     proposed ──(operator approves)──► running ──► executed | failed
-        └─────(operator rejects)───► rejected
+        ├─────(operator rejects)───► rejected
+        └──(the condition moved)───► superseded
 
 `running` is the one state no operator can leave: only the executing task
 writes it, so a process that dies mid-sequence used to strand the row there
@@ -98,8 +99,14 @@ def extract(text: str) -> list[dict[str, Any]]:
     return steps
 
 
-def propose(workdir: Path, session_key: str, steps: list[dict[str, Any]]) -> str:
-    """Park a run's steps as a proposal; returns its id."""
+def propose(workdir: Path, session_key: str, steps: list[dict[str, Any]], at: dict[str, Any] | None = None) -> str:
+    """Park a run's steps as a proposal; returns its id.
+
+    `at` is the cursor — what was true about the condition at the moment these
+    steps were chosen (see `cursor`). Optional so a caller with no run in hand
+    can still park a proposal; a row without one is simply not checked for
+    movement later, which is the behaviour every row had before this existed.
+    """
     directory = workdir / DIRNAME
     directory.mkdir(parents=True, exist_ok=True)
     proposal_id = uuid.uuid4().hex[:10]
@@ -111,6 +118,7 @@ def propose(workdir: Path, session_key: str, steps: list[dict[str, Any]]) -> str
             "created_at": round(time.time(), 3),
             "status": "proposed",
             "steps": steps,
+            "cursor": dict(at or {}),
             "results": [],
         },
     )
@@ -270,16 +278,122 @@ def stale(row: dict[str, Any], now: float | None = None) -> bool:
     return (now or time.time()) - created > APPROVAL_WINDOW_SECONDS
 
 
-def approve(workdir: Path, proposal_id: str, *, allowlist: Path | None, note: str = "") -> dict[str, Any]:
+class Moved(ValueError):
+    """The condition moved between the proposal and the click.
+
+    A ValueError, so every door that already answers 409 to "you cannot approve
+    that" keeps working unchanged; a subclass, so the two doors that can say
+    something better than "409" are able to tell this apart from a proposal
+    somebody already approved.
+    """
+
+
+def cursor(run: Any) -> dict[str, Any]:
+    """What was true about the condition when these steps were chosen.
+
+    The window above is a clock, and a clock is a proxy: it assumes the world
+    moves at a rate. This is the world itself, as far as this node can honestly
+    see it — and the whole of that honesty is that every field arrives THROUGH
+    THE PIPE. Nothing here reaches out to look. The proposal's own doctrine is
+    that no agent is in the loop at execution time; a freshness check that
+    opened a live connection to the target would need credentials this node is
+    deliberately not given (the production investigator holds none), and would
+    be a second, unaudited way of touching the system the procedure is about.
+
+    Two fields, and each is here because it moves when the other does not:
+
+      * `recovered` — the condition ENDED. Recorded by the recovery door
+        (`service.record_recovery`), which annotates the run's meta and starts
+        no turn, so it never shows up as a new run. This is the one that makes
+        the whole check worth having: a procedure written for a firing alert,
+        approved after it cleared, is the "二次误操作" this exists to stop.
+      * `run_id` — this investigation has taken another TURN. Changed by
+        `continue_run`, which is what a re-fire, a thread reply and a follow-up
+        press all end up calling, so one field covers all three. The steps were
+        lifted from a report that is no longer this session's newest.
+
+    What was considered and left out: the thread's reply count, and the re-fire
+    count. Both are real, both are already recorded — and neither can move
+    without `run_id` moving too, because both go through `continue_run`. A field
+    that cannot fire on its own is not a signal, it is a second copy of one.
+    (`refires` is still READ below, to say WHY the run id changed. That is
+    explanation, not detection.)
+    """
+    meta = getattr(run, "meta", None) or {}
+    return {
+        "run_id": str(getattr(run, "run_id", "") or ""),
+        "recovered": bool(meta.get("recovered_at")),
+        "refires": _count(meta.get("refires")),
+    }
+
+
+def _count(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def moved(before: dict[str, Any], now: dict[str, Any]) -> str:
+    """One sentence naming what changed since the proposal, or "" if nothing did.
+
+    Ordered by what an operator most needs to hear first. A proposal stamped
+    before this check existed carries no cursor, and gets the old behaviour
+    rather than a refusal invented out of a missing field.
+    """
+    if not before or not now:
+        return ""
+    if now.get("recovered") and not before.get("recovered"):
+        return "the condition ended after these steps were written"
+    if now.get("run_id") and now.get("run_id") != before.get("run_id"):
+        if _count(now.get("refires")) > _count(before.get("refires")):
+            return "the condition fired again and this investigation has looked at it since"
+        return "this investigation has taken another turn since these steps were written"
+    return ""
+
+
+def approve(
+    workdir: Path,
+    proposal_id: str,
+    *,
+    allowlist: Path | None,
+    note: str = "",
+    at: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """The operator's click. Gate-checks EVERY step against the allowlist
     before anything runs — a proposal that is half executable is refused
     whole, because "steps 1 and 3 ran" is the worst possible outcome of a
-    procedure written as 1-2-3."""
+    procedure written as 1-2-3.
+
+    `at` is the condition as it stands NOW. If it has moved since the proposal
+    was written the procedure is retired rather than run — see `moved` for the
+    two things that count as moving, and the module docstring for why the exit
+    is terminal instead of a warning the operator can press through: the button
+    on a card is single-use and gone after one press, so "refuse, and let them
+    decide again" is a UI that does not exist. What does exist is the follow-up
+    button beside it, which re-investigates and proposes against the world as it
+    is now — which is the answer anyway.
+    """
     row = load(workdir, proposal_id)
     if row is None:
         raise LookupError("no such proposal")
     if row.get("status") != "proposed":
         raise ValueError(f"proposal is {row.get('status')}, not proposed")
+    change = moved(row.get("cursor") or {}, at or {})
+    if change:
+        row["status"] = "superseded"
+        row["resolved_at"] = round(time.time(), 3)
+        row["superseded_because"] = change
+        save(workdir, row)
+        # Deliberately NOT recorded on the automation ledger. That ledger counts
+        # what a PERSON decided about a suggestion — approved, dismissed,
+        # regretted — and it feeds the graduation figures. A procedure the
+        # condition outran is not a human dismissal, and counting it as one
+        # would quietly make the machine look more often overruled than it was.
+        raise Moved(
+            f"{change}. Nothing ran, and this procedure is retired. "
+            "Ask this investigation for a fresh look if the condition still needs one."
+        )
     if stale(row):
         age_h = (time.time() - float(row.get("created_at") or 0.0)) / 3600
         raise ValueError(

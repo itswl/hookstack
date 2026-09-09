@@ -115,7 +115,7 @@ def declare(run: Run, workdir: Path) -> list[dict[str, Any]]:
                 "prompt": followup_prompt(run),
             }
         )
-    for row in _open_proposals(run.session_key, workdir):
+    for row in _open_proposals(run, workdir):
         declared.append(
             {"kind": "approve", "text": _approve_text(row.get("steps") or []), "ref": str(row.get("id") or "")}
         )
@@ -144,12 +144,30 @@ def declare(run: Run, workdir: Path) -> list[dict[str, Any]]:
     return declared
 
 
-def _open_proposals(session_key: str, workdir: Path) -> list[dict[str, Any]]:
-    """This run's procedures that are still waiting on somebody, newest first."""
+def _open_proposals(run: Run, workdir: Path) -> list[dict[str, Any]]:
+    """This run's procedures that are still waiting on somebody, newest first.
+
+    Three conditions, and the last two are the same rule as the first: a button
+    that cannot work is worse than an absent one. `proposed` is the state
+    machine's; `stale` is the 24h window, which a report re-delivered by a later
+    follow-up turn can easily be past; and `moved` is the freshness cursor,
+    which is the interesting one — a follow-up report is delivered with a NEW
+    run id, so every proposal from the turn before it has, by definition,
+    already moved. Offering those buttons would put a card in a chat whose
+    approve press is guaranteed to be refused.
+
+    That is also why the cursor check has to exist in both places. This stops
+    the doomed button being drawn; `remediation.approve` stops the race the
+    button cannot see, between the card being sent and somebody pressing it.
+    """
+    now = remediation.cursor(run)
     rows = [
         row
         for row in remediation.list_all(workdir, limit=200)
-        if str(row.get("session_key") or "") == session_key and row.get("status") == "proposed"
+        if str(row.get("session_key") or "") == run.session_key
+        and row.get("status") == "proposed"
+        and not remediation.stale(row)
+        and not remediation.moved(row.get("cursor") or {}, now)
     ]
     return rows[:_MAX_APPROVE]
 
