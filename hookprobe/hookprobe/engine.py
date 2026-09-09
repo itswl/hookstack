@@ -945,6 +945,8 @@ class ClaudeAgentEngine:
         message_count = 0
         session_seen = ""
         result: Any = None
+        # None on every path that never reaches the probe below.
+        context: dict[str, Any] | None = None
         # ClaudeSDKClient rather than query(), and the reason is the bill.
         #
         # query() is a one-shot async generator: the only way to stop it early is
@@ -1028,6 +1030,18 @@ class ClaudeAgentEngine:
                         last_text = "\n".join(text_parts)
                 elif isinstance(msg, ResultMessage):
                     result = msg
+            # BEFORE the finally, because the finally disconnects. This call
+            # used to sit AFTER it, so the probe always ran against a closed
+            # client: it could not succeed on any runtime, the latch then
+            # recorded "this runtime does not report context usage", and every
+            # run's `context` was null for a reason that had nothing to do with
+            # the runtime. Found by tests/test_scripted_turns.py, which counts
+            # and ORDERS the calls the loop makes on its client.
+            #
+            # One extra round trip to the CLI, no model call, and never fatal:
+            # a failure to ANSWER how full the context is must not fail a turn
+            # that already produced a report.
+            context = await self._context_usage(client)
         finally:
             self._interrupt = None
             # disconnect() cancels any SDK MCP tool still running and gives each
@@ -1053,10 +1067,6 @@ class ClaudeAgentEngine:
         error = engine_error(result, text)
         usage = getattr(result, "usage", None)
         model_usage = getattr(result, "model_usage", None)
-        # One extra round trip to the CLI, no model call, and never fatal: a
-        # failure to ANSWER how full the context is must not fail a turn that
-        # already produced a report.
-        context = await self._context_usage(client)
         return EngineResult(
             text=text,
             message_count=message_count,

@@ -6,6 +6,7 @@ import asyncio
 import threading
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from hookprobe.engine import EngineResult
 from hookprobe.settings import Settings
@@ -200,3 +201,98 @@ class GatedEngine:
         while not self.release.is_set():
             await asyncio.sleep(0.01)
         return self.result
+
+
+class UnscriptedCall(AssertionError):
+    """The loop talked to the runtime in a way the test did not script."""
+
+
+class ScriptedTurns:
+    """A ClaudeSDKClient stand-in that scripts turns AND polices the traffic.
+
+    Borrowed in shape from `agents.testing.ScriptedModel` in
+    openai/openai-agents-python, which does one thing this repository's fakes
+    did not: it fails when the loop makes a model call the test never scripted,
+    and when scripted steps go unconsumed.
+
+    `FakeEngine` is injected at the `Engine` protocol boundary, so it never
+    reaches the receive loop at all — and inside that loop are the cost
+    accounting, the interrupt path, the redaction capture point and the input
+    fingerprint diff. `test_engine_loop.py` records what that gap cost: two
+    bugs in one day, both one assertion away from being caught. Its own fake
+    closed half of it by scripting ONE stream; this closes the other half by
+    counting the calls, which on a product whose central argument is cost is
+    the property worth pinning. A loop that quietly asks the runtime twice is
+    a turn billed twice.
+
+    Usage:
+
+        client = ScriptedTurns([[assistant("ok"), result()]])
+        monkeypatch.setattr(claude_agent_sdk, "ClaudeSDKClient", client.factory())
+        ...
+        client.assert_consumed()
+    """
+
+    def __init__(self, turns: list[list[Any]], *, context_usage: Any = None) -> None:
+        self._turns = list(turns)
+        self._context_usage = context_usage
+        self.queries: list[str] = []
+        self.calls: list[str] = []
+        self.connects = 0
+        self.disconnects = 0
+        self.interrupts = 0
+        self.context_usage_asks = 0
+
+    def factory(self) -> Any:
+        """What `ClaudeSDKClient` is replaced with: every construction is this."""
+        outer = self
+
+        class _Client:
+            def __init__(self, options: Any = None) -> None:
+                self.options = options
+                outer.options = options
+
+            async def connect(self) -> None:
+                outer.calls.append("connect")
+                outer.connects += 1
+
+            async def disconnect(self) -> None:
+                outer.calls.append("disconnect")
+                outer.disconnects += 1
+
+            async def query(self, message: str) -> None:
+                outer.calls.append("query")
+                if not outer._turns:
+                    raise UnscriptedCall(
+                        f"the loop asked the runtime for turn {len(outer.queries) + 1} and the test "
+                        f"scripted {len(outer.queries)}. An unscripted turn is a turn nobody budgeted."
+                    )
+                outer.queries.append(message)
+
+            async def interrupt(self) -> None:
+                outer.calls.append("interrupt")
+                outer.interrupts += 1
+
+            async def get_context_usage(self) -> Any:
+                outer.calls.append("get_context_usage")
+                outer.context_usage_asks += 1
+                if isinstance(outer._context_usage, Exception):
+                    raise outer._context_usage
+                if outer._context_usage is None:
+                    raise RuntimeError("this runtime does not report context usage")
+                return outer._context_usage
+
+            async def receive_response(self):
+                for message in outer._turns.pop(0):
+                    yield message
+
+        return _Client
+
+    def assert_consumed(self) -> None:
+        """Every scripted turn was used. A loop that stops early is a bug the
+        old fake could not see: it replayed one stream and said nothing about
+        the turns the test expected and never got."""
+        if self._turns:
+            raise UnscriptedCall(
+                f"{len(self._turns)} scripted turn(s) unconsumed — the loop stopped before the test expected"
+            )
