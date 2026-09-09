@@ -70,6 +70,18 @@ every multiple after) the result carries a note telling the agent to change
 approach or record what stays unknown and move on. The budget breaker stops
 spending after the fact; this is the nudge before it costs.
 
+**Where the dollar figure comes from.** Set `HOOKPROBE_PRICE_IN_PER_1M`,
+`HOOKPROBE_PRICE_CACHE_READ_PER_1M` and `HOOKPROBE_PRICE_OUT_PER_1M` to this
+gateway's own rates and a turn's cost becomes measured tokens times a stated
+rate — the same arithmetic on every runtime.
+`HOOKPROBE_PRICE_CACHE_WRITE_PER_1M` defaults to the input rate, because writes
+cost at least fresh input wherever they are charged and a fourth number should
+not be invented silently. Unset, `cost_usd` stays whatever the runtime reported:
+the CLI's own table for a model it is not the one billing, or — on codex —
+nothing at all, which is what leaves a ceiling unable to bind. It is still
+*priced* and not *billed*: a rate goes stale and a gateway can charge for
+something these four numbers do not name.
+
 **What the ceiling can see.** `GET /v1/budget` reports `spend_visibility` in
 three states, because two of them are not the same answer: `measured` (nothing
 in the window went unpriced, so the spend is the spend), `floor` (some turns

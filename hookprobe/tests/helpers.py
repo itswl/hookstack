@@ -46,6 +46,12 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "relay_ui_url": "",
         # Empty like every deployment: a node here has no reachable address.
         "public_url": "",
+        # Off, like every deployment: `cost_usd` stays whatever the runtime
+        # reported unless a test states rates.
+        "price_in_per_1m": 0.0,
+        "price_cache_read_per_1m": 0.0,
+        "price_cache_write_per_1m": 0.0,
+        "price_out_per_1m": 0.0,
         "resume_interrupted": True,
         "agent_name": "hookprobe",
         "agent_role": "",

@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (66)
+## Environment (70)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -21,6 +21,10 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_AGENTS_CONFIG` | *(empty)* | Named subagent roles (JSON: name -> {description, prompt, tools?, model?, skills?}), the config-file twin of .claude/agents/*.md files |
 | `HOOKPROBE_REMEDIATION_ALLOWLIST` | *(empty)* | Remediation executor gate: a file of full-match regexes, one per line, hot-read at execution time |
 | `HOOKPROBE_EVENT_SECRET` | *(empty)* | The hookstack loop |
+| `HOOKPROBE_PRICE_IN_PER_1M` | `0.0` | What a token costs on THIS gateway, per million, as the operator states it |
+| `HOOKPROBE_PRICE_CACHE_READ_PER_1M` | `0.0` | Tokens read back from the prompt cache — a tenth of fresh input here, so pricing them as input over-states a cached turn tenfold |
+| `HOOKPROBE_PRICE_CACHE_WRITE_PER_1M` | `_float('HOOKPROBE_PRICE_IN_PER_1M', 0.0)` | Tokens written INTO the cache |
+| `HOOKPROBE_PRICE_OUT_PER_1M` | `0.0` | Output tokens, dollars per million |
 | `HOOKPROBE_RETURN_SECRET` | *(empty)* | Outbound HMAC secret; signs the finding on its way back |
 | `HOOKPROBE_RULING_URL` | *(empty)* | Where a retrospective condition ruling goes, and the credential for that ONE door |
 | `HOOKPROBE_RULING_SECRET` | *(empty)* | Signs the rulings this service posts to the judge |

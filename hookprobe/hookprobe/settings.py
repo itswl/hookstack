@@ -213,6 +213,32 @@ class Settings:
     # one — see describe.py, and the status-write-back note, which is blocked on
     # this same missing fact.
     public_url: str
+    # What a token costs on THIS gateway, per million, as the operator states
+    # it. Empty (all zero) by default and on every deployment until somebody
+    # sets them, because a rate nobody has confirmed is the failure this stack
+    # spent a day making visible.
+    #
+    # With them set, a turn's cost is measured tokens times a stated rate —
+    # arithmetic over two known things. Without them, `cost_usd` stays whatever
+    # the runtime reported: the CLI's table for a model it is not billing, or
+    # nothing at all on codex, which is what left a budget ceiling unable to
+    # bind. See engine.price_tokens.
+    #
+    # A cache-WRITE rate is separate and defaults to the input rate: writes
+    # cost at least as much as fresh input on every provider that charges for
+    # them, and a deployment given three numbers should not have a fourth
+    # invented for it silently.
+    # Fresh input tokens, dollars per million, as this gateway charges them.
+    price_in_per_1m: float
+    # Tokens read back from the prompt cache — a tenth of fresh input here, so
+    # pricing them as input over-states a cached turn tenfold.
+    price_cache_read_per_1m: float
+    # Tokens written INTO the cache. Defaults to the input rate: writes cost at
+    # least fresh input wherever they are charged, and a rate nobody stated
+    # should not be invented as zero.
+    price_cache_write_per_1m: float
+    # Output tokens, dollars per million.
+    price_out_per_1m: float
     # Whether a run this process finds mid-flight at startup — left by a crash,
     # an OOM kill or a redeploy — is CONTINUED in its own engine session or
     # settled as a failure. On, because the alternative throws away everything
@@ -377,6 +403,14 @@ class Settings:
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             relay_ui_url=os.environ.get("HOOKPROBE_RELAY_UI_URL", "").strip().rstrip("/"),
             public_url=os.environ.get("HOOKPROBE_PUBLIC_URL", "").strip().rstrip("/"),
+            price_in_per_1m=_float("HOOKPROBE_PRICE_IN_PER_1M", 0.0),
+            price_cache_read_per_1m=_float("HOOKPROBE_PRICE_CACHE_READ_PER_1M", 0.0),
+            # Defaults to the input rate rather than to zero: a write charged at
+            # nothing would be the same lie as a zero cost with tokens behind it.
+            price_cache_write_per_1m=_float(
+                "HOOKPROBE_PRICE_CACHE_WRITE_PER_1M", _float("HOOKPROBE_PRICE_IN_PER_1M", 0.0)
+            ),
+            price_out_per_1m=_float("HOOKPROBE_PRICE_OUT_PER_1M", 0.0),
             resume_interrupted=(os.environ.get("HOOKPROBE_RESUME_INTERRUPTED", "on").strip().lower() != "off"),
             agent_name=os.environ.get("HOOKPROBE_AGENT_NAME", "").strip()[:60] or "hookprobe",
             agent_role=os.environ.get("HOOKPROBE_AGENT_ROLE", "").strip()[:160],

@@ -579,6 +579,53 @@ def priced(total: Any, tokens: Any) -> float | None:
     return float(total)
 
 
+# Per-MILLION tokens, because that is how a provider states a rate and how the
+# operator stated theirs. hookjudge's two constants are per-1K for historical
+# reasons; converting at the edge beats carrying a unit nobody quotes.
+_PER_MILLION = 1_000_000
+
+
+def price_tokens(usage: Any, rates: tuple[float, float, float, float]) -> float | None:
+    """What this turn cost, from tokens we measured and rates the operator gave.
+
+    The alternative it replaces is worse than it looks. `cost_usd` came from
+    whatever the runtime felt like reporting: the Claude CLI prices from its own
+    table for a model it is not the one billing, codex reports tokens and never
+    money at all, and pi priced from a catalogue this deployment's model is not
+    in. So the number was either an estimate for the wrong model or absent —
+    and absent is what made a budget ceiling unable to bind on two of three
+    runtimes.
+
+    Tokens, by contrast, every runtime reports and none of them has to guess.
+    Multiplying them by the operator's own stated rate for their own gateway is
+    the first cost figure in this stack that is arithmetic over two measured
+    things rather than a table somebody else maintains.
+
+    It is still PRICED and not BILLED, and the weekly page still says so — a
+    rate can be out of date and a gateway can bill for something these four
+    numbers do not name. But it is priced from the right table, which the
+    previous number was not.
+
+    `None` when no rates are configured, which is every deployment until one
+    sets them: silence is how this stays a change nobody gets by upgrading.
+    """
+    fresh_rate, cache_read_rate, cache_write_rate, out_rate = rates
+    if not any(rate > 0 for rate in rates):
+        return None
+    if not isinstance(usage, dict):
+        return None
+    fresh = float(usage.get("input_tokens") or 0)
+    cached = float(usage.get("cache_read_input_tokens") or 0)
+    written = float(usage.get("cache_creation_input_tokens") or 0)
+    out = float(usage.get("output_tokens") or 0)
+    if not (fresh or cached or written or out):
+        return None
+    total = (fresh * fresh_rate + cached * cache_read_rate + written * cache_write_rate + out * out_rate) / _PER_MILLION
+    # Six places: a turn costing a fraction of a cent is normal here, and
+    # rounding it to four would make a hundred of them disappear.
+    return round(total, 6)
+
+
 def transient(error: str) -> bool:
     """Whether this failure is worth one more attempt, right now.
 

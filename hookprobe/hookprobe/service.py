@@ -33,7 +33,7 @@ from typing import Any, Protocol
 
 from hookprobe import actions, automation, distill, distill_loop, remediation, rulings, run_rulings, suggestions
 from hookprobe.distill import CASES_MARKER, slug
-from hookprobe.engine import EngineResult, transient
+from hookprobe.engine import EngineResult, price_tokens, transient
 from hookprobe.notify import ReturnDelivery
 from hookprobe.reports import budget_report, failure_report
 from hookprobe.runs import COMPLETED, FAILED, INFERRED_BY_PREFIX, RUNNING, Run, RunStore
@@ -1130,7 +1130,7 @@ class RunService:
             return
 
         run.message_count = result.message_count
-        run.cost_usd = result.cost_usd
+        run.cost_usd = self._turn_cost(result)
         if result.session_id:
             run.engine_session_id = result.session_id
         if result.error:
@@ -1319,7 +1319,7 @@ class RunService:
         asked = run.current_message
         run.error = error
         run.text = ""
-        run.cost_usd = result.cost_usd if result is not None else None
+        run.cost_usd = self._turn_cost(result)
         self._record_turn(run, result)
         run.meta["auto_retries"] = int(run.meta.get("auto_retries") or 0) + 1
         resume_id = run.engine_session_id or resume
@@ -1351,7 +1351,7 @@ class RunService:
         # reports dollars only with its result. Recording None there is the
         # honest answer, and _record_turn says why it is not the same as $0.
         if result is not None:
-            run.cost_usd = result.cost_usd
+            run.cost_usd = self._turn_cost(result)
         self._record_turn(run, result)
         self._settle(run)
         self._schedule_return(run)
@@ -1425,6 +1425,34 @@ class RunService:
         task = asyncio.create_task(self._returns.deliver(run, self._return_delays))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    def _rates(self) -> tuple[float, float, float, float]:
+        return (
+            self._settings.price_in_per_1m,
+            self._settings.price_cache_read_per_1m,
+            self._settings.price_cache_write_per_1m,
+            self._settings.price_out_per_1m,
+        )
+
+    def _turn_cost(self, result: EngineResult | None) -> float | None:
+        """This turn's cost, priced here rather than taken from the runtime.
+
+        One seam for three adapters, which is the reason it lives in the service
+        and not in each engine: the Claude CLI reports its own table's estimate
+        for a model it is not billing, codex reports no money at all, and pi
+        priced from a catalogue this gateway's model is absent from. Every one of
+        them reports TOKENS. So when the operator has stated their rates, the
+        cost is arithmetic over two measured things and the same arithmetic on
+        every runtime — including the two where the budget ceiling previously
+        could not bind, because there was no number for it to compare.
+
+        Falls back to whatever the runtime said when no rates are configured,
+        so nothing about an existing deployment changes on upgrade.
+        """
+        if result is None:
+            return None
+        priced_here = price_tokens(result.usage, self._rates())
+        return priced_here if priced_here is not None else result.cost_usd
 
     def _record_turn(self, run: Run, result: EngineResult | None) -> None:
         run.turns.append(
