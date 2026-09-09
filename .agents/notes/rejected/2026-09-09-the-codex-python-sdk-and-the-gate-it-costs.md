@@ -64,11 +64,27 @@ since 2026-05-08, where the app-server-backed desktop stopped running both
 `SessionStart` and `PreToolUse` hooks. Nothing found describing the
 exec-versus-app-server split directly.
 
-**The approval handler is not a substitute.** The SDK exposes one client-side
-decision point, `approval_handler`, answering
-`item/commandExecution/requestApproval`. That fires when the sandbox alone
-cannot decide a call, not before every tool, so it cannot carry a posture
-written in verbs. Its default implementation accepts.
+**The approval handler is not a substitute, and this was measured rather than
+reasoned.** One turn, three commands — a read, a local write, and
+`kubectl delete` — under `Sandbox.read_only` with an approval handler installed
+that logged every call and denied. It was asked **zero times**, including for
+the write the sandbox went on to refuse. It is also not reachable from the async
+client at all: `AsyncCodex.__init__` takes only a config, the handler lives on
+the sync `CodexClient` underneath it, and the default accepts.
+
+That same run is the clearest demonstration of why a sandbox is not a posture.
+The read-only sandbox refused the local write, and `kubectl delete` ran — it
+reached the network and failed only for want of a cluster. `readonly` here means
+"may observe, never change", and the thing it exists to stop is exactly the
+command the sandbox let through.
+
+**Everything else in the SDK works.** Verified end to end: `thread.id` present
+before the turn; a turn completing with `duration_ms` and a typed status;
+`model_context_window` (258,400) arriving beside the token usage with nothing
+asked for it; and a thread resumed from a **completely separate client**, as a
+restart would be, recalling what the first one was told. Four of the five
+obligations, three of them better than the `exec` adapter manages. Only the
+first one fails, and it takes the second with it.
 
 So the SDK buys ergonomics with obligation one. The parking note said an adapter
 that cannot supply the gate is a finding and not an obstacle to work around, and
