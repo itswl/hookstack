@@ -354,3 +354,34 @@ def test_a_single_node_deployment_gets_no_per_node_section():
     for them to be wrong in. With one probe the page is unchanged."""
     page = cost_report.render({"hours": 168, "generated_at": 0.0})
     assert "## The nodes" not in page
+
+
+def test_a_ceiling_that_cannot_bind_is_not_printed_as_headroom() -> None:
+    """Measured on a live codex node: three turns, 93,388 input tokens, and the
+    old line read "$0.00 of $1.00 spent, $1.00 left". codex reports tokens and
+    never money, so the ceiling could not trip and the page said otherwise.
+    """
+    blind = {
+        "enabled": True,
+        "window_hours": 24.0,
+        "budget_usd": 1.0,
+        "spent_usd": 0.0,
+        "remaining_usd": None,
+        "spend_visibility": "blind",
+        "unpriced_turns": 3,
+        "exhausted": False,
+    }
+    page = cost_report.render(cost_report.compute(None, None, blind, None, hours=168, now=NOW))
+    assert "the ceiling cannot bind" in page
+    assert "left" not in page.split("**Budget**")[1].split("\n")[0], "no headroom where none was measured"
+
+    # A floor still prints headroom, and says it is a floor.
+    floor = {**blind, "spent_usd": 0.4, "remaining_usd": 0.6, "spend_visibility": "floor", "unpriced_turns": 1}
+    page = cost_report.render(cost_report.compute(None, None, floor, None, hours=168, now=NOW))
+    assert "$0.6000 left (a floor: some turns went unpriced)" in page
+
+    # And a fully measured window reads exactly as it always did.
+    measured = {**floor, "spend_visibility": "measured", "unpriced_turns": 0}
+    page = cost_report.render(cost_report.compute(None, None, measured, None, hours=168, now=NOW))
+    assert "$0.4000 of $1.00 spent, $0.6000 left" in page
+    assert "floor" not in page.split("**Budget**")[1].split("\n")[0]

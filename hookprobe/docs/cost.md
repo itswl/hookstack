@@ -70,6 +70,21 @@ every multiple after) the result carries a note telling the agent to change
 approach or record what stays unknown and move on. The budget breaker stops
 spending after the fact; this is the nudge before it costs.
 
+**What the ceiling can see.** `GET /v1/budget` reports `spend_visibility` in
+three states, because two of them are not the same answer: `measured` (nothing
+in the window went unpriced, so the spend is the spend), `floor` (some turns
+priced and some not — the breaker binds, on a number that understates), and
+`blind` (nothing priced at all, so the breaker cannot bind). `blind` is every
+window on a runtime that reports tokens and never money: measured on a codex
+node on 2026-09-09, three turns and 93,388 input tokens read as `spent_usd 0.0`
+with `remaining_usd 1.0` and `exhausted false` — each figure honest alone, and
+together a dollar of headroom on a node whose spend nothing can see. So
+`remaining_usd` is now `null` there and `ceiling_binds` is `false`; the console
+chip goes dashed and says `unmeasured`. The fix is deliberately not a price
+table: a breaker acting on an estimated bill is worse than one that admits it
+cannot see, for the same reason the weekly page stopped calling any dollar
+`billed`.
+
 **Per-command deadlines.** `HOOKPROBE_BASH_TIMEOUT_MS` and
 `HOOKPROBE_BASH_MAX_TIMEOUT_MS` become the CLI's `BASH_DEFAULT_TIMEOUT_MS` /
 `BASH_MAX_TIMEOUT_MS`, so a `curl` at an unreachable host or a `kubectl` at a

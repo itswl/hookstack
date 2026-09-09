@@ -512,7 +512,16 @@ def render(r: dict[str, Any]) -> str:
     b = r.get("budget")
     if isinstance(b, dict) and b.get("enabled"):
         out.append(
-            f"- **Budget** ({b.get('window_hours')}h window): {_money(b.get('spent_usd'))} of {_money(b.get('budget_usd'))} spent, {_money(b.get('remaining_usd'))} left"
+            f"- **Budget** ({b.get('window_hours')}h window): {_money(b.get('spent_usd'))} of {_money(b.get('budget_usd'))} spent, "
+            + (
+                # A ceiling on a runtime that reports no money cannot trip, and
+                # the old line said "$1.00 left" on a node whose spend nothing
+                # could see. Headroom is only printed where it was measured.
+                "**and the ceiling cannot bind** — every turn in this window was unpriced, so the spend above is not a floor, it is a blank"
+                if b.get("spend_visibility") == "blind"
+                else f"{_money(b.get('remaining_usd'))} left"
+                + (" (a floor: some turns went unpriced)" if b.get("spend_visibility") == "floor" else "")
+            )
             + (
                 f" · cache hit {float(b.get('cache_hit_ratio') or 0) * 100:.0f}%"
                 if b.get("cache_hit_ratio") is not None

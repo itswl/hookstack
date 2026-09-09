@@ -84,6 +84,7 @@ header h1 span{color:var(--dim);font-weight:400}
 #stamp{font-size:11px;color:var(--dim);font-family:var(--mono);white-space:nowrap}
 #budget{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:10px;padding:3px 8px;white-space:nowrap}
 #budget.hot{color:var(--red);border-color:var(--red)}
+#budget.unmeasured{border-style:dashed;border-color:var(--dim)}
 button{background:#21262d;border:1px solid #30363d;color:var(--text);border-radius:6px;padding:5px 12px;cursor:pointer;font-size:13px}
 button:hover{border-color:var(--accent)}
 button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
@@ -1997,12 +1998,23 @@ async function refreshBudget() {
     const cache = b.context_reuse === null || b.context_reuse === undefined
       ? ""
       : ` · reuse ${Math.round(b.context_reuse * 100)}%`;
-    el.textContent = (b.enabled ? `${spent} of $${Number(b.budget_usd).toFixed(2)}` : spent) + cache;
+    // A ceiling the breaker cannot see is worse than no ceiling, because the
+    // chip reads as reassurance: a codex node showed "$0.00 of $1.00" beside
+    // 93,388 tokens actually spent. Say the word instead of the number.
+    const blind = b.spend_visibility === "blind";
+    el.textContent =
+      (b.enabled ? `${spent} of $${Number(b.budget_usd).toFixed(2)}${blind ? " · unmeasured" : ""}` : spent) + cache;
     const made = `read ${fmtTok(b.cache_read_tokens || 0)} · wrote ${fmtTok(b.cache_written_tokens || 0)} · fresh ${fmtTok(b.input_tokens || 0)}`;
     el.title = (b.enabled
       ? "spend in the budget window (the CLI's estimate at its own price table), the ceiling the event door refuses at, and how much of the context was read back from cache rather than paid for — "
       : "spend in the window (the CLI's estimate at its own price table) · no ceiling set (HOOKPROBE_BUDGET_USD) · reuse = context read back from cache rather than paid for — ") + made;
+    if (blind) {
+      el.title = `this runtime reports tokens and never money, so the $${Number(b.budget_usd).toFixed(2)} ceiling cannot trip: ${b.unpriced_turns} turn(s) in this window went unpriced and the spend beside it is a blank rather than a floor — ` + made;
+    }
     el.classList.toggle("hot", !!b.exhausted);
+    // Not `hot`, which means "stop": the window is not over budget, it is
+    // unmeasured. A separate state, so the two never get read as one.
+    el.classList.toggle("unmeasured", blind);
     // The other half of the bill. Printed as the service worded it rather than
     // reassembled here: the sentence gets quoted at people deciding whether to
     // pay for this, and one written in two places eventually says two things.

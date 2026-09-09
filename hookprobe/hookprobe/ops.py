@@ -44,6 +44,19 @@ from hookprobe.service import RunService
 from hookprobe.settings import Settings
 
 
+def _spend_visibility(spend: float, unpriced: int) -> str:
+    """How much of this window's spend the ceiling can actually see.
+
+    Split out because the caller had two facts and no name for their
+    combination, and the combination is the one an operator acts on. A zero
+    spend beside a non-zero unpriced count is not a quiet window; it is a window
+    nobody counted.
+    """
+    if unpriced <= 0:
+        return "measured"
+    return "blind" if spend <= 0 else "floor"
+
+
 def _worth_line(investigations: int, spent: float, useful: int, useless: int, inferred: int = 0) -> str:
     """The one sentence the adoption question actually asks for.
 
@@ -201,6 +214,20 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             # and the one that bills nothing. Non-zero means the figure above is
             # a floor.
             "unpriced_turns": service.window_unpriced(),
+            # And what that floor is worth as a ceiling input. Three states,
+            # because two of them are not the same answer:
+            #
+            #   measured  nothing unpriced; the spend above is the spend
+            #   floor     some priced, some not; the breaker binds, but late
+            #   blind     nothing priced at all; the breaker cannot bind
+            #
+            # `blind` is not hypothetical and it is not rare — it is every
+            # window on a codex node, which reports tokens and never money.
+            # Measured on 2026-09-09: three turns, 93,388 input tokens,
+            # `spent_usd 0.0`, `remaining_usd 1.0`, `exhausted false`. Each
+            # figure honest alone, and together they told an operator they had
+            # a dollar of headroom left on a node whose spend nothing can see.
+            "spend_visibility": _spend_visibility(spend, service.window_unpriced()),
             # Was any of it worth it. Only a person can say, so these stay 0
             # until somebody rules on a report — an unruled investigation is
             # unrated, never "not useful".
@@ -221,8 +248,18 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             "enabled": True,
             "budget_usd": limit,
             **window,
-            "remaining_usd": round(max(0.0, limit - spent), 6),
+            # None, not a number, when nothing in the window was priced: a
+            # subtraction from an unmeasured spend is not headroom, and this is
+            # the field a reader takes on faith. `exhausted` keeps reporting
+            # what the breaker actually decided — the door's behaviour is not
+            # changed by knowing this, only described.
+            "remaining_usd": (None if window["spend_visibility"] == "blind" else round(max(0.0, limit - spent), 6)),
             "exhausted": spent >= limit,
+            # Whether the ceiling above can do anything. A budget set on a
+            # runtime that cannot report money is decorative, and an operator
+            # who set one deserves to be told that here rather than to infer it
+            # from two other fields.
+            "ceiling_binds": window["spend_visibility"] != "blind",
         }
 
     @app.get("/metrics")

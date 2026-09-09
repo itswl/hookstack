@@ -555,6 +555,56 @@ def test_event_door_refuses_when_budget_exhausted(tmp_path) -> None:
         assert budget["remaining_usd"] == 0.0
 
 
+def test_a_ceiling_the_breaker_cannot_see_says_so(tmp_path) -> None:
+    """Measured on a live codex node: three turns, 93,388 input tokens,
+    `spent_usd 0.0`, `remaining_usd 1.0`, `exhausted false`.
+
+    Every figure honest alone, and together they told an operator they had a
+    dollar of headroom on a node whose spend nothing can see — codex reports
+    tokens and never money, so `window_spend()` stays 0.0 for any real spend and
+    the breaker cannot trip. The fix is NOT to estimate the money; it is to stop
+    printing headroom that was never measured.
+    """
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, None, time.time(), "old:unpriced")
+    with _budget_client(tmp_path, engine, store, budget_usd=1.0) as client:
+        budget = client.get("/v1/budget", headers=AUTH).json()
+        assert budget["unpriced_turns"] == 1
+        assert budget["spent_usd"] == 0.0
+        assert budget["spend_visibility"] == "blind"
+        assert budget["remaining_usd"] is None, "a subtraction from an unmeasured spend is not headroom"
+        assert budget["ceiling_binds"] is False
+        # The door's behaviour is described, not changed: nothing is known to be
+        # exhausted, so the breaker stays shut and the run proceeds.
+        assert budget["exhausted"] is False
+        assert client.post("/hooks/event", json=EVENT).json()["status"] != "refused"
+
+
+def test_a_partly_priced_window_is_a_floor_not_a_blank(tmp_path) -> None:
+    """The third state, and the reason there are three: one unpriced turn beside
+    real spend still lets the ceiling bind, just late."""
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, 0.4, time.time(), "old:priced")
+    _seed_spend(store, None, time.time(), "old:unpriced")
+    with _budget_client(tmp_path, engine, store, budget_usd=1.0) as client:
+        budget = client.get("/v1/budget", headers=AUTH).json()
+        assert budget["spend_visibility"] == "floor"
+        assert budget["remaining_usd"] == 0.6, "the ceiling still binds, on a spend that understates"
+        assert budget["ceiling_binds"] is True
+
+
+def test_a_fully_priced_window_says_nothing_is_missing(tmp_path) -> None:
+    engine = FakeEngine()
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, 0.4, time.time(), "old:priced")
+    with _budget_client(tmp_path, engine, store, budget_usd=1.0) as client:
+        budget = client.get("/v1/budget", headers=AUTH).json()
+        assert budget["spend_visibility"] == "measured"
+        assert budget["remaining_usd"] == 0.6 and budget["ceiling_binds"] is True
+
+
 def test_event_door_proceeds_under_budget(tmp_path) -> None:
     engine = FakeEngine()
     store = RunStore(tmp_path / "results")
