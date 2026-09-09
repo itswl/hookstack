@@ -23,7 +23,13 @@ from typing import Any, Literal, cast
 
 from hookprobe import inputs, telemetry
 from hookprobe.files import system_prompt_path
-from hookprobe.gate import _WRITE_PATH_KEYS, SECRETS_WITHHELD_FROM_AGENT, mcp_deny_reason, shell_write_target
+from hookprobe.gate import (
+    _WRITE_PATH_KEYS,
+    SECRETS_WITHHELD_FROM_AGENT,
+    mcp_deny_reason,
+    shell_write_target,
+    trace_environment,
+)
 from hookprobe.gate import WRITE_TOOLS as _WRITE_TOOLS
 from hookprobe.gate import append_audit as _append_audit
 from hookprobe.gate import tool_detail as _tool_detail
@@ -802,6 +808,11 @@ class ClaudeAgentEngine:
             env["OTEL_RESOURCE_ATTRIBUTES"] = _resource_attributes(
                 os.environ.get("OTEL_RESOURCE_ATTRIBUTES", ""), session_key
             )
+        # And the same identity in the one format a tool INSIDE a turn
+        # recognises. gate.trace_environment is the shared half: the two
+        # spawning adapters get it from gate.environment, this one from here,
+        # and all three derive it the same way or the derivation is worthless.
+        env.update(trace_environment(session_key))
         return env
 
     def describe_inputs(self, *, resume: str | None = None) -> dict[str, Any]:

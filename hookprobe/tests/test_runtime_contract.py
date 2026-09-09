@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import subprocess
 import sys
 import time
@@ -578,6 +579,47 @@ def test_the_withheld_list_is_one_list() -> None:
     from hookprobe.engine import ClaudeAgentEngine
 
     assert ClaudeAgentEngine._SECRETS_WITHHELD_FROM_AGENT is gate.SECRETS_WITHHELD_FROM_AGENT
+
+
+# ------------------ the run's identity, in the format a foreign tool reads
+#
+# Not one of the five obligations, and it is here anyway for the reason the
+# withheld list is: it is built in two places (gate.environment for the spawning
+# adapters, _subprocess_env for the in-process one) and a derivation that
+# differs between them is worse than none — two nodes working the same alert
+# would file their commands under two different traces and nothing would say so.
+
+_TRACEPARENT = re.compile(r"^00-(?P<trace>[0-9a-f]{32})-(?P<span>[0-9a-f]{16})-0[01]$")
+
+
+def test_every_adapter_hands_down_the_same_trace_context(tmp_path: Path) -> None:
+    """One session, one trace id, whichever runtime the node was built with."""
+    from hookprobe.engine import ClaudeAgentEngine
+
+    key = "probe:conformance:1"
+    spawned = gate.environment(make_settings(tmp_path, runtime="codex"), key, package_root=str(tmp_path))
+    in_process = ClaudeAgentEngine(make_settings(tmp_path, workdir=tmp_path))._subprocess_env(key)
+    assert spawned["TRACEPARENT"] == in_process["TRACEPARENT"]
+    assert _TRACEPARENT.match(spawned["TRACEPARENT"]), spawned["TRACEPARENT"]
+
+
+def test_the_trace_id_is_derived_from_the_session_and_nothing_else() -> None:
+    """Derived, not propagated: any node that knows which investigation this is
+    computes the same id, with nothing to pass along and nothing to lose."""
+    first = gate.trace_environment("probe:watch:111")["TRACEPARENT"]
+    assert gate.trace_environment("probe:watch:111")["TRACEPARENT"] == first
+    other = gate.trace_environment("probe:watch:112")["TRACEPARENT"]
+    assert other != first
+    # Different digests, not one sliced twice.
+    parsed = _TRACEPARENT.match(first)
+    assert parsed is not None
+    assert not parsed["trace"].startswith(parsed["span"])
+
+
+def test_a_run_with_no_session_gets_no_trace_context(tmp_path: Path) -> None:
+    """An empty key would derive one fixed id for every run that ever had none,
+    which is worse than the orphan it was meant to replace."""
+    assert gate.trace_environment("") == {}
 
 
 # ------------------ the incumbent, held to the same five as the newcomers

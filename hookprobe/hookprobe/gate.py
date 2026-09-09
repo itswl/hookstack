@@ -25,6 +25,7 @@ agent runs.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -423,6 +424,49 @@ SECRETS_WITHHELD_FROM_AGENT = (
 )
 
 
+# W3C trace context, version 00, sampled. Emitted as `TRACEPARENT` because that
+# is the name the tooling reads — otel-cli, the OpenTelemetry shell wrappers and
+# several language SDKs pick a parent up from it — even though W3C itself
+# specifies a HEADER and says nothing about environments.
+_TRACE_HEADER_VERSION = "00"
+_TRACE_SAMPLED = "01"
+
+
+def trace_environment(session_key: str) -> dict[str, str]:
+    """A trace id for whatever the agent's shell runs, DERIVED rather than propagated.
+
+    The chain hookrelay -> hookjudge -> hookprobe is already correlated, by the
+    pipe's correlation id and by the session key that carries its event id. What
+    it has never had is that identity in the ONE format an unrelated tool
+    recognises, so a `kubectl` or a script inside a turn that speaks
+    OpenTelemetry starts a brand new trace with no parent and lands in a
+    collector as an orphan nobody can join back to the alert.
+
+    Derived, and that word is the whole design. There is no span to propagate:
+    the runtime emits none (measured, CLI 2.1.229 — `OTEL_TRACES_EXPORTER` is
+    accepted, no spans arrive and the events carry no traceId; hookprobe's own
+    waterfall is reconstructed from event timestamps, not from spans). So the id
+    is a pure function of the session key instead, which makes it computable by
+    any node that knows which investigation this is, with nothing to pass along
+    and nothing to lose on the way.
+
+    WHAT THIS DOES NOT DO, and it matters before anybody builds on it: the
+    parent span named here was never emitted by anything. A collector that
+    receives a child of it shows a trace whose root is missing. That is accepted
+    — the alternative is this service generating spans, which is a tracing
+    backend's worth of work for a picture its own /telemetry page already draws
+    — and it is the reason nothing is REQUIRED to read this. A tool that ignores
+    the variable behaves exactly as it did before.
+    """
+    if not session_key:
+        return {}
+    # Two different digests, not one sliced twice: a trace id whose first half
+    # equals the span id looks like a bug to everyone who reads it later.
+    trace_id = hashlib.sha256(f"hookstack/trace/{session_key}".encode()).hexdigest()[:32]
+    span_id = hashlib.sha256(f"hookstack/span/{session_key}".encode()).hexdigest()[:16]
+    return {"TRACEPARENT": f"{_TRACE_HEADER_VERSION}-{trace_id}-{span_id}-{_TRACE_SAMPLED}"}
+
+
 def environment(settings: Any, session_key: str, *, package_root: str) -> dict[str, str]:
     """The environment a spawned runtime passes down to this gate.
 
@@ -449,6 +493,7 @@ def environment(settings: Any, session_key: str, *, package_root: str) -> dict[s
     env["HOOKPROBE_GATE_AUDIT"] = str(settings.workdir / "audit")
     env["HOOKPROBE_GATE_WORKDIR"] = str(settings.workdir)
     env["HOOKPROBE_GATE_HOME"] = str(Path.home())
+    env.update(trace_environment(session_key))
     return env
 
 

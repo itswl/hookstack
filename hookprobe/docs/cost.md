@@ -316,3 +316,31 @@ Two things to know before you build on it, both measured rather than assumed
   Anthropic dialect it is an over-estimate — the run above reports $0.129 for a
   DeepSeek call. The event carries the real model name and the raw token counts,
   so re-price from those and treat the field as a relative signal.
+
+### The trace id a tool inside a turn can pick up
+
+Because there are no spans, a `kubectl` or a script that runs *inside* a turn and
+happens to speak OpenTelemetry starts a brand-new trace with no parent, and lands
+in a collector as an orphan nobody can join back to the alert. So every runtime
+this service drives gets a `TRACEPARENT` in the environment it hands the agent —
+one W3C trace context, version 00, sampled.
+
+It is **derived, not propagated**, and that word is the design. There is nothing
+to propagate: the id is a pure function of the session key
+(`hookprobe/gate.py`, `trace_environment`), which makes it computable by any node
+that knows which investigation this is, with nothing to pass along and nothing to
+lose on the way. The same value reaches all three adapters — the two that spawn
+their gate get it from `gate.environment`, the in-process one from
+`_subprocess_env` — because a derivation that differs between them would file two
+nodes' work on one alert under two traces and say nothing about it.
+
+`TRACEPARENT` rather than a header because that is the name the tooling reads
+(otel-cli, the OpenTelemetry shell wrappers, several SDKs); W3C itself specifies
+a header and says nothing about environments.
+
+**What this does not do**, before anybody builds on it: the parent span it names
+was never emitted by anything. A collector that receives a child of it shows a
+trace whose root is missing. That is accepted — the alternative is this service
+generating spans, which is a tracing backend's worth of work for a picture
+`/telemetry` already draws from event timestamps — and it is why nothing is
+required to read the variable. A tool that ignores it behaves exactly as before.
