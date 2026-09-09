@@ -8,31 +8,38 @@ actually is: the graph is config, and two useful graphs look nothing alike.
 |---|---|---|
 | Carries | alerts from a monitoring platform | work signals from chat and a ticket tracker |
 | Front door | one signed door the platform posts to | a timer, and the watcher's own findings |
-| Brains | three judges (one live, two comparison arms) | none — the watcher already judged |
+| Brains | one judge (two comparison arms ran until 2026-09-09) | none — the watcher already judged |
 | Investigator | one, escalated by level | one, escalated by level AND kind |
 | Destinations | one chat, cards with buttons | two chats, no buttons |
-| Services | 4 containers + a bridge | 4 containers |
+| Services | 3 containers + a bridge | 4 containers |
 
 Neither needed a line of Python that the other did not.
 
 ## The alert shape
 
 ```
-platform ──► /hook/ww ──► to-judge ──┐
-                        to-judge-b ──┤  three verdicts, independently
-                        to-judge-c ──┘
-                                     │
-              ┌──── /hook/judge-notify ◄──┘   (only the live judge answers back)
-              │
-              ├──► to-me      ── card, with buttons
-              └──► to-probe   ──► investigator ──► /hook/probe-notify ──► to-me
+platform ──► /hook/ww ──► to-judge ──► /hook/judge-notify ──┐
+                                                            │
+                                          ├──► to-me      ── card, with buttons
+                                          └──► to-probe   ──► investigator
+                                                    └──► /hook/probe-notify ──► to-me
 ```
 
-Two comparison arms exist to answer a question no single judge can: they judge
-the same traffic and disagree with each other in a ledger, which is labelled
-data at production rates for free. They have no return door, deliberately — an
-arm that answered back would be a second copy of the chain rather than a second
-opinion.
+**Two comparison arms ran here until 2026-09-09** and the fan-out that fed them
+is still the reason the route is shaped this way, so it is worth saying what
+they were for and what ended them. They judged the same traffic and disagreed in
+a ledger, which is labelled data at production rates. They had no return door,
+deliberately — an arm that answered back would be a second copy of the chain
+rather than a second opinion.
+
+What ended them was reading their own numbers. `hookjudge-b` ran the same model
+as the live judge and differed only in its price constants, so it was still
+comparing a model with itself. `hookjudge-c` was the genuine cross-vendor arm
+and did think differently — it upgraded severity where the live judge
+downgrades — but it cost 25.7x the live judge for the same calls at 2.7x the
+latency, and nothing read its verdicts. A second opinion nobody reads is a
+subscription, not an instrument. Their ledgers are kept; restoring an arm means
+a service block, a channel, and one name in the fan-out.
 
 The `quiet-wake-no` filter stage drops a card when the judge said nobody needs
 to act now. Measured the week it was added: 440 interruptions, 95% repeats.
