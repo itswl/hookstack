@@ -8,7 +8,7 @@ the deploy, it opens the door, quietly, at boot. deploy.sh runs this before the
 build, against the real .env, so the production baseline the compose comments
 describe ("set BOTH in production") is enforced rather than remembered.
 
-Two rules, both read from the files rather than from a list kept beside them:
+Three rules, all read from the files rather than from a list kept beside them:
 
   1. Every `secret:` under `sources:` in the deployed pipe config is a ${NAME}
      reference AND NAME is non-empty in .env. A literal "" on a door is an
@@ -16,6 +16,29 @@ Two rules, both read from the files rather than from a list kept beside them:
      stopped being allowed the day that network was shared with other stacks.
   2. Every ${NAME} or ${NAME:-...} in the deployed compose files whose name ends
      in _SECRET or _TOKEN is non-empty in .env.
+  3. A variable that decides WHICH MODEL answers — any name ending `_MODEL` or
+     `_BASE_URL` — is set in .env whenever the compose supplies a NON-EMPTY
+     default for it. Rules 1 and 2 catch a hop that would come up open; this one
+     catches a hop that would come up POINTED SOMEWHERE ELSE, which is quieter.
+
+     It exists because that happened, twice over, on 2026-09-09. The shadow
+     compose defaulted its brain to `deepseek-chat` at `api.deepseek.com` — a
+     provider this deployment had left — and the day the two comparison arms
+     were retired, that fallback stopped belonging to an arm and became the ONLY
+     brain's. A variable dropped from .env would have put every verdict on a
+     vendor nobody chose, and `judge.py` does not error on a bad AI config: it
+     falls through to its rule route and keeps answering, so the symptom is
+     suspiciously rule-shaped verdicts rather than a failure. The compose was
+     fixed to `${VAR:?}` the same day; this rule is the mechanism, and it still
+     has a live target in the investigator's production compose
+     (`HOOKPROBE_MODEL` defaults to a Claude id on a stack whose gateway wants
+     its own).
+
+     A non-empty default is the whole condition. `${VAR:-}` substitutes nothing
+     and `${VAR:?}` refuses to start, so neither can quietly answer as somebody
+     else; and the defaults themselves stay where they are, because they are
+     what makes the quickstart runnable. What this refuses is inheriting one on
+     a production host.
 
 DEPLOY_ALLOW_EMPTY=NAME,NAME lists variables that may be empty on this host,
 each a decision written where the deploy reads it. Exit 0 when clean, 1 with
@@ -32,6 +55,16 @@ from pathlib import Path
 ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 COMPOSE_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*|:\?[^}]*)?\}")
 SENSITIVE = re.compile(r"_(SECRET|TOKEN)$")
+# Rule 3's two halves: which names decide which model answers, and the defaults
+# they can silently inherit. `:-` only — a `:?` default cannot substitute
+# anything, because compose refuses to start instead.
+#
+# Deliberately not `_AI_MODEL`: that was the first spelling of this pattern and
+# it matched hookjudge's knobs and missed `HOOKPROBE_MODEL`, which is the same
+# hazard on the investigator and the only one still live. A rule shaped around
+# the one service whose incident prompted it is a rule that catches that service.
+PROVIDER = re.compile(r"_(MODEL|BASE_URL)$")
+COMPOSE_DEFAULT = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -117,6 +150,18 @@ def check_compose(path: Path, env: dict[str, str], allow: set[str]) -> list[str]
     for var in sorted(set(COMPOSE_REF.findall(text))):
         if SENSITIVE.search(var) and var not in allow and not env.get(var):
             problems.append(f"{path.name}: ${{{var}}} is empty or missing in .env")
+    for var, default in sorted(set(COMPOSE_DEFAULT.findall(text))):
+        if not PROVIDER.search(var) or var in allow or env.get(var):
+            continue
+        fallback = default.strip()
+        # A nested default (`${A:-${B:-c}}`) resolves to another variable, not to
+        # a vendor name, and an empty one substitutes nothing.
+        if not fallback or fallback.startswith("${"):
+            continue
+        problems.append(
+            f"{path.name}: ${{{var}}} is missing from .env, so this host would run the compose "
+            f"default {fallback!r} — a vendor chosen by a file rather than by this deployment"
+        )
     return problems
 
 
@@ -143,9 +188,8 @@ def main(argv: list[str]) -> int:
         )
         return 1
     print(
-        f"deploy preflight: every door signed and every secret set ({len(env)} variables in .env"
-        + (f", {len(allow)} allowed empty" if allow else "")
-        + ")"
+        f"deploy preflight: every door signed, every secret set and every brain pointed by .env "
+        f"({len(env)} variables in .env" + (f", {len(allow)} allowed empty" if allow else "") + ")"
     )
     return 0
 
