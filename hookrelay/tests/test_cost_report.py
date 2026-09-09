@@ -257,3 +257,81 @@ def test_a_quiet_week_reads_as_a_sentence_not_a_row_of_dashes():
     page = cost_report.render({"hours": 168, "generated_at": 0.0, "work": busy})
     assert "2 interrupted by a restart, 50.0% of those finished anyway" in page
     assert "1 provider blip retried" in page, "one blip is not one blips"
+
+
+def test_an_unreachable_node_is_printed_rather_than_omitted():
+    """The one interesting decision in a cross-node overview.
+
+    A node that could not be read has an UNKNOWN board. An overview that
+    quietly drops it reports "nothing is blocked" on evidence it does not have,
+    which is the same failure as the console that was up and healthy while
+    twelve pieces of work sat abandoned on it for three weeks — only faster,
+    and with more confidence behind it.
+    """
+    survey = cost_report.survey_nodes(
+        [
+            ("http://a:8088", {"name": "planner", "policy": {"bash_guard": "readonly"}}, {"counts": {"done": 3}}),
+            ("http://b:8089", None, None),
+        ]
+    )
+    assert survey["asked"] == 2 and survey["boards_read"] == 1 and survey["unreachable"] == 1
+
+    page = cost_report.render({"hours": 168, "generated_at": 0.0, "nodes": survey})
+    assert "http://b:8089" in page, "a node that could not be read still gets a line"
+    assert "could not be read" in page
+    assert "unknown rather than zero" in page
+    assert "1 node could not be read" in page, "one node, not '1 node(s)'"
+
+
+def test_a_node_whose_board_timed_out_is_not_a_node_with_no_work():
+    """Two doors, tracked apart: identity answering proves nothing about the
+    board, and a row showing an empty board would be an invention."""
+    survey = cost_report.survey_nodes([("http://a:8088", {"name": "watcher"}, None)])
+    assert survey["unreachable"] == 0, "the node answered; it is not unreachable"
+    assert survey["boards_unread"] == 1 and survey["boards_read"] == 0
+    page = cost_report.render({"hours": 168, "generated_at": 0.0, "nodes": survey})
+    assert "identity answered" in page and "board did not" in page
+    assert "Its work is unknown." in page
+
+
+def test_the_per_node_summary_names_the_one_that_needs_a_person():
+    """The point of the section: not "I can see every node" but "the node that
+    needs me finds me", on a page a clock already delivers."""
+    survey = cost_report.survey_nodes(
+        [
+            (
+                "http://a:8088",
+                {"name": "planner", "runtime": {"adapter": "claude"}, "policy": {"bash_guard": "readonly"}},
+                {"counts": {"done": 18, "verified": 0, "executing": 0, "blocked": 0, "abandoned": 0}},
+            ),
+            (
+                "http://b:8089",
+                {"name": "watcher", "runtime": {"adapter": "codex"}, "policy": {"bash_guard": "readonly"}},
+                {"counts": {"done": 64, "verified": 1, "executing": 1, "blocked": 2, "abandoned": 1}},
+            ),
+        ]
+    )
+    assert survey["blocked"] == 2 and survey["abandoned"] == 1
+
+    page = cost_report.render({"hours": 168, "generated_at": 0.0, "nodes": survey})
+    assert "**2 waiting on a person · 1 abandoned · 2 of 2 boards read.**" in page
+    assert "could not be read" not in page, "nothing was missed, so nothing claims to have been"
+    # The node with nothing outstanding says so in words; the one with work
+    # outstanding is the only place bold survives, so the eye finds it.
+    quiet_row = (
+        "- **planner** · claude/readonly — 18 done, 0 verified · 0 in flight · nothing waiting · nothing abandoned"
+    )
+    assert quiet_row in page
+    assert "**2 waiting on a person**" in page and "**1 abandoned**" in page
+    # The posture is on the row because exactly one node on a real deployment is
+    # allowed to write; the role sentence is not, because truncating it cuts it
+    # mid-clause and reads worse than saying nothing.
+    assert "codex/readonly" in page
+    assert "failure rate" not in page, "blocked and abandoned already carry it; two figures can disagree"
+
+
+def test_a_single_node_deployment_gets_no_per_node_section():
+    """A page repeating six numbers that already have a home is a second place
+    for them to be wrong in. With one probe the page is unchanged."""
+    page = cost_report.render({"hours": 168, "generated_at": 0.0})
+    assert "## The nodes" not in page

@@ -22,6 +22,13 @@ Two kinds of number are kept apart and labelled:
 
 A service that is not given, or cannot be read, gets a section that says so
 rather than a zero that looks like a fact. Exit 0 with the page on stdout.
+
+`--probe` is repeatable (and takes a comma-separated list, so the crontab's
+`HOOKPROBE_URL` can carry several). The first node drives every section; give
+more and the page grows a per-node summary naming the one that needs a person.
+That is the deliberately small form of the PRD's cross-node Overview: a signal
+on a clock rather than a page nobody opens, with the peer URLs in the
+operator's shell rather than distributed to every node.
 """
 
 from __future__ import annotations
@@ -134,6 +141,7 @@ def compute(
     *,
     work: dict | None = None,
     proposals: list | None = None,
+    nodes: dict | None = None,
     hours: float,
     now: float,
 ) -> dict[str, Any]:
@@ -141,6 +149,8 @@ def compute(
     report: dict[str, Any] = {"hours": hours, "generated_at": now}
     if work is not None or proposals is not None:
         report["work"] = work_metrics(work, proposals, hours=hours, now=now)
+    if nodes is not None:
+        report["nodes"] = nodes
 
     if isinstance(judge, dict) and isinstance(judge.get("summary"), dict):
         s = judge["summary"]
@@ -276,6 +286,66 @@ def compare_arms(live_rows: list | None, shadows: list[tuple[str, list | None]])
     return out
 
 
+def survey_nodes(rows: list[tuple[str, dict | None, dict | None]]) -> dict[str, Any]:
+    """One line per investigator, for the deployments that run several.
+
+    A cross-node overview was parked twice as a PAGE and it was the right call
+    both times: the pipe would have to understand a field it only carries, and a
+    page nobody opens is worth nothing on a deployment nobody watches. What was
+    wanted was never the view — it was the signal. Not "I can see every node"
+    but "the one node that needs me finds me", and the delivery mechanism for
+    that already exists: this page is rendered by a clock and posted through a
+    door of the pipe like everything else.
+
+    So the fan-out lives here, in a script the operator runs, holding the peer
+    URLs in the operator's own shell. Not probe-to-probe peering, which spends
+    N-squared credentials to reach a place one script already stands in.
+
+    **An unreachable node is printed, never omitted.** This is the whole
+    interesting part of the feature. A node that could not be read has an
+    unknown board, and an overview that quietly drops it reports "nothing is
+    blocked" on evidence it does not have — which is the same failure as the
+    board that was up and healthy while twelve pieces of work sat abandoned on
+    it for three weeks, only faster and with more confidence. The two doors are
+    tracked apart for the same reason: a node whose identity answered and whose
+    board timed out is not a node with an empty board.
+    """
+    nodes: list[dict[str, Any]] = []
+    for url, agent, work in rows:
+        counts = work.get("counts") if isinstance(work, dict) else None
+        counts = counts if isinstance(counts, dict) else None
+        if not isinstance(agent, dict) and counts is None:
+            nodes.append({"url": url, "unreachable": True})
+            continue
+        runtime = agent.get("runtime") if isinstance(agent, dict) else None
+        policy = agent.get("policy") if isinstance(agent, dict) else None
+        nodes.append(
+            {
+                "url": url,
+                # Falls back to the URL rather than to "hookprobe": every node
+                # answered to that name before /v1/agent existed, and a report
+                # naming three of them identically is the problem this solves.
+                "name": (agent.get("name") if isinstance(agent, dict) else "") or url,
+                "role": (agent.get("role") if isinstance(agent, dict) else "") or "",
+                "runtime": (runtime or {}).get("adapter") or "",
+                "guard": (policy or {}).get("bash_guard") or "",
+                "counts": counts,
+                "identity_read": isinstance(agent, dict),
+                "board_read": counts is not None,
+            }
+        )
+    read = [n for n in nodes if n.get("counts")]
+    return {
+        "nodes": nodes,
+        "asked": len(nodes),
+        "boards_read": len(read),
+        "unreachable": sum(1 for n in nodes if n.get("unreachable")),
+        "boards_unread": sum(1 for n in nodes if not n.get("unreachable") and not n.get("board_read")),
+        "blocked": sum(int(n["counts"].get("blocked") or 0) for n in read),
+        "abandoned": sum(int(n["counts"].get("abandoned") or 0) for n in read),
+    }
+
+
 def render(r: dict[str, Any]) -> str:
     days = r["hours"] / 24
     out = [
@@ -326,6 +396,60 @@ def render(r: dict[str, Any]) -> str:
                 ),
                 "",
             ]
+
+    n = r.get("nodes")
+    if n is not None:
+        out += ["## The nodes", ""]
+        lead = (
+            f"**{n['blocked']} waiting on a person · {n['abandoned']} abandoned · "
+            f"{n['boards_read']} of {n['asked']} boards read.**"
+        )
+        missed = n["unreachable"] + n["boards_unread"]
+        if missed:
+            lead += (
+                f" {missed} node{'' if missed == 1 else 's'} could not be read, so that work is "
+                "**unknown rather than zero**."
+            )
+        out += [lead, ""]
+        for node in n["nodes"]:
+            if node.get("unreachable"):
+                out.append(f"- `{node['url']}` — **could not be read**. Not an idle node; an unknown one.")
+                continue
+            if not node.get("board_read"):
+                out.append(
+                    f"- **{node['name']}** · `{node['url']}` — identity answered, "
+                    "**board did not**. Its work is unknown."
+                )
+                continue
+            c = node["counts"]
+            # The name and the posture, not the role. A role is a sentence
+            # written for one node's own console ("turns a work signal into a
+            # plan a person can approve; hands …") and truncating it to fit a
+            # row cuts it mid-clause, which reads as a worse version of saying
+            # nothing. The names here are already self-describing; the posture
+            # is not derivable from one, and on this deployment exactly one node
+            # is allowed to write. It stays in --json for anything that wants it.
+            head = f"- **{node['name']}**"
+            badge = "/".join(part for part in (node["runtime"], node["guard"]) if part)
+            if badge:
+                head += f" · {badge}"
+            # No failure rate on this row on purpose: it is
+            # (needs_human + abandoned) / items, so blocked and abandoned below
+            # already carry it, and two figures that can contradict each other
+            # are worse than one. The board and --json still report it.
+            facts = [
+                f"{c.get('done') or 0} done, {c.get('verified') or 0} verified",
+                f"{c.get('executing') or 0} in flight",
+            ]
+            # Bolded only when non-zero: on a page delivered weekly into a chat,
+            # the eye has to find the node that needs somebody without reading
+            # every figure on every row.
+            blocked = int(c.get("blocked") or 0)
+            abandoned = int(c.get("abandoned") or 0)
+            facts.append(f"**{blocked} waiting on a person**" if blocked else "nothing waiting")
+            facts.append(f"**{abandoned} abandoned**" if abandoned else "nothing abandoned")
+            out.append(head + " — " + " · ".join(facts))
+        out.append("")
 
     j = r.get("judge")
     out += ["## The judge", ""]
@@ -437,7 +561,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--relay", default=os.environ.get("HOOKRELAY_URL", ""))
     ap.add_argument("--judge", default=os.environ.get("HOOKJUDGE_URL", ""))
-    ap.add_argument("--probe", default=os.environ.get("HOOKPROBE_URL", ""))
+    ap.add_argument(
+        "--probe",
+        action="append",
+        default=[],
+        help=(
+            "an investigator's URL; repeatable, and a comma-separated list is accepted so the "
+            "crontab can pass HOOKPROBE_URL. The FIRST is the deployment's primary and drives "
+            "every section below; give more than one and the page grows a per-node summary."
+        ),
+    )
     ap.add_argument(
         "--shadow-judge",
         action="append",
@@ -448,6 +581,15 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
     now = time.time()
+    # One flag, three ways to spell a list, because the caller that matters most
+    # is a crontab line that already exports HOOKPROBE_URL.
+    given = list(args.probe) or [os.environ.get("HOOKPROBE_URL", "")]
+    probes = [part.strip() for item in given for part in str(item).split(",") if part.strip()]
+    # The first node stays the primary and every existing section reads it alone,
+    # so the page a one-probe deployment gets is unchanged, character for
+    # character. A second copy of the same six numbers under a new heading is
+    # exactly the "second place to be wrong" this report already refuses.
+    primary = probes[0] if probes else ""
     judge = (
         _get(
             f"{args.judge.rstrip('/')}/status?window_hours={int(args.hours)}&limit=500",
@@ -464,13 +606,13 @@ def main() -> int:
         if args.relay
         else None
     )
-    budget = _get(f"{args.probe.rstrip('/')}/v1/budget", os.environ.get("HOOKPROBE_TOKEN", "")) if args.probe else None
+    budget = _get(f"{primary.rstrip('/')}/v1/budget", os.environ.get("HOOKPROBE_TOKEN", "")) if primary else None
     runs = (
         _get(
-            f"{args.probe.rstrip('/')}/v1/runs?limit=200",
+            f"{primary.rstrip('/')}/v1/runs?limit=200",
             os.environ.get("HOOKPROBE_TOKEN", ""),
         )
-        if args.probe
+        if primary
         else None
     )
     if isinstance(runs, dict):
@@ -478,10 +620,24 @@ def main() -> int:
     # The board's own derivation, read rather than recomputed: one place decides
     # what a piece of work is and what state it is in, and this page reports it.
     probe_token = os.environ.get("HOOKPROBE_TOKEN", "")
-    work = _get(f"{args.probe.rstrip('/')}/v1/work?limit=500", probe_token) if args.probe else None
-    proposals = _get(f"{args.probe.rstrip('/')}/v1/remediations", probe_token) if args.probe else None
+    work = _get(f"{primary.rstrip('/')}/v1/work?limit=500", probe_token) if primary else None
+    proposals = _get(f"{primary.rstrip('/')}/v1/remediations", probe_token) if primary else None
     if isinstance(proposals, dict):
         proposals = proposals.get("proposals")
+    # Only when there IS more than one node. The section answers "which of my
+    # nodes needs me", and a deployment with one node has already been told.
+    nodes = None
+    if len(probes) > 1:
+        nodes = survey_nodes(
+            [
+                (
+                    url,
+                    _get(f"{url.rstrip('/')}/v1/agent", probe_token),
+                    _get(f"{url.rstrip('/')}/v1/work?limit=500", probe_token),
+                )
+                for url in probes
+            ]
+        )
     arms = None
     if args.judge and args.shadow_judge:
         jt = os.environ.get("HOOKJUDGE_READ_TOKEN", "")
@@ -498,6 +654,7 @@ def main() -> int:
         runs if isinstance(runs, list) else None,
         work=work if isinstance(work, dict) else None,
         proposals=proposals if isinstance(proposals, list) else None,
+        nodes=nodes,
         hours=args.hours,
         now=now,
     )

@@ -102,6 +102,12 @@ investigator billed, how many re-fires a runbook answered for $0, what people
 ruled and what they have not, the budget, and the pipe's priced chains and
 incidents.
 
+Since 2026-09-09 `--probe` is repeatable (or comma-separated), and a
+deployment running several investigators gets one line per node saying how much
+of its work waits on a person and how much was abandoned — with a node that
+could not be read printed as unread rather than dropped, since an unknown board
+is not an empty one. One probe, and the section is absent.
+
 Since 2026-09-08 it also reports **the work** — the product figures rather than
 the bill. How much work opened in the window and how much of it completed; what
 share was verified and by what; how much closed with nobody stepping in; the

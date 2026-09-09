@@ -111,6 +111,15 @@ through a door of the pipe, so it is accounted for like the rest:
   | python3 scripts/post_watch_signal.py
 ```
 
+**More than one node.** `HOOKPROBE_URL` takes a comma-separated list, and
+`--probe` repeats. The first node drives every section as before; the rest add
+one line each under `## The nodes`, leading with how much of their work waits on
+a person and how much was abandoned. That is the deliberately small form of a
+cross-node overview — a signal on the clock that already runs, rather than a
+page nobody opens — and a node that could not be read is printed as unread,
+because an unknown board is not an empty one. With a single probe the section
+does not appear at all.
+
 ## The clock: a crontab, or a container that carries one
 
 `patrol.sh` fires one patrol. What decides *when* is either the host's crontab
