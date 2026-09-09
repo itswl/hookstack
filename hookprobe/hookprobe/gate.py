@@ -249,6 +249,57 @@ def deny_reason(
     return None
 
 
+# Shapes that are a credential and cannot plausibly be anything else. Borrowed
+# in idea from `ToolOutputGuardrail` in openai/openai-agents-python: this stack
+# guarded tool INPUT and only recorded tool output, and the two are not the same
+# question.
+#
+# The gap is not theoretical and it is not a hole in the input guard — it is the
+# posture working as designed. `readonly` refuses CHANGES, so
+# `kubectl get secret db-creds -o yaml` and `env` are both ALLOWED, and they
+# should be: an investigator that cannot read cannot investigate. What was
+# missing is that nothing then looked at what came back. A run whose context
+# was filled with a live credential was indistinguishable from one that read a
+# pod list, which means nobody could decide to discard the report or rotate the
+# key.
+#
+# Deliberately narrow. A guard that fires on ordinary output is a guard people
+# learn to ignore, so this matches only prefixes and headers that are issued
+# credentials — never "password" or "secret" as words, which appear in every
+# other line of a Kubernetes manifest.
+_SECRET_SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("private key", re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----")),
+    ("aws access key id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("github token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+    ("openai-style api key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
+    ("slack token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
+    ("json web token", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
+)
+
+# How much of an answer is examined. Tool output can be a megabyte of logs and
+# this runs on every call, including the spawned path that pays an interpreter
+# start each time. A credential that appears only past 64 KB of output is a case
+# this accepts missing.
+_OUTPUT_SCAN_LIMIT = 65_536
+
+
+def output_reason(tool_response: Any) -> str | None:
+    """What kind of credential this tool output appears to contain, or None.
+
+    Names the KIND, never the match. The reason string travels into the audit
+    file and, on some deployments, into a chat card — so a guard that quoted the
+    secret it found would be the leak it exists to record.
+    """
+    if isinstance(tool_response, dict):
+        text = " ".join(str(v) for v in tool_response.values() if isinstance(v, str | int | float))
+    elif isinstance(tool_response, str | bytes):
+        text = tool_response.decode("utf-8", "replace") if isinstance(tool_response, bytes) else tool_response
+    else:
+        return None
+    found = [name for name, pattern in _SECRET_SHAPES if pattern.search(text[:_OUTPUT_SCAN_LIMIT])]
+    return ", ".join(sorted(set(found))) if found else None
+
+
 def refusal(reason: str) -> dict[str, Any]:
     """A PreToolUse denial, in the shape Claude Code and Codex both read."""
     return {
@@ -320,16 +371,23 @@ def decide(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
 
     if event == "PostToolUse" and audit_dir is not None:
         response = payload.get("tool_response")
-        append_audit(
-            audit_dir,
-            {
-                "ts": round(time.time(), 3),
-                "session": session,
-                "tool": tool_name,
-                "detail": tool_detail(tool_input),
-                "error": bool(response.get("is_error")) if isinstance(response, dict) else False,
-            },
-        )
+        line = {
+            "ts": round(time.time(), 3),
+            "session": session,
+            "tool": tool_name,
+            "detail": tool_detail(tool_input),
+            "error": bool(response.get("is_error")) if isinstance(response, dict) else False,
+        }
+        # What came BACK, not what went in. Recorded rather than blocked: the
+        # output has already reached the model by the time a PostToolUse hook
+        # runs, so a "deny" here would be theatre — and the shape that would
+        # make a runtime withhold it is not one all three adapters agree on.
+        # What this buys is that the contamination is now a fact somebody can
+        # act on: discard the report, rotate the key, or both.
+        leaked = output_reason(response)
+        if leaked:
+            line["output_secret"] = leaked
+        append_audit(audit_dir, line)
     return {}
 
 
