@@ -73,6 +73,24 @@ def _drive(lines: list[str]) -> tuple[_CodexTurn, list[dict]]:
     return turn, seen
 
 
+def _installed_cli(tmp_path: Path, name: str) -> str:
+    """A path standing in for the CLI's presence — created, never run.
+
+    `verify_gate` asks whether there is a CLI to drive at all before it proves
+    the gate, and that question has its own test
+    (`test_a_missing_runtime_is_caught_before_a_turn_is_accepted`). CI runners
+    have neither codex nor pi installed, so the gate tests below stopped on that
+    earlier check and asserted nothing about a gate — and skipping them there
+    would have retired the two tests that cover the one failure this adapter has
+    actually shipped. So the presence check is satisfied with a file that
+    exists, and everything under it is untouched: the real gate, in a real
+    subprocess, refusing a real command.
+    """
+    path = tmp_path / name
+    path.write_text("", encoding="utf-8")
+    return str(path)
+
+
 # --------------------------------------------------------------- the registry
 
 
@@ -310,13 +328,27 @@ def test_a_node_that_cannot_gate_refuses_to_run(tmp_path: Path) -> None:
     reporting `bash_guard: readonly`. Everything behaved reasonably and the
     posture was simply absent.
     """
-    engine = CodexEngine(make_settings(tmp_path, runtime="codex", codex_python="/nonexistent/python"))
+    engine = CodexEngine(
+        make_settings(
+            tmp_path,
+            runtime="codex",
+            codex_binary=_installed_cli(tmp_path, "codex"),
+            codex_python="/nonexistent/python",
+        )
+    )
     with pytest.raises(RuntimeError, match="cannot hold a posture"):
         engine.verify_gate()
 
 
 def test_a_working_gate_is_proven_once(tmp_path: Path) -> None:
-    engine = CodexEngine(make_settings(tmp_path, runtime="codex", codex_python=sys.executable))
+    engine = CodexEngine(
+        make_settings(
+            tmp_path,
+            runtime="codex",
+            codex_binary=_installed_cli(tmp_path, "codex"),
+            codex_python=sys.executable,
+        )
+    )
     engine.verify_gate()
     assert engine._gate_proven, "a probe on every turn is a cost paid forever for an answer that cannot change"
 
@@ -441,7 +473,14 @@ def test_the_pi_gate_extension_ships_with_the_package() -> None:
 
 def test_pi_refuses_to_run_without_its_extension(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hookprobe.engine_pi.GATE_EXTENSION", tmp_path / "gone.ts")
-    engine = PiEngine(make_settings(tmp_path, runtime="pi", pi_python=sys.executable))
+    engine = PiEngine(
+        make_settings(
+            tmp_path,
+            runtime="pi",
+            pi_binary=_installed_cli(tmp_path, "pi"),
+            pi_python=sys.executable,
+        )
+    )
     with pytest.raises(RuntimeError, match="gate extension is missing"):
         engine.verify_gate()
 
