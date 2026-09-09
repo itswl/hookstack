@@ -1,4 +1,4 @@
-"""The preventive recycle: what it runs, and when it declines to.
+"""The bus this process does not own: recycling it, and asking what it delivered.
 
 The mechanism itself was proven live rather than here — stopping the bus on a
 running deployment and watching both consumers come back is not something a
@@ -9,6 +9,7 @@ clock, and the off switch.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 from typing import Any
@@ -71,3 +72,61 @@ def test_zero_turns_it_off(monkeypatch: Any) -> None:
     monkeypatch.setattr(bridge, "_lark", fail)
     monkeypatch.setattr(bridge, "IDLE_RECYCLE_SECONDS", 0)
     bridge.recycle_when_idle()  # returns rather than looping
+
+
+# ── shape 4: has anybody opened these? ────────────────────────────────────────
+
+
+def test_read_status_counts_and_never_names(monkeypatch: Any) -> None:
+    """Counts and timestamps, never who. The identities are the part a pipe's
+    ledger has no business holding — this bridge carries messages, it does not
+    build a record of who reads them."""
+    answer = {
+        "ok": True,
+        "data": {"items": [{"timestamp": "1788963718000", "user_id": "ou_a"}, {"timestamp": "1788963999000"}]},
+    }
+
+    def fake(args: list[str], stdin: str | None = None, timeout: int = 60) -> Any:
+        assert args[1] == "GET" and args[2].endswith("/read_users")
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(answer), stderr="")
+
+    monkeypatch.setattr(bridge, "_lark", fake)
+    out = bridge.read_status(["om_1"])
+    assert out == {"om_1": {"readers": 2, "first_read_at": 1788963718.0}}
+    assert "ou_a" not in json.dumps(out)
+
+
+def test_nobody_read_it_and_cannot_tell_are_different_answers(monkeypatch: Any) -> None:
+    """The whole value of this is telling those two apart, so a message the
+    platform will not report on must not come back looking like an unread one."""
+
+    def unread(args: list[str], stdin: str | None = None, timeout: int = 60) -> Any:
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "data": {"items": []}}), stderr="")
+
+    monkeypatch.setattr(bridge, "_lark", unread)
+    assert bridge.read_status(["om_1"]) == {"om_1": {"readers": 0, "first_read_at": None}}
+
+    def refused(args: list[str], stdin: str | None = None, timeout: int = 60) -> Any:
+        body = {"ok": False, "error": {"message": "message not found"}}
+        return subprocess.CompletedProcess(args, 1, stdout=json.dumps(body), stderr="")
+
+    monkeypatch.setattr(bridge, "_lark", refused)
+    assert bridge.read_status(["om_1"]) == {"om_1": {"error": "message not found"}}
+
+    def explodes(args: list[str], stdin: str | None = None, timeout: int = 60) -> Any:
+        raise OSError("no such binary")
+
+    monkeypatch.setattr(bridge, "_lark", explodes)
+    assert "error" in bridge.read_status(["om_1"])["om_1"]
+
+
+def test_the_batch_is_bounded_because_each_id_is_a_call(monkeypatch: Any) -> None:
+    calls: list[str] = []
+
+    def fake(args: list[str], stdin: str | None = None, timeout: int = 60) -> Any:
+        calls.append(args[2])
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"ok": True, "data": {"items": []}}), stderr="")
+
+    monkeypatch.setattr(bridge, "_lark", fake)
+    bridge.read_status([f"om_{i}" for i in range(100)])
+    assert len(calls) == bridge.READ_BATCH_MAX

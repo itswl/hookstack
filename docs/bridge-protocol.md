@@ -9,8 +9,10 @@ platform-specific — the card schema, the markdown dialect, auth, long
 connections, "which scopes does the app need" — lives in the bridge.
 
 [deploy/lark-bridge](../deploy/lark-bridge/README.md) is the first bridge. A
-bridge for another platform implements the three shapes below and passes the
-same tests; nothing in the pipe, the judge or the investigator changes.
+bridge for another platform implements the shapes below and passes the same
+tests; nothing in the pipe, the judge or the investigator changes. The first
+three are required; the fourth is optional and a bridge that cannot do it says
+so rather than guessing.
 
 This is `hookstack-bridge/1`. The version rides in every outbound body, and a
 bridge refuses a version it does not speak rather than guessing.
@@ -122,6 +124,58 @@ The token **is** the authorisation — minted, signed and single-use by the pipe
 adds the header signature on top for deployments that want defence in depth.
 The bridge then repaints the pressed card to say what happened; how is its
 business.
+
+## 4. Outbound: has anybody opened these? (optional)
+
+The pipe `POST`s to the same URL as a card, signed the same way:
+
+```json
+{
+  "protocol": "hookstack-bridge/1",
+  "read": {"message_ids": ["om_…", "om_…"]}
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "supported": true,
+  "read": {
+    "om_read":   {"readers": 2, "first_read_at": 1788963718.0},
+    "om_unread": {"readers": 0, "first_read_at": null},
+    "om_gone":   {"error": "message not found"}
+  }
+}
+```
+
+**Counts and timestamps, never who.** The count answers the question — *was this
+seen at all* — and the identities are the part a pipe's ledger has no business
+accumulating as a side effect of asking. `first_read_at` is epoch **seconds**,
+whatever the platform speaks.
+
+**Three answers, and the third is the point.** `readers: 0` means the platform
+says nobody opened it. `error` means it will not say — too old, deleted, never
+had an id. A bridge must not collapse those: the whole reason this shape exists
+is to tell "nobody has decided" apart from "nobody has seen it", and an
+un-askable card reported as unread is that feature telling the exact lie it was
+built to stop. A bridge that cannot answer at all replies
+`{"ok": true, "supported": false, "read": {}}` — which is what lark-bridge does
+in webhook mode, where a custom bot never had a message id.
+
+The pipe asks on demand (`GET /unseen`), never on a timer, and stores nothing:
+the question is only ever asked while somebody is looking, and a stored answer
+goes stale in the one direction that matters — unread becomes read, never the
+reverse. A bridge should bound the batch it accepts, and the pipe slices to the same
+number before sending; lark-bridge answers the first 20, because each id is one
+API call. Measured against a live Feishu app on 2026-09-10: **20 cards in
+20.1s**, about a second each. That rate is why the batch is bounded and why the
+pipe gives this request its own 45s timeout instead of the 10s one it delivers
+with — the first version reused the delivery timeout, asked about 59 cards at
+once, and the bridge died mid-answer with a broken pipe. Every card then came
+back `unknown`, which was the honest classification of a question nobody
+finished asking and useless as an answer.
 
 ## What a bridge must not do
 

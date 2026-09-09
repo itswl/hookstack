@@ -239,6 +239,55 @@ def _bridge_hints(channel: Channel, message: dict[str, Any], payload: dict[str, 
     return payload
 
 
+# What one request may ask about, matching what docs/bridge-protocol.md tells a
+# bridge to answer. Asking for more is not an error, it is a silently short
+# answer — so the caller slices here rather than discovering it at the far end.
+READ_BATCH_MAX = 20
+
+
+async def ask_read_status(
+    client: httpx.AsyncClient, channel: Channel, message_ids: list[str], now: float
+) -> dict[str, dict[str, Any]] | None:
+    """Shape 4 of the bridge protocol: has anybody opened these? `None` = could
+    not ask, which is not the same answer as "nobody has".
+
+    That distinction is the whole feature. A card waiting three days is either a
+    decision nobody has made or a card nobody has seen, and those have different
+    fixes; a bridge that is down must not be reported as a room full of people
+    ignoring you.
+    """
+    body = json.dumps(
+        {"protocol": BRIDGE_PROTOCOL, "read": {"message_ids": list(message_ids[:READ_BATCH_MAX])}},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    headers = {"content-type": "application/json"}
+    if channel.secret:
+        stamp = str(int(now))
+        headers["X-Hook-Timestamp"] = stamp
+        headers["X-Hook-Signature"] = hmac.new(
+            channel.secret.encode(), stamp.encode() + b"." + body, hashlib.sha256
+        ).hexdigest()
+    try:
+        # Its own timeout, not the shared client's: a bridge answers this with
+        # one platform call PER ID, so the request is slow by construction where
+        # a card is one call. Measured: the first version reused the 10s
+        # delivery timeout, asked about 59 cards at once, and the bridge died
+        # mid-answer with a broken pipe — every card came back "unknown", which
+        # is the honest classification of a question nobody finished asking.
+        response = await client.post(channel.url, content=body, headers=headers, timeout=45.0)
+        data = response.json() if response.status_code < 300 else None
+    except (httpx.HTTPError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("ok"):
+        return None
+    # `supported: false` is a real answer — a webhook bridge never had an id to
+    # ask about — and it is empty rather than unknown.
+    read = data.get("read")
+    return read if isinstance(read, dict) else {}
+
+
 async def send(
     client: httpx.AsyncClient, channel: Channel, message: dict[str, Any]
 ) -> tuple[bool, str, bytes | None, str]:

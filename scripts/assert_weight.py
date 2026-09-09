@@ -209,7 +209,26 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # rendering the same card model, markup.py went with them. The pipe's
     # outbound kinds are `generic` (machines) and `bridge` (people), and no
     # line of it names a chat platform. Split: -~380 source, -~220 code.
-    "hookrelay": (5500, Path("hookrelay/README.md")),
+    # 5500 -> 5650 on 2026-09-10, for read receipts (`/unseen`): which cards this
+    # pipe sent that nobody has opened. Split: +~125 source, +~78 code. Raised
+    # rather than trimmed because it is a pipe property by the README's own test
+    # — read state is delivery state, the same axis as queued -> sent -> dead, it
+    # reads no alert content and judges nothing — and because the pipe is the
+    # only component holding a platform message id. Three remediation proposals
+    # sat waiting for days on production with no way to tell "nobody agreed"
+    # from "nobody saw it", which are different failures with different fixes.
+    #
+    # AND THE QUESTION THE 2026-09-04 ENTRY LEFT OPEN, answered here rather than
+    # raised a fifth time in silence: should this be per-module instead of
+    # per-service? No. Recorded in
+    # .agents/notes/implemented/2026-09-10-the-ceiling-stays-per-service.md —
+    # briefly, a per-module cap would price the pipe's own decomposition, which
+    # is the one thing this budget must not do: the correct answer to "app.py is
+    # too big" is sometimes a new module, and a check that punished that would
+    # make the ceiling an argument against good structure. What the measure is
+    # for is "one person can read this service end to end", and that is a
+    # property of the service.
+    "hookrelay": (5650, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

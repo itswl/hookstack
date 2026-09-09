@@ -26,7 +26,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
-from hookrelay import actions, metrics, registry
+from hookrelay import actions, channels, metrics, registry
 from hookrelay.alarm import SelfAlarm
 from hookrelay.breaker import CircuitBreaker
 from hookrelay.config import CardAction, Config, ConfigError, Source, _warn_posture_mix
@@ -743,6 +743,82 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         _read_guard(x_read_token, authorization)
         rows = await app.state.store.recent_events(min(limit * 4, 400))
         return render_timeline(rows, limit=limit)
+
+    @app.get("/unseen")
+    async def unseen(
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+        hours: int = 24,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Which cards this pipe sent that nobody has opened.
+
+        A board that says something is waiting cannot tell you WHICH waiting it
+        is: a decision nobody has made, or a card nobody has seen. Those have
+        different fixes — one needs a person to choose, the other needs somebody
+        to look at why the card is not landing — and until now they were the
+        same row. Three remediation proposals sat for days on the production
+        deployment with no way to tell which of the two it was.
+
+        Read state is delivery state, which is why it is here and not in a
+        brain: this is the same axis as queued -> sent -> dead, and the pipe is
+        the only component that holds a platform message id. It reads no alert
+        content and makes no judgement about worth.
+
+        Asked on demand rather than polled and stored. The question is only ever
+        asked while somebody is looking, a poller would query the platform about
+        every card forever, and a stored answer would go stale in the one
+        direction that matters (unread becomes read, never the reverse).
+
+        Three outcomes per card, and the third is the point: `unseen` (the
+        platform says nobody), `seen` (it says somebody), and `unknown` — a
+        bridge that could not be asked, a channel that is not a bridge, or a
+        platform that will not report on that message. An unknown reported as
+        unseen would be this feature telling the exact lie it exists to stop.
+        """
+        _read_guard(x_read_token, authorization)
+        window = max(1, min(hours, 24 * 14))
+        now = now_ts()
+        # Bounded, newest first, and `checked` reports what was actually asked
+        # about: a bridge answers this with one platform call PER ID, so "look
+        # at everything" is a request that times out and returns unknowns.
+        rows = await app.state.store.delivered_cards(now - window * 3600, limit=max(1, min(limit, 100)))
+        by_channel: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_channel.setdefault(str(row["channel"]), []).append(row)
+        unseen_rows: list[dict[str, Any]] = []
+        counts = {"seen": 0, "unseen": 0, "unknown": 0}
+        for name, cards in by_channel.items():
+            channel = app.state.config.channels.get(name)
+            answers: dict[str, Any] | None = None
+            if channel is not None and channel.type == "bridge":
+                answers = await channels.ask_read_status(
+                    app.state.http_client,
+                    channel,
+                    [str(c["platform_message_id"]) for c in cards[: channels.READ_BATCH_MAX]],
+                    now,
+                )
+            for card in cards:
+                answer = (answers or {}).get(str(card["platform_message_id"]))
+                readers = answer.get("readers") if isinstance(answer, dict) else None
+                if not isinstance(readers, int):
+                    counts["unknown"] += 1
+                    continue
+                if readers > 0:
+                    counts["seen"] += 1
+                    continue
+                counts["unseen"] += 1
+                unseen_rows.append(
+                    {
+                        "event_id": card["event_id"],
+                        "channel": name,
+                        "source": card["source"],
+                        "title": card["title"],
+                        "sent_at": card["sent_at"],
+                        "waiting_hours": round((now - float(card["sent_at"] or now)) / 3600, 1),
+                    }
+                )
+        return {"window_hours": window, "checked": len(rows), **counts, "cards": unseen_rows}
 
     @app.get("/trace/{event_id}")
     async def round_trip(

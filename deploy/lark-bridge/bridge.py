@@ -298,6 +298,63 @@ def send_webhook(card: dict) -> tuple[bool, str]:
     return True, ""
 
 
+# One API call per message, so the batch is bounded here rather than by whoever
+# asks. Twenty is a screen's worth of waiting cards, which is the question this
+# answers; a caller with more has a different question.
+READ_BATCH_MAX = 20
+
+
+def read_status(message_ids: list[str]) -> dict[str, dict]:
+    """How many people have opened each message, and when the first one did.
+
+    Counts and timestamps, never WHO. The count is what the question needs —
+    "was this seen at all" — and the identities are the part a pipe's ledger has
+    no business holding: this bridge carries messages, it does not build a
+    record of who reads them. A deployment that wants names can ask the platform
+    itself, deliberately, rather than accumulating them as a side effect.
+
+    "Cannot tell" is a THIRD answer and it is kept distinct from "nobody read
+    it", because the whole value of this is telling those two apart. A message
+    the platform will not report on (too old, deleted, a webhook that never had
+    an id) comes back with `error` set and no count.
+    """
+    out: dict[str, dict] = {}
+    for message_id in message_ids[:READ_BATCH_MAX]:
+        if not message_id:
+            continue
+        try:
+            result = _lark(
+                [
+                    "api",
+                    "GET",
+                    f"/open-apis/im/v1/messages/{message_id}/read_users",
+                    "--params",
+                    json.dumps({"user_id_type": "open_id", "page_size": 50}),
+                    "--as",
+                    "bot",
+                ],
+                timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            out[message_id] = {"error": str(exc)[:120]}
+            continue
+        try:
+            answer = json.loads(result.stdout or "{}")
+        except ValueError:
+            out[message_id] = {"error": "unreadable answer from the platform"}
+            continue
+        if result.returncode != 0 or not answer.get("ok"):
+            detail = (answer.get("error") or {}) if isinstance(answer.get("error"), dict) else {}
+            out[message_id] = {"error": str(detail.get("message") or f"rc={result.returncode}")[:120]}
+            continue
+        items = ((answer.get("data") or {}).get("items")) or []
+        # The platform reports milliseconds; the pipe speaks epoch seconds
+        # everywhere, and a unit that changes at a seam is a bug waiting.
+        stamps = sorted(float(i["timestamp"]) / 1000.0 for i in items if str(i.get("timestamp") or "").isdigit())
+        out[message_id] = {"readers": len(items), "first_read_at": stamps[0] if stamps else None}
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     """The pipe's cards, accepted and sent as the app — the protocol's card
     model rendered here, or a finished Feishu card passed through."""
@@ -333,6 +390,18 @@ class Handler(BaseHTTPRequestHandler):
             # dead-letters it in the open, which is the visible failure we want.
             logger.warning("inbound card refused: signature missing or invalid")
             self._reply(401, {"ok": False, "error": "unauthenticated"})
+            return
+        # Shape 4 (docs/bridge-protocol.md): "has anybody opened these?".
+        # Answered before the card check, because a read query carries no card.
+        if protocol and isinstance(payload.get("read"), dict):
+            ids = [str(m)[:120] for m in (payload["read"].get("message_ids") or []) if m]
+            if WEBHOOK_MODE:
+                # A custom bot never had a message id to ask about. Saying so is
+                # the honest answer; an empty result would read as "nobody".
+                self._reply(200, {"ok": True, "supported": False, "read": {}})
+                return
+            logger.info("read status asked for %s message(s)", len(ids))
+            self._reply(200, {"ok": True, "supported": True, "read": read_status(ids)})
             return
         card = payload.get("card")
         if not isinstance(card, dict):

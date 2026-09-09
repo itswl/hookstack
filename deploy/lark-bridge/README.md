@@ -168,6 +168,15 @@ The three shapes are the protocol's, defined once in
 `X-Hookstack-Dry-Run: 1` makes this bridge render and answer without sending —
 the way to prove the wiring from inside a deployment.
 
+A fourth, optional shape answers **has anybody opened these**: the pipe posts
+`{"protocol": …, "read": {"message_ids": […]}}` to the same URL and gets back a
+reader count and a first-read timestamp per id. Counts and times, never who —
+the identities are the part a pipe's ledger has no business accumulating. It
+needs `im:message:readonly`, which the scope list above already includes, and it
+answers `{"ok": true, "supported": false, "read": {}}` in webhook mode, where a
+custom bot never had a message id to ask about. Twenty ids per request, because
+each one is an API call.
+
 ## Operating it
 
 - **Is it connected?** `docker exec <bridge> lark-cli event status` → `Bus:

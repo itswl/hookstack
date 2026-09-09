@@ -499,6 +499,24 @@ class Store:
                 (now, sent_body, platform_message_id or None, delivery_id),
             )
 
+    async def delivered_cards(self, since: float, limit: int = 200) -> list[dict[str, Any]]:
+        """Cards this pipe sent recently that the platform gave an id for.
+
+        The id is the only handle anything can ask a read question about, so a
+        delivery without one is not a card nobody read — it is a card nothing
+        can be asked about, and it is left out here rather than counted as
+        unseen.
+        """
+        cursor = await self.read.execute(
+            "SELECT d.id, d.channel, d.sent_at, d.platform_message_id, d.event_id,"
+            " e.title, e.source FROM deliveries d JOIN events e ON e.id = d.event_id"
+            " WHERE d.status = 'sent' AND d.sent_at >= ?"
+            " AND d.platform_message_id IS NOT NULL AND d.platform_message_id != ''"
+            " ORDER BY d.sent_at DESC LIMIT ?",
+            (since, max(1, limit)),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
     async def thread_context(self, platform_message_id: str) -> dict[str, Any] | None:
         """What a reply under a card we sent is about: the chain, and the
         investigation session in it, if any.
