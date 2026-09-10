@@ -170,6 +170,14 @@ services:
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
       HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
+      # Where this node is reachable from OUTSIDE, if anywhere. Empty on every
+      # deployment here — the nodes bind to loopback behind the host firewall —
+      # and the Agent Description then carries paths with `reachable: false`
+      # rather than publishing an address that resolves to the caller's own
+      # machine. Declared so an operator CAN set it: a knob no compose passes
+      # through is a knob nobody can reach, which is how the price rates shipped
+      # inert.
+      HOOKPROBE_PUBLIC_URL: ${HOOKPROBE_PUBLIC_URL:-}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
@@ -319,6 +327,14 @@ services:
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
       HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
+      # Where this node is reachable from OUTSIDE, if anywhere. Empty on every
+      # deployment here — the nodes bind to loopback behind the host firewall —
+      # and the Agent Description then carries paths with `reachable: false`
+      # rather than publishing an address that resolves to the caller's own
+      # machine. Declared so an operator CAN set it: a knob no compose passes
+      # through is a knob nobody can reach, which is how the price rates shipped
+      # inert.
+      HOOKPROBE_PUBLIC_URL: ${HOOKPROBE_PUBLIC_URL:-}
       HOOKPROBE_AGENT_NAME: watcher
       HOOKPROBE_AGENT_ROLE: reads the operator's own feeds and raises what looks like work
       # Who this is, on every telemetry event it emits: deployment, service,
@@ -489,6 +505,14 @@ services:
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
       HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
+      # Where this node is reachable from OUTSIDE, if anywhere. Empty on every
+      # deployment here — the nodes bind to loopback behind the host firewall —
+      # and the Agent Description then carries paths with `reachable: false`
+      # rather than publishing an address that resolves to the caller's own
+      # machine. Declared so an operator CAN set it: a knob no compose passes
+      # through is a knob nobody can reach, which is how the price rates shipped
+      # inert.
+      HOOKPROBE_PUBLIC_URL: ${HOOKPROBE_PUBLIC_URL:-}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).

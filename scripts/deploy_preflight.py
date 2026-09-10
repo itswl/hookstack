@@ -16,6 +16,17 @@ Three rules, all read from the files rather than from a list kept beside them:
      stopped being allowed the day that network was shared with other stacks.
   2. Every ${NAME} or ${NAME:-...} in the deployed compose files whose name ends
      in _SECRET or _TOKEN is non-empty in .env.
+  4. REPORTED, never refused: a variable set in .env that no deployed compose
+     passes through. There is no `env_file`, deliberately (2026-09-02), so the
+     `environment:` block IS the complete list of what a container can see —
+     which means a variable the operator took the trouble to set and no compose
+     names does nothing at all, silently. That happened: `HOOKPROBE_PRICE_*`
+     shipped as settings the code read and no compose declared, so setting the
+     rates in .env changed nothing and the ledger went on pricing from the
+     runtime's own table. A note rather than a refusal, because .env is shared
+     with the crontab and the patrols, and a variable meant for those is not a
+     mistake.
+
   3. A variable that decides WHICH MODEL answers — any name ending `_MODEL` or
      `_BASE_URL` — is set in .env whenever the compose supplies a NON-EMPTY
      default for it. Rules 1 and 2 catch a hop that would come up open; this one
@@ -47,6 +58,7 @@ every finding listed.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import sys
@@ -165,6 +177,23 @@ def check_compose(path: Path, env: dict[str, str], allow: set[str]) -> list[str]
     return problems
 
 
+# What the composes are expected to carry. Scoped so the note lists this stack's
+# own variables and not the operator's shell.
+OURS = re.compile(r"^(HOOKPROBE|HOOKJUDGE|HOOKRELAY|LARK|SHADOW|WW)_")
+
+
+def unreachable_vars(env: dict[str, str], texts: list[str]) -> list[str]:
+    """Variables set in .env that no deployed compose passes into a container.
+
+    Not a failure — .env is also read by the crontab and the patrols — but the
+    one signal that separates "configured" from "configured and reaching the
+    process", which are the two things a deploy is otherwise unable to tell
+    apart. See rule 4.
+    """
+    joined = "\n".join(texts)
+    return sorted(name for name, value in env.items() if value and OURS.match(name) and name not in joined)
+
+
 def main(argv: list[str]) -> int:
     root = Path(argv[1]) if len(argv) > 1 else Path.cwd()
     env = load_env(root / ".env")
@@ -187,10 +216,23 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+    texts = []
+    for compose in ("deploy/docker-compose.shadow.yml", "hookprobe/deploy/docker-compose.prod.yml"):
+        with contextlib.suppress(OSError):
+            texts.append((root / compose).read_text(encoding="utf-8"))
+    stranded = unreachable_vars(env, texts)
     print(
         f"deploy preflight: every door signed, every secret set and every brain pointed by .env "
         f"({len(env)} variables in .env" + (f", {len(allow)} allowed empty" if allow else "") + ")"
     )
+    if stranded:
+        print(
+            f"  note: {len(stranded)} variable(s) set in .env that no deployed compose passes through, "
+            "so they reach no container — fine if they are for the crontab or the patrols, a silent "
+            "no-op if they were meant for a service:"
+        )
+        for name in stranded:
+            print(f"    {name}")
     return 0
 
 

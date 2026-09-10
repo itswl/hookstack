@@ -37,6 +37,7 @@ services:
       WW_RELAY_SECRET: ${WW_RELAY_SECRET:?set it}
       HOOKRELAY_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
+      SHADOW_RETURN_SECRET: ${SHADOW_RETURN_SECRET:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       HOOKJUDGE_AI_MODEL: ${HOOKJUDGE_AI_MODEL:-deepseek-chat}
       HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:-https://api.deepseek.com/v1}
@@ -135,3 +136,33 @@ def test_a_vendor_default_is_only_a_problem_when_the_env_is_silent(tmp_path, cap
     root = _write(tmp_path, FULL_ENV)
     assert preflight.main(["x", str(root)]) == 0
     assert "every brain pointed by .env" in capsys.readouterr().out
+
+
+def test_a_variable_that_reaches_no_container_is_noted_but_never_refused(tmp_path, capsys) -> None:
+    """Rule 4, from the incident that produced it.
+
+    `HOOKPROBE_PRICE_*` shipped as settings the code read and no compose
+    declared. There is no `env_file` — removed 2026-09-02 so a container sees
+    only what its `environment:` block names — so setting the rates in .env
+    changed nothing, the ledger went on pricing from the runtime's own table,
+    and `/v1/budget` kept saying `measured` because it already was. Nothing
+    anywhere said the variable had reached no process.
+
+    A note and not a refusal: .env is shared with the crontab and the patrols,
+    and a variable meant for those is not a mistake.
+    """
+    root = _write(tmp_path, FULL_ENV + "HOOKPROBE_PRICE_IN_PER_1M=0.20\nEDITOR=vim\n")
+    assert preflight.main(["x", str(root)]) == 0, "a stranded variable never blocks a deploy"
+    out = capsys.readouterr().out
+    assert "no deployed compose passes through" in out
+    assert "HOOKPROBE_PRICE_IN_PER_1M" in out
+    # Scoped to this stack's own names, or the note would list the operator's shell.
+    assert "EDITOR" not in out
+    # And a variable the compose DOES declare is not stranded.
+    assert "WW_RELAY_SECRET" not in out.split("no deployed compose passes through")[1]
+
+
+def test_no_note_when_every_variable_reaches_something(tmp_path, capsys) -> None:
+    root = _write(tmp_path, FULL_ENV)
+    assert preflight.main(["x", str(root)]) == 0
+    assert "no deployed compose passes through" not in capsys.readouterr().out
