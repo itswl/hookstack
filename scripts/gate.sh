@@ -61,6 +61,14 @@ if hookrelay/.venv/bin/python scripts/assert_node_contract.py \
 fi
 echo "node contract: the checker still catches the round it was written for"
 
+# The same argument aimed at the SUITE. A green suite proves the code passes its
+# tests; it does not prove the tests would catch the code being wrong, which is
+# this repository's recurring bug shape — a boundary described everywhere and
+# absent in fact. This breaks twelve containment claims on purpose and requires
+# a test to notice each one. ~9s, because each mutation runs only the files that
+# claim to protect it.
+python3 scripts/assert_guards_are_tested.py
+
 # The judge's prompt is versioned and hash-bound to its safety scenarios: a
 # prompt edited without re-reviewing them fails here on the hash. Offline (the
 # rule floor needs no model); the model's own behaviour is the golden set the
