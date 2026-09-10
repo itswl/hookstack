@@ -32,6 +32,12 @@ does NOT apply here: remediation exists to do the mutations that guard blocks,
 and its gate is the operator's allowlist plus the operator's click, not a
 regex that errs toward blocking investigations.
 
+Those two gate WHO may run a procedure and WHAT it may contain. The cooldown
+(`cooling`) gates HOW OFTEN: a target another procedure has just acted on is
+left alone for a window, so a fix and its rollback cannot both be pressed
+inside a minute. It adds no state — the refused row stays `proposed` and
+becomes approvable again when the window passes.
+
 The proposals directory is on the input guard's protected list: the agent
 proposes THROUGH its report, so a direct write could only mean forging a
 proposal's provenance. (A bash write around that guard still produces only a
@@ -353,6 +359,116 @@ def moved(before: dict[str, Any], now: dict[str, Any]) -> str:
     return ""
 
 
+# How long one target is left alone after a procedure has acted on it. The
+# proposal flow gates WHO may run a procedure and WHAT it may contain; nothing
+# in it gated HOW OFTEN. Two proposals naming the same host — a re-fire's
+# investigation and the original's, or a fix and the rollback of that fix —
+# could both be approved inside a minute, and the second acted on a machine the
+# first had just changed and nobody had looked at since. That is a flap, and a
+# flap is how a remediation loop turns one incident into an outage.
+#
+# 15 minutes is chosen to be longer than a procedure runs (five steps, each
+# capped at the bash timeout) and shorter than a human's attention on an
+# incident: long enough that the second press has to be deliberate, short
+# enough that it is not a lockout. 0 disables the whole rule.
+COOLDOWN_SECONDS = 900
+
+# The states in which a proposal has already put commands on a target. `running`
+# counts because it is the worst case, not the mildest: two sequences
+# interleaving their steps against one host is a state neither procedure was
+# written for. It is the one status held with no window at all, which is bounded
+# rather than forever: the next boot settles a stranded `running` row into
+# `failed` (`settle_interrupted`), and from there the clock applies.
+_ACTED_STATUSES = ("running", "executed", "failed")
+
+
+def cooldown_key(step: dict[str, Any]) -> str:
+    """What a step is ABOUT, normalised — the thing the cooldown counts against.
+
+    `target` was in the step schema from the first commit and read by nothing:
+    the model was already being asked to name the host, service or resource each
+    command touches, and the answer was stored and ignored. This is that field
+    finally load-bearing.
+
+    Falls back to the command when the target is missing, which is narrower than
+    it sounds — it still catches the literal same fix fired twice — and is the
+    honest floor rather than a pretence: BE CLEAR ABOUT WHO WRITES THIS KEY. It
+    is the model. A step that names no target and varies its command by one flag
+    keys differently and is not cooled. Like the input guard, this catches the
+    over-eager model, which is the case that happens, and not an adversary; what
+    bounds an adversary is the allowlist and the operator's click, both of which
+    are the operator's own text.
+    """
+    target = " ".join(str(step.get("target") or "").split()).lower()
+    if target:
+        return target
+    return " ".join(str(step.get("command") or "").split()).lower()
+
+
+def _keys(row: dict[str, Any]) -> set[str]:
+    return {key for key in (cooldown_key(step) for step in row.get("steps") or []) if key}
+
+
+class Cooling(ValueError):
+    """Something else acted on this target recently, so this is not run NOW.
+
+    A ValueError like `Moved`, so every door already answering 409 keeps
+    working — but unlike `Moved` this is not terminal and the row is left
+    `proposed`: the condition has not moved, the clock has not run out, and the
+    same procedure is approvable once the window passes. The refusal therefore
+    names the age and the window it fell inside, not a state it has been put in.
+    """
+
+
+def cooling(
+    row: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    window: int = COOLDOWN_SECONDS,
+    now: float | None = None,
+) -> str:
+    """Why this procedure should not run yet, or "" when it may.
+
+    Pure over rows already loaded, because both callers have them: the button is
+    not drawn when the target is cooling, and the approval is refused for the
+    race the button cannot see — the same two-place shape as the freshness
+    cursor, and for the same reason. A button that cannot work is worse than an
+    absent one, and a card sent while the target was free can still be pressed
+    after another procedure has touched it.
+    """
+    if window <= 0:
+        return ""
+    keys = _keys(row)
+    if not keys:
+        return ""
+    now = time.time() if now is None else now
+    acted: list[tuple[dict[str, Any], set[str]]] = []
+    for other in rows:
+        if str(other.get("id") or "") == str(row.get("id") or ""):
+            continue
+        if str(other.get("status") or "") not in _ACTED_STATUSES:
+            continue
+        shared = keys & _keys(other)
+        if shared:
+            acted.append((other, shared))
+    for other, shared in acted:
+        if other.get("status") == "running":
+            return f"{sorted(shared)[0]} is being acted on right now by proposal {other.get('id')}"
+    for other, shared in acted:
+        # `executed_at` is stamped by both endings; `approved_at` covers the row
+        # a crash left without one. A row with neither reads as ancient and cools
+        # nothing — absent is not stale, the same rule the cursor follows for a
+        # proposal stamped before the cursor existed.
+        when = float(other.get("executed_at") or other.get("approved_at") or 0.0)
+        if when and now - when < window:
+            return (
+                f"{sorted(shared)[0]} was acted on {(now - when) / 60:.0f}m ago by proposal "
+                f"{other.get('id')} ({other.get('status')}), inside the "
+                f"{window // 60}m cooldown"
+            )
+    return ""
+
+
 def approve(
     workdir: Path,
     proposal_id: str,
@@ -360,6 +476,7 @@ def approve(
     allowlist: Path | None,
     note: str = "",
     at: dict[str, Any] | None = None,
+    cooldown: int = COOLDOWN_SECONDS,
 ) -> dict[str, Any]:
     """The operator's click. Gate-checks EVERY step against the allowlist
     before anything runs — a proposal that is half executable is refused
@@ -374,6 +491,11 @@ def approve(
     decide again" is a UI that does not exist. What does exist is the follow-up
     button beside it, which re-investigates and proposes against the world as it
     is now — which is the answer anyway.
+
+    The cooldown is checked LAST, after the allowlist, because the two refusals
+    are different in kind: a command no allowlist permits can never run as
+    written, and answering "wait 9 minutes" to it would be a lie of omission.
+    Order the permanent refusal first.
     """
     row = load(workdir, proposal_id)
     if row is None:
@@ -406,6 +528,19 @@ def approve(
         reason = deny_reason(str(step.get("command") or ""), patterns)
         if reason is not None:
             raise PermissionError(f"step '{step.get('action')}': {reason}")
+    reason = cooling(row, list_all(workdir, limit=200), window=cooldown)
+    if reason:
+        # The row stays `proposed`. Nothing about it has been decided — not by
+        # the condition, not by the clock, not by a person — so it is not on the
+        # automation ledger either, for the same reason `superseded` is not: that
+        # ledger counts what a HUMAN decided, and "another procedure got there
+        # first" is not a human overruling anything.
+        logger.warning("remediation approval refused, target cooling: %s — %s", proposal_id, reason)
+        raise Cooling(
+            f"{reason}. Nothing ran. Let the first procedure's change settle and "
+            "press again, or ask this investigation for a fresh look at what the "
+            "target needs now."
+        )
     row["status"] = "running"
     row["approved_at"] = round(time.time(), 3)
     row["approved_note"] = note[:300]

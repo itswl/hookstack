@@ -184,7 +184,10 @@ always reach. Two things about the word *default*, before the layers:
   `POST /v1/runs/{key}/handoff` behind a signed card click, and a proposed
   remediation runs only after `POST /v1/remediations/{id}/approve`, each step
   gate-checked against an allowlist and executed as an argv, never through a
-  shell (a command that needs a shell is refused instead). Both are recorded
+  shell (a command that needs a shell is refused instead) — and a target
+  another procedure acted on inside the cooldown
+  (`HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS`, 15 minutes, 0 disables) is held
+  rather than changed twice with nobody looking in between. Both are recorded
   in the run's audit with the person's action beside them.
 
 1. **Credentials** — mount query-only credentials (read-only kubeconfig,

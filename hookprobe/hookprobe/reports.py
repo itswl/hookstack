@@ -334,6 +334,52 @@ def superseded_report(reason: str, steps: list[dict[str, Any]]) -> str:
     )
 
 
+def cooling_report(reason: str, steps: list[dict[str, Any]]) -> str:
+    """A report-shaped refusal for a press whose target was just acted on.
+
+    Sibling of `superseded_report`, and the difference between them is the whole
+    point of having two: that one retires a procedure, this one defers it. The
+    recommendation is therefore "press again after the window", not "ask for a
+    fresh look" — nothing about these steps has been invalidated, they are
+    simply not the second thing to do to a machine inside a quarter of an hour.
+    """
+    commands = [str(step.get("command") or "") for step in steps[:3] if step.get("command")]
+    summary = (
+        f"The approved procedure did NOT run: {reason}. It is held, not retired — the steps "
+        "are still valid and the proposal is still approvable. Two changes to one target "
+        "inside the cooldown is the shape of a flap, so the second one waits for somebody "
+        "to see what the first one did."
+    )
+    return json.dumps(
+        {
+            "summary": summary,
+            "root_cause": {
+                "status": "not_executed",
+                "description": f"A remediation approval was held back: {reason}.",
+            },
+            "evidence": [{"what": "the steps that did not run", "detail": command} for command in commands],
+            "impact": {
+                "scope": "remediation",
+                "severity": "none",
+                "description": "Nothing was executed against the target. No step ran and none is pending.",
+            },
+            "timeline": [],
+            "recommendations": [
+                {
+                    "priority": "P2",
+                    "action": "Check what the earlier procedure changed, then approve this one again if still needed",
+                    "reason": "The cooldown buys a look at the first change; it does not decide about the second.",
+                }
+            ],
+            "unknowns": ["Whether the earlier procedure already fixed what this one is for."],
+            "assumptions": [],
+            "next_checks": [],
+            "confidence": 0.0,
+        },
+        ensure_ascii=False,
+    )
+
+
 def budget_report(spent: float, budget: float, window_hours: float) -> str:
     """A report-shaped refusal, so the family loop completes without an engine run."""
     summary = (

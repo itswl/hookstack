@@ -83,7 +83,8 @@ _INTERFACES: tuple[dict[str, Any], ...] = (
         "humanAuthorization": True,
         "description": (
             "Approve a proposed remediation. Nothing here executes without this call, "
-            "and what it may then run is bounded by an operator's allowlist."
+            "what it may then run is bounded by an operator's allowlist, and a target "
+            "another procedure has just acted on is refused until its cooldown passes."
         ),
     },
 )

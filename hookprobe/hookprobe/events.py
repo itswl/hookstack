@@ -61,11 +61,14 @@ a known false alarm, a naming convention; never about this one incident — end 
 with a line `MEMORY-SUGGESTION: <the fact, one line>`. At most one; omit it when unsure.
 If concrete commands would remediate the root cause, ALSO append a fenced block:
 ```remediation
-[{{"action": "what this does", "command": "the exact command", "target": "what it touches", \
+[{{"action": "what this does", "command": "the exact command", \
+"target": "the one host, service or resource it changes", \
 "risk": "low|medium|high", "rollback": "how to undo it"}}]
 ```
 Propose only commands you are confident in; an operator approves each proposal before \
-anything runs, and nothing you write here executes by itself.
+anything runs, and nothing you write here executes by itself. Name `target` the way a \
+runbook would and the same way every time: it is what holds a second procedure off a \
+machine this one has just changed.
 
 Source: {source}
 Level: {level}
@@ -493,6 +496,17 @@ def _approve(service: RunService, params: dict[str, Any], *, actor: str, correla
         row = service.approve_remediation(ref, note=note)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="no such proposal") from exc
+    except remediation.Cooling as exc:
+        # The target cooldown: another procedure acted on this same target
+        # recently, and two changes to one machine inside the window with nobody
+        # looking in between is a flap. Answered exactly like `Moved` below,
+        # because it is the same hole — the bridge repainted the card "accepted
+        # and passed on" and stripped its buttons, so a refusal nobody carries
+        # back is a refusal nobody sees. The status is neither `stale` nor
+        # `superseded`: this proposal is still good and still approvable, which
+        # is what the report it sends back says.
+        service.report_cooling(ref, str(exc))
+        return {"status": "cooling", "kind": "approve", "ref": ref, "detail": str(exc)}
     except remediation.Moved as exc:
         # The freshness cursor: the condition moved between the card being sent
         # and this press. Caught before the ValueError it subclasses, because

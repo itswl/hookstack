@@ -152,6 +152,7 @@ _TEENS = {
     "twenty-three": 23,
     "twenty-four": 24,
     "twenty-five": 25,
+    "twenty-six": 26,
     "十一": 11,
     "十二": 12,
     "十三": 13,
@@ -167,6 +168,7 @@ _TEENS = {
     "二十三": 23,
     "二十四": 24,
     "二十五": 25,
+    "二十六": 26,
 }
 _NUMBER_WORDS = {
     **{

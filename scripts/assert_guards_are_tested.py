@@ -126,6 +126,13 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
         ("tests/test_remediation.py", "tests/test_card_actions.py"),
     ),
     (
+        "one target can be changed twice in a minute",
+        "hookprobe/hookprobe/remediation.py",
+        "COOLDOWN_SECONDS = 900",
+        "COOLDOWN_SECONDS = 0",
+        ("tests/test_remediation.py", "tests/test_card_actions.py"),
+    ),
+    (
         "the selftest counts a check it could not run as a pass",
         "hookprobe/hookprobe/selftest.py",
         '    ran = [c for c in checks if c["held"] is not None]',

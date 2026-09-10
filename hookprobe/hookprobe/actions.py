@@ -88,7 +88,7 @@ def followup_prompt(run: Run) -> str:
     return _RESUME_PROMPT if run.error else _WHY_PROMPT
 
 
-def declare(run: Run, workdir: Path) -> list[dict[str, Any]]:
+def declare(run: Run, workdir: Path, *, cooldown: int = remediation.COOLDOWN_SECONDS) -> list[dict[str, Any]]:
     """Which actions this report deserves — the judgement, not the buttons.
 
     Three groups, and the reasoning differs for each:
@@ -121,7 +121,7 @@ def declare(run: Run, workdir: Path) -> list[dict[str, Any]]:
                 "prompt": followup_prompt(run),
             }
         )
-    for row in _open_proposals(run, workdir):
+    for row in _open_proposals(run, workdir, cooldown=cooldown):
         declared.append(
             {"kind": "approve", "text": _approve_text(row.get("steps") or []), "ref": str(row.get("id") or "")}
         )
@@ -150,10 +150,10 @@ def declare(run: Run, workdir: Path) -> list[dict[str, Any]]:
     return declared
 
 
-def _open_proposals(run: Run, workdir: Path) -> list[dict[str, Any]]:
+def _open_proposals(run: Run, workdir: Path, *, cooldown: int = remediation.COOLDOWN_SECONDS) -> list[dict[str, Any]]:
     """This run's procedures that are still waiting on somebody, newest first.
 
-    Three conditions, and the last two are the same rule as the first: a button
+    Four conditions, and the last three are the same rule as the first: a button
     that cannot work is worse than an absent one. `proposed` is the state
     machine's; `stale` is the 24h window, which a report re-delivered by a later
     follow-up turn can easily be past; and `moved` is the freshness cursor,
@@ -162,18 +162,26 @@ def _open_proposals(run: Run, workdir: Path) -> list[dict[str, Any]]:
     already moved. Offering those buttons would put a card in a chat whose
     approve press is guaranteed to be refused.
 
-    That is also why the cursor check has to exist in both places. This stops
-    the doomed button being drawn; `remediation.approve` stops the race the
-    button cannot see, between the card being sent and somebody pressing it.
+    `cooling` is the fourth and the only one that can become false again: the
+    other three are one-way, but a target's window expires, so a proposal this
+    drops today is offered by the next report's card. That is the intended
+    direction — the button follows the target's state rather than freezing a
+    verdict about it.
+
+    That is also why these checks have to exist in both places. This stops the
+    doomed button being drawn; `remediation.approve` stops the race the button
+    cannot see, between the card being sent and somebody pressing it.
     """
     now = remediation.cursor(run)
+    everything = remediation.list_all(workdir, limit=200)
     rows = [
         row
-        for row in remediation.list_all(workdir, limit=200)
+        for row in everything
         if str(row.get("session_key") or "") == run.session_key
         and row.get("status") == "proposed"
         and not remediation.stale(row)
         and not remediation.moved(row.get("cursor") or {}, now)
+        and not remediation.cooling(row, everything, window=cooldown)
     ]
     return rows[:_MAX_APPROVE]
 

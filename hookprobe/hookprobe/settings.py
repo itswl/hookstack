@@ -41,6 +41,20 @@ def _float(name: str, default: float) -> float:
         return default
 
 
+def _cooldown_default() -> int:
+    """The remediation cooldown's default, from the module that owns the rule.
+
+    Imported here rather than at the top because this module is the bottom of
+    the import graph — `files` imports Settings, `remediation` imports `files` —
+    so a top-level import is a cycle. The alternative is writing 900 twice, and
+    a number with two homes is how the approvals page and the work board came to
+    disagree about which proposals were still runnable.
+    """
+    from hookprobe import remediation
+
+    return remediation.COOLDOWN_SECONDS
+
+
 def _path_env(name: str) -> Path | None:
     raw = os.environ.get(name, "").strip()
     return Path(raw) if raw else None
@@ -203,6 +217,14 @@ class Settings:
     # hot-read at execution time. Deny by default — unset or empty means
     # proposals collect and nothing executes, which is the shipping posture.
     remediation_allowlist: Path | None
+
+    # Remediation cooldown: seconds a target is left alone after a procedure has
+    # acted on it. Unlike the allowlist this defaults ON, because it costs
+    # nothing where remediation is unused and the thing it stops — a fix and its
+    # rollback approved a minute apart — is reachable the moment remediation is
+    # armed at all. 0 disables it, including the refusal to run two procedures
+    # against one target at the same time.
+    remediation_cooldown_seconds: int
 
     # Storm coalescing at the event door: a re-fire of the same alert (same
     # source + title, new event id) within this many seconds continues the
@@ -418,6 +440,7 @@ class Settings:
             coalesce_window_seconds=max(0, _int("HOOKPROBE_COALESCE_WINDOW_SECONDS", 1800)),
             consolidate_at=max(0, _int("HOOKPROBE_CONSOLIDATE_AT", 5)),
             remediation_allowlist=_path_env("HOOKPROBE_REMEDIATION_ALLOWLIST"),
+            remediation_cooldown_seconds=max(0, _int("HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS", _cooldown_default())),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             relay_ui_url=os.environ.get("HOOKPROBE_RELAY_UI_URL", "").strip().rstrip("/"),

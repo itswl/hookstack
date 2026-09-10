@@ -115,7 +115,11 @@ class ReturnDelivery:
                 # a request, not a guarantee: the pipe drops kinds it is not
                 # configured to accept, and only channels that HAVE callbacks
                 # render any of them. See hookprobe.actions.
-                "actions": actions.declare(run, self._settings.workdir),
+                "actions": actions.declare(
+                    run,
+                    self._settings.workdir,
+                    cooldown=self._settings.remediation_cooldown_seconds,
+                ),
             },
             ensure_ascii=False,
             sort_keys=True,

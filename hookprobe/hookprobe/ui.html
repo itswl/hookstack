@@ -1255,6 +1255,10 @@ async function openApprovals() {
     // `expired` comes from the service, which computes it with the same
     // remediation.stale that approve() refuses on — filtering on status alone
     // counted rows whose buttons are not drawn and whose click the gate refuses.
+    // `cooling` is from the same service and NOT filtered: it expires by itself,
+    // and it is worth reading — it says another procedure just touched this
+    // target. So the row stays, its approve button is dead, and reject still
+    // works, because "no, not this one" is a decision a cooldown must not eat.
     const proposals = (rem.proposals || []).filter((r) => r.status === "proposed" && !r.expired);
     const lines = mem.open || [];
     const unruled = (runs || []).filter((r) => r.status !== "running");
@@ -1265,7 +1269,8 @@ async function openApprovals() {
           <div class="h"><span class="badge proposed">proposed</span><span>${esc(r.session_key)}</span>
           <span class="w">${esc(fmtTime(r.created_at))}</span></div>
           ${(r.steps || []).map((s) => `<div class="cmd">$ ${esc(s.command)}</div>`).join("")}
-          <div class="ap-bar"><button class="primary" data-act="approve">approve &amp; run</button>
+          ${r.cooling ? `<div class="w">held · ${esc(r.cooling)}</div>` : ""}
+          <div class="ap-bar"><button class="primary" data-act="approve"${r.cooling ? " disabled" : ""}>approve &amp; run</button>
           <button class="danger" data-act="reject">reject</button></div></div>`).join(""));
     }
     if (lines.length) {

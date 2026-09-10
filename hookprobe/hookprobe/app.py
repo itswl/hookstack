@@ -822,6 +822,16 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         rows = remediation.list_all(settings.workdir)
         for row in rows:
             row["expired"] = row.get("status") == "proposed" and remediation.stale(row, now)
+            # And the other refusal a reader cannot derive from the row itself:
+            # the cooldown lives in the OTHER rows. Reported for the same reason
+            # `expired` is — the console's button is the one surface that can
+            # still be pressed after the card's is gone, and it should say why
+            # the press would be refused before somebody makes it.
+            row["cooling"] = (
+                remediation.cooling(row, rows, window=settings.remediation_cooldown_seconds, now=now)
+                if row.get("status") == "proposed"
+                else ""
+            )
         return {"proposals": rows}
 
     @app.post("/v1/remediations/{proposal_id}/approve", dependencies=[Depends(require_token)])

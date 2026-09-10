@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from hookprobe import remediation
 from hookprobe.engine import EngineResult
 from hookprobe.settings import Settings
 
@@ -43,6 +44,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         # wants the pass says so, and nobody else pays a surprise model run.
         "consolidate_at": 0,
         "remediation_allowlist": None,
+        "remediation_cooldown_seconds": remediation.COOLDOWN_SECONDS,
         "coalesce_window_seconds": 1800,
         "event_secret": "",
         "return_url": "",

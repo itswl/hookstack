@@ -713,3 +713,138 @@ def test_the_environment_reaches_the_process_that_runs(tmp_path, monkeypatch):
     assert output, "the command produced nothing, so this proves nothing"
     assert "the-real-secret" not in output
     assert "HOOKPROBE_EVENT_SECRET" not in output
+
+
+# ── how often, not who or what ────────────────────────────────────────────────
+
+
+def _acted(tmp_path, command: str, *, target: str = "", status: str = "executed", ago: float = 60.0) -> str:
+    """A proposal that has already put this command on this target."""
+    steps = [{"action": "a", "command": command, "target": target, "risk": "low", "rollback": ""}]
+    pid = remediation.propose(tmp_path, "probe:alerts:earlier", steps)
+    row = remediation.load(tmp_path, pid)
+    row["status"] = status
+    row["approved_at"] = time.time() - ago
+    if status != "running":
+        row["executed_at"] = time.time() - ago
+    remediation.save(tmp_path, row)
+    return pid
+
+
+def test_the_cooldown_key_is_the_target_and_falls_back_to_the_command() -> None:
+    """`target` was in the step schema from the first commit and read by
+    nothing. The model was already naming the host each command touches; this
+    is that answer finally load-bearing."""
+    assert remediation.cooldown_key({"target": " API-1 ", "command": "systemctl restart api"}) == "api-1"
+    # No target: the literal command, which still catches the same fix fired
+    # twice. Narrower than a target and honest about being the floor.
+    assert remediation.cooldown_key({"command": "echo  hi"}) == "echo hi"
+    assert remediation.cooldown_key({}) == ""
+
+
+def test_a_target_acted_on_a_minute_ago_is_cooling_and_another_is_not(tmp_path) -> None:
+    _acted(tmp_path, "systemctl restart api", target="host-1", ago=60)
+    rows = remediation.list_all(tmp_path)
+    same = {"id": "new", "steps": [{"command": "systemctl stop api", "target": "host-1"}]}
+    other = {"id": "new", "steps": [{"command": "systemctl restart api", "target": "host-2"}]}
+    # A DIFFERENT command against the same host is still cooling: a fix and the
+    # rollback of that fix are two changes to one machine, which is the flap.
+    assert "host-1 was acted on" in remediation.cooling(same, rows)
+    # The same command against another host is a fleet, not a flap.
+    assert remediation.cooling(other, rows) == ""
+
+
+def test_the_cooldown_expires_and_can_be_switched_off(tmp_path) -> None:
+    _acted(tmp_path, "systemctl restart api", target="host-1", ago=60)
+    rows = remediation.list_all(tmp_path)
+    row = {"id": "new", "steps": [{"command": "systemctl stop api", "target": "host-1"}]}
+    assert remediation.cooling(row, rows, window=30) == "", "60s ago is outside a 30s window"
+    assert remediation.cooling(row, rows, window=0) == "", "0 disables the rule"
+    # A row nobody approved holds nothing: proposals pile up without executing,
+    # which is the shipping posture, and a pile must not become a lockout.
+    assert remediation.cooling(row, [{"id": "x", "status": "proposed", "steps": row["steps"]}]) == ""
+
+
+def test_a_procedure_running_right_now_holds_its_target_past_the_window(tmp_path) -> None:
+    """`running` is the worst case, not the mildest: two sequences interleaving
+    their steps against one host is a state neither was written for. A long
+    procedure can outlive the window — five steps, each capped at the bash
+    timeout — so this one is not measured by the clock at all."""
+    _acted(tmp_path, "systemctl restart api", target="host-1", status="running", ago=99999)
+    rows = remediation.list_all(tmp_path)
+    row = {"id": "new", "steps": [{"command": "systemctl stop api", "target": "host-1"}]}
+    assert "being acted on right now" in remediation.cooling(row, rows)
+
+
+def test_a_second_procedure_against_the_same_target_is_refused_and_stays_approvable(tmp_path):
+    """The refusal that is not terminal. Nothing about these steps has been
+    invalidated — the condition has not moved and the clock has not run out —
+    so the row stays `proposed` and the same press works after the window."""
+    from hookprobe import automation
+
+    run, service = _proposed(tmp_path)
+    pid = run.meta["remediation_proposal"]
+    earlier = _acted(tmp_path, "echo remediated", ago=60)
+
+    with pytest.raises(remediation.Cooling) as caught:
+        service.approve_remediation(pid)
+    assert "echo remediated" in str(caught.value) and "Nothing ran" in str(caught.value)
+    row = remediation.load(tmp_path, pid)
+    assert row["status"] == "proposed", "held, not retired"
+    assert row.get("results") == [], "nothing ran"
+    # Not a human decision, so not on the ledger that feeds graduation — the
+    # same rule `superseded` follows, for the same reason.
+    events = [r.get("event") for r in automation.ledger(tmp_path, "remediation")]
+    assert "approved" not in events and "dismissed" not in events
+
+    # The window passes and the identical proposal is approvable.
+    older = remediation.load(tmp_path, earlier)
+    older["executed_at"] = older["approved_at"] = time.time() - (remediation.COOLDOWN_SECONDS + 60)
+    remediation.save(tmp_path, older)
+    approved = remediation.approve(tmp_path, pid, allowlist=tmp_path / "allow.txt")
+    assert approved["status"] == "running"
+
+
+def test_the_allowlist_refusal_comes_before_the_cooldown(tmp_path):
+    """Two refusals, different in kind. A command no allowlist permits can
+    never run as written, and answering "wait 9 minutes" to it would be a lie
+    of omission. Order the permanent one first."""
+    run, service = _proposed(tmp_path, allow="")
+    _acted(tmp_path, "echo remediated", ago=60)
+    with pytest.raises(PermissionError):
+        service.approve_remediation(run.meta["remediation_proposal"])
+
+
+def test_the_button_is_not_offered_while_the_target_is_cooling(tmp_path):
+    """The same two-place shape as the freshness cursor: this stops the doomed
+    button being drawn, and `approve` stops the race it cannot see."""
+    from hookprobe import actions
+
+    run, _ = _proposed(tmp_path)
+    assert [a for a in actions.declare(run, tmp_path) if a["kind"] == "approve"]
+    _acted(tmp_path, "echo remediated", ago=60)
+    assert [a for a in actions.declare(run, tmp_path) if a["kind"] == "approve"] == []
+    # Unlike the other three filters this one is not one-way: the window
+    # expires, and the next report's card offers the button again.
+    assert [a for a in actions.declare(run, tmp_path, cooldown=0) if a["kind"] == "approve"]
+
+
+def test_the_chat_is_told_a_pressed_procedure_was_held(tmp_path):
+    """A refusal the refused party cannot see is not a refusal. The bridge has
+    already repainted the card "accepted and passed on" and stripped its
+    buttons by the time this is decided."""
+    run, service = _proposed(tmp_path)
+    pid = run.meta["remediation_proposal"]
+    _acted(tmp_path, "echo remediated", ago=60)
+    with pytest.raises(remediation.Cooling) as caught:
+        service.approve_remediation(pid)
+    notice = service.report_cooling(pid, str(caught.value))
+    assert notice is not None and notice.origin == "relay" and notice.cost_usd == 0.0
+    assert notice.meta["notice"] == "cooling" and notice.meta["proposal"] == pid
+    assert notice.meta["title"] == "t" and notice.meta["source"] == "alerts"
+    assert "held, not retired" in notice.text and "echo remediated" in notice.text
+    # Keyed on the press, not only the proposal: the same row can be pressed
+    # again after the window and refused again by a different procedure, and
+    # collapsing those onto one key would answer the second press with silence.
+    assert service.report_cooling(pid, str(caught.value)) is None
+    assert service.report_cooling(pid, "host-1 is being acted on right now") is not None

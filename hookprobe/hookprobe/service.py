@@ -36,7 +36,13 @@ from hookprobe import actions, automation, distill, distill_loop, remediation, r
 from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult, price_tokens, transient
 from hookprobe.notify import ReturnDelivery
-from hookprobe.reports import budget_report, failure_report, superseded_report, unanswered_report
+from hookprobe.reports import (
+    budget_report,
+    cooling_report,
+    failure_report,
+    superseded_report,
+    unanswered_report,
+)
 from hookprobe.runs import COMPLETED, FAILED, INFERRED_BY_PREFIX, RUNNING, Run, RunStore
 from hookprobe.settings import Settings
 
@@ -1276,6 +1282,7 @@ class RunService:
             allowlist=self._settings.remediation_allowlist,
             note=note,
             at=self.proposal_cursor(proposal_id),
+            cooldown=self._settings.remediation_cooldown_seconds,
         )
         task = asyncio.create_task(self._apply_remediation(row))
         self._tasks.add(task)
@@ -1328,6 +1335,37 @@ class RunService:
             kind="superseded",
             error=f"not executed: {reason}",
             text=superseded_report(reason, list(row.get("steps") or [])),
+            extra={"proposal": str(row.get("id") or "")},
+        )
+
+    def report_cooling(self, proposal_id: str, reason: str) -> Run | None:
+        """Say in the chat that a pressed procedure was held back, and why.
+
+        Same hole as `report_superseded` and the same answer: the bridge has
+        already repainted the card "accepted and passed on" and stripped its
+        buttons, so a refusal decided here reaches the operator through no
+        existing path. A refusal the refused party cannot see is not a refusal.
+
+        Keyed on the proposal AND on the press, unlike the superseded notice.
+        Superseding is terminal — the row can only be retired once, so one
+        notice is the whole truth. Cooling is not: the same proposal may be
+        pressed again after the window and refused again if something else got
+        there first, and collapsing those onto one key would answer the second
+        press with silence.
+        """
+        row = remediation.load(self._settings.workdir, proposal_id)
+        if row is None:
+            return None
+        run = self._store.get(str(row.get("session_key") or ""))
+        if run is None:
+            return None
+        digest = hashlib.sha256(f"{proposal_id}:{reason}".encode()).hexdigest()[:10]
+        return self._notice(
+            run,
+            key=f"probe:cooling:{digest}",
+            kind="cooling",
+            error=f"not executed: {reason}",
+            text=cooling_report(reason, list(row.get("steps") or [])),
             extra={"proposal": str(row.get("id") or "")},
         )
 

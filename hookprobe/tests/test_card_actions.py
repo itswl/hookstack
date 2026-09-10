@@ -562,6 +562,46 @@ def test_the_remember_button_offers_only_what_the_shape_check_refused(tmp_path) 
     assert not [row for row in actions.declare(run, tmp_path) if row["kind"] == "remember"]
 
 
+def test_a_press_against_a_target_something_just_touched_runs_nothing(tmp_path: Path) -> None:
+    """The other race, and the one a clock cannot see: nothing about this
+    proposal is wrong — the condition stands, the window is open, the command
+    is allowlisted — except that another procedure changed the same target a
+    minute ago and nobody has looked at what it did.
+
+    Delivered like the superseded refusal because it is the same hole, and
+    answered differently because it is a different verdict: `cooling`, the row
+    left `proposed`, and a report that says press again rather than ask again.
+    """
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    report = 'ok\n```remediation\n[{"action":"probe","command":"echo repaired","risk":"low"}]\n```\n'
+    client, _ = _investigated(tmp_path, text=report, remediation_allowlist=allow)
+    with client:
+        run = _drain(client, "probe:inbound:5")
+        proposal_id = run["meta"]["remediation_proposal"]
+
+        # Something else already ran this exact fix, a minute ago.
+        earlier = remediation.propose(
+            tmp_path, "probe:inbound:4", [{"action": "a", "command": "echo repaired", "risk": "low"}]
+        )
+        row = remediation.load(tmp_path, earlier)
+        row["status"], row["executed_at"] = "executed", time.time() - 60
+        remediation.save(tmp_path, row)
+
+        answer = _press(client, "approve", params={"ref": proposal_id}).json()
+        assert answer["status"] == "cooling"
+        assert "inside the 15m cooldown" in answer["detail"]
+
+        held = remediation.load(tmp_path, proposal_id)
+        assert held["status"] == "proposed", "held, not retired — this one is still approvable"
+        assert not held["results"], "nothing ran"
+
+        listed = client.get("/v1/runs", headers={"Authorization": f"Bearer {TOKEN}"}).json()
+        notices = [r for r in listed if str(r["session_key"]).startswith("probe:cooling:")]
+        assert notices, "the refusal reached no chat and no board"
+        assert notices[0]["cost_usd"] == 0.0
+
+
 def test_a_press_that_arrives_after_the_condition_ended_runs_nothing(tmp_path: Path) -> None:
     """The race the card cannot see. A procedure is a decision about a moment;
     between the card being sent and somebody pressing it, the pipe delivered
