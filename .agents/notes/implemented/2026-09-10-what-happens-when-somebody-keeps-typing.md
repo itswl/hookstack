@@ -67,6 +67,24 @@ existing session for exactly this reason. What was real in the proposal was the
 *quality* half — that a folded conversation has lost something and nobody is
 told — and that is what shipped.
 
+**3. And a report delivered after its condition ended says so.** Same shape as
+the fold: `with_recovery_note()` appends one line naming when the condition
+ended relative to the report being finished.
+
+This one came from a review's "split-brain" scenario, and it is the only shape
+of stale card this system can actually produce. `record_recovery` finds the run
+whether or not it has finished (`list_runs` holds in-flight runs too) and
+annotates it; it starts no turn, spends nothing, and therefore moves nothing the
+freshness cursor watches. So the cursor — which guards the APPROVAL of a
+procedure — cannot see it, and nothing guarded the DELIVERY of the report. Before
+this, `notify.py` contained the string `recovered` exactly zero times.
+
+An admission, not a suppression, and the boundary is worth stating: a proposal
+created *after* the recovery is stamped as already-recovered, so `moved()` sees
+no change and its approve button is still drawn. That is deliberate — the
+operator may still want the fix — and this line is what tells the person
+pressing it what they are pressing.
+
 ## Consequences
 
 * A refused reply now costs one card in the chat. That is a real increase in

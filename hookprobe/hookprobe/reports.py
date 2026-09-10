@@ -122,6 +122,53 @@ def with_fold_note(summary: str, folds: int) -> str:
     )
 
 
+def _gap_words(seconds: float) -> str:
+    """How long ago, in the coarsest unit that is still true."""
+    if seconds < 90:
+        return "moments"
+    if seconds < 5400:
+        return f"{round(seconds / 60)} minutes"
+    return f"{seconds / 3600:.1f} hours"
+
+
+def with_recovery_note(summary: str, recovered_at: Any, finished_at: Any) -> str:
+    """`summary`, admitting that the condition ended — if it did, and when.
+
+    The one shape of stale card this system can actually produce. An
+    investigation takes a minute; a recovery arriving during that minute is
+    recorded on the run by `service.record_recovery` (which annotates and
+    spends nothing, so it never shows up as a new turn) and then the report is
+    delivered on schedule, recommending work for a condition that is over. The
+    reader has no way to know: the card is identical either way.
+
+    Deliberately an ADMISSION and not a suppression. The findings may still be
+    worth reading — a flapping alert clears on its own and will be back — and a
+    procedure proposed here may still be the right thing to run. What the reader
+    loses without this line is the fact that it was written about a moment that
+    has passed, which is the one thing they cannot see for themselves.
+    """
+    try:
+        ended = float(recovered_at or 0.0)
+    except (TypeError, ValueError):
+        return summary
+    if ended <= 0:
+        return summary
+    try:
+        done = float(finished_at or 0.0)
+    except (TypeError, ValueError):
+        done = 0.0
+    if not done:
+        return f"{summary}\n\n_The condition this investigated has since ended._"
+    if ended > done:
+        gap = _gap_words(ended - done)
+        return f"{summary}\n\n_The condition this investigated ended {gap} after this report was finished._"
+    gap = _gap_words(done - ended)
+    return (
+        f"{summary}\n\n_The condition this investigated ended {gap} before this report was finished — "
+        "anything proposed below was chosen while it was still firing._"
+    )
+
+
 def report_summary(text: str) -> str:
     """The one paragraph a channel card shows; the full text stays on the run."""
     try:

@@ -33,7 +33,7 @@ import time
 import urllib.request
 
 from hookprobe import actions
-from hookprobe.reports import folded, report_summary, verdict, with_fold_note
+from hookprobe.reports import folded, report_summary, verdict, with_fold_note, with_recovery_note
 from hookprobe.runs import Run, RunStore
 from hookprobe.settings import Settings
 from hookprobe.wire import sign_timestamped
@@ -52,8 +52,11 @@ class ReturnDelivery:
         self._alarm_suppressed = 0
 
     async def deliver(self, run: Run, delays: tuple[float, ...]) -> None:
-        # The answer, plus the one thing the answer cannot say about itself.
+        # The answer, plus the two things the answer cannot say about itself:
+        # that its own context was folded, and that the condition it is about
+        # ended while it was being written.
         summary = with_fold_note(report_summary(run.text), folded(run.turns))
+        summary = with_recovery_note(summary, run.meta.get("recovered_at"), run.finished_at)
         alert_title = str(run.meta.get("title") or run.session_key)
         body = json.dumps(
             {

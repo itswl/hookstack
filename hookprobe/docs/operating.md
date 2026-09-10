@@ -369,6 +369,22 @@ in the thread — the cap, a spent budget, and a session that can no longer be
 resumed — because those are the three a person can act on. An unknown thread, a
 redelivery and an unlisted sender stay quiet on purpose.
 
+**And a report can outlive the condition it is about.** An investigation takes
+a minute; a recovery arriving during that minute is recorded on the run —
+`record_recovery` annotates and spends nothing, so it never becomes a new turn —
+and then the report is delivered on schedule, recommending work for something
+that is over. The card used to be identical either way. It now carries a line
+saying the condition ended, and whether that was before or after the report was
+finished, because only the first makes the findings stale.
+
+It is an admission, not a suppression: a flapping alert clears on its own and
+will be back, the findings may still be worth reading, and a procedure proposed
+there may still be the right thing to run. What the reader gets is the one fact
+they could not see — that the answer was written about a moment that has passed.
+Note the boundary: the freshness cursor guards the APPROVAL of a procedure, and
+a proposal born after the recovery is stamped as already-recovered, so its
+button is still drawn. This line is what tells the person pressing it.
+
 Before the cap, the runtime folds its own context away when it fills. That has
 always been recorded and shown on the console's turn line (`context folded 2×`);
 the card now says it too, in one line under the summary. It is not a claim that

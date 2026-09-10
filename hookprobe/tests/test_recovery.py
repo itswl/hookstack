@@ -171,3 +171,102 @@ def test_only_a_stated_recovery_counts_never_a_guess_at_the_words(tmp_path) -> N
     key = _fire(client, event_id=40, title="Redis slow command rate high")
     assert _recover(client, event_id=41, title="Redis slow command rate high", flag="resolved")["status"] == "verified"
     assert service.get(key).meta["recovered_at"] > 0
+
+
+# ── the one stale card this system can actually produce ───────────────────────
+
+
+def _returns(monkeypatch: Any) -> list[dict[str, Any]]:
+    import json
+
+    from hookprobe import notify
+
+    posted: list[dict[str, Any]] = []
+
+    def capture(self: Any, body: bytes) -> int:
+        posted.append(json.loads(body))
+        return 200
+
+    monkeypatch.setattr(notify.ReturnDelivery, "_post_return", capture)
+    return posted
+
+
+def test_a_report_delivered_after_its_condition_ended_says_so(tmp_path, monkeypatch) -> None:
+    """The real race, driven rather than forged: the alert opens a run that
+    takes a moment, the recovery arrives while it is still working, and the
+    report is delivered afterwards recommending work for a condition that is
+    over.
+
+    A recovery annotates and spends nothing, so it never shows up as a new turn
+    — which is exactly why the freshness cursor cannot catch this one. The
+    cursor guards the APPROVAL of a procedure; nothing guarded the delivery of
+    the report, and the card is identical either way.
+    """
+    posted = _returns(monkeypatch)
+    settings = make_settings(
+        tmp_path,
+        token=TOKEN,
+        escalate_levels=frozenset({"high", "critical"}),
+        return_url="http://relay/hook/probe-notify",
+    )
+    service = RunService(settings, FakeEngine(delay=0.4), RunStore(tmp_path / "results"))
+    client = TestClient(create_app(settings, service))
+    with client:
+        accepted = client.post(
+            "/hooks/event",
+            json={
+                "source": "judge-notify",
+                "title": "Payment gateway 5xx rate 8.1%",
+                "body": "…",
+                "level": "high",
+                "event_id": 7,
+                "fields": {},
+            },
+        ).json()
+        key = accepted["sessionKey"]
+        # While the investigation is still running.
+        assert not service.get(key).finished
+        assert _recover(client)["status"] == "verified"
+
+        run = _wait(client, key)
+        for _ in range(400):
+            if posted:
+                break
+            time.sleep(0.01)
+
+    ended = service.get(key).meta["recovered_at"]
+    assert ended < service.get(key).finished_at, "the recovery must land before the report is finished"
+    assert run["status"] == "completed"
+    summary = posted[-1]["analysis"]["summary"]
+    assert "ended moments before this report was finished" in summary, summary
+    assert "chosen while it was still firing" in summary
+    # The same string reaches both fields a renderer might read.
+    assert posted[-1]["report"]["summary"] == summary
+
+
+def test_a_live_condition_earns_no_such_line(tmp_path, monkeypatch) -> None:
+    """A note that appears on every card teaches nobody anything."""
+    posted = _returns(monkeypatch)
+    client, _, _ = _client(tmp_path, return_url="http://relay/hook/probe-notify")
+    with client:
+        _fire(client)
+        for _ in range(300):
+            if posted:
+                break
+            time.sleep(0.01)
+    assert "condition this investigated" not in posted[-1]["analysis"]["summary"]
+
+
+def test_a_recovery_that_arrives_after_the_report_reads_differently(tmp_path) -> None:
+    """Ended two minutes before the answer was written and two minutes after it
+    are different facts, and only one of them makes the findings stale."""
+    from hookprobe.reports import with_recovery_note
+
+    before = with_recovery_note("s", 1000.0, 1120.0)
+    after = with_recovery_note("s", 1120.0, 1000.0)
+    assert "before this report was finished" in before and "still firing" in before
+    assert "after this report was finished" in after and "still firing" not in after
+    # No recovery, no line — and a junk value is not a recovery either.
+    assert with_recovery_note("s", None, 1000.0) == "s"
+    assert with_recovery_note("s", "soon", 1000.0) == "s"
+    assert with_recovery_note("s", 0, 1000.0) == "s"
