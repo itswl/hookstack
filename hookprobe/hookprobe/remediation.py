@@ -280,7 +280,26 @@ APPROVAL_WINDOW_SECONDS = 24 * 3600
 
 
 def stale(row: dict[str, Any], now: float | None = None) -> bool:
-    """Whether this proposal is past the window in which it may still be run."""
+    """Whether this proposal is past the window in which it may still be run.
+
+    A missing or unparseable `created_at` becomes `0.0` and therefore reads as
+    stale. That is deliberate and it is the safe direction: `approve` refuses on
+    this, so a record nobody can date is a record nobody can run.
+
+    It stays two-valued on purpose, and the argument was had. Three values —
+    expired, live, and "no usable timestamp" — would be a state nothing has ever
+    been observed in, which is the same reason `received` and `triaged` are not
+    work-item states. A missing `created_at` is not something the world does; it
+    is a corrupted record. The third value earns its place where the third case
+    is real (a check that could not run, a target with no answer yet), not where
+    it is a file that should not exist.
+
+    The residual, so the next reader has it rather than deriving it: such a row
+    is refused at the gate, hidden from the approvals page (which filters on
+    `expired`), and still named on its work item as `expired unapproved` — inert
+    but not invisible, which is what makes "wait for one" safe rather than a bet.
+    One row existing is the trigger to revisit this.
+    """
     created = float(row.get("created_at") or 0.0)
     return (now or time.time()) - created > APPROVAL_WINDOW_SECONDS
 
