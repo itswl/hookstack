@@ -208,3 +208,38 @@ def test_what_this_rule_does_not_stop() -> None:
     audit as a refusal instead of passing silently."""
     sneaky = "python3 -c \"import socket,ssl;s=socket.create_connection(('elsewhere.example',443))\""
     assert bash_deny_reason(sneaky, READONLY) is None
+
+
+# ── `aws` the command, not `aws` the three letters ────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl https://docs.aws.amazon.com",
+        "curl -sS https://aws.amazon.com/blogs/",
+        "curl https://s3.eu-west-1.amazonaws.com/public/doc.txt",
+    ],
+)
+def test_a_dotted_hostname_is_not_an_aws_invocation(command: str) -> None:
+    """`\\baws\\b` matched the label inside a hostname, so reading AWS's own
+    documentation was refused as "aws non-read operation" — measured on the
+    production deployment, whose WebFetch reaches docs.aws.amazon.com more than
+    any other host."""
+    assert bash_deny_reason(command, READONLY) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/usr/local/bin/aws s3 rm s3://b/k",
+        "AWS_PROFILE=p aws s3 rm s3://b/k",
+        "cd /tmp && aws iam create-user --user-name x",
+        "aws ec2 terminate-instances --instance-ids i-1",
+    ],
+)
+def test_narrowing_it_did_not_open_the_path_forms(command: str) -> None:
+    """The obvious fix — widening the preceding class the way `_AWS_READ` does
+    for its verbs — would have let an absolute path through. Excluding only a
+    dot on either side costs nothing an invocation can use."""
+    assert bash_deny_reason(command, READONLY) is not None

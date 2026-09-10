@@ -127,8 +127,17 @@ _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     # every `put-`/`create-`/`delete-`/`terminate-` do not. The read verbs are
     # the AWS API's own naming convention, which is the only reason a list this
     # short can cover it.
+    #
+    # The lookarounds keep `aws` a COMMAND rather than any occurrence of the
+    # three letters. `curl https://docs.aws.amazon.com` was refused as an "aws
+    # non-read operation", because `\baws\b` matches the label inside a dotted
+    # hostname — measured 2026-09-10, and it is the one documentation host this
+    # deployment's WebFetch reaches most. Excluding a dot on either side is the
+    # narrow fix: it costs nothing an invocation can use, where widening the
+    # preceding class to `[^/:.\w-]` (the shape `_AWS_READ` uses for its verbs)
+    # would have let `/usr/local/bin/aws s3 rm` through.
     (
-        re.compile(rf"\baws\b(?![^|;&\n]*{_AWS_READ})"),
+        re.compile(rf"(?<!\.)\baws\b(?!\.)(?![^|;&\n]*{_AWS_READ})"),
         "aws non-read operation",
     ),
 )
