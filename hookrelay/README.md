@@ -141,6 +141,17 @@ person's message) so the report lands inside the topic. A later reply in that
 topic has the person's message as its root, not a card; the lookup then finds
 the chain through the report that carried the same `thread_root`.
 
+`on_new_topic` covers a second case that looks different and is the same: a
+reply under a card this pipe DID send, whose chain carries no investigation —
+a watcher's notification, a verdict nobody investigated. The stage resolves the
+chain, finds no session, and shapes the message as a question rather than as a
+follow-up to nothing, adding `fields.about` (what the card was about, since a
+person replying under a card does not repeat its contents). Without it the
+message keeps `kind: follow_up`, which either matches no route or reaches a node
+whose answer is "no investigation behind this thread" — both of which reach a
+ledger and not the person who asked. Route on `kind` rather than on `topic` to
+catch both shapes.
+
 The other half is on the channel: `options: {thread_replies: true}` on a `bridge`
 channel makes a delivery whose event carries
 `fields.thread_root` go out as a reply in that thread (`reply_to` in the body

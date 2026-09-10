@@ -397,9 +397,15 @@ routes:
   # here: the stage skips them as unknown_thread.
   # A topic someone opened has no session yet: it goes to the planner as a
   # work item, and the plan card lands inside the topic.
-  - name: topic-to-plan
+  # A question with no session behind it: an @-mention that opened a topic, or a
+  # reply under a card that was never an investigation (a watcher's notification
+  # is the common one). `thread_lookup` shapes both as `kind: task` — matching on
+  # THAT rather than on `topic: new` is what makes the second case work. Before
+  # it did, a reply under a watch card resolved to its chain, stayed
+  # `kind: follow_up`, matched nothing, and the person got silence.
+  - name: question-to-plan
     source: lark-thread
-    when: {topic: new}
+    when: {kind: task}
     send_to: [to-plan]
     priority: 110
     stop: true

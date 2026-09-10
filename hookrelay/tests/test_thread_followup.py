@@ -365,3 +365,111 @@ async def test_a_new_topic_takes_the_configured_shape_and_answers_into_itself(st
     assert reply["outcome"] == "routed"
     trip = await store.round_trip(result["event_id"])
     assert reply["event_id"] in [r["id"] for r in trip["returns"]], "the follow-up is a hop of the topic's chain"
+
+
+# ── a question under a card that was never an investigation ───────────────────
+#
+# Reproduced from a real one on the work deployment, 2026-09-10 09:42: a watcher
+# posted a notification, a person replied "@bot 看一下这个 ip 属于啥服务", the
+# stage resolved the chain, kept `kind: follow_up`, and the routes wanted a
+# `return_source` a notification does not have. Outcome `no_route`, and the
+# person got silence.
+
+
+async def _notification_card(store, cfg):
+    """A card this pipe sent that is NOT an investigation: no session in its
+    chain, which is the whole difference."""
+    note = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["ww"],
+        {"title": "asset beacon added 203.0.113.9", "body": "two ip assets", "level": "low"},
+        now=100.0,
+    )
+    for row in await store.due_deliveries(now=200.0):
+        if row["channel"] == "to-me":
+            await store.mark_sent(row["id"], 170.0, "{}", "om_note")
+    return note["event_id"]
+
+
+async def test_a_question_under_a_notification_is_not_a_follow_up_to_nothing(store, cfg):
+    """`follow_up` sends it to a node whose answer is "no investigation behind
+    this thread" — an answer that reaches a ledger, not a person."""
+    raw = CFG["pipeline"][0]
+    raw["on_new_topic"] = {"kind": "task", "level": "high"}
+    cfg = Config.from_dict(CFG)
+    note_id = await _notification_card(store, cfg)
+
+    result = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lark-thread"],
+        {
+            "root_message_id": "om_note",
+            "message_id": "om_q",
+            "sender": "ou_sre",
+            "topic": "reply",
+            "text": "which service owns this ip?",
+        },
+        now=300.0,
+    )
+    del raw["on_new_topic"]
+
+    assert result["outcome"] == "routed", result
+    stage = next(s for s in result["steps"] if s.get("gate") == "thread-lookup")
+    assert stage["result"] == "asked", "a resolve with no session is a question, not a continuation"
+    assert stage["origin_event_id"] == note_id
+
+    row = await store._event_row(result["event_id"])
+    fields = row["fields"]
+    assert fields["kind"] == "task" and row["level"] == "high"
+    # It still belongs to the chain it was asked in.
+    assert fields["thread_root"] == "om_note" and fields["correlation_id"].startswith("hr-")
+    # And it carries WHAT was asked about: a person replying under a card does
+    # not repeat it, so without this the question arrives with no subject.
+    assert fields["about"] == "asset beacon added 203.0.113.9"
+
+
+async def test_a_reply_that_does_have_a_session_is_still_a_follow_up(store, cfg):
+    """The change must not turn every continuation into a fresh paid question."""
+    raw = CFG["pipeline"][0]
+    raw["on_new_topic"] = {"kind": "task", "level": "high"}
+    cfg = Config.from_dict(CFG)
+    await _alert_then_report(store, cfg)
+    result = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lark-thread"],
+        {
+            "root_message_id": "om_report",
+            "message_id": "om_f",
+            "sender": "ou_sre",
+            "topic": "reply",
+            "text": "why?",
+        },
+        now=300.0,
+    )
+    del raw["on_new_topic"]
+
+    stage = next(s for s in result["steps"] if s.get("gate") == "thread-lookup")
+    assert stage["result"] == "resolved"
+    fields = (await store._event_row(result["event_id"]))["fields"]
+    assert fields["kind"] == "follow_up" and fields["session"] == "probe:ww:1"
+    assert "about" not in fields
+
+
+async def test_without_the_knob_the_old_behaviour_stands(store, cfg):
+    """A deployment that has not said what a question starts does not acquire a
+    new paid door by upgrading."""
+    await _notification_card(store, cfg)
+    result = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lark-thread"],
+        {"root_message_id": "om_note", "message_id": "om_q2", "sender": "ou_sre", "topic": "reply", "text": "?"},
+        now=300.0,
+    )
+    stage = next(s for s in result["steps"] if s.get("gate") == "thread-lookup")
+    assert stage["result"] == "resolved"
+    fields = (await store._event_row(result["event_id"]))["fields"]
+    assert fields["kind"] == "follow_up" and "about" not in fields

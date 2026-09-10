@@ -196,6 +196,7 @@ class ThreadLookupProcessor:
         field = str(options.get("from") or "root_message_id")
         root = str(ctx.extracted["fields"].get(field) or "").strip()
         found = await rt.store.thread_context(root) if root else None
+        shape = options.get("on_new_topic")
         if found is None:
             # A message that opens a topic (the bridge marks it `topic: new`
             # and roots it at itself) has no card behind it by definition.
@@ -204,7 +205,6 @@ class ThreadLookupProcessor:
             # it as a work item for the planner; `{kind: brief}` as a question
             # for the investigator; absent, a new topic is skipped like any
             # reply under a card nobody here sent.
-            shape = options.get("on_new_topic")
             if root and str(ctx.extracted["fields"].get("topic") or "") == "new" and isinstance(shape, dict):
                 ctx.extracted["fields"]["thread_root"] = root
                 if shape.get("kind"):
@@ -225,13 +225,39 @@ class ThreadLookupProcessor:
                 "kind": str(ctx.extracted["fields"].get("kind") or "follow_up"),
             }
         )
+        asked = False
+        if not found["session"] and isinstance(shape, dict):
+            # A card this pipe sent, and somebody asked a question under it —
+            # but that card was never an investigation, so there is no session
+            # to continue. `follow_up` sends it to a node whose answer is "no
+            # investigation behind this thread", and that answer goes to a
+            # ledger, not to the person. Measured on the work deployment: a
+            # reply under a watcher's notification resolved to its chain, kept
+            # kind=follow_up, matched no route (`no_route`), and the operator
+            # got silence.
+            #
+            # So it is shaped as a QUESTION, the same way a new topic is and
+            # with the same knob: from the deployment's side both are "somebody
+            # asked something and there is no session behind it", and the answer
+            # to both is the same shape.
+            asked = True
+            if shape.get("kind"):
+                ctx.extracted["fields"]["kind"] = str(shape["kind"])
+            if shape.get("level"):
+                ctx.extracted["level"] = str(shape["level"])
+            # What they are pointing AT. A person replying under a card does not
+            # repeat its contents — "看一下这个 ip 属于啥服务" names no ip — so
+            # without this the question arrives with its subject missing.
+            title = str(found.get("title") or "")[:300]
+            if title:
+                ctx.extracted["fields"]["about"] = title
         # The pipeline adopts a quoted correlation before the stages run; this
         # one is learned inside a stage, so it is adopted here.
         ctx.correlation_id = found["quote"]
         ctx.steps.append(
             {
                 "gate": name,
-                "result": "resolved",
+                "result": "asked" if asked else "resolved",
                 "origin_event_id": found["origin_event_id"],
                 "session": found["session"] or None,
             }

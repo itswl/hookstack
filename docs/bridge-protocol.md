@@ -102,7 +102,11 @@ message door (the deployment names it; ours is `lark-thread`):
 ```
 
 `topic: reply` — the message is under something; `root_message_id` is the
-message it replies to (a card the pipe sent, or a person's own topic).
+message it replies to (a card the pipe sent, or a person's own topic). A reply
+under a card that was never an investigation — a plain notification, say — has
+no session to continue; the pipe's `thread_lookup` stage shapes it as a fresh
+question instead (`on_new_topic`), carrying what the card was about, because a
+person replying under a card does not repeat its contents.
 `topic: new` — a top-level message that addressed the bot; `root_message_id` is
 the message itself. Signed with the door's secret in the same
 `X-Hook-Timestamp` / `X-Hook-Signature` headers. The bridge decides only by
