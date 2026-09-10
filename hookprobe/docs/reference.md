@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (73)
+## Environment (74)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -56,6 +56,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_BUDGET_USD` | `0.0` | The budget breaker, guarding the only path that spends money without a human asking: once the window's recorded spend reaches budget_usd, the event door refuses NEW investigations… |
 | `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24.0` | Window the spend ceiling is measured over |
 | `HOOKPROBE_RETENTION_DAYS` | `0` | Volume retention (days): case files and engine transcripts older than this are pruned daily |
+| `HOOKPROBE_SELFTEST_EVERY_SECONDS` | `3600` | How often the node demonstrates its own boundaries (/v1/selftest) and tells the alarm channel when one does not hold |
 | `HOOKPROBE_PI_PROVIDER` | *(empty)* | Which provider in that configuration serves this node's model |
 | `HOOKPROBE_SKILLS` | *(empty)* | Directory of skills the engine may load |
 | `HOOKPROBE_RETURN_URL` | *(empty)* | The one door findings go back to |

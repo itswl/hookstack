@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import pytest
+
 from hookprobe import audit, selftest
 from tests.helpers import make_settings
 
@@ -189,3 +191,115 @@ def test_the_loopback_check_does_not_block_the_loop(tmp_path) -> None:
     assert inspect.iscoroutinefunction(selftest.agent_token_cannot_write)
     source = inspect.getsource(selftest.agent_token_cannot_write)
     assert "to_thread" in source, "a blocking urlopen here holds the loop that has to answer it"
+
+
+# ── the watch: a check nobody runs has never caught anything ──────────────────
+
+
+def _watch(tmp_path, monkeypatch, verdict, *, alarm_url: str = "https://alarm.invalid/x", sent: bool = True):
+    """A Watch whose selftest returns `verdict` and whose alarm is recorded."""
+    told: list[str] = []
+
+    async def fake_run(_settings):
+        return dict(verdict)
+
+    async def fake_alarm(text: str) -> bool:
+        told.append(text)
+        return sent
+
+    monkeypatch.setattr(selftest, "run", fake_run)
+    settings = make_settings(tmp_path, workdir=tmp_path, alarm_url=alarm_url, selftest_every_seconds=3600)
+    return selftest.Watch(settings, fake_alarm), told
+
+
+def _verdict(**kw):
+    base = {
+        "held": True,
+        "checked_at": 1.0,
+        "demonstrated": 7,
+        "unproven": [],
+        "failed": [],
+        "checks": [{"name": "n", "held": True, "detail": "d"}],
+    }
+    return {**base, **kw}
+
+
+def test_a_holding_watch_says_nothing_and_records_the_verdict(tmp_path, monkeypatch) -> None:
+    """An alarm channel that fires when nothing is wrong gets muted by a human,
+    which is how a boundary check becomes decorative a second way."""
+    watch, told = _watch(tmp_path, monkeypatch, _verdict())
+    result = asyncio.run(watch.once())
+    assert result["held"] is True and told == []
+    assert watch.last is not None and watch.last["demonstrated"] == 7
+
+
+def test_a_broken_boundary_reaches_the_alarm_and_says_so(tmp_path, monkeypatch) -> None:
+    broken = _verdict(
+        held=False,
+        failed=["the shell guard refuses a mutation"],
+        checks=[{"name": "the shell guard refuses a mutation", "held": False, "detail": "kubectl delete ran"}],
+    )
+    watch, told = _watch(tmp_path, monkeypatch, broken)
+    result = asyncio.run(watch.once())
+    assert result["alarm"] == "sent"
+    assert told and "the shell guard refuses a mutation" in told[0] and "kubectl delete ran" in told[0]
+
+
+def test_a_boundary_that_broke_where_nobody_could_be_told_says_which(tmp_path, monkeypatch) -> None:
+    """The state that must be visible rather than inferred. A failing check on a
+    node with no alarm channel, and one whose quiet window swallowed the news,
+    are different situations with the same silence — and an operator reading the
+    ops page has to be able to tell them apart. A boolean cannot."""
+    broken = _verdict(held=False, failed=["egress refuses an unlisted destination"])
+    quiet, _ = _watch(tmp_path, monkeypatch, broken, sent=False)
+    assert asyncio.run(quiet.once())["alarm"] == "suppressed"
+
+    deaf, told = _watch(tmp_path, monkeypatch, broken, alarm_url="")
+    assert asyncio.run(deaf.once())["alarm"] == "no channel"
+    assert told == [], "no channel means the alarm was never even attempted"
+
+
+def test_unproven_is_neither_alarmed_nor_hidden(tmp_path, monkeypatch, caplog) -> None:
+    """`held: true` with a check that could not run is not seven boundaries
+    holding, and it is not a failure either. It warns."""
+    watch, told = _watch(tmp_path, monkeypatch, _verdict(demonstrated=6, unproven=["the agent's bearer cannot write"]))
+    with caplog.at_level("WARNING"):
+        assert asyncio.run(watch.once())["held"] is True
+    assert told == []
+    assert "could not run" in caplog.text
+
+
+def test_the_watch_survives_a_pass_that_raises(tmp_path, monkeypatch) -> None:
+    """A watch that dies on one bad pass is worse than no watch: the ops page
+    freezes on its last good verdict and nothing says the watching stopped."""
+    calls = {"n": 0}
+
+    async def sometimes_explodes(_settings):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("a subprocess went missing")
+        return _verdict()
+
+    async def alarm(_text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(selftest, "run", sometimes_explodes)
+    settings = make_settings(tmp_path, workdir=tmp_path, selftest_every_seconds=3600)
+    watch = selftest.Watch(settings, alarm)
+
+    async def two_passes():
+        slept: list[float] = []
+
+        async def no_sleep(seconds):
+            slept.append(seconds)
+            if len(slept) >= 3:
+                raise asyncio.CancelledError
+
+        monkeypatch.setattr(selftest.asyncio, "sleep", no_sleep)
+        with pytest.raises(asyncio.CancelledError):
+            await watch.loop(3600)
+        return slept
+
+    slept = asyncio.run(two_passes())
+    assert calls["n"] == 2, "the raising pass did not stop the loop"
+    assert slept[0] == 60, "the first pass waits: a process still starting is not one under test"

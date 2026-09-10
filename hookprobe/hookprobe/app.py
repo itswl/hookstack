@@ -185,6 +185,10 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     # moves; this is where that becomes something a browser can wait on.
     live = Live()
     service.on_board_change = live.changed
+    # Created here rather than inside the lifespan so `/v1/ops` can read the last
+    # verdict: an operator asking "are the boundaries still holding" gets the
+    # answer the watch already computed, not another seven demonstrations.
+    watch = selftest.Watch(settings, service.alarm) if settings.selftest_every_seconds > 0 else None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -205,9 +209,17 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                 await asyncio.sleep(86400)
 
         pruner = asyncio.create_task(retention_loop()) if settings.retention_days > 0 else None
+        # And the boundaries, on a clock. `/v1/selftest` shipped run by nothing,
+        # which makes it a claim rather than a check; this is what turns it into
+        # one. A failure goes to the alarm channel — the same door the pipe's own
+        # delivery failure uses, because "a boundary did not hold" is that same
+        # kind of news and must not travel through the thing that broke.
+        watcher = asyncio.create_task(watch.loop(settings.selftest_every_seconds)) if watch is not None else None
         try:
             yield
         finally:
+            if watcher is not None:
+                watcher.cancel()
             if pruner is not None:
                 pruner.cancel()
             # The other side of the sweep above: give the work in flight a
@@ -876,6 +888,6 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     # no token guard on purpose: it is authenticated by hookrelay's signature.
     events.register(app, settings, service)
     library.register(app, settings, service, require_token)
-    ops.register(app, settings, service, require_token)
+    ops.register(app, settings, service, require_token, watch=watch)
 
     return app

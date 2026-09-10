@@ -149,26 +149,44 @@ class ReturnDelivery:
 
     async def _alarm_return_failure(self, run: Run, error: str) -> None:
         """Who watches the watchman: the pipe is the broken link right now, so
-        the news travels around it — straight to a bot/collector URL. Rate
-        limited, the suppressed count folds into the next message, and it
-        never raises: an alarm failure must not become a delivery failure."""
+        the news travels around it — straight to a bot/collector URL."""
+        await self.alarm(f"report return failed\nsession: {run.session_key}\nreason: {error[:200]}")
+
+    async def alarm(self, text: str) -> bool:
+        """Say something to the operator around the pipe. True if it was sent.
+
+        One quiet window per CHANNEL, not per reason, and deliberately: every
+        caller here is the same news — this node is not working — and a
+        selftest failure arriving during a delivery outage is a second symptom
+        of one problem, not a second problem. The suppressed count folds into
+        the next message so a quiet window never hides how much it swallowed.
+
+        Never raises. An alarm that throws into its caller turns "the report
+        did not go out" into "the request died", and the second is worse. False
+        is returned for both "no channel configured" and "the quiet window is
+        open" — a caller that needs to know it was heard cannot get that from a
+        None, and the one caller that does log the difference is the selftest
+        watch, whose whole job is to be believable.
+        """
         if not self._settings.alarm_url:
-            return
+            return False
         now = time.time()
         if now - self._alarm_last_sent < self._settings.alarm_min_interval_seconds:
             self._alarm_suppressed += 1
-            return
+            return False
         held = self._alarm_suppressed
         self._alarm_suppressed = 0
         self._alarm_last_sent = now
-        text = f"[hookprobe] report return failed\nsession: {run.session_key}\nreason: {error[:200]}"
+        message = f"[hookprobe] {text}"
         if held:
-            text += f"\n({held} more folded into this one during the quiet window)"
-        body = json.dumps({"msg_type": "text", "content": {"text": text}}, ensure_ascii=False).encode()
+            message += f"\n({held} more folded into this one during the quiet window)"
+        body = json.dumps({"msg_type": "text", "content": {"text": message}}, ensure_ascii=False).encode()
         try:
             await asyncio.to_thread(self._post_alarm, body)
-        except Exception:  # noqa: BLE001 — an alarm must never raise into delivery
+        except Exception:  # noqa: BLE001 — an alarm must never raise into its caller
             self._alarm_last_sent = 0.0  # let the next failure try again
+            return False
+        return True
 
     def _post_alarm(self, body: bytes) -> None:
         request = urllib.request.Request(

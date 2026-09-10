@@ -90,6 +90,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "retention_days": 0,
         "alarm_url": "",
         "alarm_min_interval_seconds": 600,
+        "selftest_every_seconds": 0,
         "host": "127.0.0.1",
         "port": 0,
     }

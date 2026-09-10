@@ -390,6 +390,12 @@ class Settings:
     # Floor between two alarm sends, so a storm cannot page repeatedly.
     alarm_min_interval_seconds: int
 
+    # How often the node demonstrates its own boundaries (`/v1/selftest`) and
+    # tells the alarm channel when one does not hold. Defaults ON: it spends
+    # nothing, runs no model, and an endpoint nobody calls has never caught
+    # anything. 0 disables the watch; the endpoint stays callable either way.
+    selftest_every_seconds: int
+
     # Address the service binds to.
     host: str
     # Port the service listens on.
@@ -480,6 +486,7 @@ class Settings:
             retention_days=max(0, _int("HOOKPROBE_RETENTION_DAYS", 0)),
             alarm_url=os.environ.get("HOOKPROBE_ALARM_URL", "").strip(),
             alarm_min_interval_seconds=_int("HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS", 600),
+            selftest_every_seconds=max(0, _int("HOOKPROBE_SELFTEST_EVERY_SECONDS", 3600)),
             # Bind-all is the right default inside a container; every compose
             # in this repo maps the host side to loopback where it matters.
             host=os.environ.get("HOOKPROBE_HOST", "0.0.0.0"),  # nosec B104

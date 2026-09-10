@@ -1291,6 +1291,16 @@ class RunService:
         self._board_changed()
         return row
 
+    async def alarm(self, text: str) -> bool:
+        """Say something to the operator around the pipe; True if it went.
+
+        The delivery object owns the channel and its quiet window, and this is
+        the one seam other parts of the service reach it through — the selftest
+        watch, today. Kept as a method rather than handing the delivery object
+        out, because what a caller needs is "tell somebody", not the machinery.
+        """
+        return await self._returns.alarm(text)
+
     def proposal_cursor(self, proposal_id: str) -> dict[str, Any]:
         """The condition this proposal is about, as it stands right now.
 

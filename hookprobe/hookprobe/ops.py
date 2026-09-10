@@ -93,7 +93,14 @@ def _worth_line(investigations: int, spent: float, useful: int, useless: int, in
     return head + tail
 
 
-def register(app: FastAPI, settings: Settings, service: RunService, guard: Callable[..., None]) -> None:
+def register(
+    app: FastAPI,
+    settings: Settings,
+    service: RunService,
+    guard: Callable[..., None],
+    *,
+    watch: Any = None,
+) -> None:
     """Mount the observability routes. /metrics and /healthz stay unauthenticated."""
 
     @app.get("/v1/audit", dependencies=[Depends(guard)])
@@ -160,6 +167,23 @@ def register(app: FastAPI, settings: Settings, service: RunService, guard: Calla
             "handoff_secret_set": bool(settings.handoff_secret),
             "bash_guard": settings.bash_guard,
             "alarm_configured": bool(settings.alarm_url),
+            # The boundary watch: whether it runs, and what it last saw. `null`
+            # until the first pass completes — no verdict is not a passing
+            # verdict, and this page showing `held: true` before anything ran
+            # would be the first lie /v1/selftest exists to prevent.
+            "selftest_every_seconds": settings.selftest_every_seconds or None,
+            "selftest_last": (
+                {
+                    "held": watch.last["held"],
+                    "checked_at": watch.last["checked_at"],
+                    "demonstrated": watch.last["demonstrated"],
+                    "failed": watch.last["failed"],
+                    "unproven": watch.last["unproven"],
+                    "alarm": watch.last.get("alarm"),
+                }
+                if watch is not None and watch.last
+                else None
+            ),
             "event_secret_set": bool(settings.event_secret),
             "return_secret_set": bool(settings.return_secret),
             "token_required": bool(settings.token),

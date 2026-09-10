@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import socket
 import sys
@@ -46,6 +47,9 @@ from hookprobe.settings import Settings
 # hole this file exists to argue against.
 UNROUTABLE = "hookstack-selftest.invalid"
 _CONNECT_TIMEOUT = 8.0
+
+
+logger = logging.getLogger("hookprobe.selftest")
 
 
 def _check(name: str, held: bool | None, detail: str, stops: str) -> dict[str, Any]:
@@ -258,3 +262,78 @@ async def run(settings: Settings) -> dict[str, Any]:
         audit_is_tamper_evident(settings),
     ]
     return _roll_up(checks)
+
+
+class Watch:
+    """The selftest on a clock, with somewhere for a failure to go.
+
+    `/v1/selftest` shipped and was called by NOTHING for a day. A boundary
+    check nobody runs has never caught anything, which makes it a claim about
+    the boundaries rather than a check on them — the exact shape this file
+    exists to refuse. The question that blocked it was "what should a failure
+    wake", and it has an answer already in the building: `alarm_url`, the
+    channel the return-delivery failure uses to route AROUND the pipe when the
+    pipe is what broke. A boundary failing is that same kind of news.
+
+    What a failure produces is recorded, not assumed. `alarm` on the last
+    verdict says `sent`, `suppressed` (a channel exists and the quiet window
+    swallowed it) or `no channel` — because "the boundary broke and nobody was
+    told" is a state an operator has to be able to SEE, and a boolean cannot
+    say which of the two it was.
+    """
+
+    def __init__(self, settings: Settings, alarm: Any) -> None:
+        self._settings = settings
+        self._alarm = alarm
+        # None until the first pass completes: no verdict is not a passing
+        # verdict, and an ops page that showed `held: true` before anything ran
+        # would be the first lie this module is supposed to prevent.
+        self.last: dict[str, Any] | None = None
+
+    async def once(self) -> dict[str, Any]:
+        result = await run(self._settings)
+        if result["failed"]:
+            told = "no channel"
+            if self._settings.alarm_url:
+                told = "sent" if await self._alarm(self._message(result)) else "suppressed"
+            result["alarm"] = told
+            logger.error(
+                "selftest FAILED checks=%s unproven=%s alarm=%s",
+                ",".join(result["failed"]),
+                ",".join(result["unproven"]),
+                told,
+            )
+        elif result["unproven"]:
+            # Not a failure and not a pass. Logged at WARNING so a check that
+            # has quietly stopped being able to run is visible before somebody
+            # reads `held: true` as "all seven held".
+            logger.warning("selftest held, but could not run: %s", ",".join(result["unproven"]))
+        else:
+            logger.info("selftest held, %s boundaries demonstrated", result["demonstrated"])
+        self.last = result
+        return result
+
+    def _message(self, result: dict[str, Any]) -> str:
+        broken = [c for c in result["checks"] if c["held"] is False]
+        lines = [f"selftest FAILED: {len(broken)} boundary check(s) did not hold"]
+        lines += [f"- {c['name']}: {str(c.get('detail') or '')[:120]}" for c in broken[:5]]
+        return "\n".join(lines)
+
+    async def loop(self, every: int) -> None:
+        """Forever, and it must never die quietly.
+
+        The first pass waits, because a process that is still starting is not a
+        process under test: the loopback check would report `could not ask` on
+        every boot and the ops page would open on an unproven verdict. That is
+        the same reason `gate.verify` runs before the first RUN rather than at
+        import.
+        """
+        await asyncio.sleep(min(60, every))
+        while True:
+            try:
+                await self.once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — a watch that dies silently is worse than no watch
+                logger.exception("selftest watch pass failed; continuing")
+            await asyncio.sleep(every)

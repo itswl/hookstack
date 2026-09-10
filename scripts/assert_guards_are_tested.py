@@ -147,6 +147,13 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
         ("tests/test_remediation.py", "tests/test_work.py", "tests/test_recovery.py"),
     ),
     (
+        "a failed boundary check tells nobody",
+        "hookprobe/hookprobe/selftest.py",
+        '        if result["failed"]:',
+        "        if False:",
+        ("tests/test_selftest.py",),
+    ),
+    (
         "the selftest counts a check it could not run as a pass",
         "hookprobe/hookprobe/selftest.py",
         '    ran = [c for c in checks if c["held"] is not None]',
