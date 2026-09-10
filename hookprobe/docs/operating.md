@@ -419,10 +419,32 @@ It spends nothing and runs no model. Two properties are the point:
   [containment](../../docs/containment.md) does. A check that only reports a
   pass teaches its reader the boundary is total.
 
-The one claim it cannot make is on the same page rather than omitted: the audit
-is append-only JSONL with no chaining, so *tamper-evident* reports `null`. That
-is the claim a compliance reader most wants, and this node cannot yet
-demonstrate it.
+**The audit trail is chained.** Each line carries the hash of the one before it,
+so an edit, a deletion or a reordering afterwards stops the chain and can be
+pointed at — `verify_chain` names the first line that stops adding up, and the
+selftest walks it. That row reported `null` — *not built* — from the day the
+endpoint shipped, which is what made it worth building: the gap sat on the same
+page as the boundaries that held.
+
+Three outcomes, told apart on purpose. **Intact**: every linked line's digest
+recomputes and names its predecessor. **Broken**: the first offending line is
+named, and everything after it is unverifiable rather than wrong. **Unchained**:
+lines written before this existed, counted and never treated as a break — every
+deployment has history from before, and an alarm that fired on all of it on day
+one would be ignored by day two.
+
+The digest is over canonical JSON, not the bytes on disk, so a reader that
+re-serialises differently still verifies: the record is the facts, not the
+formatting. Writing is serialised with a lock on a chain file rather than the
+day file, because the gate is spawned per tool call and two writers racing on
+the same predecessor is the ordinary case. **And if the chain cannot be kept —
+a locked file, a read-only mount — the line is still written, unchained.** A
+missing audit line is worse than an unverifiable one; verification reports the
+gap, where a writer that dropped the record leaves nothing to report.
+
+What it does not stop: somebody who can also rewrite the chain file. Chaining
+makes tampering *evident on this disk*; an off-box copy is what makes it
+*impossible to hide*, and this node does not have one.
 
 `GET /v1/agent` says what this node is — name, role, runtime, policy, health — so
 a deployment running an investigator, a planner and a work runner can tell them

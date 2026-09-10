@@ -82,15 +82,51 @@ def test_no_proxy_configured_is_unproven_not_broken(tmp_path, monkeypatch) -> No
     assert egress["name"] in report["unproven"]
 
 
-def test_the_gap_it_cannot_close_is_on_the_same_page(tmp_path) -> None:
-    """The audit is append-only JSONL with no chaining, so the claim a
-    compliance reader most wants is the one this cannot make. Reported as
-    `null` rather than omitted, because a boundary list that silently drops
-    what it cannot prove is a boundary list nobody should trust."""
-    report = _run(make_settings(tmp_path, workdir=tmp_path))
+def test_the_audit_chain_is_walked_not_asserted(tmp_path) -> None:
+    """This row reported `null` from the day the endpoint shipped, which is
+    what made it worth building. A node with nothing chained yet is STILL
+    `null`: having recorded no linked lines demonstrates nothing."""
+    from hookprobe import gate
+
+    settings = make_settings(tmp_path, workdir=tmp_path)
+
+    # "Nothing chained" is `null`, not a pass — asserted directly, because a
+    # selftest RUN can never see it: its own gate probe is a real refusal and
+    # gets recorded, which is the honest thing for it to do.
+    empty = selftest.audit_is_tamper_evident(make_settings(tmp_path / "fresh", workdir=tmp_path / "fresh"))
+    assert empty["held"] is None and "no chained lines" in empty["detail"]
+
+    audit = next(c for c in _run(settings)["checks"] if "tamper-evident" in c["name"])
+    assert audit["held"] is True and "linked line(s) verify" in audit["detail"]
+
+    # And the probe it wrote is attributed to the selftest, not to a real run —
+    # or it would inflate the per-session refusal count that exists to spot a
+    # run which kept asking for what it may not have.
+    written = "".join(p.read_text(encoding="utf-8") for p in (tmp_path / "audit").glob("*.jsonl"))
+    assert "probe:selftest:0" in written
+    assert gate.verify_chain(tmp_path / "audit")["intact"] is True
+
+
+def test_a_doctored_audit_takes_the_whole_report_down(tmp_path) -> None:
+    """The endpoint has to NOTICE a tampered record, not merely be able to."""
+    import json
+
+    from hookprobe import gate
+
+    settings = make_settings(tmp_path, workdir=tmp_path)
+    for i in range(3):
+        gate.append_audit(tmp_path / "audit", {"ts": i, "tool": "Bash", "detail": f"cmd {i}"})
+    path = next((tmp_path / "audit").glob("*.jsonl"))
+    lines = path.read_text(encoding="utf-8").splitlines()
+    doctored = json.loads(lines[1])
+    doctored["detail"] = "nothing to see"
+    lines[1] = json.dumps(doctored, ensure_ascii=False)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    report = _run(settings)
     audit = next(c for c in report["checks"] if "tamper-evident" in c["name"])
-    assert audit["held"] is None
-    assert "not built" in audit["detail"]
+    assert audit["held"] is False and "CHAIN BREAKS AT" in audit["detail"]
+    assert report["held"] is False
 
 
 @pytest.mark.parametrize("field", ["does_not_stop", "detail", "name"])

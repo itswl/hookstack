@@ -35,7 +35,7 @@ Seven steps, and each one names the thing that does it — so the positioning ab
 - **Remediation with a person in the loop.** The investigator proposes; a signed approve runs each step against an allowlist, as an argv and never through a shell, on a node whose credential is the whole blast radius.
 - **Every verdict priced, every week accounted for.** One page reads the three ledgers and puts measured beside counterfactual — what the routes avoided, what runbooks answered, how the live arm compared with its shadows — and says in words what it could not measure.
 - **One page per event.** `/audit/{event_id}` shows every hop with digests, decision steps, deliveries and human actions; `/trace/{id}` replays the bodies; `/timeline` groups chains into incidents.
-- **Agents you can contain.** Read-only by default and measured at startup, a closed tool allowlist, budget ceilings that refuse out loud, and twenty-three structural boundaries each documented with what it does **not** stop ([containment](docs/containment.md)).
+- **Agents you can contain.** Read-only by default and measured at startup, a closed tool allowlist, budget ceilings that refuse out loud, and twenty-four structural boundaries each documented with what it does **not** stop ([containment](docs/containment.md)).
 - **Your model, your chat.** The investigator takes any Anthropic-dialect endpoint, the judge any OpenAI-compatible base including local models; shadow arms compare prompts or models on live traffic before anything is promoted. Cards reach the chat through one small protocol between the pipe and a per-platform bridge ([docs/bridge-protocol.md](docs/bridge-protocol.md)) — Feishu/Lark today, DingTalk and WeCom as a shipped plugin, another platform is another bridge — or go as signed JSON to any webhook; OpenTelemetry is on by default and received by the investigator itself — every run's waterfall is on its own page with no collector deployed, and forwarded untouched when you name one.
 
 ![hookrelay's ledger: every message accounted for, every delivery with an outcome](docs/img/hookrelay-ledger.png)
@@ -125,7 +125,7 @@ A custom bot can only *send*, so the buttons on its cards have nowhere to call b
 
 ## Developer & Verification Docs
 
-*   [`docs/containment.md`](docs/containment.md) — Twenty-three structural security boundaries, and exactly what each does **not** stop.
+*   [`docs/containment.md`](docs/containment.md) — Twenty-four structural security boundaries, and exactly what each does **not** stop.
 *   [`docs/deployments.md`](docs/deployments.md) — Two deployments sharing every line of code but agreeing on nothing: alerts vs work timers.
 *   [`STACK.md`](STACK.md) — Local runbook to drive the whole cost-saving pipeline step-by-step.
 *   [`CONTRIBUTING.md`](CONTRIBUTING.md) — Per-service gates, AST copy validations, and general SDLC workflows.

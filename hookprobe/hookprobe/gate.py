@@ -67,12 +67,130 @@ def tool_detail(tool_input: Any) -> str:
         return ""
 
 
+# The audit's chain. Each line carries the hash of the one before it, so an
+# edit or a deletion after the fact stops the chain and can be pointed at.
+#
+# This is the claim a compliance reader most wants and the one the node could
+# not make: the flight recorder was append-only JSONL, and nothing detected a
+# line rewritten later. It is deliberately NOT a distributed ledger — the
+# threat is somebody quietly tidying a record on this disk, and a hash chain
+# plus an off-box copy answers that, where a blockchain answers a question
+# nobody here is asking.
+_CHAIN_SEED = "hookstack/audit/1"
+_CHAIN_FILE = ".chain"
+# How far back a verification walks by default. The whole history is the honest
+# answer and an unbounded read on a per-call path is not; the caller can ask
+# for more.
+CHAIN_DAYS = 7
+
+
+def _line_hash(line: dict[str, Any]) -> str:
+    """A line's digest, over everything but the digest itself.
+
+    Canonical JSON rather than the bytes on disk, so a reader that re-serialises
+    differently still verifies — the record is the FACTS, not the formatting.
+    """
+    body = {key: value for key, value in line.items() if key != "hash"}
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+
+
 def append_audit(audit_dir: Path, line: dict[str, Any]) -> None:
-    """One JSONL line into today's audit file. Never raises; see the callers."""
+    """One JSONL line into today's audit file, linked to the one before it.
+
+    Never raises, and never loses the line: if the chain cannot be maintained —
+    a locked file, a read-only mount, anything — the line is still written,
+    unchained. A missing audit line is worse than an unverifiable one, and a
+    verification that reports the gap is better than a writer that dropped it.
+    """
     audit_dir.mkdir(parents=True, exist_ok=True)
     day_file = audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")
-    with day_file.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+    try:
+        import fcntl  # noqa: PLC0415 — linux/macOS only, and only on this path
+
+        # The lock is on the chain file, not the day file, because the day file
+        # rolls over at midnight and the chain does not. Held across the whole
+        # read-modify-write: the gate is SPAWNED per tool call, so two writers
+        # racing on the same `prev` is the ordinary case, not the rare one.
+        chain = audit_dir / _CHAIN_FILE
+        with chain.open("a+", encoding="utf-8") as state:
+            fcntl.flock(state.fileno(), fcntl.LOCK_EX)
+            state.seek(0)
+            previous = (state.read() or "").strip() or _CHAIN_SEED
+            linked = {**line, "prev": previous}
+            linked["hash"] = _line_hash(linked)
+            with day_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(linked, ensure_ascii=False) + "\n")
+            state.seek(0)
+            state.truncate()
+            state.write(linked["hash"])
+    except Exception:  # noqa: BLE001 — see the docstring: the line matters more
+        # Unchained rather than lost. `verify_chain` counts these and, once the
+        # chain has started, treats a later one as a break — so the gap is
+        # reported by the reader instead of being swallowed by the writer.
+        with day_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
+def verify_chain(audit_dir: Path, days: int = CHAIN_DAYS) -> dict[str, Any]:
+    """Walk the audit in order and report where, if anywhere, it stops adding up.
+
+    Three outcomes worth telling apart, and the third is why this returns a
+    record rather than a bool:
+
+      * `intact` — every chained line's digest recomputes and names its
+        predecessor.
+      * `broken_at` — a line was edited or one was removed. The FIRST such line
+        is named; everything after it is unverifiable rather than wrong.
+      * `unchained` — lines written before this existed, or by a writer whose
+        lock failed. Counted, never treated as a break: an honest gap is not
+        evidence of tampering, and conflating them would make the alarm useless
+        on the first day it ran.
+    """
+    if not audit_dir.is_dir():
+        return {"intact": True, "checked": 0, "unchained": 0, "broken_at": None, "files": 0}
+    files = sorted(audit_dir.glob("*.jsonl"))[-max(1, days) :]
+    previous, checked, unchained = _CHAIN_SEED, 0, 0
+    started = False
+    for path in files:
+        try:
+            raw_lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            return {"intact": False, "checked": checked, "unchained": unchained, "broken_at": f"{path.name}: {exc}"}
+        for number, raw in enumerate(raw_lines, start=1):
+            if not raw.strip():
+                continue
+            try:
+                line = json.loads(raw)
+            except ValueError:
+                return {
+                    "intact": False,
+                    "checked": checked,
+                    "unchained": unchained,
+                    "broken_at": f"{path.name}:{number} is not JSON",
+                }
+            if "hash" not in line:
+                unchained += 1
+                # Before the chain existed is a gap; after it started is a break.
+                if started:
+                    return {
+                        "intact": False,
+                        "checked": checked,
+                        "unchained": unchained,
+                        "broken_at": f"{path.name}:{number} has no link",
+                    }
+                continue
+            started = True
+            if _line_hash(line) != line["hash"] or str(line.get("prev") or "") != previous:
+                return {
+                    "intact": False,
+                    "checked": checked,
+                    "unchained": unchained,
+                    "broken_at": f"{path.name}:{number}",
+                }
+            previous, checked = str(line["hash"]), checked + 1
+    return {"intact": True, "checked": checked, "unchained": unchained, "broken_at": None, "files": len(files)}
 
 
 def mcp_deny_reason(tool_name: str, allowed: frozenset[str]) -> str | None:

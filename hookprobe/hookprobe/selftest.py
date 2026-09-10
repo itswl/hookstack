@@ -185,20 +185,37 @@ async def posture_still_holds(settings: Settings) -> dict[str, Any]:
     )
 
 
-def audit_is_append_only() -> dict[str, Any]:
-    """Stated as a check that cannot pass yet, rather than left out.
+def audit_is_tamper_evident(settings: Settings) -> dict[str, Any]:
+    """Walk the chain and require it to add up.
 
-    The audit is plain append JSONL. Nothing detects a line edited or removed
-    afterwards, so this node cannot demonstrate the one claim a compliance
-    reader most wants. Reporting `null` keeps the gap on the same page as the
-    boundaries that do hold, which is where somebody deciding to trust this
-    will actually look.
+    This row reported `null` — "not built" — from the day the endpoint shipped,
+    which is what made it worth building: the gap sat on the same page as the
+    boundaries that held, where somebody deciding whether to trust this node
+    would actually see it.
     """
+    try:
+        report = gate.verify_chain(settings.workdir / "audit")
+    except Exception as exc:  # noqa: BLE001
+        return _check("the audit trail is tamper-evident", None, f"could not verify: {exc}", "")
+    if report["checked"] == 0:
+        # Nothing chained yet is not a pass: a node that has recorded no linked
+        # lines has demonstrated nothing about its record.
+        return _check(
+            "the audit trail is tamper-evident",
+            None,
+            f"no chained lines yet ({report['unchained']} from before the chain existed)",
+            "",
+        )
+    detail = f"{report['checked']} linked line(s) verify"
+    if report["unchained"]:
+        detail += f", {report['unchained']} from before the chain existed"
+    if not report["intact"]:
+        detail = f"CHAIN BREAKS AT {report['broken_at']}"
     return _check(
         "the audit trail is tamper-evident",
-        None,
-        "not built: the audit is append-only JSONL with no chaining",
-        "an edit or deletion after the fact, which is exactly what it does not yet detect",
+        report["intact"],
+        detail,
+        "an edit by whoever can also rewrite the chain file — an off-box copy is what answers that",
     )
 
 
@@ -217,7 +234,7 @@ async def run(settings: Settings) -> dict[str, Any]:
         egress_refuses(),
         await agent_token_cannot_write(settings),
         await posture_still_holds(settings),
-        audit_is_append_only(),
+        audit_is_tamper_evident(settings),
     ]
     ran = [c for c in checks if c["held"] is not None]
     return {
