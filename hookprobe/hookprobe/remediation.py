@@ -382,31 +382,59 @@ COOLDOWN_SECONDS = 900
 _ACTED_STATUSES = ("running", "executed", "failed")
 
 
-def cooldown_key(step: dict[str, Any]) -> str:
-    """What a step is ABOUT, normalised — the thing the cooldown counts against.
+def _normal(value: Any) -> str:
+    return " ".join(str(value or "").split()).lower()
+
+
+def cooldown_keys(step: dict[str, Any]) -> set[str]:
+    """What a step is ABOUT — BOTH its declared target and its literal command.
 
     `target` was in the step schema from the first commit and read by nothing:
     the model was already being asked to name the host, service or resource each
-    command touches, and the answer was stored and ignored. This is that field
-    finally load-bearing.
+    command touches, and every one of those answers was stored and ignored. This
+    is that field finally load-bearing.
 
-    Falls back to the command when the target is missing, which is narrower than
-    it sounds — it still catches the literal same fix fired twice — and is the
-    honest floor rather than a pretence: BE CLEAR ABOUT WHO WRITES THIS KEY. It
-    is the model. A step that names no target and varies its command by one flag
-    keys differently and is not cooled. Like the input guard, this catches the
+    It is not load-bearing ALONE, and production is why. The five proposals
+    sitting on the deployment name their target three different ways for one
+    thing — `AWS SES 账户状态`, `AWS SES account status`, `AWS SES 账户状态（只读）`
+    — while running character-identical commands. Keying on the target and
+    falling back to the command was the first version of this, and on that data
+    it would have cooled nothing: the label varies, the command does not.
+
+    So both count, and a match on either cools. The command is the honest half:
+    `execute()` runs it verbatim from one container, so two identical command
+    strings ARE the same action against the same thing, whatever they were
+    labelled. The target catches what the command cannot — a fix and its
+    rollback are different text against one machine.
+
+    BE CLEAR ABOUT WHO WRITES THESE KEYS. The model writes both. A step that
+    varies its command by a flag AND names its target differently keys
+    differently and is not cooled. Like the input guard, this catches the
     over-eager model, which is the case that happens, and not an adversary; what
     bounds an adversary is the allowlist and the operator's click, both of which
     are the operator's own text.
     """
-    target = " ".join(str(step.get("target") or "").split()).lower()
-    if target:
-        return target
-    return " ".join(str(step.get("command") or "").split()).lower()
+    return {key for key in (_normal(step.get("target")), _normal(step.get("command"))) if key}
 
 
 def _keys(row: dict[str, Any]) -> set[str]:
-    return {key for key in (cooldown_key(step) for step in row.get("steps") or []) if key}
+    keys: set[str] = set()
+    for step in row.get("steps") or []:
+        keys |= cooldown_keys(step)
+    return keys
+
+
+def _targets(row: dict[str, Any]) -> set[str]:
+    return {key for key in (_normal(step.get("target")) for step in row.get("steps") or []) if key}
+
+
+def _label(shared: set[str], *rows: dict[str, Any]) -> str:
+    """The shared key to say out loud: a declared target where there is one,
+    because `AWS SES account status` is what an operator recognises and a
+    120-character aws invocation is not."""
+    named = shared & set().union(*(_targets(row) for row in rows))
+    label = sorted(named or shared)[0]
+    return label if len(label) <= 80 else label[:77] + "..."
 
 
 class Cooling(ValueError):
@@ -453,7 +481,7 @@ def cooling(
             acted.append((other, shared))
     for other, shared in acted:
         if other.get("status") == "running":
-            return f"{sorted(shared)[0]} is being acted on right now by proposal {other.get('id')}"
+            return f"{_label(shared, row, other)} is being acted on right now by proposal {other.get('id')}"
     for other, shared in acted:
         # `executed_at` is stamped by both endings; `approved_at` covers the row
         # a crash left without one. A row with neither reads as ancient and cools
@@ -462,7 +490,7 @@ def cooling(
         when = float(other.get("executed_at") or other.get("approved_at") or 0.0)
         if when and now - when < window:
             return (
-                f"{sorted(shared)[0]} was acted on {(now - when) / 60:.0f}m ago by proposal "
+                f"{_label(shared, row, other)} was acted on {(now - when) / 60:.0f}m ago by proposal "
                 f"{other.get('id')} ({other.get('status')}), inside the "
                 f"{window // 60}m cooldown"
             )

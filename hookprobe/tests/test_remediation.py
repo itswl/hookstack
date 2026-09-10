@@ -731,27 +731,37 @@ def _acted(tmp_path, command: str, *, target: str = "", status: str = "executed"
     return pid
 
 
-def test_the_cooldown_key_is_the_target_and_falls_back_to_the_command() -> None:
+def test_a_step_keys_on_its_target_and_on_its_command_both() -> None:
     """`target` was in the step schema from the first commit and read by
-    nothing. The model was already naming the host each command touches; this
-    is that answer finally load-bearing."""
-    assert remediation.cooldown_key({"target": " API-1 ", "command": "systemctl restart api"}) == "api-1"
-    # No target: the literal command, which still catches the same fix fired
-    # twice. Narrower than a target and honest about being the floor.
-    assert remediation.cooldown_key({"command": "echo  hi"}) == "echo hi"
-    assert remediation.cooldown_key({}) == ""
+    nothing, so it is load-bearing now — but not alone. Production's five
+    proposals name one thing three ways (`AWS SES 账户状态`, `AWS SES account
+    status`, `AWS SES 账户状态（只读）`) while running character-identical
+    commands: on that data a target-only key cools nothing."""
+    assert remediation.cooldown_keys({"target": " API-1 ", "command": "systemctl  restart api"}) == {
+        "api-1",
+        "systemctl restart api",
+    }
+    # Either half alone still keys. A step with neither keys on nothing and is
+    # never the reason something else is held.
+    assert remediation.cooldown_keys({"command": "echo  hi"}) == {"echo hi"}
+    assert remediation.cooldown_keys({}) == set()
 
 
-def test_a_target_acted_on_a_minute_ago_is_cooling_and_another_is_not(tmp_path) -> None:
+def test_either_half_of_the_key_cools_and_an_unrelated_procedure_does_not(tmp_path) -> None:
     _acted(tmp_path, "systemctl restart api", target="host-1", ago=60)
     rows = remediation.list_all(tmp_path)
-    same = {"id": "new", "steps": [{"command": "systemctl stop api", "target": "host-1"}]}
-    other = {"id": "new", "steps": [{"command": "systemctl restart api", "target": "host-2"}]}
-    # A DIFFERENT command against the same host is still cooling: a fix and the
-    # rollback of that fix are two changes to one machine, which is the flap.
-    assert "host-1 was acted on" in remediation.cooling(same, rows)
-    # The same command against another host is a fleet, not a flap.
-    assert remediation.cooling(other, rows) == ""
+    same_host = {"id": "new", "steps": [{"command": "systemctl stop api", "target": "host-1"}]}
+    same_command = {"id": "new", "steps": [{"command": "systemctl restart api", "target": "the api box"}]}
+    unrelated = {"id": "new", "steps": [{"command": "systemctl restart web", "target": "host-2"}]}
+    # A DIFFERENT command against the same declared host: a fix and the rollback
+    # of that fix are two changes to one machine, which is the flap.
+    assert "host-1 was acted on" in remediation.cooling(same_host, rows)
+    # The SAME command under a different label. `execute()` runs it verbatim
+    # from one container, so this is the same action however it was named —
+    # and the label is the half that varies, as production shows.
+    assert "systemctl restart api was acted on" in remediation.cooling(same_command, rows)
+    # Neither half shared: a different box, a different command, no hold.
+    assert remediation.cooling(unrelated, rows) == ""
 
 
 def test_the_cooldown_expires_and_can_be_switched_off(tmp_path) -> None:
