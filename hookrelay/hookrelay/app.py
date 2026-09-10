@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from hookrelay import actions, channels, metrics, registry
@@ -659,8 +659,17 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     # ── read side ─────────────────────────────────────────────────────────
 
-    def _read_guard(token: str | None, authorization: str | None = None) -> None:
+    def _read_guard(
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> None:
         """X-Read-Token, or the standard Authorization: Bearer form.
+
+        A route DEPENDENCY rather than a call each handler remembers to make:
+        seven routes repeated the two header parameters and the invocation, and
+        a guard you can forget to call is a guard that will eventually not be
+        called. FastAPI reads the headers for it — the same shape hookprobe's
+        `require_token` already uses.
 
         Both accepted because tooling speaks Bearer: Prometheus can carry a
         scrape credential from a FILE that way (its config has no env-var
@@ -671,31 +680,25 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         bearer = None
         if authorization and authorization.lower().startswith("bearer "):
             bearer = authorization[7:].strip()
-        if not (token_ok(configured, token) or (bearer and token_ok(configured, bearer))):
+        if not (token_ok(configured, x_read_token) or (bearer and token_ok(configured, bearer))):
             raise HTTPException(status_code=401, detail="read token required")
 
-    @app.get("/live")
-    async def live_stream(
-        x_read_token: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
-    ) -> StreamingResponse:
+    @app.get("/live", dependencies=[Depends(_read_guard)])
+    async def live_stream() -> StreamingResponse:
         """The ledger's wake-up line: one `changed` per write, a `ping` through the quiet.
 
         No rows: this board carries a source filter, an outcome filter, a search
         and a cursor, so "look again" is smaller than pushing rows the viewer
         may not be asking for — and it cannot get their filters wrong.
         """
-        _read_guard(x_read_token, authorization)
         return StreamingResponse(
             live.stream(),
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
-    @app.get("/status")
+    @app.get("/status", dependencies=[Depends(_read_guard)])
     async def status(
-        x_read_token: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
         source: str | None = None,
         outcome: str | None = None,
         skip_code: str | None = None,
@@ -704,7 +707,6 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         limit: int = 50,
     ) -> dict[str, Any]:
         """The board's data: recent events, deliveries, breaker and silence state as JSON."""
-        _read_guard(x_read_token, authorization)
         now = now_ts()
         return {
             "queue": await app.state.store.queue_counts(),
@@ -717,10 +719,8 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             ),
         }
 
-    @app.get("/timeline")
+    @app.get("/timeline", dependencies=[Depends(_read_guard)])
     async def timeline(
-        x_read_token: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
         limit: int = 50,
     ) -> dict[str, Any]:
         """What happened — one stream, chains gathered, with what each one spent.
@@ -740,7 +740,6 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         field, and `unpriced_hops` counts the ones where it does not — because a
         free hop and an unpriced one are different facts and only the config
         knows which is which."""
-        _read_guard(x_read_token, authorization)
         rows = await app.state.store.recent_events(min(limit * 4, 400))
         return render_timeline(rows, limit=limit)
 
@@ -759,10 +758,8 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             return []
         return [str(a.get("text") or "")[:80] for a in actions if isinstance(a, dict)]
 
-    @app.get("/unseen")
+    @app.get("/unseen", dependencies=[Depends(_read_guard)])
     async def unseen(
-        x_read_token: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
         hours: int = 24,
         limit: int = 20,
     ) -> dict[str, Any]:
@@ -791,7 +788,6 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         platform that will not report on that message. An unknown reported as
         unseen would be this feature telling the exact lie it exists to stop.
         """
-        _read_guard(x_read_token, authorization)
         window = max(1, min(hours, 24 * 14))
         now = now_ts()
         # Bounded, newest first, and `checked` reports what was actually asked
@@ -844,11 +840,9 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 )
         return {"window_hours": window, "checked": len(rows), **counts, "cards": unseen_rows}
 
-    @app.get("/trace/{event_id}")
+    @app.get("/trace/{event_id}", dependencies=[Depends(_read_guard)])
     async def round_trip(
         event_id: int,
-        x_read_token: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         """One alert's whole journey: the original, where it fanned out to, and
         what each processing system sent back.
@@ -858,36 +852,28 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         in their input. Works from either end: ask about a return and you get
         the group assembled around its origin.
         """
-        _read_guard(x_read_token, authorization)
         trip = await app.state.store.round_trip(event_id)
         if trip is None:
             raise HTTPException(status_code=404, detail="no such event")
         return trip
 
-    @app.get("/audit/{event_id}")
+    @app.get("/audit/{event_id}", dependencies=[Depends(_read_guard)])
     async def audit_record(
         event_id: int,
-        x_read_token: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         """One operation as an accountability record: every hop, delivery,
         return, cost and human press, with bodies replaced by digests. The
         document an auditor is handed; /trace is where the bytes behind each
         digest live."""
-        _read_guard(x_read_token, authorization)
         record = await app.state.store.audit_record(event_id)
         if record is None:
             raise HTTPException(status_code=404, detail="no such event")
         return record
 
-    @app.get("/metrics", response_class=PlainTextResponse)
-    async def prometheus_metrics(
-        x_read_token: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
-    ) -> str:
+    @app.get("/metrics", response_class=PlainTextResponse, dependencies=[Depends(_read_guard)])
+    async def prometheus_metrics() -> str:
         """Prometheus text: events by door and outcome, deliveries, outbox, breaker state."""
         # Same guard as /status: the numbers describe the estate's alert flow.
-        _read_guard(x_read_token, authorization)
         now = now_ts()
         return metrics.render(
             queue=await app.state.store.queue_counts(),
