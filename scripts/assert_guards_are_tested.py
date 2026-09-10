@@ -29,6 +29,7 @@ which is the whole ceremony.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess  # nosec B404 — runs this repo's own pytest, fixed argv
 import sys
@@ -144,6 +145,22 @@ def survives(file: str, before: str, after: str, tests: tuple[str, ...]) -> str 
                 capture_output=True,
                 text=True,
                 timeout=600,
+                # A CACHE OF ITS OWN, and this is not tidiness — it is the
+                # difference between this file measuring something and measuring
+                # nothing. Python validates a `.pyc` against the source's
+                # (mtime-truncated-to-SECONDS, size). Two mutations of the same
+                # module that add the SAME NUMBER OF CHARACTERS and land in the
+                # same wall-clock second are indistinguishable to that check, so
+                # the second run silently executes the first one's bytecode.
+                #
+                # It happened here: emptying SECRETS_WITHHELD_FROM_AGENT and
+                # emptying _SECRET_SHAPES both add exactly 16 characters to
+                # gate.py, and the credential detector was intermittently
+                # reported ESCAPED while running the withheld-list mutation's
+                # code. The false alarm is the safe direction; the same race can
+                # report `caught` for a guarantee that was never tested, which
+                # is not.
+                env={**os.environ, "PYTHONPYCACHEPREFIX": str(Path(keep) / "pycache")},
             )
         finally:
             shutil.copy2(backup, path)

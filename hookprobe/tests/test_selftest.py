@@ -11,30 +11,41 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
-
 from hookprobe import audit, selftest
 from tests.helpers import make_settings
+
+
+def _check_that_held() -> dict[str, Any]:
+    return {"name": "a boundary that held", "held": True, "detail": "", "does_not_stop": ""}
 
 
 def _run(settings) -> dict[str, Any]:
     return asyncio.run(selftest.run(settings))
 
 
-def test_a_check_that_could_not_run_is_never_a_pass(tmp_path) -> None:
+def test_a_check_that_could_not_run_is_never_a_pass() -> None:
     """The whole hazard this file exists for. A green board assembled out of
     checks that quietly skipped is worse than no board — it is the same shape
-    as a price knob no compose could pass, where every surface read fine."""
-    report = _run(make_settings(tmp_path, workdir=tmp_path))
-    for check in report["checks"]:
-        assert check["held"] in (True, False, None)
-        if check["held"] is None:
-            assert check["name"] in report["unproven"]
-            assert check["name"] not in report["failed"]
-    # `held` is computed only over what actually ran.
-    ran = [c for c in report["checks"] if c["held"] is not None]
-    assert report["demonstrated"] == len(ran)
-    assert report["held"] == all(c["held"] for c in ran)
+    as a price knob no compose could pass, where every surface read fine.
+
+    Against `_roll_up` with a made-up mix, because this is about the ARITHMETIC
+    over the checks and not about performing them: a subprocess, two posture
+    CLIs and a socket are the price of demonstrating a boundary, and no part of
+    that price buys anything here.
+    """
+    skipped = {"name": "unprovable", "held": None, "detail": "", "does_not_stop": ""}
+    report = selftest._roll_up([_check_that_held(), skipped])
+
+    assert report["held"] is True, "an unprovable check must not drag a true report down"
+    assert report["demonstrated"] == 1, "nor count toward what was demonstrated"
+    assert report["unproven"] == ["unprovable"] and report["failed"] == []
+
+    broke = {"name": "broken", "held": False, "detail": "", "does_not_stop": ""}
+    worse = selftest._roll_up([_check_that_held(), skipped, broke])
+    assert worse["held"] is False and worse["failed"] == ["broken"]
+
+    # And nothing is silently dropped: every check is still on the page.
+    assert len(worse["checks"]) == 3
 
 
 def test_the_gate_check_actually_asks_the_gate(tmp_path) -> None:
@@ -51,11 +62,12 @@ def test_it_fails_when_the_guard_would_let_the_bypass_through(tmp_path, monkeypa
     """Not a mock of the report — the guard itself is replaced with one that
     allows, and the endpoint has to notice."""
     monkeypatch.setattr(selftest, "bash_deny_reason", lambda command, mode: None)
-    report = _run(make_settings(tmp_path, workdir=tmp_path))
-    guard = next(c for c in report["checks"] if c["name"].startswith("the shell guard"))
+    guard = selftest.guard_refuses(make_settings(tmp_path, workdir=tmp_path))
     assert guard["held"] is False
     assert "egress bypass" in guard["detail"]
-    assert report["held"] is False, "one absent boundary must take the whole report down"
+    # And one absent boundary takes the whole report down — asserted on the
+    # assembly rather than by paying for another full run.
+    assert selftest._roll_up([guard, _check_that_held()])["held"] is False
 
 
 def test_the_egress_check_never_connects_where_it_is_told(tmp_path) -> None:
@@ -76,10 +88,9 @@ def test_no_proxy_configured_is_unproven_not_broken(tmp_path, monkeypatch) -> No
     node cannot demonstrate. Those are different answers."""
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
     monkeypatch.delenv("https_proxy", raising=False)
-    report = _run(make_settings(tmp_path, workdir=tmp_path))
-    egress = next(c for c in report["checks"] if c["name"].startswith("egress"))
+    egress = selftest.egress_refuses()
     assert egress["held"] is None
-    assert egress["name"] in report["unproven"]
+    assert egress["name"] in selftest._roll_up([egress])["unproven"]
 
 
 def test_the_audit_chain_is_walked_not_asserted(tmp_path) -> None:
@@ -89,21 +100,29 @@ def test_the_audit_chain_is_walked_not_asserted(tmp_path) -> None:
 
     settings = make_settings(tmp_path, workdir=tmp_path)
 
-    # "Nothing chained" is `null`, not a pass — asserted directly, because a
-    # selftest RUN can never see it: its own gate probe is a real refusal and
-    # gets recorded, which is the honest thing for it to do.
     empty = selftest.audit_is_tamper_evident(make_settings(tmp_path / "fresh", workdir=tmp_path / "fresh"))
     assert empty["held"] is None and "no chained lines" in empty["detail"]
 
-    row = next(c for c in _run(settings)["checks"] if "tamper-evident" in c["name"])
-    assert row["held"] is True and "linked line(s) verify" in row["detail"]
+    for i in range(3):
+        audit.append(tmp_path / "audit", {"ts": i, "tool": "Bash", "detail": f"cmd {i}"})
+    row = selftest.audit_is_tamper_evident(settings)
+    assert row["held"] is True and "3 linked line(s) verify" in row["detail"]
 
-    # And the probe it wrote is attributed to the selftest, not to a real run —
-    # or it would inflate the per-session refusal count that exists to spot a
-    # run which kept asking for what it may not have.
+    assert audit.verify_chain(tmp_path / "audit")["intact"] is True
+
+
+def test_the_probe_it_writes_is_attributed_to_the_selftest(tmp_path) -> None:
+    """Its gate probe is a real refusal and is recorded as one — the honest
+    thing for it to do. But under `probe:selftest:0`, not a real run's key, or
+    it would inflate the per-session refusal count that exists to spot a run
+    which kept asking for what it may not have."""
+    settings = make_settings(tmp_path, workdir=tmp_path)
+    assert selftest.gate_refuses(settings)["held"] is True
+
     written = "".join(p.read_text(encoding="utf-8") for p in (tmp_path / "audit").glob("*.jsonl"))
     assert "probe:selftest:0" in written
-    assert audit.verify_chain(tmp_path / "audit")["intact"] is True
+    assert audit.trips(tmp_path / "audit", "probe:selftest:0", since=0) >= 1
+    assert audit.trips(tmp_path / "audit", "probe:a-real-run:1", since=0) == 0
 
 
 def test_a_doctored_audit_takes_the_whole_report_down(tmp_path) -> None:
@@ -120,19 +139,28 @@ def test_a_doctored_audit_takes_the_whole_report_down(tmp_path) -> None:
     lines[1] = json.dumps(doctored, ensure_ascii=False)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    report = _run(settings)
-    row = next(c for c in report["checks"] if "tamper-evident" in c["name"])
+    row = selftest.audit_is_tamper_evident(settings)
     assert row["held"] is False and "CHAIN BREAKS AT" in row["detail"]
-    assert report["held"] is False
+    assert selftest._roll_up([row])["held"] is False
 
 
-@pytest.mark.parametrize("field", ["does_not_stop", "detail", "name"])
-def test_every_check_says_what_it_does_not_cover(tmp_path, field: str) -> None:
+def test_every_check_says_what_it_does_not_cover(tmp_path) -> None:
     """The same discipline as containment.md's third column. A check that only
-    reports a pass teaches its reader that the boundary is total."""
+    reports a pass teaches its reader that the boundary is total.
+
+    One run, three fields. It was parametrised over the field names, which paid
+    for a full selftest — subprocess, posture CLIs, sockets — three times to
+    assert that three keys exist.
+    """
     report = _run(make_settings(tmp_path, workdir=tmp_path))
     for check in report["checks"]:
-        assert field in check
+        assert {"name", "detail", "does_not_stop"} <= set(check)
+        assert check["held"] in (True, False, None)
+    # The one full run in this file, so it also carries the end-to-end shape:
+    # the arithmetic above is tested against `_roll_up`, and this proves the
+    # real report obeys it too.
+    ran = [c for c in report["checks"] if c["held"] is not None]
+    assert report["demonstrated"] == len(ran) and report["held"] == all(c["held"] for c in ran)
 
 
 def test_could_not_ask_is_unproven_not_failed(tmp_path, monkeypatch) -> None:
@@ -146,11 +174,11 @@ def test_could_not_ask_is_unproven_not_failed(tmp_path, monkeypatch) -> None:
         raise OSError("connection refused")
 
     monkeypatch.setattr(selftest.urllib.request, "urlopen", refuses_to_connect)
-    report = _run(make_settings(tmp_path, workdir=tmp_path, token="t", agent_token="a"))
-    token = next(c for c in report["checks"] if "bearer cannot write" in c["name"])
+    settings = make_settings(tmp_path, workdir=tmp_path, token="t", agent_token="a")
+    token = asyncio.run(selftest.agent_token_cannot_write(settings))
     assert token["held"] is None
-    assert token["name"] in report["unproven"]
-    assert token["name"] not in report["failed"]
+    rolled = selftest._roll_up([token])
+    assert token["name"] in rolled["unproven"] and token["name"] not in rolled["failed"]
 
 
 def test_the_loopback_check_does_not_block_the_loop(tmp_path) -> None:

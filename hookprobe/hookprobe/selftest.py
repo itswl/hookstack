@@ -225,6 +225,27 @@ def _package_root() -> str:
     return str(os.path.dirname(os.path.dirname(os.path.abspath(hookprobe.__file__))))
 
 
+def _roll_up(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    """The verdict, separated from the demonstrating.
+
+    Two jobs and they fail differently: a check can be wrong about its
+    boundary, and the assembly can be wrong about the checks — counting one it
+    could not run as a pass is the second kind, and it is the one that would
+    make the whole endpoint lie quietly. Separated so the second can be tested
+    without paying for the first: subprocesses, posture CLIs and sockets are
+    the price of demonstrating, and arithmetic over a list is not.
+    """
+    ran = [c for c in checks if c["held"] is not None]
+    return {
+        "held": all(c["held"] for c in ran),
+        "checked_at": round(time.time(), 3),
+        "demonstrated": len(ran),
+        "unproven": [c["name"] for c in checks if c["held"] is None],
+        "failed": [c["name"] for c in ran if not c["held"]],
+        "checks": checks,
+    }
+
+
 async def run(settings: Settings) -> dict[str, Any]:
     """Every claim, demonstrated. `held` is false if ANY check that ran failed."""
     checks = [
@@ -236,12 +257,4 @@ async def run(settings: Settings) -> dict[str, Any]:
         await posture_still_holds(settings),
         audit_is_tamper_evident(settings),
     ]
-    ran = [c for c in checks if c["held"] is not None]
-    return {
-        "held": all(c["held"] for c in ran),
-        "checked_at": round(time.time(), 3),
-        "demonstrated": len(ran),
-        "unproven": [c["name"] for c in checks if c["held"] is None],
-        "failed": [c["name"] for c in ran if not c["held"]],
-        "checks": checks,
-    }
+    return _roll_up(checks)

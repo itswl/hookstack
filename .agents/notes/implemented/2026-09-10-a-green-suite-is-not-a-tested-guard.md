@@ -49,6 +49,24 @@ minutes for the docker builds already there. A check nobody runs protects
 nothing, and this repository has said so about its own steps; putting it behind
 a "run it deliberately" README line would have made it decoration.
 
+**It reported a false alarm on its second day, and the cause is worth the
+paragraph.** `the credential detector never fires` came back ESCAPED
+intermittently — and was caught every time it was run alone. Python validates a
+`.pyc` against the source's **(mtime truncated to seconds, size)**. Emptying
+`SECRETS_WITHHELD_FROM_AGENT` and emptying `_SECRET_SHAPES` both add **exactly
+16 characters** to `gate.py`; run in the same wall-clock second, the second
+mutation is indistinguishable from the first to that check, so pytest executed
+the first one's bytecode — in which the credential detector was intact.
+
+Each mutation now compiles into a `PYTHONPYCACHEPREFIX` of its own. Three
+consecutive runs, twelve caught, zero escaped.
+
+The direction it failed in was the safe one — a guarantee reported as untested
+when it is tested. **The same race can report `caught` for a guarantee that was
+never tested**, and that one would be invisible. A checker whose own failure
+mode is a silent pass is the thing this file exists to argue against, so it is
+fixed rather than noted.
+
 ## Consequences
 
 * **An entry that rots is a failure, not a skip.** If its anchor text no longer
