@@ -858,3 +858,86 @@ def test_the_chat_is_told_a_pressed_procedure_was_held(tmp_path):
     # collapsing those onto one key would answer the second press with silence.
     assert service.report_cooling(pid, str(caught.value)) is None
     assert service.report_cooling(pid, "host-1 is being acted on right now") is not None
+
+
+# ── the high-risk allowlist ───────────────────────────────────────────────────
+#
+# `risk` was in the step schema from the first commit and gated nothing: a
+# colour in the console and a word on the approve button. These are about the
+# field becoming a second gate — and about the ceiling on what a gate keyed on
+# a MODEL-SUPPLIED label can ever be worth.
+
+
+def test_a_high_risk_step_needs_both_lists(tmp_path: Path) -> None:
+    ordinary = [r"kubectl rollout restart deploy/\w+ -n prod"]
+    strict = [r"kubectl rollout restart deploy/api -n prod"]
+    low = {"action": "a", "command": "kubectl rollout restart deploy/api -n prod", "risk": "low"}
+    high = {"action": "a", "command": "kubectl rollout restart deploy/api -n prod", "risk": "high"}
+    other = {"action": "a", "command": "kubectl rollout restart deploy/web -n prod", "risk": "high"}
+
+    # A low step is unaffected by the second file, present or absent.
+    assert remediation.step_deny_reason(low, ordinary, []) is None
+    assert remediation.step_deny_reason(low, ordinary, strict) is None
+    # A high step with no high-risk file is refused: arming remediation must not
+    # arm its worst half by the same gesture.
+    assert remediation.step_deny_reason(high, ordinary, []) is not None
+    # A high step on both lists runs.
+    assert remediation.step_deny_reason(high, ordinary, strict) is None
+    # A high step the ordinary list permits and the strict one does not is refused.
+    assert remediation.step_deny_reason(other, ordinary, strict) is not None
+
+
+def test_the_high_risk_gate_only_ever_tightens(tmp_path: Path) -> None:
+    """The label is the MODEL's, so this gate can add a requirement and never
+    remove one. A dangerous command mislabelled `low` is bounded by exactly
+    what bounded it before this existed — the ordinary allowlist — and a
+    high-risk file that is wide open still cannot widen the first gate."""
+    mislabelled = {"action": "a", "command": "kubectl delete ns prod", "risk": "low"}
+    assert remediation.step_deny_reason(mislabelled, [r"echo .*"], [r".*"]) is not None
+    # And the second list cannot license what the first refuses, at any label.
+    honest = {"action": "a", "command": "kubectl delete ns prod", "risk": "high"}
+    assert remediation.step_deny_reason(honest, [r"echo .*"], [r".*"]) is not None
+
+
+def test_the_high_risk_list_is_rechecked_before_each_step(tmp_path):
+    """Same rule as the ordinary list: an operator emptying it mid-incident
+    stops the high-risk steps that have not run, and the `low` ones carry on."""
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    strict = tmp_path / "allow-high.txt"
+    strict.write_text("echo .*\n", encoding="utf-8")
+    row = {
+        "id": "0123456789",
+        "status": "running",
+        "steps": [
+            {"action": "a", "command": "echo first", "risk": "low"},
+            {"action": "b", "command": "echo second", "risk": "high"},
+        ],
+    }
+
+    async def scenario():
+        strict.write_text("# withdrawn mid-incident\n", encoding="utf-8")
+        await remediation.execute(tmp_path, row, bash_timeout_ms=5000, allowlist=allow, high_risk_allowlist=strict)
+
+    asyncio.run(scenario())
+    assert row["status"] == "failed"
+    assert len(row["results"]) == 2, "the low step ran; the high one was refused"
+    assert row["results"][0]["exit"] == 0
+    assert "refused at execution" in row["results"][1]["output"]
+
+
+def test_approval_refuses_the_whole_procedure_for_one_high_step(tmp_path):
+    """All-or-refused, the same rule the ordinary allowlist follows at the
+    click: a procedure written 1-2-3 whose step 2 is high and uncovered must
+    not run step 1 and then stop."""
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    steps = [
+        {"action": "a", "command": "echo first", "risk": "low"},
+        {"action": "b", "command": "echo second", "risk": "high"},
+    ]
+    proposal_id = remediation.propose(tmp_path, "ses-x", steps)
+    with pytest.raises(PermissionError) as excinfo:
+        remediation.approve(tmp_path, proposal_id, allowlist=allow, high_risk_allowlist=None)
+    assert "high risk" in str(excinfo.value)
+    assert remediation.load(tmp_path, proposal_id)["status"] == "proposed", "nothing was decided"

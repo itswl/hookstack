@@ -129,10 +129,16 @@ BOUNDARY_COUNT_STATED = (
     Path("docs/zh/index.md"),
 )
 _BOUNDARY_ROW = re.compile(r"^\| \*\*", re.MULTILINE)
+# Deliberately NOT an enumeration of the number words. It was one until
+# 2026-09-10, and it stopped at twenty-five while `_TEENS` learned twenty-six:
+# both English pages then said "twenty-six structural boundaries", matched
+# nothing, and were silently excluded from the check that exists to keep them
+# honest — the report still read "26 boundaries match every page that counts
+# them" while counting one page of three. Match ANY word here and resolve it
+# below, so an unknown word is a failure with a name instead of a page quietly
+# dropping out of the set.
 _BOUNDARY_EN = re.compile(
-    r"\b(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
-    r"twenty-one|twenty-two|twenty-three|twenty-four|twenty-five|\d+)\s+structural\s+"
-    r"(?:security\s+)?boundaries\b",
+    r"\b([a-z]+(?:-[a-z]+)?|\d+)\s+structural\s+(?:security\s+)?boundaries\b",
     re.IGNORECASE,
 )
 _BOUNDARY_ZH = re.compile(r"([一二三四五六七八九十]{1,3}|\d+)条结构性边界")
@@ -153,6 +159,7 @@ _TEENS = {
     "twenty-four": 24,
     "twenty-five": 25,
     "twenty-six": 26,
+    "twenty-seven": 27,
     "十一": 11,
     "十二": 12,
     "十三": 13,
@@ -169,6 +176,7 @@ _TEENS = {
     "二十四": 24,
     "二十五": 25,
     "二十六": 26,
+    "二十七": 27,
 }
 _NUMBER_WORDS = {
     **{
@@ -193,14 +201,21 @@ _NUMBER_WORDS = {
 }
 
 
-def _stated_boundaries(text: str) -> list[tuple[int, int]]:
-    """Every (line number, stated boundary count) in the text, both languages."""
-    out = []
+def _stated_boundaries(text: str) -> list[tuple[int, int | None, str]]:
+    """Every (line number, stated boundary count, word) in the text.
+
+    The count is None when the word is not a number this file knows. That is a
+    failure the caller reports, never a match it drops: a page whose count word
+    goes unrecognised is a page nobody is checking.
+    """
+    out: list[tuple[int, int | None, str]] = []
     for pattern in (_BOUNDARY_EN, _BOUNDARY_ZH):
         for m in pattern.finditer(text):
             word = m.group(1).lower()
             value = _TEENS.get(word) or _NUMBER_WORDS.get(word)
-            out.append((text.count("\n", 0, m.start()) + 1, value or int(word)))
+            if value is None:
+                value = int(word) if word.isdigit() else None
+            out.append((text.count("\n", 0, m.start()) + 1, value, word))
     return out
 
 
@@ -312,8 +327,13 @@ def main() -> int:
 
     rows = len(_BOUNDARY_ROW.findall(BOUNDARY_TABLE.read_text(encoding="utf-8")))
     for doc in BOUNDARY_COUNT_STATED:
-        for line, count in _stated_boundaries(doc.read_text(encoding="utf-8")):
-            if count != rows:
+        for line, count, word in _stated_boundaries(doc.read_text(encoding="utf-8")):
+            if count is None:
+                problems.append(
+                    f"{doc}:{line} states the boundary count as {word!r}, which this checker cannot read — "
+                    f"add it to _TEENS, or this page stops being checked"
+                )
+            elif count != rows:
                 problems.append(f"{doc}:{line} says {count} structural boundaries, but {BOUNDARY_TABLE} lists {rows}")
 
     if problems:

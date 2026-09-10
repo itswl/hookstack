@@ -27,7 +27,12 @@ what its shutdown has to wait for.
 The gate that makes any of this runnable is the allowlist file
 (HOOKPROBE_REMEDIATION_ALLOWLIST): one regex per line, hot-read at execution
 time, deny-by-default. No file, no execution — proposals still collect, which
-is the shipping default. The read-only bash guard's deny list deliberately
+is the shipping default. A step the report itself called `high` risk must
+full-match a pattern in a SECOND file as well
+(HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST, deny-by-default in the same
+direction), so that arming remediation does not arm its worst half by the same
+gesture. That label is the model's, so the second gate can only tighten — see
+`step_deny_reason` for what that does and does not buy. The read-only bash guard's deny list deliberately
 does NOT apply here: remediation exists to do the mutations that guard blocks,
 and its gate is the operator's allowlist plus the operator's click, not a
 regex that errs toward blocking investigations.
@@ -263,6 +268,43 @@ def deny_reason(command: str, patterns: list[str]) -> str | None:
         except re.error:
             continue  # a broken pattern must fail closed, not open
     return "command matches no allowlist pattern"
+
+
+def step_deny_reason(
+    step: dict[str, Any],
+    patterns: list[str],
+    high_risk_patterns: list[str],
+) -> str | None:
+    """Why this STEP may not run: the command gate, and a second one for `high`.
+
+    The risk label has been in the step schema as long as `target` was, and was
+    read by as little: a colour in the console and a word in the approve
+    button. This is the field becoming a gate — a step the report itself called
+    high risk must full-match a pattern in the high-risk file TOO, so that
+    arming remediation at all does not arm its worst half by the same gesture.
+
+    What this can and cannot be, and the difference matters more here than the
+    mechanism: **the label is the model's**. A gate keyed on it can only ever
+    ADD a requirement, never remove one. A step that should have said `high`
+    and said `low` is refused or permitted by the ordinary allowlist exactly as
+    it was before this existed — an operator-written full-match pattern, which
+    is the boundary that actually holds. Read this as "the operator can reserve
+    a stricter list for the commands the model is willing to call dangerous",
+    not as "dangerous commands need two patterns".
+    """
+    reason = deny_reason(str(step.get("command") or ""), patterns)
+    if reason is not None:
+        return reason
+    if str(step.get("risk") or "").strip().lower() != "high":
+        return None
+    if not high_risk_patterns:
+        return (
+            "step declares high risk and no high-risk allowlist is configured "
+            "(HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST); the ordinary allowlist does not cover it"
+        )
+    if deny_reason(str(step.get("command") or ""), high_risk_patterns) is not None:
+        return "step declares high risk and matches no high-risk allowlist pattern"
+    return None
 
 
 # How long a proposal stays runnable. The same 24 hours the pipe gives a card's
@@ -521,6 +563,7 @@ def approve(
     proposal_id: str,
     *,
     allowlist: Path | None,
+    high_risk_allowlist: Path | None = None,
     note: str = "",
     at: dict[str, Any] | None = None,
     cooldown: int = COOLDOWN_SECONDS,
@@ -571,8 +614,9 @@ def approve(
             "these commands were chosen from evidence that has since moved. Ask for a fresh look."
         )
     patterns = allowlist_patterns(allowlist)
+    high_risk = allowlist_patterns(high_risk_allowlist)
     for step in row.get("steps", []):
-        reason = deny_reason(str(step.get("command") or ""), patterns)
+        reason = step_deny_reason(step, patterns, high_risk)
         if reason is not None:
             raise PermissionError(f"step '{step.get('action')}': {reason}")
     reason = cooling(row, list_all(workdir, limit=200), window=cooldown)
@@ -661,7 +705,14 @@ def execution_env() -> dict[str, str]:
     return kept
 
 
-async def execute(workdir: Path, row: dict[str, Any], *, bash_timeout_ms: int, allowlist: Path | None = None) -> None:
+async def execute(
+    workdir: Path,
+    row: dict[str, Any],
+    *,
+    bash_timeout_ms: int,
+    allowlist: Path | None = None,
+    high_risk_allowlist: Path | None = None,
+) -> None:
     """Approved commands run EXACTLY as written: sequentially, stop on the
     first failure, output captured, every command on the audit log. No
     agent in this loop — an agent that adapts an approved command is
@@ -685,8 +736,11 @@ async def execute(workdir: Path, row: dict[str, Any], *, bash_timeout_ms: int, a
         command = str(step.get("command") or "")
         started = time.monotonic()
         # Second gate. Deny-by-default holds: a file that has since been emptied
-        # or narrowed stops the rest of the procedure.
-        refusal = deny_reason(command, allowlist_patterns(allowlist))
+        # or narrowed stops the rest of the procedure. BOTH files are re-read,
+        # for the same reason the first one is — an operator who empties the
+        # high-risk list mid-incident stops the high-risk steps that have not
+        # run, and a procedure whose remaining steps are all `low` carries on.
+        refusal = step_deny_reason(step, allowlist_patterns(allowlist), allowlist_patterns(high_risk_allowlist))
         if refusal is None:
             argv, refusal = argv_for(command)
         else:

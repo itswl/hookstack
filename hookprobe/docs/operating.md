@@ -331,6 +331,27 @@ future deployment adds under a name nobody wrote down. If the list is wrong the
 command fails with its own error in the results an operator reads — where one
 quietly carrying a signing key leaves no trace at all.
 
+**A step the report called high risk needs a second list.** `risk` has been in
+the step schema as long as `target` has, and gated as little: a colour in the
+console, a word on the approve button. It is now a gate. A step marked
+`risk: high` must full-match a pattern in `HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST`
+as well as in the ordinary allowlist, deny-by-default in the same direction —
+configure the ordinary list alone and every high-risk step is refused, naming
+the variable that would cover it. Both lists are re-read before every step, so
+withdrawing the strict one mid-incident stops the high-risk steps that have not
+run while the `low` ones carry on. The refusal is all-or-nothing at the click,
+like the ordinary allowlist: one uncovered high step refuses the whole
+procedure rather than running 1 and stopping at 2.
+
+Know what this is worth before relying on it. **The risk label is written by the
+model**, not by the operator and not by a checker, so this gate can only ADD a
+requirement — it can never catch the case that matters most, a dangerous
+command the report called `low`. That step is bounded by the ordinary
+allowlist, an operator-written full-match pattern, exactly as it was before this
+existed. What the second list buys is the ability to reserve a stricter set for
+the commands the model is *willing to call dangerous*, which is a real thing to
+want and a smaller thing than it sounds like.
+
 **A procedure expires after a day.** Approving one runs commands chosen from
 evidence gathered at one moment — *suppress this address*, *restart that unit* —
 and approving it a week later runs a decision about a system that has since

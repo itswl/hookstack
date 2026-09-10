@@ -100,8 +100,15 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
     (
         "approved commands run without the allowlist",
         "hookprobe/hookprobe/remediation.py",
-        '        reason = deny_reason(str(step.get("command") or ""), patterns)',
+        "        reason = step_deny_reason(step, patterns, high_risk)",
         "        reason = None",
+        ("tests/test_remediation.py",),
+    ),
+    (
+        "a high-risk step runs on the ordinary allowlist alone",
+        "hookprobe/hookprobe/remediation.py",
+        '    if str(step.get("risk") or "").strip().lower() != "high":',
+        "    if True:",
         ("tests/test_remediation.py",),
     ),
     (

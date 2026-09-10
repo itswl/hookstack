@@ -82,5 +82,5 @@ where there is nothing to preserve.
 * gVisor and eBPF-as-observation stay open. Either could be proposed properly:
   gVisor with an overhead measurement on this workload, eBPF as a detection
   feed into the audit rather than an enforcement point.
-* What survived the same review, and is worth building, is in
+* What survived the same review was built the same day, and is in
   [[three-gaps-before-the-execution-door-opens]].

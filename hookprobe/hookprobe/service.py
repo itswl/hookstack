@@ -1280,6 +1280,7 @@ class RunService:
             self._settings.workdir,
             proposal_id,
             allowlist=self._settings.remediation_allowlist,
+            high_risk_allowlist=self._settings.remediation_high_risk_allowlist,
             note=note,
             at=self.proposal_cursor(proposal_id),
             cooldown=self._settings.remediation_cooldown_seconds,
@@ -1456,6 +1457,7 @@ class RunService:
             # The second gate needs the file, not the patterns read at the click:
             # an operator narrowing it mid-procedure should stop what has not run.
             allowlist=self._settings.remediation_allowlist,
+            high_risk_allowlist=self._settings.remediation_high_risk_allowlist,
         )
         self._board_changed()
 

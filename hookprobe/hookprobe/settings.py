@@ -218,6 +218,14 @@ class Settings:
     # proposals collect and nothing executes, which is the shipping posture.
     remediation_allowlist: Path | None
 
+    # The second gate, for steps the report itself called high risk: a `high`
+    # step must full-match a pattern in BOTH files. Deny by default in the same
+    # direction as the first — a high-risk step with no high-risk file is
+    # refused, so arming remediation does not silently arm its worst half. The
+    # risk label is the MODEL's, so this can only ever tighten: a step
+    # mislabelled `low` is bounded by the ordinary allowlist and nothing here.
+    remediation_high_risk_allowlist: Path | None
+
     # Remediation cooldown: seconds a target is left alone after a procedure has
     # acted on it. Unlike the allowlist this defaults ON, because it costs
     # nothing where remediation is unused and the thing it stops — a fix and its
@@ -440,6 +448,7 @@ class Settings:
             coalesce_window_seconds=max(0, _int("HOOKPROBE_COALESCE_WINDOW_SECONDS", 1800)),
             consolidate_at=max(0, _int("HOOKPROBE_CONSOLIDATE_AT", 5)),
             remediation_allowlist=_path_env("HOOKPROBE_REMEDIATION_ALLOWLIST"),
+            remediation_high_risk_allowlist=_path_env("HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST"),
             remediation_cooldown_seconds=max(0, _int("HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS", _cooldown_default())),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
