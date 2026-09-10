@@ -166,7 +166,17 @@ def test_an_anchored_head_survives_a_rebuilt_chain(tmp_path: Path) -> None:
     assert audit.verify_chain(audit_dir)["intact"] is True, (
         "a rebuilt chain is locally consistent — that is the problem"
     )
-    assert audit.chain_anchored(audit_dir, anchored) is False, "and the off-box head is what catches it"
+    # The message carries both heads on purpose. This assertion failed once,
+    # on 2026-09-10, in a full-suite run that has not reproduced it in two
+    # since — deterministic order, no xdist. `assert True is False` said
+    # nothing about WHY, so a recurrence now names the rebuilt head beside the
+    # anchor: equal means the rebuild really did reproduce a line hash, which
+    # would be a fact about the digest; different means `chain_anchored` read
+    # something stale, which would be a fact about the reader.
+    rebuilt = audit.chain_head(audit_dir)
+    assert audit.chain_anchored(audit_dir, anchored) is False, (
+        f"the off-box head is what catches it — anchor={anchored} rebuilt={rebuilt}"
+    )
 
 
 def test_the_anchor_check_is_not_fooled_by_a_substring(tmp_path: Path) -> None:
