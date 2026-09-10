@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from hookprobe import work
+from hookprobe import remediation, work
 from hookprobe.app import create_app
 from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, RunStore
 from hookprobe.service import RunService
@@ -83,7 +83,11 @@ def test_a_procedure_that_ran_clean_verifies_the_work_but_does_not_close_it() ->
     applied = {
         "id": "a" * 10,
         "session_key": "probe:ww:1",
-        "status": "applied",
+        # From the writer, never typed here. Typed, it said "applied" for
+        # months — a status remediation has never written — so this test
+        # passed on a row that cannot exist while the branch it covers was
+        # dead. See test_remediation's end-to-end twin.
+        "status": remediation.EXECUTED,
         "steps": steps,
         "results": [{"exit": 0}, {"exit": 0}],
     }
@@ -279,3 +283,36 @@ def test_the_failure_rate_counts_work_not_runs(tmp_path=None) -> None:
     counts = work.counts(work.resolve([ok, retried, lost, gone]))
     assert counts["failure_rate"] == 0.5, "two of four ended without an answer"
     assert work.counts([])["failure_rate"] is None, "no work, no rate — not zero"
+
+
+def test_the_board_says_how_long_until_an_answer_and_how_many_signals_it_took() -> None:
+    """The two numbers an on-call reads first, and neither existed. The board
+    led with `closed_unattended` and a failure rate — both about outcome, and
+    silent on the two questions a person actually opens it with: how long until
+    it was any use, and how much of the noise it absorbed.
+
+    Both computed from fields already on the item, so this is an aggregation
+    and not a new measurement — and both absent rather than zero when there is
+    nothing to say, because "no answer yet" and "an instant answer" are
+    different facts.
+    """
+    quick = _run("probe:a:1", created_at=100.0)
+    quick.finished_at = 140.0
+    slow = _run("probe:a:2", created_at=100.0, meta={"refires": 3, "follow_ups": ["om_a"]})
+    slow.finished_at = 400.0
+    items = work.resolve([quick, slow])
+    out = work.counts(items)
+    # Two items, 40s and 300s to a first answer: the median of a two-item board
+    # is the upper of the pair, which is the conservative reading.
+    assert out["median_answer_seconds"] == 300.0
+    # Six signals arrived — two openings, three re-fires, one follow-up — and
+    # became two pieces of work.
+    assert out["signals"] == 6 and out["signals_per_item"] == 3.0
+
+    # Nothing answered yet: absent, not zero.
+    running = _run("probe:a:3", created_at=100.0)
+    running.status = RUNNING
+    running.finished_at = None
+    out = work.counts(work.resolve([running]))
+    assert out["median_answer_seconds"] is None
+    assert work.counts([])["signals_per_item"] is None

@@ -69,6 +69,17 @@ logger = logging.getLogger("hookprobe.remediation")
 
 DIRNAME = "remediation"
 
+# The terminal statuses, named rather than typed at each reader. `work.py`
+# retyped this one as "applied" — a status this module has never written — so
+# `_applied_cleanly` returned False for every row that ever ran, the work board's
+# `verified_by = "remediation"` was unreachable, and `closed_unattended` (the
+# node's north star) could only ever be reached by a recovery arriving. Two
+# tests covered that branch and both hand-wrote `"status": "applied"` into their
+# fixtures, so they proved the fixture and not the code. A string with two homes
+# is a bug with no symptom.
+EXECUTED = "executed"
+FAILED = "failed"
+
 _BLOCK = re.compile(r"```remediation\s*\n(.*?)```", re.DOTALL)
 _MAX_STEPS = 5
 _RISKS = ("low", "medium", "high")
@@ -186,7 +197,7 @@ def settle_interrupted(workdir: Path) -> list[dict[str, Any]]:
             continue
         commands = [str(step.get("command") or "") for step in row.get("steps") or []]
         ran = len(row.get("results") or [])
-        row["status"] = "failed"
+        row["status"] = FAILED
         row["executed_at"] = round(time.time(), 3)
         row["interrupted"] = {"ran": commands[:ran], "not_run": commands[ran:]}
         try:
@@ -440,7 +451,7 @@ COOLDOWN_SECONDS = 900
 # written for. It is the one status held with no window at all, which is bounded
 # rather than forever: the next boot settles a stranded `running` row into
 # `failed` (`settle_interrupted`), and from there the clock applies.
-_ACTED_STATUSES = ("running", "executed", "failed")
+_ACTED_STATUSES = ("running", EXECUTED, FAILED)
 
 
 def _normal(value: Any) -> str:
@@ -786,7 +797,7 @@ async def execute(
         if returncode != 0:
             failed = True
             break
-    row["status"] = "failed" if failed else "executed"
+    row["status"] = FAILED if failed else EXECUTED
     row["executed_at"] = round(time.time(), 3)
     try:
         save(workdir, row)

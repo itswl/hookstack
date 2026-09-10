@@ -1187,9 +1187,17 @@ async function openWork() {
     $("#meta").textContent = "work · one row per piece of work, however many runs it took";
     const rate = c.failure_rate === null || c.failure_rate === undefined
       ? "" : ` · ${Math.round(c.failure_rate * 100)}% ended without an answer`;
+    // Two numbers an on-call reads before any of the others: how long until it
+    // was any use, and how many signals it took to make one piece of work.
+    // Both absent rather than zero when nothing has answered — "no answer" and
+    // "an instant answer" are different facts.
+    const answer = c.median_answer_seconds === null || c.median_answer_seconds === undefined
+      ? "" : ` · ${fmtMs(Math.round(c.median_answer_seconds * 1000))} to a first answer (median)`;
+    const fold = c.signals_per_item && c.signals_per_item > 1
+      ? ` · ${c.signals} signals folded into ${(d.items || []).length} pieces of work` : "";
     $("#prov").innerHTML = `${c.blocked || 0} blocked · ${c.executing || 0} in flight · ` +
       `${c.done || 0} done, ${c.verified || 0} verified · ` +
-      `<b>${c.closed_unattended || 0}</b> closed without anyone stepping in${rate}`;
+      `<b>${c.closed_unattended || 0}</b> closed without anyone stepping in${rate}${answer}${fold}`;
     const items = d.items || [];
     if (!items.length) { $("#turns").innerHTML = '<div class="empty">no work yet — an alert, a task or a question through the event door opens one</div>'; return; }
     // A board with 184 items in one column needs a way to reach one of them.

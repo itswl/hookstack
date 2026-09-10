@@ -35,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from hookprobe.remediation import EXECUTED as PROCEDURE_EXECUTED
 from hookprobe.remediation import stale as proposal_stale
 from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run
 
@@ -169,8 +170,15 @@ def _applied_cleanly(row: dict[str, Any]) -> bool:
     report proposed were approved, ran, and none of them failed. A partial run
     (`interrupted`) is not a pass — that is the case this check exists to keep
     out of the completed column.
+
+    The status comes FROM the writer (`remediation.EXECUTED`) rather than being
+    typed here, because it was typed here: this read `"applied"`, a status
+    remediation has never written, so the check returned False for every real
+    row and the board's own north star could not be reached by the one path
+    that runs anything. Both tests covering it hand-wrote the same wrong string
+    into their fixtures and passed for months.
     """
-    if str(row.get("status") or "") != "applied" or row.get("interrupted"):
+    if str(row.get("status") or "") != PROCEDURE_EXECUTED or row.get("interrupted"):
         return False
     results = row.get("results") or []
     steps = row.get("steps") or []
@@ -357,4 +365,19 @@ def counts(items: list[WorkItem]) -> dict[str, Any]:
     # counts: nobody came, so it ended without an answer just the same.
     ended_badly = out.get(NEEDS_HUMAN, 0) + out.get(ABANDONED, 0)
     out["failure_rate"] = round(ended_badly / len(items), 4) if items else None
+    # How long until the work was any use, over the items that got that far.
+    # The median rather than the mean, because one 40-minute follow-up chain
+    # would otherwise describe a board of 45-second answers. `None` when
+    # nothing has answered yet — "no answer" and "an instant answer" are
+    # different facts, and a 0 here would report the wrong one.
+    answered = sorted(i.first_result_at - i.opened_at for i in items if i.first_result_at and i.opened_at)
+    out["median_answer_seconds"] = round(answered[len(answered) // 2], 1) if answered else None
+    # Every signal that arrived, against the pieces of work they became. This
+    # is the local, honest form of "500 alerts became 5 incidents": it counts
+    # what THIS node was told — one per item, plus each re-fire the door folded
+    # into an existing investigation and each follow-up somebody typed. The
+    # pipe drops and coalesces more before any of it reaches here, so this is a
+    # floor on the folding, never the whole of it.
+    out["signals"] = len(items) + sum(i.refires for i in items) + sum(i.follow_ups for i in items)
+    out["signals_per_item"] = round(out["signals"] / len(items), 2) if items else None
     return out

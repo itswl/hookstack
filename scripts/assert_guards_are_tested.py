@@ -140,6 +140,13 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
         ("tests/test_remediation.py", "tests/test_card_actions.py"),
     ),
     (
+        "the work board reads a procedure status the writer never writes",
+        "hookprobe/hookprobe/work.py",
+        '    if str(row.get("status") or "") != PROCEDURE_EXECUTED or row.get("interrupted"):',
+        '    if str(row.get("status") or "") != "applied" or row.get("interrupted"):',
+        ("tests/test_remediation.py", "tests/test_work.py", "tests/test_recovery.py"),
+    ),
+    (
         "the selftest counts a check it could not run as a pass",
         "hookprobe/hookprobe/selftest.py",
         '    ran = [c for c in checks if c["held"] is not None]',

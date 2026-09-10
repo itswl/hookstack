@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from hookprobe import work
+from hookprobe import remediation, work
 from hookprobe.app import create_app
 from hookprobe.runs import RunStore
 from hookprobe.service import RunService
@@ -122,7 +122,7 @@ def test_a_ruling_and_a_clean_procedure_both_outrank_it(tmp_path) -> None:
     applied = {
         "id": "a" * 10,
         "session_key": key,
-        "status": "applied",
+        "status": remediation.EXECUTED,
         "steps": [{"command": "x"}],
         "results": [{"exit": 0}],
     }

@@ -941,3 +941,49 @@ def test_approval_refuses_the_whole_procedure_for_one_high_step(tmp_path):
         remediation.approve(tmp_path, proposal_id, allowlist=allow, high_risk_allowlist=None)
     assert "high risk" in str(excinfo.value)
     assert remediation.load(tmp_path, proposal_id)["status"] == "proposed", "nothing was decided"
+
+
+def test_a_procedure_that_really_ran_verifies_its_work_item(tmp_path):
+    """The seam, crossed once for real — and it was broken the whole time.
+
+    `work._applied_cleanly` read `status == "applied"`; this module writes
+    `executed`. So the board's `verified_by = "remediation"` was unreachable and
+    `closed_unattended` — the node's own north star — could only be reached by a
+    recovery arriving from the pipe. Two unit tests covered the branch and both
+    hand-wrote `"status": "applied"` into their fixtures, which is a test of the
+    fixture.
+
+    Nothing here is hand-written: the report proposes, the operator approves, the
+    command actually runs, and the row the WRITER left on disk is the row the
+    READER is handed.
+    """
+    from hookprobe import work
+
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    report = 'ok\n```remediation\n[{"action":"probe","command":"echo done","risk":"low"}]\n```\n'
+
+    async def scenario():
+        service, _ = _approved(tmp_path, report, "echo .*\n")
+        service.start(
+            {"message": "Title: t\ngo", "sessionKey": "probe:alerts:7", "_meta": {"source": "alerts", "title": "t"}},
+            origin="relay",
+        )
+        run = await _finish(service, "probe:alerts:7")
+        service.approve_remediation(run.meta["remediation_proposal"])
+        for _ in range(300):
+            row = remediation.load(tmp_path, run.meta["remediation_proposal"])
+            if row["status"] in (remediation.EXECUTED, remediation.FAILED):
+                return run, row
+            await asyncio.sleep(0.01)
+        raise AssertionError("never executed")
+
+    run, row = asyncio.run(scenario())
+    assert row["status"] == remediation.EXECUTED, row
+    (item,) = work.resolve([run], proposals=[row])
+    assert item.verified and item.verified_by == "remediation"
+    # And the failure direction, from the same writer: a step that exits
+    # non-zero leaves `failed`, which is not a verification of anything.
+    row["status"], row["results"] = remediation.FAILED, [{"exit": 1}]
+    (item,) = work.resolve([run], proposals=[row])
+    assert not item.verified
