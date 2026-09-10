@@ -123,14 +123,28 @@ class Settings:
             retention_days=_int("HOOKJUDGE_RETENTION_DAYS", 30),
             ai_base_url=os.environ.get("HOOKJUDGE_AI_BASE_URL", ""),
             ai_api_key=os.environ.get("HOOKJUDGE_AI_API_KEY", ""),
-            ai_model=os.environ.get("HOOKJUDGE_AI_MODEL", "gpt-4o-mini"),
+            # Same shape as ai_structured_output below, and this one had teeth:
+            # the quickstart compose passes `${HOOKJUDGE_AI_MODEL:-}`, so a user
+            # who set a key and a base URL but no model got an EMPTY model in
+            # every request — a provider error and a degraded verdict, with the
+            # cause invisible. A default that only applies when the key is
+            # absent never applies inside a container.
+            ai_model=(os.environ.get("HOOKJUDGE_AI_MODEL") or "").strip() or "gpt-4o-mini",
             ai_timeout_seconds=_float("HOOKJUDGE_AI_TIMEOUT_SECONDS", 60.0),
             ai_body_limit=_int("HOOKJUDGE_AI_BODY_LIMIT", 4000),
             ai_title_limit=_int("HOOKJUDGE_AI_TITLE_LIMIT", 300),
             ai_fields_limit=_int("HOOKJUDGE_AI_FIELDS_LIMIT", 2000),
             ai_price_in_per_1k=_float("HOOKJUDGE_AI_PRICE_IN_PER_1K", 0.0),
             ai_price_out_per_1k=_float("HOOKJUDGE_AI_PRICE_OUT_PER_1K", 0.0),
-            ai_structured_output=os.environ.get("HOOKJUDGE_AI_STRUCTURED_OUTPUT", "auto"),
+            # `or "auto"` rather than a default argument, so an EMPTY value means
+            # the same as an absent one. The composes pass every knob as
+            # `${NAME:-}`, which sets the variable to "" when .env is silent — so
+            # a default that only applies when the key is missing never applies
+            # inside a container. Behaviourally this one was harmless (neither ""
+            # nor "auto" is a dialect, so both step down from the strongest), but
+            # the shape is the hazard and `test_empty_is_the_same_as_unset` pins
+            # it for every knob rather than this one.
+            ai_structured_output=(os.environ.get("HOOKJUDGE_AI_STRUCTURED_OUTPUT") or "").strip() or "auto",
             burst_window_seconds=_int("HOOKJUDGE_BURST_WINDOW_SECONDS", 600),
             host=os.environ.get("HOOKJUDGE_HOST", "127.0.0.1"),
             port=_int("HOOKJUDGE_PORT", 8200),

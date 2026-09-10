@@ -1535,3 +1535,42 @@ def test_the_return_carries_the_burst_so_the_pipe_can_group(app_client):
     )
     assert "burst_id" not in Outgoing(inc, v).payload()["meta"], "a group of one is not a burst"
     assert Outgoing(inc, v, burst_id="burst-7").payload()["meta"]["burst_id"] == "burst-7"
+
+
+def test_empty_is_the_same_as_unset(monkeypatch) -> None:
+    """The composes pass every knob as `${NAME:-}`, which sets the variable to
+    an EMPTY STRING when .env is silent — not to nothing. So a default supplied
+    as `os.environ.get(NAME, default)` never applies inside a container: the key
+    exists, and the value is "".
+
+    Found on 2026-09-10 while adding 34 passthroughs, by diffing the loaded
+    settings with the knobs unset against the same knobs set to "". One field
+    moved — `ai_structured_output`, from `auto` to `""` — and it happened to be
+    harmless, because neither value names a dialect and both step down from the
+    strongest. The next one would not be. This asserts the whole class instead
+    of that field.
+    """
+    import dataclasses
+    import re
+    from pathlib import Path
+
+    from hookjudge.settings import Settings
+
+    # Only the knobs a compose passes with an EMPTY default. A knob set
+    # literally (`HOOKJUDGE_HOST: 0.0.0.0`) or required (`${NAME:?...}`) can
+    # never arrive empty, and demanding `empty == unset` of those would be
+    # asserting something the deployment cannot produce.
+    root = Path(__file__).resolve().parent.parent.parent
+    composes = [c.read_text(encoding="utf-8") for c in root.glob("**/docker-compose*.yml") if ".venv" not in c.parts]
+    names = sorted({n for text in composes for n in re.findall(r"\$\{(HOOKJUDGE_[A-Z0-9_]+):-\}", text)})
+    assert len(names) >= 8, f"only {len(names)} emptyable knobs found; the compose parse has lost the files"
+
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+    unset = dataclasses.asdict(Settings.load())
+    for name in names:
+        monkeypatch.setenv(name, "")
+    empty = dataclasses.asdict(Settings.load())
+
+    moved = {k: (unset[k], empty[k]) for k in unset if unset[k] != empty[k]}
+    assert not moved, f"passing these knobs empty is not the same as leaving them unset: {moved}"

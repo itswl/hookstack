@@ -27,17 +27,17 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKJUDGE_RETENTION_DAYS` | `30` | How long judged rows are kept; 0 disables purging entirely |
 | `HOOKJUDGE_AI_BASE_URL` | *(empty)* | OpenAI-compatible base |
 | `HOOKJUDGE_AI_API_KEY` | *(empty)* | Credential for the base above |
-| `HOOKJUDGE_AI_MODEL` | `gpt-4o-mini` | Model name sent to that base |
 | `HOOKJUDGE_AI_TIMEOUT_SECONDS` | `60.0` | How long one judgement may take before it falls back to the rules |
 | `HOOKJUDGE_AI_BODY_LIMIT` | `4000` | Characters of the alert body sent to the model |
 | `HOOKJUDGE_AI_TITLE_LIMIT` | `300` | The rest of the untrusted span in the prompt |
 | `HOOKJUDGE_AI_FIELDS_LIMIT` | `2000` | How many payload fields are offered to the model |
 | `HOOKJUDGE_AI_PRICE_IN_PER_1K` | `0.0` | Input price per 1k tokens, so the ledger can cost a verdict |
 | `HOOKJUDGE_AI_PRICE_OUT_PER_1K` | `0.0` | Output price per 1k tokens, the other half of that sum |
-| `HOOKJUDGE_AI_STRUCTURED_OUTPUT` | `auto` | schema \| tools \| object to pin one, anything else (default "auto") to negotiate downwards from the strongest the provider will accept |
 | `HOOKJUDGE_BURST_WINDOW_SECONDS` | `600` | A burst is different rules from one origin inside one window |
 | `HOOKJUDGE_HOST` | `127.0.0.1` | Where to listen |
 | `HOOKJUDGE_PORT` | `8200` | Port the service listens on |
+| `HOOKJUDGE_AI_MODEL` | *(empty)* | Model name sent to that base |
+| `HOOKJUDGE_AI_STRUCTURED_OUTPUT` | *(empty)* | schema \| tools \| object to pin one, anything else (default "auto") to negotiate downwards from the strongest the provider will accept |
 
 ## Routes (11)
 
