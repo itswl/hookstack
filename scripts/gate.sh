@@ -130,6 +130,16 @@ for f in scripts/*.py; do
 done
 echo "scripts: OK"
 
+step_bridge "the egress proxy parses, lints and holds its allowlist"
+# Same lesson as the bridge below, applied before it is learned twice: a sidecar
+# that is not inside a service package is reached by no component gate, and this
+# one sits in the path of every call an investigator makes.
+python3 -m compileall -q deploy/egress-proxy
+hookrelay/.venv/bin/python -m ruff check deploy/egress-proxy
+hookrelay/.venv/bin/python -m ruff format --check deploy/egress-proxy
+hookrelay/.venv/bin/python -m pytest -q deploy/egress-proxy/tests
+echo "egress-proxy: OK"
+
 step_bridge "the lark bridge parses and lints"
 python3 -m compileall -q deploy/lark-bridge
 hookrelay/.venv/bin/python -m ruff check deploy/lark-bridge
