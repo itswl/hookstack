@@ -141,9 +141,18 @@ schema with one free-text field — rather than to build a parallel typed surfac
   bigger than its implementation, found by checking rather than re-reading.
 * **What is verified, and what is not.** The cooldown was read back on
   production after its deploy — all five rows report `cooling: ''`, so nothing
-  is falsely held on day one. The high-risk gate has unit tests and a mutation
-  in `assert_guards_are_tested.py` that fails when the risk branch is removed;
-  it has **not** yet been read back on a deployment. That is the outstanding
-  step, and by this repository's own standard it is the one that counts.
+  is falsely held on day one. The high-risk gate was read back on production at
+  `5a00dfd`, in two parts, because the first alone would have proved less than
+  it looks: the knob now ARRIVES (`printenv` exits 0 with an empty value; before
+  the compose line it exited non-zero), and the DEPLOYED IMAGE's own
+  `step_deny_reason` refuses a `high` step with no high-risk file — *"step
+  declares high risk and no high-risk allowlist is configured"* — while passing
+  the identical command labelled `low`. That is a refusal observed on the
+  artifact rather than on a laptop.
+  **What it still does not show is the gate standing in the path of a real
+  approval.** `HOOKPROBE_REMEDIATION_ALLOWLIST` on that host is empty, so no
+  proposal reaches any gate: deployed and answering, never exercised in anger.
+  It stays that way until an operator arms remediation, and this bullet should
+  be the first thing revisited when one does.
 * The declined half of the same review is in
   [[two-person-review-needs-a-second-person]].
