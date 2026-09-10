@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import urllib.error
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -768,8 +769,28 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
     @app.get("/v1/remediations", dependencies=[Depends(require_token)])
     async def remediations_list() -> dict[str, Any]:
-        """Open remediation proposals, newest first."""
-        return {"proposals": remediation.list_all(settings.workdir)}
+        """Open remediation proposals, newest first, each saying whether it is
+        still runnable.
+
+        `expired` is `remediation.stale` — the SAME function `approve` refuses
+        on and the work board reads — rather than a second opinion computed
+        here. Two readers disagreeing about one fact is what this fixes: the
+        board has always excluded a stale proposal from `blocked` (it cannot be
+        cleared, so offering it is dead weight), while the approvals page
+        filtered on `status` alone and counted three 47-to-55-hour-old rows as
+        "procedures waiting for approval", each with a button the card no longer
+        draws and a click the gate refuses.
+
+        Reported, not rewritten. The honest alternative — rejecting them — would
+        record three decisions nobody made and destroy the distinction between
+        "somebody looked and said no" and "nobody came", which on an unattended
+        deployment is most of what the board is for.
+        """
+        now = time.time()
+        rows = remediation.list_all(settings.workdir)
+        for row in rows:
+            row["expired"] = row.get("status") == "proposed" and remediation.stale(row, now)
+        return {"proposals": rows}
 
     @app.post("/v1/remediations/{proposal_id}/approve", dependencies=[Depends(require_token)])
     async def remediation_approve(proposal_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:

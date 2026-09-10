@@ -117,7 +117,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/v1/memory/suggestions/{suggestion_id}/accept` | Adopt one queued line into CLAUDE.md under its own heading |
 | POST | `/v1/memory/suggestions/{suggestion_id}/dismiss` | Drop one queued line; nothing is written to memory |
 | GET | `/v1/posture` | What the credentials could do when this runner started, measured against the declared posture — the record behind "this ran read-only" |
-| GET | `/v1/remediations` | Open remediation proposals, newest first |
+| GET | `/v1/remediations` | Open remediation proposals, newest first, each saying whether it is still runnable |
 | POST | `/v1/remediations/{proposal_id}/approve` | The one click that makes anything run |
 | POST | `/v1/remediations/{proposal_id}/reject` | Refuse a parked proposal; it keeps its file, marked rejected |
 | GET | `/v1/runs` | Finished runs, newest first |

@@ -1252,7 +1252,10 @@ async function openApprovals() {
       (await api("/v1/memory/suggestions")).json().catch(() => ({ open: [] })),
       (await api("/v1/runs?unruled=1&limit=50")).json().catch(() => []),
     ]);
-    const proposals = (rem.proposals || []).filter((r) => r.status === "proposed");
+    // `expired` comes from the service, which computes it with the same
+    // remediation.stale that approve() refuses on — filtering on status alone
+    // counted rows whose buttons are not drawn and whose click the gate refuses.
+    const proposals = (rem.proposals || []).filter((r) => r.status === "proposed" && !r.expired);
     const lines = mem.open || [];
     const unruled = (runs || []).filter((r) => r.status !== "running");
     const parts = [];

@@ -4,6 +4,7 @@ approved, only what an allowlist permits, and writes down every command."""
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -600,3 +601,37 @@ def test_a_notice_earns_no_buttons(tmp_path):
     notice = service.report_superseded(pid, "the condition ended after these steps were written")
     assert notice is not None
     assert actions.declare(notice, tmp_path) == []
+
+
+def test_the_list_says_which_proposals_are_past_their_window(tmp_path):
+    """Two readers, one rule. The work board has always excluded a stale
+    proposal from `blocked` — it cannot be cleared, so offering it is dead
+    weight — while the approvals page filtered on status alone and counted
+    three 47-to-55-hour-old rows as waiting for a person, each with a button
+    the card no longer draws and a click the gate refuses.
+
+    Reported, never rewritten: rejecting them would record three decisions
+    nobody made, and destroy the difference between "somebody looked and said
+    no" and "nobody came".
+    """
+    from hookprobe import work
+
+    steps = [{"action": "check", "command": "aws sesv2 get-account", "risk": "low"}]
+    fresh = remediation.propose(tmp_path, "probe:alerts:1", steps)
+    old = remediation.propose(tmp_path, "probe:alerts:2", steps)
+    row = remediation.load(tmp_path, old)
+    row["created_at"] = time.time() - (remediation.APPROVAL_WINDOW_SECONDS + 3600)
+    remediation.save(tmp_path, row)
+
+    by_id = {r["id"]: r for r in remediation.list_all(tmp_path)}
+    now = time.time()
+    for r in by_id.values():
+        r["expired"] = r.get("status") == "proposed" and remediation.stale(r, now)
+    assert by_id[fresh]["expired"] is False
+    assert by_id[old]["expired"] is True
+    assert by_id[old]["status"] == "proposed", "expiry is reported, not written into the row"
+
+    # The gate and the board already agreed; this is the third reader joining.
+    with pytest.raises(ValueError, match="past the"):
+        remediation.approve(tmp_path, old, allowlist=None)
+    assert work.proposal_stale(by_id[old], now)

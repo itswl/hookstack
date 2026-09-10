@@ -66,6 +66,19 @@ The local work deployment is the HARDER case, not the easier one, which is worth
 recording because the instinct is the opposite: its MCP server is plain HTTP at
 `host.docker.internal:52222`, which an internal network cannot reach at all.
 
+**The partial that already exists**, so the next reader does not think there is
+nothing. The output guard's pattern list carries
+`("openai-style api key", r"\bsk-[A-Za-z0-9_-]{20,}\b")`, and the provider
+credential is `sk-` + 48 — so it matches. An agent that reads it INTO tool
+output (`env`, a printenv, a config dump) gets `output_secret` recorded on the
+run and shown above the transcript. Two honest limits: it is detection, not
+prevention, and the token never appears in output when the agent uses it
+directly — `curl -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN"` is expanded
+by the shell, so the guard sees a variable name in the command and no secret in
+the answer. It converts the most likely accidental path, and the most likely
+path an injected instruction takes, from silent into recorded. It does not close
+the hole.
+
 ## Consequences
 
 * The proxy is on the stack gate (`compileall`, ruff, its own tests) from the
