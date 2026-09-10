@@ -75,6 +75,15 @@ NOT_A_KNOB: dict[str, str] = {
         "nothing on disk, and it rotates on restart. Set it only if something outside the container "
         "needs the read-only surface, which no deployment here does"
     ),
+    "HOOKRELAY_CARD_CALLBACK_SECRET": (
+        "an OPTIONAL second signature on /card-action, and unusable on the deployments this repo "
+        "ships: the only client that posts there is the lark bridge, which sends no signature header "
+        "(bridge.py, the card-action POST carries content-type and nothing else), so setting it 401s "
+        "every button press. The control that always applies is the signed single-use token in the "
+        "button itself. Passing it through cost a refused deploy on 2026-09-10 — `deploy_preflight` "
+        "requires any _SECRET a deployed compose names to be non-empty, and following its advice to "
+        "set one would have broken the button path. Add the line, and the bridge's signing, together"
+    ),
     # The alternate runtimes' binaries and config paths. Their defaults are the
     # paths inside the image this repository builds, so on every deployment here
     # they are already correct; only a custom image needs to move them, and that
