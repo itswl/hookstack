@@ -130,3 +130,54 @@ def test_the_batch_is_bounded_because_each_id_is_a_call(monkeypatch: Any) -> Non
     monkeypatch.setattr(bridge, "_lark", fake)
     bridge.read_status([f"om_{i}" for i in range(100)])
     assert len(calls) == bridge.READ_BATCH_MAX
+
+
+# ── an unrouted message answers in its thread ─────────────────────────────────
+
+
+def test_a_skip_the_pipe_knows_about_is_explained_to_the_sender(monkeypatch: Any) -> None:
+    """A 200 with a reason reaches the pipe's ledger. The person who typed the
+    message reaches nothing, and cannot tell a decision from an outage."""
+    sent: list[tuple[dict, str, str]] = []
+    monkeypatch.setattr(
+        bridge, "send_card", lambda c, reply_to="", chat_id="": (sent.append((c, reply_to, chat_id)), (True, "om_x"))[1]
+    )
+
+    body = json.dumps({"event_id": 9, "outcome": "skipped", "skip_code": "unknown_thread", "steps": [{"gate": "x"}]})
+    bridge.say_unrouted("om_root", "oc_1", body)
+    assert len(sent) == 1
+    card, reply_to, chat = sent[0]
+    assert reply_to == "om_root" and chat == "oc_1", "the answer belongs in the thread it was typed in"
+    assert "no record of the card" in card["elements"][0]["elements"][0]["content"]
+
+
+def test_only_the_two_codes_this_bridge_understands_are_explained(monkeypatch: Any) -> None:
+    """A skip code it does not recognise stays silent rather than being
+    explained by a guess, and a routed message is not commented on at all."""
+    sent: list[Any] = []
+    monkeypatch.setattr(bridge, "send_card", lambda *a, **k: (sent.append(1), (True, ""))[1])
+
+    for body in (
+        json.dumps({"outcome": "routed", "event_id": 9}),
+        json.dumps({"outcome": "skipped", "skip_code": "storm_suppressed"}),
+        json.dumps({"outcome": "skipped"}),
+        "not json at all",
+        "",
+    ):
+        bridge.say_unrouted("om_root", "oc_1", body)
+    assert sent == []
+
+
+def test_a_failed_explanation_is_not_a_failed_forward(monkeypatch: Any) -> None:
+    """The message has already been forwarded and declined by the time this
+    runs; an exception here would be reported as a lost message."""
+
+    def explodes(*_a: Any, **_k: Any) -> Any:
+        raise OSError("lark down")
+
+    monkeypatch.setattr(bridge, "send_card", explodes)
+    body = json.dumps({"outcome": "skipped", "skip_code": "no_route"})
+    try:
+        bridge.say_unrouted("om_root", "oc_1", body)
+    except OSError:
+        raise AssertionError("say_unrouted must not raise into the consumer") from None

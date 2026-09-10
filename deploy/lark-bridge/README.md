@@ -183,6 +183,17 @@ each one is an API call.
   running`, `Active consumers: 2` (presses and messages). The log shows
   `listening for events (key=…)` for each, and `remote connection check:
   online_instance_cnt=0` on connect.
+- **A message that went nowhere is told so.** The pipe answers every forwarded
+  message with a 200 and a reason, and its own docstring is honest about what
+  that buys — *"the pipe records it"*, in a ledger. The person who @-mentioned
+  the bot reaches nothing, and cannot tell a decision from an outage. So for the
+  two skip codes this bridge understands (`unknown_thread`, `no_route`) it
+  replies once, in the thread the message was typed in, saying what happened.
+  Any other code stays silent rather than being explained by a guess, and a
+  message this bridge did not decide to forward never gets here at all. Never
+  fatal: the forward already succeeded, and a failed explanation must not be
+  reported as a lost message.
+
 - **Preventive recycling.** The bridge does not hold the long connection —
   lark-cli's `event _bus` daemon does, and the two `event consume` processes
   attach to it over a unix socket. So a bus whose socket has silently died looks

@@ -85,6 +85,21 @@ no change and its approve button is still drawn. That is deliberate — the
 operator may still want the fix — and this line is what tells the person
 pressing it what they are pressing.
 
+**4. And a message the PIPE declined is told so too.** The three fixes above are
+all in the probe; this one is a layer earlier. `unknown_thread` (a reply under a
+card nobody here sent) and `no_route` now come back as one line in the thread,
+sent by the bridge — the only component that can speak — and only for messages
+it decided to forward in the first place.
+
+Deliberately just those two codes. An unrecognised code stays silent rather than
+being explained by a guess, and a routed message is not commented on at all.
+The read of the pipe's answer had to grow from `read(300)` to the whole body:
+300 bytes was enough for the log line it was written for and truncates the JSON
+this now parses, which would have failed silently — the same defect, one layer
+in, caught before it shipped. And a failed explanation is swallowed: the caller
+reports "forwarding the thread reply failed", and turning "we could not explain
+ourselves" into "your message was lost" is worse than the silence being fixed.
+
 ## Consequences
 
 * A refused reply now costs one card in the chat. That is a real increase in

@@ -605,6 +605,55 @@ def _sign(secret: str, body: bytes, ts: str) -> str:
     return hmac.new(secret.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
 
 
+# What the pipe can decide about a person's message that the person cannot see.
+#
+# Both of these are 200s with a reason, and the pipe's own docstring says what
+# that buys: "the pipe records it". It records it in a LEDGER. Somebody who
+# @-mentioned the bot and got nothing back cannot tell a decision from an
+# outage, and the bot looks broken either way.
+#
+# Only these two, and only ever these two. A skip code this bridge does not
+# recognise stays silent rather than being explained by a guess, and a message
+# this bridge did not decide to forward never reaches here at all — the filter
+# above is what keeps the bot from talking to people who did not address it.
+UNROUTED_REPLIES = {
+    "unknown_thread": (
+        "I have no record of the card this replies to, so there is nothing here for me to continue. "
+        "Ask me at top level with an @ and I will treat it as a new question."
+    ),
+    "no_route": "Nothing was started: this deployment has no route for a message of this shape.",
+}
+
+
+def say_unrouted(root: str, chat_id: str, answer: str) -> None:
+    """Tell the person their message went nowhere, in the thread they typed it.
+
+    Never fatal and never retried: the message has already been forwarded and
+    declined by the time this runs, and a failed explanation must not be
+    reported as a failed forward.
+    """
+    try:
+        parsed = json.loads(answer or "{}")
+    except ValueError:
+        return
+    if not isinstance(parsed, dict) or parsed.get("outcome") != "skipped":
+        return
+    line = UNROUTED_REPLIES.get(str(parsed.get("skip_code") or ""))
+    if not line:
+        return
+    card = {"elements": [{"tag": "note", "elements": [{"tag": "plain_text", "content": line}]}]}
+    try:
+        ok, detail = send_card(card, reply_to=root, chat_id=chat_id)
+    except Exception as exc:  # noqa: BLE001 — see the docstring: never fatal
+        # The caller's `except` around this reports a FAILED FORWARD, and the
+        # forward succeeded. Letting this escape would turn "we could not
+        # explain ourselves" into "your message was lost", which is worse than
+        # the silence being fixed here.
+        logger.warning("could not tell the sender their message went nowhere: %s", exc)
+        return
+    logger.info("told the sender their message went nowhere: ok=%s %s", ok, detail[:120])
+
+
 def forward_message(event: dict) -> None:
     """A message in the chat, handed to the pipe only when it is a reply under
     something — the pipe decides whether that something was one of its cards.
@@ -664,8 +713,14 @@ def forward_message(event: dict) -> None:
     )
     try:
         with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310
-            answer = response.read(300).decode("utf-8", "replace")
+            # The WHOLE body, bounded. It used to be read(300) because only the
+            # log wanted it; now `say_unrouted` parses it, and a truncated JSON
+            # object fails to parse and takes the explanation down silently —
+            # the exact failure this is here to end, one layer in.
+            answer = response.read(MAX_BODY).decode("utf-8", "replace")
             logger.info("thread reply forwarded: %s %s", response.status, answer[:160])
+        if not WEBHOOK_MODE:
+            say_unrouted(root, chat_id, answer)
     except Exception:  # a lost message must not kill the consumer
         logger.exception("forwarding the thread reply failed")
 
