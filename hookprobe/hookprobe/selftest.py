@@ -25,6 +25,7 @@ before they decide whether to trust it with something.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import socket
@@ -127,7 +128,7 @@ def egress_refuses() -> dict[str, Any]:
     )
 
 
-def agent_token_cannot_write(settings: Settings) -> dict[str, Any]:
+async def agent_token_cannot_write(settings: Settings) -> dict[str, Any]:
     """Present the AGENT's bearer to a write route and require 401. The route
     that first claimed this — the regret door — was wrong about it for its whole
     life, which is why it is demonstrated rather than asserted."""
@@ -139,13 +140,27 @@ def agent_token_cannot_write(settings: Settings) -> dict[str, Any]:
         headers={"Authorization": f"Bearer {settings.agent_token}", "content-type": "application/json"},
         method="PUT",
     )
+
+    def ask() -> int:
+        try:
+            with urllib.request.urlopen(request, timeout=_CONNECT_TIMEOUT) as answer:  # nosec B310 — loopback, own port
+                return int(answer.status)
+        except urllib.error.HTTPError as exc:
+            return int(exc.code)
+
     try:
-        with urllib.request.urlopen(request, timeout=_CONNECT_TIMEOUT) as answer:  # nosec B310 — loopback, own port
-            code = answer.status
-    except urllib.error.HTTPError as exc:
-        code = exc.code
+        # In a THREAD, and this is not a detail. The first production run of
+        # this endpoint reported the boundary FAILED with "could not ask: timed
+        # out" — a blocking loopback call inside an async handler holds the
+        # event loop, so the service could not answer its own request. The
+        # endpoint found a bug on day one and the bug was its own.
+        code = await asyncio.to_thread(ask)
     except OSError as exc:
-        return _check("the agent's bearer cannot write", False, f"could not ask: {exc}", "")
+        # Could not ask is UNPROVEN, not failed. Saying "the boundary broke"
+        # when the truth is "I could not look" is the exact merge this file
+        # refuses everywhere else — and it was inconsistent with its own rule
+        # until production said so out loud.
+        return _check("the agent's bearer cannot write", None, f"could not ask: {exc}", "")
     return _check(
         "the agent's bearer cannot write",
         code == 401,
@@ -200,7 +215,7 @@ async def run(settings: Settings) -> dict[str, Any]:
         gate_spawns(settings),
         guard_refuses(settings),
         egress_refuses(),
-        agent_token_cannot_write(settings),
+        await agent_token_cannot_write(settings),
         await posture_still_holds(settings),
         audit_is_append_only(),
     ]

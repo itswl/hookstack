@@ -100,3 +100,31 @@ def test_every_check_says_what_it_does_not_cover(tmp_path, field: str) -> None:
     report = _run(make_settings(tmp_path, workdir=tmp_path))
     for check in report["checks"]:
         assert field in check
+
+
+def test_could_not_ask_is_unproven_not_failed(tmp_path, monkeypatch) -> None:
+    """Found by production on this endpoint's first run, against itself: a
+    blocking loopback call inside the async handler held the event loop, the
+    service could not answer its own request, and the report said the boundary
+    FAILED. "I could not look" and "the boundary broke" are different answers,
+    and merging them is the exact thing this file refuses everywhere else."""
+
+    def refuses_to_connect(*_a: Any, **_k: Any) -> Any:
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(selftest.urllib.request, "urlopen", refuses_to_connect)
+    report = _run(make_settings(tmp_path, workdir=tmp_path, token="t", agent_token="a"))
+    token = next(c for c in report["checks"] if "bearer cannot write" in c["name"])
+    assert token["held"] is None
+    assert token["name"] in report["unproven"]
+    assert token["name"] not in report["failed"]
+
+
+def test_the_loopback_check_does_not_block_the_loop(tmp_path) -> None:
+    """The fix, pinned: it must be awaited off the event loop, or the service
+    deadlocks on its own request exactly as production did."""
+    import inspect
+
+    assert inspect.iscoroutinefunction(selftest.agent_token_cannot_write)
+    source = inspect.getsource(selftest.agent_token_cannot_write)
+    assert "to_thread" in source, "a blocking urlopen here holds the loop that has to answer it"

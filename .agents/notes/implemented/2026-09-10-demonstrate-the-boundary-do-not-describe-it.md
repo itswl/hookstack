@@ -62,6 +62,18 @@ caller-supplied destination would be a request-forgery hole inside the file
 arguing for boundaries. The target is a constant under `.invalid`, reserved by
 RFC 2606 so it can never resolve — the refusal is the allowlist's, not DNS's.
 
+**It found a bug on its first production run, and the bug was its own.** The
+report came back `held: false` with *the agent's bearer cannot write — could not
+ask: timed out*. Not a boundary failure: a blocking loopback call inside an
+async handler holds the event loop, so the service could not answer its own
+request. Two fixes, and the second is the more interesting:
+
+* the call moved to a thread, so the loop stays free to serve it;
+* **"could not ask" became `null`, not `false`.** Saying *the boundary broke*
+  when the truth is *I could not look* is the exact merge this file refuses
+  everywhere else — and the module was inconsistent with its own stated rule
+  until production said so out loud.
+
 ## Consequences
 
 * It costs a couple of seconds, because re-measuring the posture shells out to
