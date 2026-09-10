@@ -133,6 +133,49 @@ def append_audit(audit_dir: Path, line: dict[str, Any]) -> None:
             handle.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
+def chain_head(audit_dir: Path) -> str:
+    """The hash of the newest linked line, or "" when nothing is chained yet.
+
+    Cheap on purpose — one small file, no walk — because this is read on the
+    path of every report that goes home, and a per-report walk of the audit
+    would be a cost nobody agreed to.
+    """
+    try:
+        return (audit_dir / _CHAIN_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def chain_anchored(audit_dir: Path, digest: str, days: int = CHAIN_DAYS) -> bool:
+    """Does any line in this node's chain still hash to `digest`?
+
+    This is the question an OFF-BOX copy asks. Each report that goes home
+    carries the chain head as it stood when the report was written, and the
+    pipe keeps that payload in its own ledger on its own disk. So a record
+    rewritten here later fails twice: `verify_chain` stops adding up locally,
+    and a head somebody else wrote down no longer names any line this node has.
+
+    The second is the one that matters, because it survives an editor who can
+    also rewrite `.chain` — rebuilding a self-consistent chain is easy, and
+    rebuilding one that still contains a hash another service recorded hours
+    ago is not.
+    """
+    if not digest or not audit_dir.is_dir():
+        return False
+    for path in sorted(audit_dir.glob("*.jsonl"))[-max(1, days) :]:
+        try:
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                if digest in raw:
+                    try:
+                        if json.loads(raw).get("hash") == digest:
+                            return True
+                    except ValueError:
+                        continue
+        except OSError:
+            continue
+    return False
+
+
 def verify_chain(audit_dir: Path, days: int = CHAIN_DAYS) -> dict[str, Any]:
     """Walk the audit in order and report where, if anywhere, it stops adding up.
 

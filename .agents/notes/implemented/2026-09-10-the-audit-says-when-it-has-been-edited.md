@@ -55,10 +55,16 @@ ordinary case rather than the rare one.
 * Twenty-fourth containment boundary, and it closes the one `unproven` row the
   selftest shipped with. That row existing is why this got built — the gap was
   on the same page as the boundaries that held.
-* **What it does not stop, stated where somebody will read it:** an edit by
-  whoever can also rewrite the chain file. This makes tampering *evident on this
-  disk*; only an off-box copy makes it *impossible to hide*, and this node does
-  not have one. That is the next thing, not a claim being made now.
+* **The off-box half shipped the same day.** The gap this note first recorded —
+  an edit by whoever can also rewrite `.chain` — is now bounded: every report
+  carries `meta.audit_head` home, the pipe keeps it in its own ledger on its own
+  disk, and `gate.chain_anchored` asks whether any line here still hashes to a
+  head somebody else wrote down. A test proves the limit it closes: a
+  perfectly rebuilt chain passes `verify_chain` and fails the anchor.
+
+  What remains is an editor who can reach both disks. Two services is the bound
+  this buys, and calling it proof would be the overstatement this file keeps
+  correcting.
 * Verification walks the last 7 day-files by default. The whole history is the
   honest answer and an unbounded read on a path the selftest calls is not; the
   caller can ask for more.

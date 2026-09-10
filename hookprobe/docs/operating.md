@@ -442,9 +442,27 @@ a locked file, a read-only mount — the line is still written, unchained.** A
 missing audit line is worse than an unverifiable one; verification reports the
 gap, where a writer that dropped the record leaves nothing to report.
 
-What it does not stop: somebody who can also rewrite the chain file. Chaining
-makes tampering *evident on this disk*; an off-box copy is what makes it
-*impossible to hide*, and this node does not have one.
+**And the chain head goes off-box with every report.** Chaining alone is evident
+only on this disk: whoever can rewrite the audit can rewrite `.chain` beside it
+and rebuild something perfectly self-consistent, which `verify_chain` accepts —
+that is asserted as a test, because it is the limit somebody would otherwise
+have to discover.
+
+So each report that goes home carries `meta.audit_head`: the chain head as it
+stood when the report was written. The pipe keeps that payload in its own
+ledger, on its own disk. A record rewritten here later fails twice — the local
+chain stops adding up, and a head the pipe wrote down hours ago no longer names
+any line this node has. `gate.chain_anchored(audit_dir, head)` asks exactly that
+question, and it is the half an editor cannot forge, because rebuilding a chain
+is easy and rebuilding one that still contains somebody else's recorded hash is
+not.
+
+A hash and nothing else leaves: no content, and the field is empty on a node
+that has chained nothing yet.
+
+What it still does not stop: somebody who can rewrite the audit here **and**
+reach the pipe's ledger. Two disks and two services is the bound this buys, not
+proof.
 
 `GET /v1/agent` says what this node is — name, role, runtime, policy, health — so
 a deployment running an investigator, a planner and a work runner can tell them

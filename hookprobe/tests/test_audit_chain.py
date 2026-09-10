@@ -128,3 +128,78 @@ def test_the_line_is_never_lost_when_the_chain_cannot_be_kept(tmp_path: Path, mo
     written = _day_file(audit).read_text(encoding="utf-8")
     assert "still recorded" in written
     assert "hash" not in json.loads(written.splitlines()[0])
+
+
+# ── the off-box half ──────────────────────────────────────────────────────────
+
+
+def test_the_head_is_cheap_and_empty_before_anything_is_chained(tmp_path: Path) -> None:
+    """Read on the path of every report that goes home, so it is one small file
+    and never a walk."""
+    audit = tmp_path / "audit"
+    assert gate.chain_head(audit) == ""
+    _write(audit, 2)
+    head = gate.chain_head(audit)
+    assert len(head) == 64
+    last = json.loads(_day_file(audit).read_text(encoding="utf-8").splitlines()[-1])
+    assert head == last["hash"]
+
+
+def test_an_anchored_head_survives_a_rebuilt_chain(tmp_path: Path) -> None:
+    """The point of writing the head somewhere else. Chaining alone is evident
+    only on this disk: whoever can rewrite the audit can rewrite `.chain` beside
+    it and produce something self-consistent — which `verify_chain` accepts.
+
+    What they cannot produce is a chain that still contains a hash the pipe
+    recorded hours ago, on its own disk.
+    """
+    audit = tmp_path / "audit"
+    _write(audit, 4)
+    anchored = gate.chain_head(audit)  # what a report carried home
+    assert gate.chain_anchored(audit, anchored) is True
+
+    # The tidier rewrites history AND relinks it, perfectly.
+    _day_file(audit).unlink()
+    (audit / gate._CHAIN_FILE).unlink()
+    _write(audit, 4)
+
+    assert gate.verify_chain(audit)["intact"] is True, "a rebuilt chain is locally consistent — that is the problem"
+    assert gate.chain_anchored(audit, anchored) is False, "and the off-box head is what catches it"
+
+
+def test_the_anchor_check_is_not_fooled_by_a_substring(tmp_path: Path) -> None:
+    """A digest that merely APPEARS in a line — in some detail field — is not
+    that line's hash, and must not read as anchored."""
+    audit = tmp_path / "audit"
+    _write(audit, 2)
+    head = gate.chain_head(audit)
+    gate.append_audit(audit, {"ts": 9, "tool": "Bash", "detail": f"echo {head}"})
+    assert gate.chain_anchored(audit, head) is True
+
+    invented = "f" * 64
+    gate.append_audit(audit, {"ts": 10, "tool": "Bash", "detail": f"echo {invented}"})
+    assert gate.chain_anchored(audit, invented) is False
+
+
+def test_a_report_carries_the_head_home(tmp_path: Path, monkeypatch) -> None:
+    """Through the real return payload, so the pipe's ledger keeps a copy."""
+    import asyncio
+
+    from hookprobe import notify
+    from hookprobe.runs import Run, RunStore
+    from tests.helpers import make_settings
+
+    settings = make_settings(tmp_path, workdir=tmp_path, return_url="http://relay/hook/probe-notify")
+    _write(tmp_path / "audit", 3)
+    expected = gate.chain_head(tmp_path / "audit")
+
+    posted: list[dict] = []
+    monkeypatch.setattr(
+        notify.ReturnDelivery, "_post_return", lambda self, body: (posted.append(json.loads(body)), 200)[1]
+    )
+    run = Run(session_key="probe:a:1", run_id="r1", origin="relay", text='{"summary": "ok"}')
+    run.meta = {"title": "t", "source": "a"}
+    asyncio.run(notify.ReturnDelivery(settings, RunStore(tmp_path / "results")).deliver(run, (0.0,)))
+
+    assert posted[-1]["meta"]["audit_head"] == expected
+    assert len(expected) == 64
