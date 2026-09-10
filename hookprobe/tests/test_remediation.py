@@ -635,3 +635,81 @@ def test_the_list_says_which_proposals_are_past_their_window(tmp_path):
     with pytest.raises(ValueError, match="past the"):
         remediation.approve(tmp_path, old, allowlist=None)
     assert work.proposal_stale(by_id[old], now)
+
+
+# ── what an approved command is allowed to see ────────────────────────────────
+
+
+def test_an_approved_command_does_not_inherit_the_services_secrets(monkeypatch):
+    """The one path that actually EXECUTES was passing no `env` at all, so an
+    approved procedure ran with the family's HMAC signing keys, the Lark app
+    secret and the provider credential in its environment.
+
+    Three things stand in front of it — a deny-by-default allowlist, a human
+    click, and no shell — and none of them is a reason to hand a procedure keys
+    it does not need. The agent's own shell was scrubbed for exactly this
+    argument; this path was never given the same treatment.
+    """
+    for name in ("HOOKPROBE_TOKEN", "HOOKPROBE_EVENT_SECRET", "HOOKPROBE_RETURN_SECRET", "LARK_APP_SECRET"):
+        monkeypatch.setenv(name, "the-real-secret")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-" + "a" * 48)
+    monkeypatch.setenv("SHADOW_INGEST_SECRET", "forge-a-judgement")
+
+    env = remediation.execution_env()
+    leaked = sorted(k for k in env if "SECRET" in k or "TOKEN" in k.upper().replace("_PROXY", ""))
+    assert not leaked, f"an approved command could read {leaked}"
+    assert "ANTHROPIC_AUTH_TOKEN" not in env, "a procedure has no business calling the model"
+
+
+def test_it_still_carries_what_a_procedure_actually_needs(monkeypatch):
+    """Loud rather than silent if this is wrong: a command missing a variable
+    fails with its own error in the results an operator reads, where one
+    quietly carrying a signing key leaves no trace at all. So the list has to
+    cover the real cases."""
+    monkeypatch.setenv("AWS_PROFILE", "readonly")
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/data/aws/credentials")
+    monkeypatch.setenv("KUBECONFIG", "/data/kube/config")
+    monkeypatch.setenv("HOME", "/data/home")
+
+    env = remediation.execution_env()
+    assert env["AWS_PROFILE"] == "readonly"
+    assert env["AWS_SHARED_CREDENTIALS_FILE"] == "/data/aws/credentials"
+    assert env["KUBECONFIG"] == "/data/kube/config"
+    assert env["HOME"] == "/data/home" and "PATH" in env
+
+
+def test_the_egress_boundary_survives_into_the_procedure(monkeypatch):
+    """Dropping these would make an approved command the one thing on the node
+    that reaches the network without passing the allowlist. A fix that opened a
+    hole would be a poor trade for closing one."""
+    monkeypatch.setenv("HTTPS_PROXY", "http://egress-proxy:8888")
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,hookrelay")
+
+    env = remediation.execution_env()
+    assert env["HTTPS_PROXY"] == "http://egress-proxy:8888"
+    assert env["NO_PROXY"] == "127.0.0.1,hookrelay"
+
+
+def test_the_environment_reaches_the_process_that_runs(tmp_path, monkeypatch):
+    """Not the function in isolation — the env the exec'd command actually sees.
+    A helper that returns the right dict and a call that ignores it is the
+    failure this whole file keeps finding elsewhere."""
+    monkeypatch.setenv("HOOKPROBE_EVENT_SECRET", "the-real-secret")
+    allow = tmp_path / "allow.txt"
+    allow.write_text("/usr/bin/env\n|/bin/sh -c .*\n", encoding="utf-8")
+    row = {
+        "id": "abcdef0123",
+        "session_key": "probe:x:1",
+        "status": "running",
+        "steps": [{"action": "dump", "command": "/usr/bin/env", "risk": "low"}],
+        "results": [],
+        "created_at": time.time(),
+    }
+    (tmp_path / "remediation").mkdir(parents=True, exist_ok=True)
+    remediation.save(tmp_path, row)
+    asyncio.run(remediation.execute(tmp_path, row, bash_timeout_ms=30000, allowlist=allow))
+
+    output = "".join(str(r.get("output") or "") for r in remediation.load(tmp_path, "abcdef0123")["results"])
+    assert output, "the command produced nothing, so this proves nothing"
+    assert "the-real-secret" not in output
+    assert "HOOKPROBE_EVENT_SECRET" not in output

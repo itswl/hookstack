@@ -312,6 +312,25 @@ memory line an investigation proposed, and every report nobody has ruled on, wit
 the buttons. It answers "what do I owe", which is deliberately wider than "what is
 blocked" — a memory line blocks nothing and still waits for a person.
 
+**An approved command sees only what it needs.** `execution_env()` passes
+`PATH`, `HOME`, locale, the cloud credentials an operator mounted for the
+purpose (`AWS_*`, `KUBE*`, `GOOGLE_*`, `AZURE_*`) and the egress proxy
+variables — and nothing else. Until 2026-09-10 it passed no environment at all,
+which meant an approved procedure ran with the family's HMAC signing keys, the
+Lark app secret and the provider credential in scope. Three things stood in
+front of that — a deny-by-default allowlist, a human click, and no shell — and
+none of them is a reason to hand a procedure keys it does not need. The agent's
+own shell had been scrubbed on exactly this argument; the one path that
+actually executes had never been.
+
+An allowlist here rather than the agent's denylist, and the difference is the
+point: a denylist names the secrets this repository knows it holds, which is
+right for a process that must keep working with everything else. A procedure's
+needs are known and short, and what a denylist cannot cover is the secret a
+future deployment adds under a name nobody wrote down. If the list is wrong the
+command fails with its own error in the results an operator reads — where one
+quietly carrying a signing key leaves no trace at all.
+
 **A procedure expires after a day.** Approving one runs commands chosen from
 evidence gathered at one moment — *suppress this address*, *restart that unit* —
 and approving it a week later runs a decision about a system that has since

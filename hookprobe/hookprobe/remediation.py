@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shlex
 import time
@@ -426,6 +427,58 @@ def reject(workdir: Path, proposal_id: str) -> dict[str, Any]:
     return row
 
 
+# What an approved command is allowed to see. An ALLOWLIST, not a scrub, and
+# that is the difference from the agent's subprocess: `gate.SECRETS_WITHHELD_FROM_AGENT`
+# names the secrets this repository knows it holds, which is the right shape when
+# the process must keep working with everything else. Here the process is a
+# short procedure an operator approved, its needs are known, and the thing a
+# denylist cannot cover is the secret a future deployment adds under a name
+# nobody here has written down.
+#
+# Until this, `create_subprocess_exec` passed no `env` at all, so an approved
+# command inherited the SERVICE's whole environment: the family's HMAC signing
+# keys, the Lark app secret, the provider credential. Three things stood in
+# front of it — a deny-by-default allowlist, a human click, and no shell — and
+# none of them is a reason to hand a procedure the keys it does not need. The
+# agent's own shell was scrubbed for exactly this argument; the one path that
+# actually EXECUTES was never given the same treatment.
+_EXEC_ENV_KEEP = frozenset({"PATH", "HOME", "USER", "LOGNAME", "LANG", "TZ", "TMPDIR"})
+_EXEC_ENV_PREFIXES = (
+    # The credentials an operator mounts FOR this: the whole point of a
+    # danger-only node is that its procedures can reach a cloud.
+    "AWS_",
+    "KUBE",
+    "GOOGLE_",
+    "AZURE_",
+    "LC_",
+    # The egress boundary. Dropping these would make an approved command the one
+    # thing on the node that goes out without passing the allowlist — a fix that
+    # created a hole would be a poor trade for closing one.
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+)
+
+
+def execution_env() -> dict[str, str]:
+    """The environment an approved command runs in: what it needs, nothing else.
+
+    Loud rather than silent if it is wrong. A command that needs a variable this
+    does not pass fails with its own error, in the results the operator reads —
+    where a command that quietly carried a signing key leaves no trace at all.
+    """
+    kept = {}
+    for name, value in os.environ.items():
+        if name in _EXEC_ENV_KEEP or name.startswith(_EXEC_ENV_PREFIXES):
+            kept[name] = value
+    return kept
+
+
 async def execute(workdir: Path, row: dict[str, Any], *, bash_timeout_ms: int, allowlist: Path | None = None) -> None:
     """Approved commands run EXACTLY as written: sequentially, stop on the
     first failure, output captured, every command on the audit log. No
@@ -474,6 +527,7 @@ async def execute(workdir: Path, row: dict[str, Any], *, bash_timeout_ms: int, a
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(workdir),
+                env=execution_env(),
             )
             try:
                 output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)

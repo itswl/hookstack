@@ -105,6 +105,13 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
         ("tests/test_remediation.py",),
     ),
     (
+        "an approved command inherits the service's secrets",
+        "hookprobe/hookprobe/remediation.py",
+        "                env=execution_env(),\n",
+        "",
+        ("tests/test_remediation.py",),
+    ),
+    (
         "the approval window never expires",
         "hookprobe/hookprobe/remediation.py",
         "APPROVAL_WINDOW_SECONDS = 24 * 3600",
