@@ -289,6 +289,28 @@ services:
       # Direct self-alarm when report returns exhaust their retries:
       HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
       HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
+      # Everything below reaches the container ONLY through this block: there is
+      # no env_file, deliberately, so a setting the code reads and no compose
+      # names is a default with a docstring. These were exactly that until
+      # 2026-09-10 — the reference table documented every one as settable while
+      # `.env` could not move any of them. `scripts/assert_knobs_are_reachable.py`
+      # is what stops the list drifting again.
+      HOOKPROBE_AUTOMATION_TIERS: ${HOOKPROBE_AUTOMATION_TIERS:-}
+      HOOKPROBE_DEFAULT_TIMEOUT_SECONDS: ${HOOKPROBE_DEFAULT_TIMEOUT_SECONDS:-}
+      HOOKPROBE_MAX_CONCURRENT: ${HOOKPROBE_MAX_CONCURRENT:-}
+      HOOKPROBE_MAX_TIMEOUT_SECONDS: ${HOOKPROBE_MAX_TIMEOUT_SECONDS:-}
+      HOOKPROBE_MAX_TURNS: ${HOOKPROBE_MAX_TURNS:-}
+      HOOKPROBE_MEMORY_AUTO_APPLY: ${HOOKPROBE_MEMORY_AUTO_APPLY:-}
+      HOOKPROBE_POSTURE_CHECK: ${HOOKPROBE_POSTURE_CHECK:-}
+      HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS: ${HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS:-}
+      HOOKPROBE_RESUME_INTERRUPTED: ${HOOKPROBE_RESUME_INTERRUPTED:-}
+      HOOKPROBE_RULING_REVERIFY_DAYS: ${HOOKPROBE_RULING_REVERIFY_DAYS:-}
+      HOOKPROBE_RULING_TTL_DAYS: ${HOOKPROBE_RULING_TTL_DAYS:-}
+      HOOKPROBE_RUNBOOK_ANSWER_DAYS: ${HOOKPROBE_RUNBOOK_ANSWER_DAYS:-}
+      HOOKPROBE_RUNTIME: ${HOOKPROBE_RUNTIME:-}
+      HOOKPROBE_SELFTEST_EVERY_SECONDS: ${HOOKPROBE_SELFTEST_EVERY_SECONDS:-}
+      HOOKPROBE_TELEMETRY_RECEIVER: ${HOOKPROBE_TELEMETRY_RECEIVER:-}
+      HOOKPROBE_VERDICTS: ${HOOKPROBE_VERDICTS:-}
       # Set BOTH in production — this network is shared with the platform.
       # Unsigned, the event door takes anyone's escalations and anyone can
       # impersonate the investigator's reports. One line of .env each.

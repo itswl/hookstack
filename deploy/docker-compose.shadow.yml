@@ -76,6 +76,17 @@ services:
       # everyone rather than admitting anyone. That is why this was missing for
       # weeks without being a hole: the admin surface simply did not work.
       HOOKRELAY_ADMIN_TOKEN: ${SHADOW_ADMIN_TOKEN:-}
+      # Same as the judge's block below: read by the code, documented as
+      # settable, and reaching no container until this line existed.
+      HOOKRELAY_ACTION_TTL_SECONDS: ${HOOKRELAY_ACTION_TTL_SECONDS:-}
+      HOOKRELAY_ALARM_MIN_INTERVAL_SECONDS: ${HOOKRELAY_ALARM_MIN_INTERVAL_SECONDS:-}
+      HOOKRELAY_ALARM_URL: ${HOOKRELAY_ALARM_URL:-}
+      HOOKRELAY_BREAKER_COOLDOWN_SECONDS: ${HOOKRELAY_BREAKER_COOLDOWN_SECONDS:-}
+      HOOKRELAY_BREAKER_THRESHOLD: ${HOOKRELAY_BREAKER_THRESHOLD:-}
+      HOOKRELAY_CARD_CALLBACK_SECRET: ${HOOKRELAY_CARD_CALLBACK_SECRET:-}
+      HOOKRELAY_MAX_ATTEMPTS: ${HOOKRELAY_MAX_ATTEMPTS:-}
+      HOOKRELAY_MAX_BODY_BYTES: ${HOOKRELAY_MAX_BODY_BYTES:-}
+      HOOKRELAY_RETENTION_DAYS: ${HOOKRELAY_RETENTION_DAYS:-}
       # shadow.yaml's ${...} refs are expanded by hookrelay from its OWN
       # environment, not by compose — so every name used there has to be
       # passed through here or it silently resolves to empty. An empty URL
@@ -161,6 +172,17 @@ services:
       HOOKJUDGE_AI_PRICE_IN_PER_1K: ${HOOKJUDGE_AI_PRICE_IN_PER_1K:?set HOOKJUDGE_AI_PRICE_IN_PER_1K in .env}
       HOOKJUDGE_AI_PRICE_OUT_PER_1K: ${HOOKJUDGE_AI_PRICE_OUT_PER_1K:?set HOOKJUDGE_AI_PRICE_OUT_PER_1K in .env}
       HOOKJUDGE_READ_TOKEN: ${SHADOW_READ_TOKEN:-}
+      # Settable, and until 2026-09-10 documented as settable while no compose
+      # carried them — see scripts/assert_knobs_are_reachable.py.
+      HOOKJUDGE_AI_BODY_LIMIT: ${HOOKJUDGE_AI_BODY_LIMIT:-}
+      HOOKJUDGE_AI_FIELDS_LIMIT: ${HOOKJUDGE_AI_FIELDS_LIMIT:-}
+      HOOKJUDGE_AI_STRUCTURED_OUTPUT: ${HOOKJUDGE_AI_STRUCTURED_OUTPUT:-}
+      HOOKJUDGE_AI_TIMEOUT_SECONDS: ${HOOKJUDGE_AI_TIMEOUT_SECONDS:-}
+      HOOKJUDGE_AI_TITLE_LIMIT: ${HOOKJUDGE_AI_TITLE_LIMIT:-}
+      HOOKJUDGE_BURST_WINDOW_SECONDS: ${HOOKJUDGE_BURST_WINDOW_SECONDS:-}
+      HOOKJUDGE_MAX_BODY_BYTES: ${HOOKJUDGE_MAX_BODY_BYTES:-}
+      HOOKJUDGE_RETENTION_DAYS: ${HOOKJUDGE_RETENTION_DAYS:-}
+      HOOKJUDGE_RETURN_MAX_ATTEMPTS: ${HOOKJUDGE_RETURN_MAX_ATTEMPTS:-}
     volumes:
       - ../shadow-data/hookjudge:/data
     ports:

@@ -91,6 +91,13 @@ python3 scripts/assert_locks.py
 # hold its own number, but not the fact that all three are measured the same way
 # and that only two of them are capped.
 python3 scripts/assert_weight.py
+# And whether the settings each service reads can be SET on a deployment. There
+# is no env_file: the compose `environment:` block is the whole of what reaches a
+# container, so a knob no compose names is a default with a docstring — which is
+# what 34 of them were on 2026-09-10, every one documented as settable. Cross-
+# service because the composes are, and because the same mistake landed in two
+# services on one afternoon.
+python3 scripts/assert_knobs_are_reachable.py
 # Cross-service for the same reason again: it compares one helper's body against
 # the copy of it living in another service. `Live.watcher_count` had already gone
 # missing from one of three copies, and verify_signature had stripped its
