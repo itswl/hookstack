@@ -79,6 +79,14 @@ the answer. It converts the most likely accidental path, and the most likely
 path an injected instruction takes, from silent into recorded. It does not close
 the hole.
 
+**The policy half shipped** on the same day, as
+`implemented/2026-09-10-egress-by-policy-not-by-topology.md`: the probes keep
+their network and route outbound through the proxy by `HTTP_PROXY`/`HTTPS_PROXY`.
+That measurement also killed option 2 outright — the gateway is Cloudflare-fronted,
+so an IP allowlist for it admits everything else behind Cloudflare. What remains
+open here is option 1 and only option 1: enforcement, which needs the probe off
+the shared network, which needs the neighbouring compose.
+
 ## Consequences
 
 * The proxy is on the stack gate (`compileall`, ruff, its own tests) from the

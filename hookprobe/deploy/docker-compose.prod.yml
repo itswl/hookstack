@@ -36,6 +36,48 @@
 name: hookprobe-prod
 
 services:
+  # The investigator's way out, and a list of where out may be.
+  #
+  # Measured before this existed: ANTHROPIC_AUTH_TOKEN is readable by a Bash
+  # step (the CLI needs it, and the agent's shell is the CLI's child), and
+  # `curl https://example.com` from inside the container returned 200. The
+  # container boundary stops somebody breaking IN; nothing bounded the other
+  # direction.
+  #
+  # This is POLICY, not topology, and the difference is the whole honesty of
+  # it: the probe keeps its network, so a process that ignores the proxy
+  # environment still gets out. What it buys is that everything which honours
+  # it — the CLI, curl, aws, WebFetch — goes through one allowlist, and a
+  # destination nobody listed is REFUSED and logged at WARNING. That log is the
+  # product; it is the only place that can say a run tried to reach somewhere
+  # nobody wrote down. Enforcement needs the probe off this network entirely,
+  # which needs the neighbouring deployment's compose — see
+  # .agents/notes/proposed/2026-09-10-the-agent-can-read-the-provider-key-and-post-it-anywhere.md
+  egress-proxy:
+    image: python:3.14-slim
+    container_name: hookprobe-egress
+    restart: unless-stopped
+    command: ["python3", "-u", "/app/proxy.py"]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 128m
+    pids_limit: 64
+    volumes:
+      - ../../deploy/egress-proxy/proxy.py:/app/proxy.py:ro
+    environment:
+      # The model gateway, plus the three documentation hosts this deployment's
+      # WebFetch has actually reached in its life (7 aws docs, 2 grafana, 2 raw
+      # githubusercontent — counted from the audit log, not guessed). WebSearch
+      # needs nothing here: its details are QUERIES, not URLs, because the
+      # search runs server-side and rides the model API.
+      #
+      # The in-network names are listed too, so a NO_PROXY that misses one
+      # degrades to "carried and allowed" rather than "refused".
+      EGRESS_ALLOW: >-
+        ${EGRESS_ALLOW:-model-gateway.example,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,hookjudge,hookprobe,webhook-receiver,webhookwise-observability-alloy-1}
+
   hookprobe:
     build:
       context: ..
@@ -90,6 +132,15 @@ services:
     # no longer dumps the file wholesale into the container). engine.py
     # additionally blanks the family HMAC keys from the agent's own subprocess.
     environment:
+      # Out through the allowlist. NO_PROXY carries everything reachable on this
+      # network directly — including 127.0.0.1, which is where the CLI posts its
+      # own telemetry (telemetry.subprocess_env), and proxying that would break
+      # the run's waterfall for nothing. The proxy is therefore in the path of
+      # EXTERNAL calls only: if it dies, the return door, the MCP server and the
+      # collector keep working and only the model call stops.
+      HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+      HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,hookrelay,hookjudge,hookprobe,webhook-receiver,webhookwise-observability-alloy-1}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       # Was reaching the container only through the deleted env_file. It gates
       # whether the budget breaker also refuses the agent door; keep it explicit.

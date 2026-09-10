@@ -123,6 +123,32 @@ services:
   # The planner. Same image and same doors as the family's investigator; what
   # makes it "plan" rather than "diagnose" is the `kind: task` its signals
   # carry, which selects the how-would-this-be-done prompt at the door.
+  # The investigators' way out, and a list of where out may be. Policy, not
+  # topology: the probes keep their network, so this bounds what HONOURS a proxy
+  # (the CLI, curl, aws, WebFetch) and records every destination nobody listed.
+  # The refusal log is the product. See deploy/egress-proxy/proxy.py and
+  # .agents/notes/proposed/2026-09-10-the-agent-can-read-the-provider-key-and-post-it-anywhere.md
+  #
+  # This deployment needs a wider list than production's: probe-work is
+  # `danger-only` and holds an AWS credential its own uid can read, so AWS is on
+  # the list by necessity — which is exactly why the refusal log matters more
+  # here, not less.
+  egress-proxy:
+    image: python:3.14-slim
+    container_name: work-egress-proxy
+    restart: unless-stopped
+    command: ["python3", "-u", "/app/proxy.py"]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 128m
+    volumes:
+      - ./egress-proxy/proxy.py:/app/proxy.py:ro
+    environment:
+      EGRESS_ALLOW: >-
+        ${EGRESS_ALLOW:-model-gateway.example,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
+
   probe-plan:
     build:
       context: ../hookprobe
@@ -182,6 +208,12 @@ services:
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=plan
+      # Out through the allowlist; everything on this network, the host (the MCP
+      # server lives there) and 127.0.0.1 (the CLI posts its own telemetry
+      # there) go direct — proxying those would break them for nothing.
+      HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+      HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
@@ -341,6 +373,12 @@ services:
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=watch
+      # Out through the allowlist; everything on this network, the host (the MCP
+      # server lives there) and 127.0.0.1 (the CLI posts its own telemetry
+      # there) go direct — proxying those would break them for nothing.
+      HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+      HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
@@ -517,6 +555,12 @@ services:
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=work
+      # Out through the allowlist; everything on this network, the host (the MCP
+      # server lives there) and 127.0.0.1 (the CLI posts its own telemetry
+      # there) go direct — proxying those would break them for nothing.
+      HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+      HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
