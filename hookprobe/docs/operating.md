@@ -393,6 +393,37 @@ assumption that the answer saw everything. Note that context *fullness* is
 unavailable on this deployment: the CLI does not answer the usage request, so
 `run.context` is null and the fold count is the only signal.
 
+**`GET /v1/selftest` — the node demonstrates its claims instead of describing
+them.** `/healthz` says the process is up. `/v1/posture` says what the
+credentials allowed at STARTUP. `/v1/agent` says what the settings asked for.
+All three are descriptions, and the failure this service keeps meeting is not a
+boundary breaking — it is a boundary being **absent while every surface still
+reads fine**: a spawned gate that could not import its own package, so a
+`kubectl delete` ran on a node reporting `bash_guard: readonly`; an egress
+allowlist whose bypass was one shell prefix for the first hours of its life; a
+price knob no compose could pass.
+
+So this one does the things, now, and reports what happened: it hands the gate
+a tool no posture permits (in process, and again through the subprocess path);
+it hands the shell guard a mutation and an egress bypass; it asks this node's
+own proxy for a name nobody listed; it presents the AGENT's bearer to a write
+route; and it re-measures the credentials rather than reading the boot record,
+because one widened after startup moves nothing that anybody reads.
+
+It spends nothing and runs no model. Two properties are the point:
+
+* **A check that cannot run reports `held: null` and is listed under
+  `unproven` — never a pass.** A green board assembled out of checks that
+  quietly skipped is the same failure it exists to catch.
+* **Every check names what it does not cover**, the way each row of
+  [containment](../../docs/containment.md) does. A check that only reports a
+  pass teaches its reader the boundary is total.
+
+The one claim it cannot make is on the same page rather than omitted: the audit
+is append-only JSONL with no chaining, so *tamper-evident* reports `null`. That
+is the claim a compliance reader most wants, and this node cannot yet
+demonstrate it.
+
 `GET /v1/agent` says what this node is — name, role, runtime, policy, health — so
 a deployment running an investigator, a planner and a work runner can tell them
 apart by something other than a port. Set `HOOKPROBE_AGENT_NAME` and

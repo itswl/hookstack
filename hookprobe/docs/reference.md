@@ -83,7 +83,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_GATE_HOME` | *(empty)* | The agent's home, whose settings and skills are inputs too |
 | `HOOKPROBE_GATE_MCP` | *(empty)* | The MCP tools this node may call, from mcp_tools |
 
-## Routes (59)
+## Routes (60)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -130,6 +130,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/v1/runs/{session_key}/ruling` | One run, ruled from the sessions page — and told what the ruling DID |
 | GET | `/v1/runs/{session_key}/stream` | The open session's steps, pushed as they happen (NDJSON, one per line) |
 | GET | `/v1/runs/{session_key}/telemetry` | The shape of one run: every model call and tool call on one time axis, with what each cost, from the telemetry the CLI posted to this service |
+| GET | `/v1/selftest` | Every boundary this node claims, demonstrated right now |
 | GET | `/v1/skills` | Every runbook with its review state and case count, newest first |
 | GET | `/v1/skills/export` | Runbooks packaged to LEAVE this deployment — see hookprobe.export |
 | DELETE | `/v1/skills/{name}` | Only the project layer is deletable |

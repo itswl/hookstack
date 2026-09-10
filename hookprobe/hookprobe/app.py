@@ -52,6 +52,7 @@ from hookprobe import (
     ops,
     posture,
     remediation,
+    selftest,
     suggestions,
     telemetry,
     work,
@@ -766,6 +767,30 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         describe.py.
         """
         return describe.agent_description(settings, version=__version__)
+
+    @app.get("/v1/selftest", dependencies=[Depends(require_token)])
+    async def node_selftest() -> dict[str, Any]:
+        """Every boundary this node claims, demonstrated right now.
+
+        `/healthz` says the process is up. `/v1/posture` says what the
+        credentials allowed at STARTUP. `/v1/agent` says what the settings
+        asked for. All three are descriptions, and the failure this service
+        keeps meeting is a boundary being absent while every surface still
+        reads fine — a spawned gate that could not import its own package, an
+        egress allowlist whose bypass was one shell prefix, a price knob no
+        compose could pass.
+
+        So this one does the things: refuses a tool no posture permits, in
+        process and through the subprocess path; refuses a mutation and an
+        egress bypass at the shell guard; asks its own proxy for a name nobody
+        listed; presents the agent's bearer to a write route; re-measures the
+        credentials rather than reading the boot record.
+
+        Spends nothing and runs no model. A check that cannot run reports
+        `held: null` and is listed under `unproven` — never a pass, for the
+        reason the guard fails closed.
+        """
+        return await selftest.run(settings)
 
     @app.get("/v1/remediations", dependencies=[Depends(require_token)])
     async def remediations_list() -> dict[str, Any]:
