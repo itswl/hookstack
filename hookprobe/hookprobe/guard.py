@@ -156,6 +156,31 @@ _DANGER_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b(shutdown|reboot|halt|poweroff)\b"), "a host power command"),
 )
 
+# Turning the egress boundary off. Checked under EVERY posture, before the mode
+# branch, because this is not about what a runner may change — it is about not
+# disabling the thing that records where it went.
+#
+# `deploy/egress-proxy` bounds the investigator's outbound calls by allowlist,
+# and it works by environment (HTTP_PROXY/HTTPS_PROXY/NO_PROXY). That made the
+# bypass exactly one shell prefix — `unset HTTPS_PROXY; curl ... -d @/tmp/x` was
+# allowed, measured on 2026-09-10 — which is ordinary tooling, not a determined
+# adversary, and therefore inside the threat this is for.
+#
+# Honest about what it buys: it moves the bypass from one prefix to writing a
+# program. A python one-liner opening its own socket does not read these
+# variables and this rule cannot see it. What it also buys, and this is the
+# larger half, is that the ATTEMPT lands in the audit as a refusal instead of
+# passing silently.
+_PROXY_VARS = r"(?:HTTPS?_PROXY|ALL_PROXY|NO_PROXY|https?_proxy|all_proxy|no_proxy)"
+_ALWAYS_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(rf"\bunset\b{_SEG}\b{_PROXY_VARS}\b"), "unsetting the egress proxy variables"),
+    (re.compile(rf"\benv\b{_SEG}-u\s*{_PROXY_VARS}\b"), "clearing the egress proxy variables"),
+    (re.compile(rf"\b{_PROXY_VARS}\s*="), "overriding the egress proxy variables"),
+    # The same bypass without touching the environment at all.
+    (re.compile(rf"\bcurl\b{_SEG}(--noproxy|-x\s|--proxy[= ])"), "a curl flag that goes around the egress proxy"),
+    (re.compile(rf"\bwget\b{_SEG}--no-proxy\b"), "a wget flag that goes around the egress proxy"),
+)
+
 READONLY, DANGER_ONLY = "readonly", "danger-only"
 MODES = (READONLY, DANGER_ONLY)
 
@@ -172,6 +197,13 @@ def bash_deny_reason(command: str, mode: str = READONLY) -> str | None:
     # long kubectl/helm lines exactly this way, so this was an accidental hole,
     # not only an adversarial one. Collapse continuations before matching.
     command = re.sub(r"\\\r?\n", " ", command)
+    # Before the mode branch: every posture keeps its egress boundary.
+    for pattern, label in _ALWAYS_RULES:
+        if pattern.search(command):
+            return (
+                f"egress guard: {label} is blocked. Outbound calls go through the "
+                f"allowlisting proxy; a destination it refuses is a destination nobody listed"
+            )
     if mode == DANGER_ONLY:
         for pattern, label in _DANGER_RULES:
             if pattern.search(command):

