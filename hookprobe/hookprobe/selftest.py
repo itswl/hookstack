@@ -35,7 +35,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from hookprobe import gate, posture
+from hookprobe import audit, gate, posture
 from hookprobe.guard import bash_deny_reason
 from hookprobe.settings import Settings
 
@@ -194,7 +194,7 @@ def audit_is_tamper_evident(settings: Settings) -> dict[str, Any]:
     would actually see it.
     """
     try:
-        report = gate.verify_chain(settings.workdir / "audit")
+        report = audit.verify_chain(settings.workdir / "audit")
     except Exception as exc:  # noqa: BLE001
         return _check("the audit trail is tamper-evident", None, f"could not verify: {exc}", "")
     if report["checked"] == 0:

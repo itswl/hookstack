@@ -43,10 +43,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 
 from hookprobe import (
     __version__,
+    audit,
     automation,
     describe,
     events,
-    gate,
     handoff,
     library,
     ops,
@@ -428,7 +428,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             # What this run's tool output appeared to contain. Read from the
             # audit on the DETAIL and not the list: one file scan for one run a
             # person opened, rather than one per row of a 200-row board.
-            "output_secrets": gate.output_secrets(settings.workdir / "audit", session_key),
+            "output_secrets": audit.output_secrets(settings.workdir / "audit", session_key),
         }
 
     @app.get("/v1/posture", dependencies=[Depends(require_token)])
@@ -664,7 +664,14 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
 
         Deliberately write-gated to the operator token, not reachable by any run:
         a regret is a label, and a label the automation could write about itself
-        is not a label. The agent's subprocess holds no token.
+        is not a label.
+
+        This docstring used to end "the agent's subprocess holds no token", and
+        that sentence was FALSE for its whole life — the agent inherited
+        HOOKPROBE_TOKEN and could have posted here. It is true in substance now
+        and for a different reason: the agent holds a bearer of its own, and
+        `require_token` refuses it on every method but GET. Not "no token"; a
+        token this door will not take.
         """
         automation.record(
             settings.workdir, cls, item_id, "regretted", note=str((payload or {}).get("note") or "")[:300]

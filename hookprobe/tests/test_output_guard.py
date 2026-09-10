@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from hookprobe import gate
+from hookprobe import audit, gate
 
 
 def test_the_input_guard_allows_reading_a_secret_which_is_the_whole_point(tmp_path: Path) -> None:
@@ -66,8 +66,8 @@ def test_a_flagged_answer_lands_in_the_audit_beside_the_call(tmp_path: Path, mon
     the output has already reached the model, so a denial there would be
     theatre — and no shape for withholding it is agreed across the three
     runtimes."""
-    audit = tmp_path / "audit"
-    monkeypatch.setenv("HOOKPROBE_GATE_AUDIT", str(audit))
+    audit_dir = tmp_path / "audit"
+    monkeypatch.setenv("HOOKPROBE_GATE_AUDIT", str(audit_dir))
     monkeypatch.setenv("HOOKPROBE_GATE_MODE", "readonly")
     monkeypatch.setenv("HOOKPROBE_GATE_WORKDIR", str(tmp_path))
     monkeypatch.setenv("HOOKPROBE_SESSION_KEY", "probe:leak:1")
@@ -83,7 +83,11 @@ def test_a_flagged_answer_lands_in_the_audit_beside_the_call(tmp_path: Path, mon
             dict(__import__("os").environ),
         )
 
-    lines = [json.loads(raw) for raw in (audit / next(p.name for p in audit.iterdir())).read_text().splitlines() if raw]
+    lines = [
+        json.loads(raw)
+        for raw in (audit_dir / next(p.name for p in audit_dir.iterdir())).read_text().splitlines()
+        if raw
+    ]
     assert [line.get("output_secret") for line in lines] == ["aws access key id", None]
     assert all(line["tool"] == "Bash" for line in lines)
     # The command is recorded as before — the flag is added, nothing replaced.
@@ -102,15 +106,15 @@ def test_repeated_refusals_are_counted_where_one_refusal_used_to_look_the_same(
     the gate is stateless on the spawned runtimes, where it is a fresh process
     per tool call.
     """
-    audit = tmp_path / "audit"
+    audit_dir = tmp_path / "audit"
     env = {
-        "HOOKPROBE_GATE_AUDIT": str(audit),
+        "HOOKPROBE_GATE_AUDIT": str(audit_dir),
         "HOOKPROBE_GATE_MODE": "readonly",
         "HOOKPROBE_GATE_WORKDIR": str(tmp_path),
         "HOOKPROBE_SESSION_KEY": "probe:steered:1",
     }
     started = __import__("time").time()
-    assert gate.trips(audit, "probe:steered:1", since=started) == 0, "nothing refused yet"
+    assert audit.trips(audit_dir, "probe:steered:1", since=started) == 0, "nothing refused yet"
 
     for command in ("kubectl delete pod a", "kubectl apply -f x.yaml", "kubectl get pods"):
         gate.decide(
@@ -118,10 +122,10 @@ def test_repeated_refusals_are_counted_where_one_refusal_used_to_look_the_same(
             env,
         )
 
-    assert gate.trips(audit, "probe:steered:1", since=started) == 2, "two refused, one allowed"
+    assert audit.trips(audit_dir, "probe:steered:1", since=started) == 2, "two refused, one allowed"
     # Scoped to the session and the turn, or a busy node's counts would bleed.
-    assert gate.trips(audit, "probe:other:1", since=started) == 0
-    assert gate.trips(audit, "probe:steered:1", since=started + 3600) == 0
+    assert audit.trips(audit_dir, "probe:other:1", since=started) == 0
+    assert audit.trips(audit_dir, "probe:steered:1", since=started + 3600) == 0
 
 
 def test_both_new_numbers_have_a_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

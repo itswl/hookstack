@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import hookprobe
-from hookprobe import gate
+from hookprobe import audit, gate
 from hookprobe.engine import EngineResult, engine_error, file_fact, priced
 from hookprobe.gate import tool_detail
 from hookprobe.settings import Settings
@@ -191,14 +191,14 @@ class PiEngine:
             stderr=stderr,
             # Read from the audit rather than counted in this process: the gate
             # is spawned per tool call here, so it has nowhere to keep a tally.
-            guard_trips=gate.trips(self._workdir / "audit", session_key, since=wall_started),
+            guard_trips=audit.trips(self._workdir / "audit", session_key, since=wall_started),
         )
 
     def _check_gate_was_consulted(self, state: _Turn, session_key: str, *, since: float) -> None:
         """A turn that ran tools and left no audit line ran without a posture."""
         if not state.tool_calls:
             return
-        if gate.consulted(self._workdir / "audit", session_key, since=since):
+        if audit.consulted(self._workdir / "audit", session_key, since=since):
             return
         self._gate_proven = False
         self._gate_broken = (

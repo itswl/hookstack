@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from hookprobe import inputs, telemetry
+from hookprobe import audit, inputs, telemetry
 from hookprobe.files import system_prompt_path
 from hookprobe.gate import (
     _WRITE_PATH_KEYS,
@@ -32,9 +32,7 @@ from hookprobe.gate import (
     trace_environment,
 )
 from hookprobe.gate import WRITE_TOOLS as _WRITE_TOOLS
-from hookprobe.gate import append_audit as _append_audit
 from hookprobe.gate import tool_detail as _tool_detail
-from hookprobe.gate import trips as _guard_trips
 from hookprobe.guard import bash_deny_reason
 from hookprobe.hygiene import post_tool_hook
 from hookprobe.settings import Settings
@@ -411,7 +409,7 @@ def _audit_recorder(audit_dir: Path, session_key: str) -> Callable[[dict[str, An
         try:
             import time
 
-            _append_audit(audit_dir, {"ts": round(time.time(), 3), "session": session_key, **extra})
+            audit.append(audit_dir, {"ts": round(time.time(), 3), "session": session_key, **extra})
         except Exception:  # noqa: BLE001 — a refusal must still be a refusal if the recorder fails
             logger.debug("audit write failed", exc_info=True)
 
@@ -437,7 +435,7 @@ def _audit_hook(audit_dir: Path, session_key: str) -> Callable[..., Any]:
                 "detail": _tool_detail(input_data.get("tool_input")),
                 "error": bool(response.get("is_error")) if isinstance(response, dict) else False,
             }
-            _append_audit(audit_dir, line)
+            audit.append(audit_dir, line)
         except Exception:  # noqa: BLE001 — the recorder must never break the run
             logger.debug("audit write failed", exc_info=True)
         return {}
@@ -1163,7 +1161,7 @@ class ClaudeAgentEngine:
             input_changes=input_changes,
             context=context,
             compactions=tuple(compactions),
-            guard_trips=_guard_trips(self._workdir / "audit", session_key, since=wall_started),
+            guard_trips=audit.trips(self._workdir / "audit", session_key, since=wall_started),
         )
 
     async def _context_usage(self, client: Any) -> dict[str, Any] | None:

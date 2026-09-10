@@ -419,7 +419,7 @@ It spends nothing and runs no model. Two properties are the point:
   [containment](../../docs/containment.md) does. A check that only reports a
   pass teaches its reader the boundary is total.
 
-**The audit trail is chained.** Each line carries the hash of the one before it,
+**The audit trail is chained** (`hookprobe/audit.py` — the record; `gate.py` is the decision). Each line carries the hash of the one before it,
 so an edit, a deletion or a reordering afterwards stops the chain and can be
 pointed at — `verify_chain` names the first line that stops adding up, and the
 selftest walks it. That row reported `null` — *not built* — from the day the

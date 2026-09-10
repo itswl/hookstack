@@ -34,7 +34,7 @@ from typing import Any
 
 import pytest
 
-from hookprobe import gate
+from hookprobe import audit, gate
 from hookprobe.engine_codex import CodexEngine, sandbox_for
 from hookprobe.engine_codex import _Turn as _CodexTurn
 from hookprobe.engine_pi import GATE_EXTENSION, PiEngine
@@ -916,7 +916,7 @@ def test_a_recorded_call_clears_the_check(tmp_path: Path) -> None:
         {"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}},
         CodexEngine(settings)._env("probe:gated:1"),
     )
-    assert gate.consulted(tmp_path / "audit", "probe:gated:1", since=since)
+    assert audit.consulted(tmp_path / "audit", "probe:gated:1", since=since)
 
 
 def test_the_pi_adapter_makes_the_same_check(tmp_path: Path) -> None:

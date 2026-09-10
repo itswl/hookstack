@@ -32,7 +32,7 @@ import logging
 import time
 import urllib.request
 
-from hookprobe import actions, gate
+from hookprobe import actions, audit
 from hookprobe.reports import folded, report_summary, verdict, with_fold_note, with_recovery_note
 from hookprobe.runs import Run, RunStore
 from hookprobe.settings import Settings
@@ -81,11 +81,11 @@ class ReturnDelivery:
                     # `.chain` beside it and rebuild something self-consistent.
                     # What they cannot rebuild is a chain still containing a
                     # hash the PIPE wrote into its own ledger, on its own disk,
-                    # hours earlier. `gate.chain_anchored` asks exactly that.
+                    # hours earlier. `audit.chain_anchored` asks exactly that.
                     #
                     # A hash and nothing else: no content leaves, and the field
                     # is empty on a node that has chained nothing yet.
-                    "audit_head": gate.chain_head(self._settings.workdir / "audit"),
+                    "audit_head": audit.chain_head(self._settings.workdir / "audit"),
                     # The work this report belongs to, so the pipe's ledger can
                     # carry it and a person can follow one piece of work across
                     # the two nodes that did it (hookprobe/work.py).
