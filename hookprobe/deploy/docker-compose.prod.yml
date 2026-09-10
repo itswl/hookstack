@@ -226,6 +226,11 @@ services:
       # line, deny-by-default. Unset = proposals collect, nothing runs.
       # Mount it read-only beside the other operator config.
       HOOKPROBE_REMEDIATION_ALLOWLIST: ${HOOKPROBE_REMEDIATION_ALLOWLIST:-}
+      # The second gate, for steps the report itself called high risk: a
+      # `high` step must full-match a pattern in BOTH files. Unset = every
+      # high-risk step is refused, which is the deny-by-default direction —
+      # arming remediation must not arm its worst half by the same gesture.
+      HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST: ${HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST:-}
       # Model-call telemetry. On by default and harmless when nothing is
       # listening — measured: with no endpoint a run finishes in the same time,
       # emits no retries and logs nothing. So the switch stays on and the only
