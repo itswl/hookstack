@@ -158,21 +158,26 @@ def test_an_anchored_head_survives_a_rebuilt_chain(tmp_path: Path) -> None:
     anchored = audit.chain_head(audit_dir)  # what a report carried home
     assert audit.chain_anchored(audit_dir, anchored) is True
 
-    # The tidier rewrites history AND relinks it, perfectly.
+    # The tidier rewrites history AND relinks it, perfectly — and rewriting
+    # means REMOVING something, which is why the rebuild is three lines and not
+    # four. The first version of this test rebuilt an identical four and was
+    # flaky: `_write` stamps `round(time.time(), 3)`, both passes can land in
+    # the same millisecond, and byte-identical lines hash to a byte-identical
+    # head. That is the digest being correct. A tidier who reproduces the
+    # record exactly has deleted nothing and there is nothing to catch.
     _day_file(audit_dir).unlink()
     (audit_dir / audit._CHAIN_FILE).unlink()
-    _write(audit_dir, 4)
+    _write(audit_dir, 3)
 
     assert audit.verify_chain(audit_dir)["intact"] is True, (
         "a rebuilt chain is locally consistent — that is the problem"
     )
-    # The message carries both heads on purpose. This assertion failed once,
-    # on 2026-09-10, in a full-suite run that has not reproduced it in two
-    # since — deterministic order, no xdist. `assert True is False` said
-    # nothing about WHY, so a recurrence now names the rebuilt head beside the
-    # anchor: equal means the rebuild really did reproduce a line hash, which
-    # would be a fact about the digest; different means `chain_anchored` read
-    # something stale, which would be a fact about the reader.
+    # The message carries both heads on purpose, and it earned that within the
+    # hour: the assertion failed twice on 2026-09-10 and the second failure
+    # printed `anchor=39ae873a… rebuilt=39ae873a…` — EQUAL, which named the
+    # cause as the fixture's millisecond timestamps rather than anything in
+    # `chain_anchored`. `assert True is False` had said nothing at all. Kept,
+    # because the next failure here deserves the same head start.
     rebuilt = audit.chain_head(audit_dir)
     assert audit.chain_anchored(audit_dir, anchored) is False, (
         f"the off-box head is what catches it — anchor={anchored} rebuilt={rebuilt}"
