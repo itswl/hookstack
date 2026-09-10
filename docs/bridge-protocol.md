@@ -164,6 +164,11 @@ built to stop. A bridge that cannot answer at all replies
 `{"ok": true, "supported": false, "read": {}}` — which is what lark-bridge does
 in webhook mode, where a custom bot never had a message id.
 
+`/unseen` also says what each unseen card was ASKING for, read from the bytes
+the pipe itself sent (`card.actions`): an unseen notification is noise, an
+unseen card with a button on it is somebody waiting on an answer nobody was ever
+asked for, and `unseen_asking` counts only the second kind.
+
 The pipe asks on demand (`GET /unseen`), never on a timer, and stores nothing:
 the question is only ever asked while somebody is looking, and a stored answer
 goes stale in the one direction that matters — unread becomes read, never the

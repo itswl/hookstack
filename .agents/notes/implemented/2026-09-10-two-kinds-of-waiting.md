@@ -66,6 +66,19 @@ own 45s timeout, the same run reads **20 checked, 20 seen** in 20.1s.
 * A bridge that does not implement shape 4 answers
   `{"ok": true, "supported": false, "read": {}}` and every card reads `unknown`.
   lark-bridge does that in webhook mode, where a custom bot never had an id.
+* **An unseen card says what it was asking for.** `card.actions`, read from the
+  stored `sent_body` — the exact octets that left the socket, kept for this kind
+  of question — and counted as `unseen_asking`. An unseen notification is noise;
+  an unseen card with a button on it is somebody waiting on an answer nobody was
+  ever asked for. Reading that block is not reading the alert: the pipe wrote
+  it, and the labels are the pipe's own text.
+
+  It cannot be proven live on the work deployment: `work.yaml` carries no
+  `card_actions`, so no card it sends has a button. (Its comment for that — "no
+  bridge, so no callback can reach this pipe" — is now stale, since that
+  deployment grew two `bridge` channels. Left alone: turning card actions on
+  there is the operator's decision, not a tidy-up.) The shadow config mints
+  them, so this reports for real where the waiting proposals actually are.
 * **Not yet on any board.** This is a pipe route; hookprobe's work board still
   says `waiting_approval` without saying whether the card was seen, because the
   probe never learns the platform message id. Joining them is the obvious next

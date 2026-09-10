@@ -20,7 +20,9 @@ from hookrelay import channels
 from hookrelay.config import Channel
 
 
-async def _sent_card(client: httpx.AsyncClient, app_store: Any, message_id: str, when: float) -> int:
+async def _sent_card(
+    client: httpx.AsyncClient, app_store: Any, message_id: str, when: float, buttons: list[str] | None = None
+) -> int:
     """One delivered card on the bridge channel, with the id a platform gave it."""
     event_id = await app_store.insert_event(
         "grafana", "fp-" + message_id, {"title": "disk 94%", "body": "", "level": "high", "fields": {}}, "{}", when
@@ -28,7 +30,8 @@ async def _sent_card(client: httpx.AsyncClient, app_store: Any, message_id: str,
     await app_store.enqueue_delivery(event_id, "feishu-main", when)
     rows = await app_store.due_deliveries(when + 1, limit=10)
     delivery = next(r for r in rows if r["event_id"] == event_id)
-    await app_store.mark_sent(int(delivery["id"]), when, None, message_id)
+    body = json.dumps({"card": {"title": "t", "actions": [{"text": b} for b in buttons or []]}}) if buttons else "{}"
+    await app_store.mark_sent(int(delivery["id"]), when, body, message_id)
     return int(event_id)
 
 
@@ -133,3 +136,49 @@ async def test_the_batch_is_bounded_before_it_leaves(client) -> None:
 @pytest.mark.anyio
 async def test_an_unauthenticated_read_is_refused(client) -> None:
     assert (await client.get("/unseen")).status_code == 401
+
+
+@pytest.mark.anyio
+async def test_an_unseen_card_says_what_it_was_asking_for(client, monkeypatch) -> None:
+    """An unseen notification is noise. An unseen card with a button on it is
+    somebody waiting on an answer nobody was ever asked for, and those are the
+    rows that a person has to do something about."""
+    store = client._transport.app.state.store  # type: ignore[attr-defined]
+    now = time.time()
+    await _sent_card(client, store, "om_fyi", now - 600)
+    await _sent_card(client, store, "om_ask", now - 900, buttons=["approve & run kubectl rollout restart", "reject"])
+
+    async def nobody(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"om_fyi": {"readers": 0}, "om_ask": {"readers": 0}}
+
+    monkeypatch.setattr(channels, "ask_read_status", nobody)
+    body = (await client.get("/unseen", headers={"X-Read-Token": "read-t"})).json()
+
+    assert body["unseen"] == 2
+    assert body["unseen_asking"] == 1, "two cards went unseen; only one of them wanted an answer"
+    asking = [c for c in body["cards"] if c["asking"]]
+    assert len(asking) == 1
+    assert asking[0]["asking"][0].startswith("approve & run")
+
+
+@pytest.mark.anyio
+async def test_a_body_that_is_not_a_card_is_not_an_ask(client, monkeypatch) -> None:
+    """The stored body is whatever left the socket, which for a non-bridge
+    channel is not a card model at all. It must read as "no buttons", never as
+    a crash on the one route somebody opens when something is already wrong."""
+    store = client._transport.app.state.store  # type: ignore[attr-defined]
+    now = time.time()
+    event_id = await store.insert_event(
+        "ci", "fp-raw", {"title": "raw", "body": "", "level": "high", "fields": {}}, "{}", now
+    )
+    await store.enqueue_delivery(event_id, "feishu-main", now)
+    row = next(r for r in await store.due_deliveries(now + 1, limit=10) if r["event_id"] == event_id)
+    await store.mark_sent(int(row["id"]), now, "not json at all", "om_raw")
+
+    async def nobody(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"om_raw": {"readers": 0}}
+
+    monkeypatch.setattr(channels, "ask_read_status", nobody)
+    body = (await client.get("/unseen", headers={"X-Read-Token": "read-t"})).json()
+    assert body["unseen"] == 1 and body["unseen_asking"] == 0
+    assert body["cards"][0]["asking"] == []

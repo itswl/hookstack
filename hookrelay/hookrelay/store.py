@@ -508,7 +508,7 @@ class Store:
         unseen.
         """
         cursor = await self.read.execute(
-            "SELECT d.id, d.channel, d.sent_at, d.platform_message_id, d.event_id,"
+            "SELECT d.id, d.channel, d.sent_at, d.platform_message_id, d.event_id, d.sent_body,"
             " e.title, e.source FROM deliveries d JOIN events e ON e.id = d.event_id"
             " WHERE d.status = 'sent' AND d.sent_at >= ?"
             " AND d.platform_message_id IS NOT NULL AND d.platform_message_id != ''"

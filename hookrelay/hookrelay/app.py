@@ -744,6 +744,21 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         rows = await app.state.store.recent_events(min(limit * 4, 400))
         return render_timeline(rows, limit=limit)
 
+    def _buttons_on(sent_body: Any) -> list[str]:
+        """The button labels this pipe put on a card, or none.
+
+        From the stored body rather than a new column: `sent_body` is already
+        the exact octets that left the socket, kept for exactly this kind of
+        question. A card with no buttons told somebody something; a card with
+        buttons asked them for something, and only the second kind going unseen
+        is a problem anybody has to fix.
+        """
+        try:
+            actions = (json.loads(sent_body or "{}").get("card") or {}).get("actions") or []
+        except (ValueError, AttributeError):
+            return []
+        return [str(a.get("text") or "")[:80] for a in actions if isinstance(a, dict)]
+
     @app.get("/unseen")
     async def unseen(
         x_read_token: str | None = Header(default=None),
@@ -787,7 +802,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         for row in rows:
             by_channel.setdefault(str(row["channel"]), []).append(row)
         unseen_rows: list[dict[str, Any]] = []
-        counts = {"seen": 0, "unseen": 0, "unknown": 0}
+        counts = {"seen": 0, "unseen": 0, "unknown": 0, "unseen_asking": 0}
         for name, cards in by_channel.items():
             channel = app.state.config.channels.get(name)
             answers: dict[str, Any] | None = None
@@ -808,6 +823,14 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                     counts["seen"] += 1
                     continue
                 counts["unseen"] += 1
+                # What the card was FOR, from the bytes this pipe itself sent.
+                # An unseen notification is noise; an unseen card with a button
+                # on it is somebody waiting on an answer that was never asked
+                # for. Reading `card.actions` is not reading the alert — the
+                # pipe wrote that block, and the button LABELS are its own text.
+                asks = _buttons_on(card.get("sent_body"))
+                if asks:
+                    counts["unseen_asking"] += 1
                 unseen_rows.append(
                     {
                         "event_id": card["event_id"],
@@ -816,6 +839,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                         "title": card["title"],
                         "sent_at": card["sent_at"],
                         "waiting_hours": round((now - float(card["sent_at"] or now)) / 3600, 1),
+                        "asking": asks,
                     }
                 )
         return {"window_hours": window, "checked": len(rows), **counts, "cards": unseen_rows}
