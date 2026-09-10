@@ -375,6 +375,31 @@ deliberately so — this node holds no credentials for the systems it writes
 procedures about, and a freshness check that opened one would be a second,
 unaudited way of touching them.
 
+**And a target is left alone for a quarter of an hour after something acted on
+it.** The clock and the cursor both answer *has the world moved since these
+steps were written*. Neither answers *did we already do this to this box twenty
+minutes ago*, which is what a flapping condition asks — and a fix and the
+rollback of that fix could both be approved inside a minute, the second acting
+on a machine the first had just changed and nobody had looked at since.
+
+So an approval is refused while another procedure's target is cooling
+(`HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS`, 15 minutes, `0` disables), and a
+procedure still executing holds its target with no window at all. This refusal
+is the one that is **held, not retired**: nothing about the proposal is wrong,
+so the row stays `proposed`, the console lists the reason beside it with reject
+still enabled, and the same approval works once the window passes. Its report
+back into the chat says *check what the earlier procedure changed, then approve
+this one again if still needed* — which is the actual work the cooldown is
+buying time for.
+
+A step is held by its declared `target` or by its literal command, either one
+matching. Both, because production showed the label alone is not enough: five
+proposals there name one thing three ways — `AWS SES 账户状态`, `AWS SES account
+status`, `AWS SES 账户状态（只读）` — while running character-identical commands.
+The command is the half that holds: a procedure runs verbatim in this
+container, so two identical strings are the same action whatever they were
+called.
+
 **What happens if somebody just keeps replying.** Not what most people expect:
 the conversation hits the **follow-up cap** long before the context window. Each
 reply continues the same engine session — which is the cheap direction, measured
