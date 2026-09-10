@@ -263,6 +263,14 @@ def register(
             # whether to pay, and a model's opinion of itself is not an answer.
             "ruled_inferred": inferred,
             "worth": _worth_line(investigations, spend, useful, useless, inferred),
+            # And whether the cheap half of the loop can run at all. A library
+            # of runbooks beside a path that has never fired reads as "the
+            # feature works and nothing matched"; `blocked_by` says which of
+            # the three actual reasons it is, in a sentence an operator can act
+            # on. Measured on this deployment: 21 runbooks, six for the SES
+            # conditions it re-investigates from cold every time, and the
+            # licence to reuse any of them is a ruling nobody has ever filed.
+            "runbook_answers": service.runbook_readiness(),
         }
         state = service.budget_state()
         if state is None:

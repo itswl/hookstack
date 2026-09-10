@@ -157,3 +157,62 @@ def test_a_withdrawn_runbook_cannot_answer(tmp_path):
     condition that stopped being understood stops being answered this way, even
     if an old useful ruling still sits on a run."""
     assert _ran_for_real(tmp_path, "queue stalled", ruled_at=time.time() - 3600, make_runbook=False) is False
+
+
+# ── and when it cannot fire, why ──────────────────────────────────────────────
+
+
+def test_readiness_names_the_one_reason_the_cheap_path_is_idle(tmp_path):
+    """Configured and inert reads exactly like working. This deployment carries
+    21 runbooks — six for the SES conditions it re-investigates from cold every
+    time — and the answer path has never fired; the reason took three modules to
+    reconstruct. So the node says it, in a sentence, and names ONE reason
+    because a list of four blockers is a list nobody acts on."""
+    title = "SES bounce rate above 5%"
+
+    # 1. The knob is off, which outranks everything: nothing else matters yet.
+    service, _ = _service(tmp_path, runbook_answer_days=0)
+    _runbook(tmp_path, title)
+    ready = service.runbook_readiness()
+    assert ready["library"] == 1 and ready["answer_days"] is None
+    assert "switched off" in ready["blocked_by"]
+
+    # 2. Knob on, runbooks present, and nobody has ever ruled — the real state
+    # of this deployment, and the one an operator can act on today.
+    service, _ = _service(tmp_path, runbook_answer_days=7)
+    ready = service.runbook_readiness()
+    assert ready["conditions_ready"] == 0
+    assert "useful" in ready["blocked_by"] and "vouch" in ready["blocked_by"]
+
+    # 3. A person rules, and the same figures say it can now fire.
+    prior = Run(session_key="probe:ww:1", run_id="r-old", status=COMPLETED)
+    prior.meta = {"title": title}
+    prior.ruling, prior.ruled_at = "useful", time.time()
+    service._store.create(prior)
+    ready = service.runbook_readiness()
+    assert ready["conditions_ready"] == 1 and ready["blocked_by"] is None
+
+
+def test_readiness_and_the_answer_path_share_one_predicate(tmp_path):
+    """Two readers of one rule, and this is the seam that has bitten before:
+    `work.py` read a procedure status nothing ever wrote, for months, because
+    the rule had two homes. A ruling that does not license an answer must not
+    be counted as readiness either."""
+    title = "SES bounce rate above 5%"
+    service, _ = _service(tmp_path, runbook_answer_days=7)
+    _runbook(tmp_path, title)
+
+    # A runbook ANSWER cannot vouch for the next one — the citation loop the
+    # answer path refuses. Readiness has to refuse it identically.
+    echo = Run(session_key="probe:ww:9", run_id="r-echo", status=COMPLETED)
+    echo.meta = {"title": title, "answered_from_runbook": True}
+    echo.ruling, echo.ruled_at = "useful", time.time()
+    service._store.create(echo)
+    assert service.runbook_readiness()["conditions_ready"] == 0
+
+    # And a ruling older than the window licenses nothing, on both paths.
+    stale = Run(session_key="probe:ww:8", run_id="r-stale", status=COMPLETED)
+    stale.meta = {"title": title}
+    stale.ruling, stale.ruled_at = "useful", time.time() - 30 * 86400
+    service._store.create(stale)
+    assert service.runbook_readiness()["conditions_ready"] == 0

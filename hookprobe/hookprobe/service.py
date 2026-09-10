@@ -376,20 +376,7 @@ class RunService:
             procedure = manifest.read_text(encoding="utf-8").split(CASES_MARKER, 1)[0].strip()
         except OSError:
             return None  # no runbook, or it was withdrawn — a cold start reverifies
-        cutoff = time.time() - days * 86400
-        vouched = max(
-            (
-                other
-                for other in self._store.list_runs(limit=200)
-                if str(other.meta.get("title") or "") == title
-                and other.ruling == "useful"
-                and not other.meta.get("answered_from_runbook")
-                and other.session_key != run.session_key
-                and (other.ruled_at or 0) >= cutoff
-            ),
-            key=lambda r: r.ruled_at or 0.0,
-            default=None,
-        )
+        vouched = self._vouching_run(title, time.time() - days * 86400, exclude=run.session_key)
         if vouched is None:
             return None  # nobody has vouched recently; a real run earns the licence
         age_days = int((time.time() - float(vouched.ruled_at or 0)) / 86400)
@@ -411,6 +398,77 @@ class RunService:
             ensure_ascii=False,
             indent=2,
         )
+
+    def _vouching_run(self, title: str, cutoff: float, *, exclude: str = "") -> Run | None:
+        """The most recent REAL investigation of this condition a person called
+        useful, inside the window — or None.
+
+        One home for the predicate, because two readers ask it: the answer path
+        below, and the readiness figure `/v1/stats` reports. A rule written
+        twice is a rule that will eventually say two things, which is how
+        `work.py` came to read a procedure status nothing ever wrote.
+
+        `answered_from_runbook` runs are excluded on purpose: only a real run
+        vouches, or a chain of runbook answers would keep citing itself.
+        """
+        return max(
+            (
+                other
+                for other in self._store.list_runs(limit=200)
+                if str(other.meta.get("title") or "") == title
+                and other.ruling == "useful"
+                and not other.meta.get("answered_from_runbook")
+                and other.session_key != exclude
+                and (other.ruled_at or 0) >= cutoff
+            ),
+            key=lambda r: r.ruled_at or 0.0,
+            default=None,
+        )
+
+    def runbook_readiness(self) -> dict[str, Any]:
+        """Whether the $0 answer path CAN fire, and when it cannot, why.
+
+        This deployment carries 21 runbooks — six of them for the same SES
+        conditions it re-investigates from cold every time — and the path that
+        would answer from them has never fired. Nothing anywhere said why, and
+        the reason takes three modules to reconstruct: the knob is off AND no
+        report has ever been ruled, and the ruling is the licence. A feature
+        that is configured and inert is indistinguishable from one that is
+        working, unless it says so.
+
+        `blocked_by` names ONE reason, the first that applies, because a list of
+        four blockers is a list nobody acts on. It is prose rather than a code
+        so it can be read straight off the page and acted on.
+        """
+        skills = self._settings.workdir / ".claude" / "skills"
+        library = len(list(skills.glob("*/SKILL.md"))) if skills.is_dir() else 0
+        days = self._settings.runbook_answer_days
+        ready: list[str] = []
+        if days > 0 and library:
+            cutoff = time.time() - days * 86400
+            seen = {str(r.meta.get("title") or "") for r in self._store.list_runs(limit=200)}
+            ready = [
+                title
+                for title in sorted(t for t in seen if t)
+                if (skills / slug(title) / "SKILL.md").is_file() and self._vouching_run(title, cutoff) is not None
+            ]
+        if days <= 0:
+            blocked = "HOOKPROBE_RUNBOOK_ANSWER_DAYS is 0, so the $0 answer path is switched off"
+        elif not library:
+            blocked = "no runbooks: nothing has been distilled to answer from"
+        elif not ready:
+            blocked = (
+                f"no condition has a `useful` ruling inside {days}d — a person vouching for a runbook "
+                "is what licenses reusing it, and an unruled report vouches for nothing"
+            )
+        else:
+            blocked = ""
+        return {
+            "library": library,
+            "answer_days": days or None,
+            "conditions_ready": len(ready),
+            "blocked_by": blocked or None,
+        }
 
     def _finish_without_engine(self, run: Run, text: str) -> None:
         """Complete a run the gate answered: same ledger, same return leg, no
