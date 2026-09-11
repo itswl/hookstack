@@ -19,6 +19,111 @@ a real model cannot be steered into emitting a harmful one.
 > a `danger-only` runner records its blast radius; an identity that cannot be asked is reported *unverifiable*, never confirmed.
 > The measurement is served on `GET /v1/posture` and cited in every run's audit record.
 
+## What holds, and what only helps
+
+Every row below is a claim about a different kind of failure, and reading them
+as one list is how a regex over model output gets trusted the way a signature
+is. The split is stated here rather than left to the third column, because the
+question an operator actually has — *if the model is hostile, which of these is
+still standing?* — is not answerable by reading twenty-seven rows.
+
+Nothing in this process is containment against a model that is genuinely
+adversarial. The read-only credential is, and the row for the bash guard has
+said so in those words since the day it was written: **the read-only credential
+is what holds.** What follows sorts the rest honestly.
+
+`scripts/assert_docs.py` requires every row in the table to appear in exactly
+one of these four lists. A new boundary that nobody classified fails the gate —
+otherwise this section becomes the prose that rots, which is what happened to
+the mutation count one paragraph down.
+
+### Holds against a hostile model
+
+Cryptography, an operator's file, an identity check, or arithmetic the model
+cannot reach. Its limits are in the third column; its key is not model-written.
+
+- **Per-source HMAC** — a signature the model has no secret for.
+- **Per-node credentials** — the real boundary, and the one that lives outside this repository.
+- **Declared bypass lanes** — a payload picks from inside a set the config declared.
+- **Verdict vocabulary** — a closed set; free text cannot widen it.
+- **MCP tool allowlist** — a closed set; the model cannot name a server into it.
+- **Tool gate reachability** — bounds the EXISTENCE of the heuristics below, not their content: a node whose gate cannot answer, or was never asked, stops.
+- **Budget breaker** — arithmetic over a ledger the model does not write.
+- **Card action signing** — a signed, single-use token.
+- **Chat sender allowlist** — an identity at the door. What an allowed sender then pastes is the posture's problem, not this one's.
+- **Chained audit** — tamper-evidence, bounded by needing two disks and two services.
+- **The agent's bearer reads only** — the method check is in the door, not in a pattern.
+- **Remediation allowlist** — deny-by-default over an operator's file. The residual is a pattern written too wide, which is the operator's text, not the model's.
+- **Approved commands run in an allowlisted environment** — an allowlist, so a secret added later under an unknown name is excluded by default.
+- **Approval window** — a clock. Weak, and not defeatable from inside a report.
+- **Freshness cursor** — fields that arrive through the pipe; a report cannot move them.
+- **Bridge inbound signature** — a signature, on the exact bytes.
+- **Unattended retry caps** — counters the model does not increment.
+
+### Reduces accidents, and an adversary defeats it
+
+These read a string the model produced, or key on a field the model filled in.
+They catch the over-eager model, which is the case that happens. Defeating one
+is not a defect — see the scope section below.
+
+- **Bash guard** — regexes over a command the model wrote. Its own row says the credential is what holds.
+- **Input guard** — three write shapes, all of them patterns over model text; a redirect assembled from two variables gets through.
+- **Memory shape check** — a shape, not a truth: a benign-shaped line that is simply wrong passes.
+- **High-risk allowlist** — **keyed on `risk`, which the MODEL writes.** A dangerous step labelled `low` never meets it; the ordinary allowlist is what bounds that case.
+- **Target cooldown** — **keyed on `target` and the command text, both MODEL-written.** A step that varies its command and relabels its target is not cooled.
+
+### Enforced at config load, and not about the model at all
+
+Structural properties of a configuration. An operator can still choose wrong;
+these only make the choice explicit and refuse the incoherent ones.
+
+- **`on_error` per stage** — makes fail-open versus fail-closed a stated choice.
+- **Inline timeout cap** — refuses a config that would hold a sender's connection.
+- **Topology invariants** — refuses a graph with an unreachable door or a starved exit.
+- **Delivery method allowlist** — refuses a verb at config load.
+
+### Named here as a residual, not a boundary
+
+- **The watcher holds a signing key** — it stops nothing, and the row says so. It is in the table so the residual is visible rather than absent.
+
+## What is not a defect
+
+The distinction above decides what is worth reporting as a failure of this
+design and what is the design working as documented.
+
+**Not a defect, because the row already says so:**
+
+- Defeating a heuristic: a bash-guard regex bypass, an input-guard write shape
+  assembled at runtime, a secret-shape miss.
+- A model omitting or relabelling a field a heuristic keys on — an absent
+  `target` escaping the cooldown, a dangerous step self-labelled `low`. A gate
+  whose key its subject writes can only add a requirement; it was never able to
+  catch a lie, and both rows say so.
+- Anything an allowed sender does within the posture the node declares.
+- An operator's allowlist pattern written too wide. The file is the decision;
+  the gate only holds it.
+
+**A defect, and this is where the effort goes:**
+
+- A row behaving contrary to its own third column.
+- A heuristic that has silently stopped running. This is the one place this
+  project spends more than the split above would justify — `gate.verify`,
+  `/v1/selftest` and the mutation list exist because a guard that quietly
+  stopped catching anything is indistinguishable from one with nothing to
+  catch, and that has happened here more than once.
+- Credentials wider than the posture a node declares (`posture.py` refuses to
+  start under `enforce`).
+- A refusal the refused party cannot see. A gate whose denial reaches nobody
+  did not gate anything; it only lost the work.
+
+**Outside the supported posture:**
+
+- A node declaring `readonly` with wider credentials and `HOOKPROBE_POSTURE_CHECK=off`.
+- The bridge on a shared container network with `BRIDGE_INBOUND_SECRET` empty —
+  the shipped default, and why both deployments set it.
+- Treating anything in the second list as the thing that holds when the input
+  surface is untrusted.
+
 ## The boundaries
 
 Every row here is a claim, and a claim is worth what its test is worth. `scripts/assert_guards_are_tested.py` breaks a subset of them on purpose and requires a test to fail for each; `--list` prints which, and the gate runs it. A mutation that survives is a guarantee nobody is really testing. The list is not repeated here on purpose — this sentence said "twelve" and named nine while the script carried seventeen, which is what a count with two homes does.

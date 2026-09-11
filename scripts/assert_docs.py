@@ -123,6 +123,16 @@ _COUNT_ZH = re.compile(r"([一二三四五六七八九十]|\d+)条[^。\n]{0,12}
 # the fourth said fifteen. Nobody reading either number could tell which was
 # true, and the number is the claim the security page is FOR.
 BOUNDARY_TABLE = Path("docs/containment.md")
+# And every row must be SORTED, not merely present. The page gained a section
+# on 2026-09-11 splitting the table into what holds against a hostile model,
+# what only reduces accidents, what is a config-load invariant, and what is
+# named as a residual — borrowed from NousResearch/hermes-agent's SECURITY.md,
+# whose §2.2/§2.4 split is the thing this table was missing. A classification
+# nothing checks is prose, and prose about a count is exactly what rotted one
+# paragraph above it ("twelve" against a script carrying seventeen).
+_CLASSIFIED_ROW = re.compile(r"^- \*\*(.+?)\*\*", re.MULTILINE)
+# `_BOUNDARY_ROW` below counts rows and captures nothing; the names need their own.
+_BOUNDARY_NAME = re.compile(r"^\| \*\*(.+?)\*\*", re.MULTILINE)
 BOUNDARY_COUNT_STATED = (
     Path("README.md"),
     Path("docs/index.md"),
@@ -326,6 +336,21 @@ def main() -> int:
                 )
 
     rows = len(_BOUNDARY_ROW.findall(BOUNDARY_TABLE.read_text(encoding="utf-8")))
+    table_text = BOUNDARY_TABLE.read_text(encoding="utf-8")
+    named = [n.strip() for n in _BOUNDARY_NAME.findall(table_text)]
+    classified = [n.strip() for n in _CLASSIFIED_ROW.findall(table_text)]
+    unsorted_rows = [n for n in named if n not in classified]
+    phantom = [n for n in classified if n not in named]
+    duplicated = sorted({n for n in classified if classified.count(n) > 1})
+    for name in unsorted_rows:
+        problems.append(
+            f"{BOUNDARY_TABLE}: boundary {name!r} is in the table and in none of the four lists under "
+            '"What holds, and what only helps" — say whether it holds against a hostile model'
+        )
+    for name in phantom:
+        problems.append(f"{BOUNDARY_TABLE}: {name!r} is classified but is not a row in the table")
+    for name in duplicated:
+        problems.append(f"{BOUNDARY_TABLE}: {name!r} is classified more than once; a row belongs to one list")
     for doc in BOUNDARY_COUNT_STATED:
         for line, count, word in _stated_boundaries(doc.read_text(encoding="utf-8")):
             if count is None:
