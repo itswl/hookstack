@@ -208,7 +208,12 @@ def test_the_cap_holds_for_new_runbooks_and_evicts_nothing(skills: Path) -> None
     outcome = install(skills, limit=3)
 
     assert outcome == {"skipped": "at the 3-runbook cap"}
-    assert sorted(path.name for path in skills.iterdir()) == ["existing-0", "existing-1", "existing-2"]
+    # `*/SKILL.md`, not every entry in the directory: the assertion is about
+    # RUNBOOKS, which is how the product counts them too (`runbook_readiness`).
+    # Asserting the exact directory contents breaks the day anything puts a
+    # sibling file beside them — which is precisely what `.chain` did to the
+    # audit directory on 2026-09-10, turning a green local gate into a red CI.
+    assert sorted(p.parent.name for p in skills.glob("*/SKILL.md")) == ["existing-0", "existing-1", "existing-2"]
 
 
 def test_the_cap_never_stops_a_runbook_from_going_on_learning(skills: Path) -> None:
@@ -298,7 +303,7 @@ def test_a_recurring_alert_keeps_one_runbook(skills: Path) -> None:
 
     assert "installed" in first
     assert "updated" in second
-    assert len(list(skills.iterdir())) == 1
+    assert len(list(skills.glob("*/SKILL.md"))) == 1, "updated the existing runbook, did not grow a second"
 
 
 def test_an_operator_save_counts_as_the_review(tmp_path: Path) -> None:
