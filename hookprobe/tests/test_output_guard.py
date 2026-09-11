@@ -85,7 +85,13 @@ def test_a_flagged_answer_lands_in_the_audit_beside_the_call(tmp_path: Path, mon
 
     lines = [
         json.loads(raw)
-        for raw in (audit_dir / next(p.name for p in audit_dir.iterdir())).read_text().splitlines()
+        # `*.jsonl`, not the first thing `iterdir` happens to yield. The audit
+        # directory gained a `.chain` file on 2026-09-10 and directory order is
+        # the filesystem's: macOS yielded the day file first and Linux yielded
+        # `.chain`, so this passed on every local gate and failed in CI, where
+        # the hash was handed to `json.loads`. Every source path already globs
+        # `*.jsonl`; this test was the only reader that did not say what it meant.
+        for raw in sorted(audit_dir.glob("*.jsonl"))[0].read_text().splitlines()
         if raw
     ]
     assert [line.get("output_secret") for line in lines] == ["aws access key id", None]

@@ -88,6 +88,15 @@ along a bug fix.
 * **It will read as more safety than it is if the ceiling is not stated.** A
   registry cannot stop an operator registering `run-shell(cmd)`. Say that where
   the registry lives, in the same words the input guard uses.
+* **The "a second structured block is a new surface" objection is now answered
+  with evidence rather than argument.** `blockers.py` shipped one on
+  2026-09-11 — a fenced ```blocked``` block the service lifts exactly the way it
+  lifts ```remediation``` — against a measured before-state: 11 `task` reports
+  on the planning node, 10 carrying an `unknowns` section, **0** carrying one
+  runnable command or one name an operator could act on, and the same missing
+  credential opening three consecutive reports. Whoever picks this residual up
+  should cite those numbers and whatever ```blocked``` does on the deployment,
+  rather than re-deriving the case for asking a model to fill a schema.
 * **Backward compatibility is the part most likely to be got wrong.** Five rows
   on production carry a free-text `command` and were written before any of
   this; they must stay readable, refusable and approvable exactly as they are.
