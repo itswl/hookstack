@@ -39,18 +39,38 @@ for a large fraction of a gate run. In that window a `git add -A` from another
 session in this tree commits a deleted containment boundary. That command has
 been used twice in one day here, and the tree has three sessions in it.
 
-**It cannot stay hidden, which is why this is a note and not a patch.**
-`survives()` checks `original.count(before) != 1` before mutating and returns
-*"anchor appears 0 times — this entry has rotted"*, so the next run fails loudly
-and names the entry. The exposure is the gap between the bad commit and that
-run — which can include a push.
+**It cannot stay hidden, and detection is doubled rather than single.**
+Simulated in a detached worktree at HEAD by both sessions independently —
+delete `env=execution_env(),`, run the suite — and the ORDINARY component
+pytest fails first:
+
+    FAILED tests/test_remediation.py::test_the_environment_reaches_the_process_that_runs
+    1 failed, 44 passed
+
+`STACK GATE GREEN` never prints, and the gate exits 1. The guards checker's rot
+check (`survives()` refuses to mutate unless `original.count(before) == 1`,
+returning *"anchor appears 0 times — this entry has rotted"*) is the SECOND line
+of defence, for anyone running that checker alone rather than the gate.
+
+Worth stating because a reader will see two `GATE GREEN` lines in that run —
+hookrelay's and hookjudge's component gates, both legitimately passing — and
+"a green gate lied" is a recorded incident here. It did not lie this time: the
+stack verdict is the one that counts and it never appeared.
 
 ## Consequences
 
+* **The residual is narrower than it first looked, and the difference decides
+  how much machinery it deserves.** Because the ordinary suite fails on a
+  leftover mutation, the exposure is not "a bad commit that survives until the
+  next guards run". It is a commit made **without running the gate at all** —
+  which `AGENTS.md` already forbids in its first rule. "Somebody skipped the
+  gate" and "the gate missed it" are different problems and only the second
+  would justify rebuilding the runner.
 * **The mitigation in force is discipline, and it is partial.** Staging explicit
   paths instead of `git add -A` removes this for the session that does it, and
-  does nothing about the other two. That asymmetry is the whole argument for
-  eventually copying rather than mutating.
+  does nothing about the other two. Discipline that binds only the disciplined
+  is not a control, which is why this is written down rather than agreed in
+  chat — but combined with the doubled detection above it is proportionate.
 * **A copy-based runner is not free.** The venv installs hookprobe, so the copy
   has to win the import — `PYTHONPATH` ahead of site-packages, `cwd` at the
   copied tests. Cheap to write, easy to get subtly wrong, and wrong here means
