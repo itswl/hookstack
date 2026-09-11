@@ -169,6 +169,12 @@ def _sampled(key: str, pct: int) -> bool:
     return bucket < pct
 
 
+# How much of the card being replied to travels into the question. Bounded
+# because it is being pasted into somebody else's context: the event door caps a
+# body at 4000, and this is a quotation inside another prompt, not the prompt.
+_ABOUT_MAX = 1200
+
+
 @registry.processor("thread_lookup")
 class ThreadLookupProcessor:
     """A person's reply under a card we sent, resolved to the operation it is
@@ -248,9 +254,19 @@ class ThreadLookupProcessor:
             # What they are pointing AT. A person replying under a card does not
             # repeat its contents — "看一下这个 ip 属于啥服务" names no ip — so
             # without this the question arrives with its subject missing.
-            title = str(found.get("title") or "")[:300]
-            if title:
-                ctx.extracted["fields"]["about"] = title
+            #
+            # The TITLE is not the subject, which took a real one to see: card
+            # #281 was titled "资产灯塔新增 4 条 IP 资产" and listed the four
+            # addresses in its BODY. A reply asking which service they belong to
+            # arrived with every IP missing, and the investigator answered —
+            # accurately — that the ticket did not list them. Carry both.
+            about = "\n\n".join(part for part in (str(found.get("title") or ""), str(found.get("body") or "")) if part)
+            if len(about) > _ABOUT_MAX:
+                # Truncation is admitted rather than silent: a subject cut in
+                # half is worse than a short one when the reader cannot tell.
+                about = about[:_ABOUT_MAX] + "\n… (the card's body was truncated here)"
+            if about:
+                ctx.extracted["fields"]["about"] = about
         # The pipeline adopts a quoted correlation before the stages run; this
         # one is learned inside a stage, so it is adopted here.
         ctx.correlation_id = found["quote"]

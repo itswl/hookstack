@@ -574,6 +574,9 @@ class Store:
             "session": session,
             "return_source": return_source,
             "title": str(trip["origin"].get("title") or ""),
+            # The body too: a card's title says what happened, its body says
+            # what to. See the `about` field in processors.thread_lookup.
+            "body": str(trip["origin"].get("body") or ""),
         }
 
     async def mark_failed(

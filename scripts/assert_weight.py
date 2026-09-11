@@ -209,6 +209,15 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # rendering the same card model, markup.py went with them. The pipe's
     # outbound kinds are `generic` (machines) and `bridge` (people), and no
     # line of it names a chat platform. Split: -~380 source, -~220 code.
+    # 5650 -> 5700 on 2026-09-11, for the SUBJECT of a question asked under a
+    # card. `thread_lookup` already carried the card's title into the new
+    # question — the comment there says why, and it was right — but a title
+    # names what happened and the body names what to. Card #281 was titled
+    # "four new IP assets" and listed the four addresses in its body; the reply
+    # asking which service they belong to arrived with every address missing,
+    # and the investigator answered, accurately, that the ticket did not list
+    # them. Three lines in the store and a bounded, self-admitting truncation
+    # in the stage. Bought a question that can be answered.
     # 5500 -> 5650 on 2026-09-10, for read receipts (`/unseen`): which cards this
     # pipe sent that nobody has opened. Split: +~125 source, +~78 code. Raised
     # rather than trimmed because it is a pipe property by the README's own test
@@ -228,7 +237,7 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # make the ceiling an argument against good structure. What the measure is
     # for is "one person can read this service end to end", and that is a
     # property of the service.
-    "hookrelay": (5650, Path("hookrelay/README.md")),
+    "hookrelay": (5700, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

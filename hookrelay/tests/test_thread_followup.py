@@ -427,7 +427,94 @@ async def test_a_question_under_a_notification_is_not_a_follow_up_to_nothing(sto
     assert fields["thread_root"] == "om_note" and fields["correlation_id"].startswith("hr-")
     # And it carries WHAT was asked about: a person replying under a card does
     # not repeat it, so without this the question arrives with no subject.
-    assert fields["about"] == "asset beacon added 203.0.113.9"
+    assert fields["about"] == "asset beacon added 203.0.113.9\n\ntwo ip assets"
+
+
+async def test_the_subject_is_the_body_too_not_just_the_title(store, cfg):
+    """Card #281 on the work deployment, which is why this exists.
+
+    Its title was "four new IP assets" and the four addresses were in its BODY.
+    A reply asking which service they belong to carried the title alone, so the
+    question reached the investigator with every address missing — and the
+    answer, accurately, was that the ticket did not list them. The model was
+    right; the pipe under-carried.
+    """
+    raw = CFG["pipeline"][0]
+    raw["on_new_topic"] = {"kind": "task", "level": "high"}
+    cfg = Config.from_dict(CFG)
+    note = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["ww"],
+        {
+            "title": "asset beacon added 4 ip assets",
+            "body": "http://203.0.113.10, http://198.51.100.20, https://203.0.113.10, https://198.51.100.20",
+            "level": "low",
+        },
+        now=100.0,
+    )
+    for row in await store.due_deliveries(now=200.0):
+        if row["channel"] == "to-me":
+            await store.mark_sent(row["id"], 170.0, "{}", "om_note281")
+
+    result = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lark-thread"],
+        {
+            "root_message_id": "om_note281",
+            "message_id": "om_q281",
+            "sender": "ou_sre",
+            "topic": "reply",
+            "text": "which service owns this ip?",
+        },
+        now=300.0,
+    )
+    del raw["on_new_topic"]
+
+    about = (await store._event_row(result["event_id"]))["fields"]["about"]
+    # The four addresses the question is ABOUT now travel with it.
+    for ip in ("203.0.113.10", "198.51.100.20"):
+        assert ip in about, f"{ip} did not reach the question"
+    assert about.startswith("asset beacon added 4 ip assets"), "the title still leads"
+    assert note["event_id"]
+
+
+async def test_a_very_long_card_body_is_cut_and_says_so(store, cfg):
+    """It is pasted into somebody else's prompt, so it is bounded — and a
+    subject cut in half is worse than a short one when the reader cannot tell."""
+    raw = CFG["pipeline"][0]
+    raw["on_new_topic"] = {"kind": "task", "level": "high"}
+    cfg = Config.from_dict(CFG)
+    await handle_hook(
+        store,
+        cfg,
+        cfg.sources["ww"],
+        {"title": "noisy card", "body": "x" * 5000, "level": "low"},
+        now=100.0,
+    )
+    for row in await store.due_deliveries(now=200.0):
+        if row["channel"] == "to-me":
+            await store.mark_sent(row["id"], 170.0, "{}", "om_long")
+
+    result = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["lark-thread"],
+        {
+            "root_message_id": "om_long",
+            "message_id": "om_ql",
+            "sender": "ou_sre",
+            "topic": "reply",
+            "text": "what is this?",
+        },
+        now=300.0,
+    )
+    del raw["on_new_topic"]
+
+    about = (await store._event_row(result["event_id"]))["fields"]["about"]
+    assert len(about) < 1400, "bounded"
+    assert about.endswith("(the card's body was truncated here)"), "and it admits the cut"
 
 
 async def test_a_reply_that_does_have_a_session_is_still_a_follow_up(store, cfg):
