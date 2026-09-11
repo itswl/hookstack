@@ -21,7 +21,7 @@ a real model cannot be steered into emitting a harmful one.
 
 ## The boundaries
 
-Every row here is a claim, and a claim is worth what its test is worth. `scripts/assert_guards_are_tested.py` breaks twelve of these on purpose — the read-only guard, the withheld secrets, the MCP gate, the allowlist, the approval window, the freshness cursor, the audit chain, the agent's bearer, the egress rule — and requires a test to fail for each. A mutation that survives is a guarantee nobody is really testing, and it runs on the gate.
+Every row here is a claim, and a claim is worth what its test is worth. `scripts/assert_guards_are_tested.py` breaks a subset of them on purpose and requires a test to fail for each; `--list` prints which, and the gate runs it. A mutation that survives is a guarantee nobody is really testing. The list is not repeated here on purpose — this sentence said "twelve" and named nine while the script carried seventeen, which is what a count with two homes does.
 
 
 | Boundary | Stops | Does NOT stop | Enforced in |
