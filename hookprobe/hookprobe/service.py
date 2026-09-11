@@ -32,7 +32,17 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Protocol
 
-from hookprobe import actions, automation, distill, distill_loop, remediation, rulings, run_rulings, suggestions
+from hookprobe import (
+    actions,
+    automation,
+    blockers,
+    distill,
+    distill_loop,
+    remediation,
+    rulings,
+    run_rulings,
+    suggestions,
+)
 from hookprobe.distill import CASES_MARKER, slug
 from hookprobe.engine import EngineResult, price_tokens, transient
 from hookprobe.notify import ReturnDelivery
@@ -1265,6 +1275,19 @@ class RunService:
                 logger.warning("refusing an inferred run ruling with an unknown verdict")
             except LookupError:
                 logger.info("inferred run ruling names a run this service does not have: %s", verdict["sessionKey"])
+        # What stopped it, lifted the same way the procedure is, and annotated
+        # with the one thing the AGENT could not see: whether a named credential
+        # is absent from this process or merely empty. Those are different
+        # repairs — a compose line versus an .env line — and the report that
+        # said "the token is empty" three times could not tell them apart.
+        gaps = blockers.annotate(blockers.extract(run.text))
+        if gaps:
+            run.meta["blocked_on"] = gaps
+            logger.info(
+                "run blocked on %s session=%s",
+                ",".join(f"{g['kind']}:{g['name'] or 'probe'}" for g in gaps),
+                run.session_key,
+            )
         steps = remediation.extract(run.text)
         if steps:
             try:

@@ -37,7 +37,7 @@ from typing import Any
 from fastapi import Depends, FastAPI
 from fastapi.responses import PlainTextResponse
 
-from hookprobe import __version__
+from hookprobe import __version__, blockers
 from hookprobe.engine import _load_mcp_servers, _system_prompt_append
 from hookprobe.files import system_prompt_path
 from hookprobe.service import RunService
@@ -271,6 +271,14 @@ def register(
             # conditions it re-investigates from cold every time, and the
             # licence to reuse any of them is a ruling nobody has ever filed.
             "runbook_answers": service.runbook_readiness(),
+            # What has been STOPPING investigations, counted across them. One
+            # report saying "no GitHub token" is a sentence somebody skims;
+            # three saying it is a number, and a number is what gets the
+            # compose line written. Measured on the planning node the day this
+            # was added: 11 task reports, 10 with an `unknowns` section, 0 with
+            # anything an operator could act on, and the same credential named
+            # in three consecutive ones.
+            "blocked_on": blockers.tally(service.list_runs(200)),
         }
         state = service.budget_state()
         if state is None:

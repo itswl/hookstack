@@ -421,6 +421,39 @@ The command is the half that holds: a procedure runs verbatim in this
 container, so two identical strings are the same action whatever they were
 called.
 
+**When it could not finish, what it hands you instead.** A `task` investigation
+answers from the systems it can reach, and on an unattended node that is often
+not all of them. The old shape of that was an `unknowns` list in prose at the
+bottom of the report — measured across every task report the planning node had
+ever written: 11 reports, 10 with an `unknowns` section, and **zero** carrying
+anything an operator could act on. Three consecutive ones opened with the same
+missing credential, and each time the answer was somebody leaving the chat for
+a terminal that had access.
+
+So a gap now declares what would open it, in a fenced ```blocked``` block the
+service lifts out the way it lifts a procedure:
+
+| kind | means | what it carries |
+| --- | --- | --- |
+| `credential` | a named environment variable would answer it | the exact variable name |
+| `egress` | a host the proxy refused | the exact host |
+| `question` | no access helps; only the requester knows | the question |
+| `probe` | someone with access could look | one read-only command, pasteable as written |
+
+Two things make that worth more than the prose it replaces. The service
+annotates a `credential` gap with the half the agent cannot see — `absent`
+means nothing passes that variable to the container (a compose line), `empty`
+means something passes it unset (an `.env` line), and from inside a report
+those are indistinguishable, which is why the same line came back three times.
+And `/v1/stats` counts them across investigations: one report saying "no token"
+is a sentence somebody skims, three is a number, and a number is what gets the
+line written.
+
+The loop this closes: the opening sentence says what it needs, the card quotes
+that sentence, and a reply in the same thread continues the SAME investigation
+with the case file intact — measured at $0.0156 against $0.1490 for a fresh
+one. Pasting a command's output back is cheaper than asking again elsewhere.
+
 **What happens if somebody just keeps replying.** Not what most people expect:
 the conversation hits the **follow-up cap** long before the context window. Each
 reply continues the same engine session — which is the cheap direction, measured
