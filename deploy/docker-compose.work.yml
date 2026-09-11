@@ -576,7 +576,9 @@ services:
       HOOKPROBE_AGENT_ROLE: does the thing an approved plan describes — the one node a person hands work to, and the only one not on readonly
       AWS_CONFIG_FILE: /data/aws/config
       AWS_SHARED_CREDENTIALS_FILE: /data/aws/credentials
-      AWS_PROFILE: ${PROBE_PLAN_AWS_PROFILE:-demo-ro-profile}
+      # No default on purpose: any default that WORKS here is the real profile
+      # name, and a real name must not be in this repository.
+      AWS_PROFILE: ${PROBE_PLAN_AWS_PROFILE:?set PROBE_PLAN_AWS_PROFILE in .env}
       # Every plan arrives at `high` from the plan-approved door, so this gate
       # is not doing selection here — it is the backstop that keeps a stray
       # low-level event from starting a write run.
