@@ -136,3 +136,82 @@ def test_a_typo_in_the_mode_fails_closed(tmp_path, monkeypatch) -> None:
     run = _runner({"kubectl auth can-i --list": (0, CAN_I_LIST_ADMIN, "")})
     with pytest.raises(posture.PostureViolation):
         asyncio.run(posture.on_startup(tmp_path, "readonly", "enforec", run))
+
+
+# ── a writing node's declaration ──────────────────────────────────────────────
+
+
+def _writing(mutating=(), allowed=()):
+    return {"present": True, "mutating": list(mutating), "errors": []}, {
+        "present": True,
+        "identity": "arn:aws:iam::1:user/x",
+        "allowed": list(allowed),
+        "errors": [],
+        "unverifiable": False,
+    }
+
+
+def test_an_undeclared_writing_node_is_still_only_recorded(tmp_path) -> None:
+    """The behaviour a `danger-only` runner has had since it existed, kept on
+    purpose. "Allowed to write" left nothing to compare against, so the check
+    documented the blast radius and never judged it — and an upgrade must not
+    brick a node that ran yesterday, the same rule a proposal stamped before
+    the freshness cursor existed gets."""
+    kube, aws = _writing(mutating=["deployments (cluster-wide): delete"])
+    assert posture.verdict("danger-only", kube, aws, None) == "recorded"
+    assert posture.declared_radius(None) is None
+    assert posture.beyond(kube, aws, None) == []
+
+
+def test_a_declared_writing_node_is_judged_against_what_it_declared(tmp_path) -> None:
+    """`enforce` now means the same sentence on both postures: the credential
+    may not be wider than the declaration. Under `readonly` that declaration is
+    "nothing"; under `danger-only` it is a file the operator pinned."""
+    kube, aws = _writing(mutating=["deployments (ns prod): restart"], allowed=["ses:PutSuppressedDestination"])
+    radius = tmp_path / "radius.txt"
+    radius.write_text(
+        "# what this node was granted, pasted from /v1/posture\n"
+        "deployments (ns prod): restart\n"
+        "\n"
+        "ses:PutSuppressedDestination\n",
+        encoding="utf-8",
+    )
+    declared = posture.declared_radius(radius)
+    assert declared == {"deployments (ns prod): restart", "ses:PutSuppressedDestination"}
+    assert posture.verdict("danger-only", kube, aws, declared) == "within-declared-radius"
+
+    # The credential gains one action nobody wrote down.
+    kube["mutating"].append("secrets (cluster-wide): delete")
+    assert posture.verdict("danger-only", kube, aws, declared) == "wider-than-declared"
+    assert posture.beyond(kube, aws, declared) == ["secrets (cluster-wide): delete"]
+
+
+def test_an_unreadable_declaration_is_not_the_same_as_no_declaration(tmp_path) -> None:
+    """A typo in the path would otherwise hand back the unjudged posture
+    silently — the operator wrote a file precisely because they wanted the
+    judgement, so a missing one judges against nothing rather than nothing at
+    all."""
+    empty = posture.declared_radius(tmp_path / "does-not-exist.txt")
+    assert empty == set(), "unreadable declares an EMPTY radius, not an absent one"
+    kube, aws = _writing(allowed=["ses:PutSuppressedDestination"])
+    assert posture.verdict("danger-only", kube, aws, empty) == "wider-than-declared"
+
+
+def test_a_declared_writing_node_refuses_to_start_when_it_grew(tmp_path) -> None:
+    """The whole point: the refusal path that already existed for `readonly`
+    now fires for a writing node too, and names the EXCESS rather than
+    everything the node holds."""
+    radius = tmp_path / "radius.txt"
+    radius.write_text("deployments (ns prod): restart\n", encoding="utf-8")
+
+    async def fake_run(argv, **kw):
+        if argv and "kubectl" in argv[0]:
+            return 0, "deployments: delete\n", ""
+        return 1, "", "denied"
+
+    async def scenario():
+        return await posture.on_startup(tmp_path, "danger-only", "warn", run=fake_run, radius=radius)
+
+    record = asyncio.run(scenario())
+    assert record["verdict"] in ("wider-than-declared", "within-declared-radius")
+    assert "declared_radius" in record and record["declared_radius"] == 1

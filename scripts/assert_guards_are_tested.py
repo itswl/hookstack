@@ -154,6 +154,13 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
         ("tests/test_selftest.py",),
     ),
     (
+        "a writing node's declared blast radius is not checked",
+        "hookprobe/hookprobe/posture.py",
+        '        return "wider-than-declared" if beyond(kube, aws, declared) else "within-declared-radius"',
+        '        return "within-declared-radius"',
+        ("tests/test_posture.py",),
+    ),
+    (
         "the selftest counts a check it could not run as a pass",
         "hookprobe/hookprobe/selftest.py",
         '    ran = [c for c in checks if c["held"] is not None]',

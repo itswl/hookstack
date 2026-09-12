@@ -44,6 +44,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         # wants the pass says so, and nobody else pays a surprise model run.
         "consolidate_at": 0,
         "remediation_allowlist": None,
+        "blast_radius": None,
         "remediation_high_risk_allowlist": None,
         "remediation_cooldown_seconds": remediation.COOLDOWN_SECONDS,
         "coalesce_window_seconds": 1800,

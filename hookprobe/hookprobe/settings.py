@@ -218,6 +218,15 @@ class Settings:
     # proposals collect and nothing executes, which is the shipping posture.
     remediation_allowlist: Path | None
 
+    # The blast radius a WRITING node declares about itself: one measured line
+    # per entry, exactly as /v1/posture reports it. A `danger-only` runner is
+    # allowed to write by design, so until this existed there was nothing for
+    # `enforce` to compare its credentials against and it started with whatever
+    # it held. Unset keeps that behaviour — an upgrade must not brick a node
+    # that ran yesterday. Ignored under `readonly`, where the declaration is
+    # "nothing" and already enforced.
+    blast_radius: Path | None
+
     # The second gate, for steps the report itself called high risk: a `high`
     # step must full-match a pattern in BOTH files. Deny by default in the same
     # direction as the first — a high-risk step with no high-risk file is
@@ -454,6 +463,7 @@ class Settings:
             coalesce_window_seconds=max(0, _int("HOOKPROBE_COALESCE_WINDOW_SECONDS", 1800)),
             consolidate_at=max(0, _int("HOOKPROBE_CONSOLIDATE_AT", 5)),
             remediation_allowlist=_path_env("HOOKPROBE_REMEDIATION_ALLOWLIST"),
+            blast_radius=_path_env("HOOKPROBE_BLAST_RADIUS"),
             remediation_high_risk_allowlist=_path_env("HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST"),
             remediation_cooldown_seconds=max(0, _int("HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS", _cooldown_default())),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),

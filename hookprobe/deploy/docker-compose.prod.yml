@@ -226,6 +226,7 @@ services:
       # line, deny-by-default. Unset = proposals collect, nothing runs.
       # Mount it read-only beside the other operator config.
       HOOKPROBE_REMEDIATION_ALLOWLIST: ${HOOKPROBE_REMEDIATION_ALLOWLIST:-}
+      HOOKPROBE_BLAST_RADIUS: ${HOOKPROBE_BLAST_RADIUS:-}
       # The second gate, for steps the report itself called high risk: a
       # `high` step must full-match a pattern in BOTH files. Unset = every
       # high-risk step is refused, which is the deny-by-default direction —

@@ -188,6 +188,15 @@ _TEENS = {
     "二十六": 26,
     "二十七": 27,
 }
+# Twenty-through-twenty-nine, composed rather than typed. This map was extended
+# by hand at twenty-six, twenty-seven and again at twenty-eight — and the last
+# time the checker at least FAILED on the word it could not read rather than
+# silently matching nothing, which is the only reason it was caught. Composing
+# the tens removes the chore instead of paying it once more per boundary.
+_UNITS_EN = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+_UNITS_ZH = "一二三四五六七八九"
+_TEENS.update({f"twenty-{word}": 20 + i for i, word in enumerate(_UNITS_EN, 1)})
+_TEENS.update({f"二十{char}": 20 + i for i, char in enumerate(_UNITS_ZH, 1)})
 _NUMBER_WORDS = {
     **{
         w: i

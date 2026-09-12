@@ -572,6 +572,12 @@ services:
       HOOKPROBE_RETURN_SECRET: ${WORK_RETURN_SECRET:?set WORK_RETURN_SECRET in .env}
       # The whole reason this container exists as a separate service.
       HOOKPROBE_BASH_GUARD: danger-only
+      # The blast radius this node declares about itself: one measured line per
+      # entry, exactly as /v1/posture reports it. Empty means the posture check
+      # records what the credential can do and judges none of it — which is
+      # what a writing node has always done, and the reason `enforce` meant
+      # nothing here. Pin what you saw and a credential that grows refuses.
+      HOOKPROBE_BLAST_RADIUS: ${HOOKPROBE_BLAST_RADIUS:-}
       HOOKPROBE_AGENT_NAME: work runner
       HOOKPROBE_AGENT_ROLE: does the thing an approved plan describes — the one node a person hands work to, and the only one not on readonly
       AWS_CONFIG_FILE: /data/aws/config

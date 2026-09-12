@@ -199,7 +199,9 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         # procedure it died in the middle of stops claiming to be running.
         # Before the first run: are the credentials as narrow as the posture
         # says? Under enforce a wider-than-declared runner does not come up.
-        await posture.on_startup(settings.workdir, settings.bash_guard, settings.posture_check)
+        await posture.on_startup(
+            settings.workdir, settings.bash_guard, settings.posture_check, radius=settings.blast_radius
+        )
         service.recover_orphans()
         service.sweep_interrupted_remediations()
 

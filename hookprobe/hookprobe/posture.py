@@ -212,9 +212,47 @@ async def check_aws(run: Runner) -> dict[str, Any]:
     return record
 
 
-def verdict(bash_guard: str, kube: dict[str, Any], aws: dict[str, Any]) -> str:
+def declared_radius(path: Path | None) -> set[str] | None:
+    """The blast radius an operator accepted for a WRITING node, or None.
+
+    One measured line per entry, exactly as `/v1/posture` reports it, `#` for
+    comments. The workflow is deliberately "pin what you saw": start the node,
+    read the measurement, paste the lines you meant to grant. From then on a
+    credential that gains anything new refuses to start under `enforce`.
+
+    None — no file — leaves the writing posture exactly as it was, `recorded`.
+    An upgrade must not brick a node that was running yesterday, the same rule
+    a proposal stamped before the freshness cursor existed gets.
+    """
+    if path is None:
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        # Unreadable is NOT "no declaration": an operator who wrote a file and
+        # a typo in its path would silently get the unjudged posture back.
+        return set()
+    return {line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")}
+
+
+def beyond(kube: dict[str, Any], aws: dict[str, Any], declared: set[str] | None) -> list[str]:
+    """What the credential can do that nobody wrote down. Empty when undeclared."""
+    if declared is None:
+        return []
+    measured = list(kube.get("mutating") or []) + list(aws.get("allowed") or [])
+    return sorted(item for item in measured if item not in declared)
+
+
+def verdict(bash_guard: str, kube: dict[str, Any], aws: dict[str, Any], declared: set[str] | None = None) -> str:
     if bash_guard != "readonly":
-        return "recorded"  # a writing posture: the check documents the blast radius, it does not judge it
+        # A writing posture is ALLOWED to write — the question is never "can it"
+        # but "is it wider than what somebody agreed to". Undeclared, there is
+        # nothing to answer that with and this stays an observation, which is
+        # what it was for a year. Declared, `enforce` means the same thing on
+        # both postures: the credential may not exceed the declaration.
+        if declared is None:
+            return "recorded"
+        return "wider-than-declared" if beyond(kube, aws, declared) else "within-declared-radius"
     if not kube.get("present") and not aws.get("present"):
         return "no-credentials"
     if kube.get("mutating") or aws.get("allowed"):
@@ -224,15 +262,22 @@ def verdict(bash_guard: str, kube: dict[str, Any], aws: dict[str, Any]) -> str:
     return "readonly-confirmed"
 
 
-async def check(bash_guard: str, run: Runner = run_cli) -> dict[str, Any]:
+async def check(bash_guard: str, run: Runner = run_cli, declared: set[str] | None = None) -> dict[str, Any]:
     kube, aws = await check_kube(run), await check_aws(run)
-    return {
+    record = {
         "checked_at": round(time.time(), 3),
         "bash_guard": bash_guard,
         "kube": kube,
         "aws": aws,
-        "verdict": verdict(bash_guard, kube, aws),
+        "verdict": verdict(bash_guard, kube, aws, declared),
     }
+    if declared is not None:
+        # On the record, not only in the refusal: an operator reading
+        # /v1/posture needs to see the size of the declaration they pinned and
+        # exactly what exceeded it.
+        record["declared_radius"] = len(declared)
+        record["beyond_declared"] = beyond(kube, aws, declared)
+    return record
 
 
 def summary(record: dict[str, Any]) -> str:
@@ -263,9 +308,21 @@ def read(workdir: Path) -> dict[str, Any] | None:
         return None
 
 
-async def on_startup(workdir: Path, bash_guard: str, mode: str, run: Runner = run_cli) -> dict[str, Any] | None:
+async def on_startup(
+    workdir: Path,
+    bash_guard: str,
+    mode: str,
+    run: Runner = run_cli,
+    radius: Path | None = None,
+) -> dict[str, Any] | None:
     """Check, record, announce — and under `enforce`, refuse to start a runner
-    whose credentials are wider than it declares."""
+    whose credentials are wider than it declares.
+
+    `radius` is the declaration a WRITING node makes about itself. Without it a
+    `danger-only` runner has always started whatever it held, because "allowed
+    to write" left nothing to compare against; with it, `enforce` means the same
+    sentence on both postures.
+    """
     if mode not in MODES:
         mode = "enforce"  # a typo in the switch that decides whether to refuse must fail closed
     record: dict[str, Any]
@@ -273,12 +330,18 @@ async def on_startup(workdir: Path, bash_guard: str, mode: str, run: Runner = ru
         record = {"checked_at": round(time.time(), 3), "bash_guard": bash_guard, "verdict": "skipped", "mode": mode}
         write(workdir, record)
         return record
-    record = await check(bash_guard, run)
+    declared = declared_radius(radius)
+    record = await check(bash_guard, run, declared)
     record["mode"] = mode
     write(workdir, record)
     line = summary(record)
     if record["verdict"] == "wider-than-declared":
-        detail = (record["kube"].get("mutating") or []) + (record["aws"].get("allowed") or [])
+        # For a declared writing node the useful detail is the EXCESS, not the
+        # whole measurement: "these four are new" is a paste away from fixed,
+        # where a list of everything it holds is a list nobody reads.
+        detail = record.get("beyond_declared") or (
+            (record["kube"].get("mutating") or []) + (record["aws"].get("allowed") or [])
+        )
         if mode == "enforce":
             logger.error("REFUSING TO START — credentials wider than declared posture: %s · %s", line, detail)
             raise PostureViolation(f"credentials wider than declared posture {bash_guard!r}: {detail}")
