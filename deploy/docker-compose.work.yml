@@ -299,7 +299,17 @@ services:
       # forgetting `--profile`; there is only ever one in that file anyway.
       AWS_SHARED_CREDENTIALS_FILE: /data/secrets/aws/credentials
       AWS_CONFIG_FILE: /data/secrets/aws/config
-      AWS_PROFILE: ${PROBE_PLAN_AWS_PROFILE:-}
+      # Required, not empty-defaulted, and it is the same variable the work
+      # node below requires. An empty AWS_PROFILE is NOT an absent one —
+      # measured in this container rather than assumed:
+      #     unset  profile <not set>  Type: None  Location: None
+      #     empty  profile            Type: env   Location: ['AWS_PROFILE', ...]
+      # The CLI reads "" as a profile NAMED the empty string and looks for it in
+      # the mounted credentials file, so a silent .env gap gives this node a
+      # broken selector rather than the default chain. `deploy_preflight` catches
+      # an empty _SECRET or _TOKEN; a selector is neither, and empty is broken
+      # here rather than merely off.
+      AWS_PROFILE: ${PROBE_PLAN_AWS_PROFILE:?set PROBE_PLAN_AWS_PROFILE in .env}
     volumes:
       - ../work-data/probe-plan:/data
       # ── the two conventions that keep this file from growing a line per
