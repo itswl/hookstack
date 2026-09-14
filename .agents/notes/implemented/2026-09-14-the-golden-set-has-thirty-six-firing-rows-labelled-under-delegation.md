@@ -64,8 +64,17 @@ the provider-pause instance. Each was resolved on its merits: the review line is
 a set, because the prompt's own medium anchor ("a threshold crossed with room
 before it hurts") describes a review state; the silence row lost its wake label
 under the one-instance rule; the pause row kept its label and left the scored
-set, because the prompt is what should move there — see the companion note on
-the prompt.
+set, because the prompt is what should move there — see the proposed note on
+the prompt, whose first draft was tried the same afternoon and pulled back.
+
+Two more rows were settled by the deploy gate itself, which replayed the set
+twice more: a certificate instance whose relay-shape body garbles its own
+threshold sentence became a set (medium or low — on that text, low is
+defensible); an observability-blackout instance became a set (high or medium —
+the prompt's "degraded-but-serving dependency" describes it); and a
+one-hour-silence instance whose body is an emoji and a title joined the held
+rows, because the judge cannot see from that text whether the silence is
+abnormal, and neither can a label.
 
 ## Consequences
 
@@ -76,7 +85,7 @@ the prompt.
 - Over-escalation is reported at 9 of 36 firing rows and over-delivered wake at
   2 of 19 scored; neither is gated, and both are now visible per replay where
   they were invisible before.
-- The held row is the first test of the next prompt; it flips to reviewed when
-  the new prompt passes it twice at three votes.
+- The two held rows are the first tests of the next prompt; each flips to
+  reviewed when a prompt passes it twice at three votes.
 - The digest decision is dated and numbered; a week with the same shape on the
   page is its own argument.

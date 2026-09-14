@@ -145,12 +145,7 @@ different from each other. Anchor each one against what it displaces:
   critical  live loss happening now: users cannot transact, data is being lost
             or exposed. If a whole week produced one such alert, that is the one
   high      broken or breaching and it will not fix itself: a service failing
-            its users, money moving wrongly, access that should not exist, or
-            an outside provider's enforcement line crossed — an account-level
-            bounce, complaint or abuse threshold past which the provider may
-            suspend the account or pause sending. That is high even while the
-            provider has not acted yet: it will not fix itself, and every user
-            of that channel fails the moment it does
+            its users, money moving wrongly, access that should not exist
   medium    a real defect with room before it hurts: a threshold crossed with
             days of headroom, a degraded-but-serving dependency, a business
             event that breached a policy limit but completed
@@ -201,7 +196,7 @@ Trust boundary:
 # header records the version and a hash of this string. A prompt edited without
 # a bump fails the scenario gate on the hash, so the reminder cannot be missed —
 # see scripts/assert_prompt_contract.py.
-_SYSTEM_PROMPT_VERSION = "hookjudge-judge-v2"
+_SYSTEM_PROMPT_VERSION = "hookjudge-judge-v1"
 
 
 # Keyword matchers, applied to INBOUND alert text — patterns, not display copy.
