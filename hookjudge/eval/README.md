@@ -199,10 +199,17 @@ repository is public.
 
 Since 2026-08-24 this is not a runner somebody remembers to invoke:
 `scripts/deploy.sh` replays the dataset through the judge image about to ship
-(`--route ai --gate --votes 3`), between build and up. Two errors stop the
+(`--route ai --gate --votes 5`), between build and up. Two errors stop the
 deploy — `missed` (judged below every accepted severity) and `false_quiet`
 (wake=no against a label that says a person must act; the pipe DROPS cards on
 that answer). Everything else is reported and allowed through.
+
+Five votes since 2026-09-14, three before: at three, a set of thirty-six
+firing rows went red on a different borderline row in five replays out of
+five, and a five-vote replay of the same set the same afternoon showed the
+row that had failed twice answering high five times out of five. The extra
+two votes cost about seven cents a deploy and buy back the difference between
+a gate people trust and one they learn to skip.
 
 Since 2026-09-14 the run also passes `--record /data/eval-gate.json`, which
 writes the verdict beside the ledger — counts, the vote count, a timestamp and

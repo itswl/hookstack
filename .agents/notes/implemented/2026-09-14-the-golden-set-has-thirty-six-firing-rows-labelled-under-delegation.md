@@ -85,7 +85,13 @@ abnormal, and neither can a label.
 - Over-escalation is reported at 9 of 36 firing rows and over-delivered wake at
   2 of 19 scored; neither is gated, and both are now visible per replay where
   they were invisible before.
-- The two held rows are the first tests of the next prompt; each flips to
-  reviewed when a prompt passes it twice at three votes.
+- One row stays held (the title-only silence instance; unstable under both
+  prompts at five votes). The pause row was un-held the same afternoon: the
+  five-vote A/B answered it high five times out of five under the live prompt,
+  so its two-of-three medium was the coin. The deploy gate therefore moved to
+  **five votes** (deploy.sh, effective from the deploy after the one that ships
+  it) — about seven cents more per deploy for a gate that stops flipping on
+  borderline rows, which is exactly the SKIP_EVAL habit the eval README warns
+  against.
 - The digest decision is dated and numbered; a week with the same shape on the
   page is its own argument.

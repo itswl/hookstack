@@ -351,7 +351,7 @@ Three things to know before trusting one:
   first two rejections.
 - **Measure it against the golden set before it judges anything real.** The
   question is never "does it answer" but "does it miss": run
-  `scripts/eval.py --route ai --gate --votes 3` with the local base in the
+  `scripts/eval.py --route ai --gate --votes 5` with the local base in the
   environment and read `missed` and `false_quiet` beside the rule floor's. No
   number for a 7B model has been recorded here yet; the floor is the backstop
   either way, and a degraded verdict still says it degraded.

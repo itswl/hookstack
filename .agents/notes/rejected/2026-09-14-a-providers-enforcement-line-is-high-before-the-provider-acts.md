@@ -1,15 +1,15 @@
 ---
 title: An outside provider's enforcement line crossed is high before the provider acts, and the prompt says so
-status: proposed
+status: rejected
 date: 2026-09-14
 scope: hookjudge
 ---
 
 ## Decision
 
-Proposed, tried once, and pulled back the same afternoon — the prompt in
-production is still `hookjudge-judge-v1`. The proposal: the `high` anchor gains
-one clause: an outside provider's enforcement line crossed — an account-level
+Rejected on the A/B replay it asked for, the same afternoon; the prompt in
+production is `hookjudge-judge-v1` and stays so. The proposal was: the `high`
+anchor gains one clause: an outside provider's enforcement line crossed — an account-level
 bounce, complaint or abuse threshold past which the provider may suspend the
 account or pause sending — is high even while the provider has not acted yet,
 because it will not fix itself and every user of that channel fails the moment
@@ -46,13 +46,22 @@ ours: a capacity threshold with days of headroom stays medium, a security-update
 notice from the same provider stays low, and both have golden rows of their own
 to hold them there.
 
+**The A/B, 2026-09-14 14:44–14:49 UTC.** All sixty host rows, five votes each,
+same image, the candidate prompt mounted over the module. Under v1 the
+provider-pause row answered high five times out of five — the two-of-three
+medium that started this was the coin, not the prompt. Under the draft, six
+rows moved DOWN one or two levels (a datasource-no-data instance, a daily-P&L
+instance, a probe, a marked test, the observability blackout, a test-broker CPU
+row) and none moved up; three wake answers changed; unstable rows went from 17
+to 20. A clause written about one provider line made the whole scale more
+conservative. That is the opposite of its purpose and a change nobody asked
+for, so it is rejected rather than left proposed.
+
 ## Consequences
 
-- To ship this: replay the whole host set at five votes under v1 and under the
-  draft, on the same day, and compare per row — the pause row (held) must move
-  to high and the blackout row must not move at all. `replay_ledger.py` is the
-  shape of that comparison; the golden set is the corpus.
-- Until then the held golden row (the pause instance) stays documented, not
-  gating, and the mail family's account-line rules keep the v1 answers — mostly
-  high in production, medium on a coin.
-- Watch `over_escalated` on the replay either way: 9 of 36 firing rows under v1.
+- The pause row is reviewed again and gating; the gate now runs at five votes,
+  which is the lesson the replay actually taught — see the labelling note.
+- The opinion files are kept beside the labelling backups on the host. Anyone
+  reopening this starts from them, not from a fresh draft.
+- The mail family's account-line rules keep the v1 answers, which at five votes
+  are high.
