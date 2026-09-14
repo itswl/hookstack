@@ -30,12 +30,15 @@ with the thin qualifier in the same breath as the green.
 Both gates are 2026-09-14 gates being graded on the evidence they leave.
 
 The decline list went live at midday and, as this is written, has declined
-nothing: the one mail-family title that fired since carries no family prefix,
-so the pattern written for it did not match. The only way to learn that was to
-grep a container log for a line that was not there. The weekly page, whose whole
-job is to say what the week cost and what was avoided, would have read the same
-whether the list had saved twenty investigations or matched nothing at all —
-the "recorded and unread" failure the posture-refusal line was added to fix on
+nothing: no title it names has fired since. The only way to learn even that was
+to grep a container log for a line that was not there — and when a lone
+un-prefixed mail title in the run list was read as a live rule the list had
+missed, nothing could say otherwise. It was a by-hand door test from two weeks
+earlier; the live rules of that family all carry the prefix and the list names
+every one of them. The weekly page, whose whole job is to say what the week
+cost and what was avoided, would have read the same whether the list had saved
+twenty investigations, matched nothing, or been misjudged as broken — the
+"recorded and unread" failure the posture-refusal line was added to fix on
 2026-09-09, one step worse: not even recorded. A gate whose effect is invisible
 is a gate that gets removed the next time somebody trims configuration, and a
 gate that silently matches nothing is one nobody fixes.
