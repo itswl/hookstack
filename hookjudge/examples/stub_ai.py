@@ -14,7 +14,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 VERDICTS = {
     "gateway": {
-        "summary": "Payment gateway 5xx reached 8.1% over five minutes, mostly upstream timeouts; checkout success is already affected",
+        "summary": (
+            "Payment gateway 5xx reached 8.1% over five minutes, mostly upstream "
+            "timeouts; checkout success is already affected"
+        ),
         "importance": "critical",
         "event_type": "business",
         "impact_scope": "checkout and top-up paths, all users",
