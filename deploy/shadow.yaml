@@ -23,7 +23,11 @@
 #     model bill for no new information"). That objection was about the WW lane
 #     specifically. The chain below funds an investigation per judged
 #     critical/high alert, which is the bill this buys knowingly; the probe's
-#     escalate_levels and budget breaker are what bound it.
+#     escalate_levels and budget breaker are what bound it. Since 2026-09-14 the
+#     WW lane itself is switched off (WebhookWise runtime setting
+#     DEEP_ANALYSIS_ENABLED=false, decided after measuring one rule investigated
+#     through both doors seconds apart), so this chain is the only escalation
+#     path and the objection above is history.
 #   - a judge return door. Live now via SHADOW_RETURN_URL on this host; judges b
 #     and c stay hardcoded to "none" because a comparison arm that answered back
 #     would be a second copy of the chain, not a second opinion.

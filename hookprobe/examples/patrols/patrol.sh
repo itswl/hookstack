@@ -29,7 +29,7 @@
 # not about a scheduled self-review with no alert behind it; but widening the
 # shadow's reach to carry a patrol would trade a narrow config for a cron job's
 # convenience, which is the wrong way round. So the patrol goes in the way the
-# platform's own deep-analysis leg already goes in: POST /hooks/agent.
+# platform's deep-analysis leg comes in: POST /hooks/agent.
 #
 # What that mode gives up, stated plainly: the pipe's accounting, dedup and
 # silence. A patrol is scheduled, singular and wanted, so all three are close to

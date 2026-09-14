@@ -213,8 +213,8 @@ def main(argv: list[str]) -> int:
 
     if cfg.escalation is not None:
         problems.append(
-            "escalation is configured — the investigator already serves the platform's own deep-analysis "
-            "leg, so a second door onto the same runs doubles the model bill for no new information"
+            "escalation is configured — the verdict-to-me route already funds the investigator per judged "
+            "critical/high alert, so a second door onto the same runs doubles the model bill for no new information"
         )
 
     # Both brains, every event: the fan-out IS the experiment. A judge added to

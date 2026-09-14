@@ -40,7 +40,7 @@ docker exec hookrelay python -c "import yaml;c=yaml.safe_load(open('/etc/hookrel
 ```
 
 If there is not, use `PATROL_TARGET=probe`, which posts to the investigator's own
-door — the same one the platform's deep-analysis leg already uses:
+door — the same one a platform's deep-analysis leg comes in through:
 
 ```bash
 PATROL_TARGET=probe HOOKPROBE_TOKEN=... /opt/.../patrol.sh /opt/.../patrols/self-review.md "Patrol: self review"

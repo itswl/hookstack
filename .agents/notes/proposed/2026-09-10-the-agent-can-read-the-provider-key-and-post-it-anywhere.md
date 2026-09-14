@@ -48,7 +48,8 @@ nobody listed.
 **Why it is not deployed, which is the whole content of this note.** A container
 cannot be on a docker network without also getting that network's route out. The
 production investigator must stay reachable INBOUND at `hookprobe:8088` — from
-the pipe, and from the platform's own deep-analysis leg — so it must stay on
+the pipe, and until 2026-09-14 from the platform's own deep-analysis leg,
+since switched off — so it must stay on
 `hookstack_net`, and being on `hookstack_net` is exactly what gives it the
 egress this would remove. Two ways through, both needing a decision:
 

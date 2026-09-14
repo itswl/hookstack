@@ -20,9 +20,16 @@ is real but concentrated, so it is answered in order:
    relay's own `verdict-to-me → to-probe` route, which this note once recorded
    as deliberately absent. Measured 2026-09-14: one condition reached the
    investigator 35 times through the relay route and 19 times through the
-   deep-analysis door in five days, so the same rule is escalated twice. Which
-   leg keeps the job is the decision to take before any per-rule config is
-   written — coordinate before touching either.
+   deep-analysis door in five days, so the same rule was escalated twice —
+   ten of those nineteen within fifteen minutes of a relay-leg run, median gap
+   six seconds. **Decided 2026-09-14: the relay leg keeps the job.** It is the
+   leg that carries the judge's wake axis, the recoveries, the coalescing and
+   the cards; the platform leg carried none of those and its runs could never
+   see a recovery. The platform leg was switched off the same day through
+   WebhookWise's runtime-settings plane (`DEEP_ANALYSIS_ENABLED` override
+   `false`, actor and time recorded there; revert = delete the override), so
+   per-rule escalation config now has one home again: this deployment's
+   `verdict-to-me → to-probe` route plus the probe's `HOOKPROBE_ESCALATE_LEVELS`.
 3. Verdict-gated escalation (a pipe route on the judge-notify return, keyed
    on wake) gets a design note only if the long tail appears: judge-only
    signal spread across too many rules for per-rule config to chase.
