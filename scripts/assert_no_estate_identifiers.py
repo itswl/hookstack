@@ -73,6 +73,30 @@ def load_patterns() -> tuple[tuple[str, str], ...] | None:
 EXEMPT: set[str] = {".estate-identifiers.example"}
 
 
+def scanned_tree() -> str:
+    """WHICH tree the verdict is about — always the working tree at ROOT.
+
+    Stated in the output because it cannot be inferred from it. On 2026-09-12
+    this script was run inside four detached worktrees checked out at release
+    tags, to find out which tags carried an estate identifier, and it printed a
+    clean verdict for all four — while one of those tags held a real project
+    name. `ROOT` is this file's own location and `tracked_files()` runs
+    `git ls-files` with `cwd=ROOT`, so it had scanned the same working tree
+    four times and said so to nobody.
+
+    The capability to scan an arbitrary ref is NOT added here; what is added is
+    the check declining to be misread. A tool that cannot look somewhere should
+    name where it did look, rather than leave a reader to assume it obeyed them.
+    """
+    try:
+        head = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        head = "unknown"
+    return f"the working tree at {ROOT.name}@{head}"
+
+
 def tracked_files() -> list[str]:
     # Fixed argv, no shell, no untrusted input: the only "input" is the
     # repository itself. `git` is resolved from PATH, as everywhere else here.
@@ -134,7 +158,10 @@ def main() -> int:
     # pasted: a paste that loses tabs drops those rules silently, because a line
     # without a tab cannot say why it is forbidden and is skipped. Printing the
     # count turns "I hope the secret is right" into something a log can answer.
-    print(f"no estate identifiers: {len(tracked_files())} tracked file(s) clean against {len(rules)} rule(s)")
+    print(
+        f"no estate identifiers: {len(tracked_files())} tracked file(s) in {scanned_tree()} "
+        f"clean against {len(rules)} rule(s)"
+    )
     return 0
 
 
