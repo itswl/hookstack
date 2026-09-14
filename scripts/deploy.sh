@@ -29,6 +29,10 @@ cd "$ROOT"
 
 if [ "${DEPLOY_NO_PULL:-}" != "1" ]; then
   git pull --ff-only origin main
+  # bash reads this file as it runs, so a pull that changed it would finish on
+  # the OLD script's tail — on 2026-09-14 a new eval flag did not run until the
+  # deploy after the one that shipped it. Re-run the fresh copy, no second pull.
+  exec env DEPLOY_NO_PULL=1 bash "$0" "$@"
 fi
 echo "deploying $(git log --oneline -1)"
 
