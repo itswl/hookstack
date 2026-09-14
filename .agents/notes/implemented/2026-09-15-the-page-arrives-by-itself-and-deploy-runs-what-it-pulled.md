@@ -15,8 +15,10 @@ and posts its headline lines (measured, priced, golden gate, kept from a
 person, loudest condition, declined at the door, budget) through the pipe's
 watch door at level `low`, origin `weekly-page`, kind `report`. The host
 crontab fires it Monday 01:05 UTC. Tokens are read from the running
-containers' environment; the deployment `.env` is mounted read-only for the
-door secret.
+containers' environment; only the door secret is copied into a file the
+container can read (the deployment `.env` is mode 600 and holds every other
+secret this stack has — the first run mounted it whole and the container could
+not read it, which was the right failure).
 
 `scripts/deploy.sh` re-executes itself after its own `git pull`, with the pull
 skipped, so the deploy runs the script it just fetched.

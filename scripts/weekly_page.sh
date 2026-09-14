@@ -13,7 +13,7 @@
 #   WEEKLY_PAGE_DIR=/where/pages/go scripts/weekly_page.sh
 #
 # Tokens are read from the running containers' environment, not typed into a
-# crontab line; the deployment's .env is mounted read-only for the door secret.
+# crontab line; only the door secret is copied into a file the container can read.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,7 +29,7 @@ JUDGE_TOKEN="$(token hookjudge HOOKJUDGE_READ_TOKEN || true)"
 PROBE_TOKEN="$(token hookprobe HOOKPROBE_TOKEN || true)"
 
 run=(docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose.shadow.yml
-  run --rm --no-deps -T -v "$ROOT/scripts:/scripts:ro" -v "$ROOT/.env:/deployment/.env:ro")
+  run --rm --no-deps -T -v "$ROOT/scripts:/scripts:ro")
 
 "${run[@]}" -e "HOOKRELAY_READ_TOKEN=$RELAY_TOKEN" -e "HOOKJUDGE_READ_TOKEN=$JUDGE_TOKEN" -e "HOOKPROBE_TOKEN=$PROBE_TOKEN" \
   hookjudge python3 /scripts/cost_report.py \
@@ -54,6 +54,13 @@ print(json.dumps({"title": f"Weekly page · {stamp}", "detail": detail, "level":
                   "origin": "weekly-page", "kind": "report"}, ensure_ascii=False))
 PY
 )"
-printf '%s' "$signal" | "${run[@]}" -e HOOKSTACK_ENV_FILE=/deployment/.env \
+# Only the door secret crosses into the container, in a file it can read: the
+# deployment .env is mode 600 and holds every other secret this stack has.
+secret_file="$(mktemp)"
+trap 'rm -f "$secret_file"' EXIT
+grep -E '^WATCH_INGEST_SECRET=' .env > "$secret_file"
+chmod 644 "$secret_file"
+printf '%s' "$signal" | "${run[@]}" -v "$secret_file:/deployment/.env:ro" \
+  -e HOOKSTACK_ENV_FILE=/deployment/.env \
   -e HOOKSTACK_WATCH_DOOR=http://hookrelay:8100/hook/watch \
   hookjudge python3 /scripts/post_watch_signal.py
