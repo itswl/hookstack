@@ -70,8 +70,13 @@ and this follows that rule.
   this change; `HOOKPROBE_RETENTION_*` does not touch it. If it ever matters, it
   is a `tail` away.
 - `eval-gate.json` is one file on the judge's volume, overwritten per deploy.
-  The first deploy after this change fills it in; until then `/status` reads
-  `eval_gate: null` and the page says so.
+- The deploy that shipped this did NOT write it. `deploy.sh` pulls at line 31
+  and runs the gate at line 63, and bash had already buffered the old script
+  before the pull replaced it: the gate ran from the new checkout's `eval.py`
+  but with the old command line, so no `--record`. A change to `deploy.sh`
+  takes effect one deploy late — every time. The record was filled in by
+  running the same gate line by hand on the same image (nine firing rows,
+  green, thin); the next deploy overwrites it the ordinary way.
 - The page grows two lines. hookjudge spends 13 of its ceiling lines on the
   status field; hookrelay is untouched.
 - Follow-up the page now makes obvious rather than solves: the gate stays thin
