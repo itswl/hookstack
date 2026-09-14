@@ -211,7 +211,11 @@ def resolve(
     # in, it was the item's newest failed run — reading as `needs_human` on work
     # a recovery had just closed — and it collected a "was this worth it?". What
     # it reports is already on the item, as the artifact of its own proposal.
-    runs = [run for run in runs if not (run.meta or {}).get("notice")]
+    #
+    # Synthetic runs go with them, for the opposite reason: a drill or a by-hand
+    # check is real machinery on unreal work, and a board that counted them
+    # would report work nobody opened as closed without anyone stepping in.
+    runs = [run for run in runs if not (run.meta or {}).get("notice") and not (run.meta or {}).get("synthetic")]
     by_session_proposals: dict[str, list[dict[str, Any]]] = {}
     for row in proposals or []:
         by_session_proposals.setdefault(str(row.get("session_key") or ""), []).append(row)

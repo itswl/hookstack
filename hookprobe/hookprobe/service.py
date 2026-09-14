@@ -296,6 +296,11 @@ class RunService:
             origin=origin,
         )
         run.meta = dict(payload.get("_meta") or {})
+        if session_key.startswith(tuple(self._settings.synthetic_key_prefixes)):
+            # A drill, a by-hand check, a wiring test: real machinery on unreal
+            # work. Marked once here so every reader — the distiller, the re-fire
+            # anchor, the weekly page, the board — can leave it out.
+            run.meta["synthetic"] = True
         if not run.meta.get("title"):
             derived = alert_meta_from_prompt(message)
             if derived.get("title"):
@@ -484,6 +489,7 @@ class RunService:
             and not (other.meta or {}).get("notice")
             and not (other.meta or {}).get("patrol")
             and not (other.meta or {}).get("consolidates")
+            and not (other.meta or {}).get("synthetic")
         ]
         anchor = next((other for other in condition if not (other.meta or {}).get("answered_from_runbook")), None)
         if anchor is None or anchor.status != COMPLETED or anchor.error or not anchor.text:
@@ -552,6 +558,7 @@ class RunService:
                 if str(other.meta.get("title") or "") == title
                 and other.ruling == "useful"
                 and not other.meta.get("answered_from_runbook")
+                and not other.meta.get("synthetic")
                 and other.session_key != exclude
                 and (other.ruled_at or 0) >= cutoff
             ),
@@ -1415,11 +1422,25 @@ class RunService:
         steps = remediation.extract(run.text)
         if steps:
             try:
-                proposal_id = remediation.propose(
-                    self._settings.workdir, run.session_key, steps, remediation.cursor(run)
-                )
-                run.meta["remediation_proposal"] = proposal_id
-                logger.info("remediation proposed session=%s id=%s steps=%s", run.session_key, proposal_id, len(steps))
+                pending = remediation.pending_duplicate(self._settings.workdir, steps)
+                if pending:
+                    # One pending proposal per procedure. Five identical read-only
+                    # checks were parked in one day on production, each with its
+                    # own button and its own 24h clock, for one condition re-firing
+                    # every four hours; the sixth would have been the same again.
+                    run.meta["remediation_proposal"] = pending
+                    run.meta["remediation_proposal_reused"] = True
+                    logger.info(
+                        "remediation already pending session=%s id=%s steps=%s", run.session_key, pending, len(steps)
+                    )
+                else:
+                    proposal_id = remediation.propose(
+                        self._settings.workdir, run.session_key, steps, remediation.cursor(run)
+                    )
+                    run.meta["remediation_proposal"] = proposal_id
+                    logger.info(
+                        "remediation proposed session=%s id=%s steps=%s", run.session_key, proposal_id, len(steps)
+                    )
             except OSError:
                 logger.warning("could not park the remediation proposal", exc_info=True)
         self._record_turn(run, result)
@@ -1440,6 +1461,13 @@ class RunService:
             # is the failure the whole distil feature exists to end.
             run.distilled = {"skipped": "a review of the investigator is not a runbook"}
             logger.info("auto-distill skipped session=%s reason=patrol", run.session_key)
+        elif run.meta.get("synthetic"):
+            # A drill or a by-hand check produced this report. Three of the twenty
+            # runbooks on the production shelf were distilled from exactly such
+            # runs — a shell-command test, a chat about a test environment — and
+            # were loaded as instruction into every later investigation.
+            run.distilled = {"skipped": "a synthetic run teaches nothing"}
+            logger.info("auto-distill skipped session=%s reason=synthetic", run.session_key)
         else:
             # After the turn is recorded, because the runbook is assembled from it.
             distill_loop.auto_distill(run, result, self._settings)

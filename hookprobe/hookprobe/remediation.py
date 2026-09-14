@@ -177,6 +177,37 @@ def list_all(workdir: Path, limit: int = 100) -> list[dict[str, Any]]:
     return rows
 
 
+def procedure_key(steps: list[dict[str, Any]]) -> tuple[str, ...]:
+    """What makes two proposals the same procedure: their commands, sorted.
+
+    The half of a step that holds — see `cooldown_keys`: a model labels one
+    target three ways across runs while the command it writes stays identical.
+    """
+    commands = (str(step.get("command") or "").strip() for step in steps)
+    return tuple(sorted(command for command in commands if command))
+
+
+def pending_duplicate(workdir: Path, steps: list[dict[str, Any]], now: float | None = None) -> str | None:
+    """The id of a proposal still waiting for a person that IS this procedure.
+
+    Only `proposed` rows inside the approval window count: an executed, rejected
+    or expired one is history, and the same procedure proposed after it is a
+    fresh question. Five identical read-only checks parked in one day on
+    production — one condition re-firing every four hours, each run parking its
+    own row with its own button and its own 24h clock — are what this stops.
+    """
+    wanted = procedure_key(steps)
+    if not wanted:
+        return None
+    current = time.time() if now is None else now
+    for row in list_all(workdir, limit=200):
+        if str(row.get("status") or "") != "proposed" or stale(row, current):
+            continue
+        if procedure_key(list(row.get("steps") or [])) == wanted:
+            return str(row.get("id") or "") or None
+    return None
+
+
 def save(workdir: Path, row: dict[str, Any]) -> None:
     _write(workdir / DIRNAME / f"{row['id']}.json", row)
 

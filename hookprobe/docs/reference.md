@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (76)
+## Environment (78)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -31,6 +31,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_RULING_URL` | *(empty)* | Where a retrospective condition ruling goes, and the credential for that ONE door |
 | `HOOKPROBE_RULING_SECRET` | *(empty)* | Signs the rulings this service posts to the judge |
 | `HOOKPROBE_MEMORY_AUTO_APPLY` | `True` | Apply a suggested environment fact without waiting for a person, when its SHAPE cannot act (hookprobe.suggestions._UNSAFE) |
+| `HOOKPROBE_DECLINE_PATTERNS` | *(empty)* | Path to a file of full-match regexes over alert TITLES this node declines at its event door — the families it has no instrument for; unset = decline nothing |
 | `HOOKPROBE_BUDGET_GATES_AGENT_DOOR` | `False` | Whether the breaker above also refuses NEW sessions on /hooks/agent |
 | `HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS` | `600` | Floor between two alarm sends, so a storm cannot page repeatedly |
 | `HOOKPROBE_HOST` | `0.0.0.0` | Address the service binds to |
@@ -81,6 +82,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_BASH_GUARD` | *(empty)* | Which posture the bash guard takes |
 | `HOOKPROBE_POSTURE_CHECK` | *(empty)* | Whether the credentials are checked against that declaration at startup (posture.py): enforce refuses to start a runner declared readonly whose kubeconfig or AWS identity can mutat… |
 | `HOOKPROBE_TELEMETRY_RECEIVER` | *(empty)* | Whether this service receives its own runs' OpenTelemetry (telemetry.py): on points the CLI at POST /otel/v1/{logs,metrics} here, keeps a per-run timing record under {workdir}/tele… |
+| `HOOKPROBE_SYNTHETIC_KEY_PREFIXES` | *(empty)* | Session-key prefixes that mark a run SYNTHETIC — a drill, a by-hand check, a wiring test — so it is kept out of the books: no runbook is distilled from it, it anchors no re-fire an… |
 | `HOOKPROBE_SESSION_KEY` | *(empty)* | Which run this tool call belongs to, so the flight recorder can say |
 | `HOOKPROBE_GATE_AUDIT` | *(empty)* | Where the flight recorder writes |
 | `HOOKPROBE_GATE_MODE` | `READONLY` | The posture this call is judged against, passed by the adapter from bash_guard |

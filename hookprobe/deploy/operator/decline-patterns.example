@@ -1,0 +1,19 @@
+# Alert TITLES this investigator declines at its event door: the families it
+# has no instrument for. One full-match regex per line; `#` starts a comment.
+# Hot-read on every event. A line that is not a regex is logged and ignored —
+# the list fails open, because a typo must not silently stop every
+# investigation.
+#
+# Copy to decline-patterns.txt beside this file (gitignored: the real list
+# names real alert families) and set, in the deployment's .env,
+#   HOOKPROBE_DECLINE_PATTERNS=/etc/hookprobe/operator/decline-patterns.txt
+# — the production compose mounts this directory there, read-only.
+#
+# Why decline rather than investigate and report "unreachable": the platform
+# upstream excluded these families from deep analysis on 2026-09-01 for exactly
+# this reason, and the pipe's escalation leg funded twenty investigations of one
+# of them the following week — 70% of the investigator's bill — each ending in
+# a report that could only restate the alert.
+\[MAIL\].*
+\[QUEUE\].*
+ExampleCloud_ManagedDB_.*

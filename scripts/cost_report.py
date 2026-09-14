@@ -226,7 +226,14 @@ def compute(
 
     if isinstance(runs, list):
         since = now - hours * 3600
-        week = [r for r in runs if float(r.get("finished_at") or 0) >= since and r.get("status") != "running"]
+        # Synthetic runs — drills, by-hand checks — are left out: real machinery on
+        # unreal work, and one of them once counted here as a re-fire answered
+        # from a runbook.
+        week = [
+            r
+            for r in runs
+            if float(r.get("finished_at") or 0) >= since and r.get("status") != "running" and not r.get("synthetic")
+        ]
         costs = [float(r.get("cost_usd") or 0) for r in week]
         answered = [r for r in week if r.get("answered_from_runbook")]
         paid_runs = [r for r in week if float(r.get("cost_usd") or 0) > 0]

@@ -44,3 +44,9 @@ hookjudge/eval/results/
 # `git add -A` will stage one.
 .estate-identifiers
 .estate-identifiers.bak*
+
+# Operator files the production compose mounts read-only into the investigator
+# (hookprobe/deploy/operator/): the decline list names real alert families.
+# Only the .example files are shared.
+hookprobe/deploy/operator/*
+!hookprobe/deploy/operator/*.example

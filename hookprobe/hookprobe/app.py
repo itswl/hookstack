@@ -140,6 +140,9 @@ def _summary(run: Run) -> dict[str, Any]:
         # A re-fire answered from a runbook cost $0 and ran no engine; the weekly
         # cost report counts these as what the runbook loop avoided.
         "answered_from_runbook": bool(run.meta.get("answered_from_runbook")),
+        # A drill or a by-hand check: real machinery on unreal work. The weekly
+        # page and the board leave it out, and it anchors nothing.
+        "synthetic": bool(run.meta.get("synthetic")),
         "return_status": run.return_status,
         # What the run left for the next one: {"installed": name} or
         # {"skipped": reason}, empty when the loop is off.

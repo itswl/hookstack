@@ -987,3 +987,81 @@ def test_a_procedure_that_really_ran_verifies_its_work_item(tmp_path):
     row["status"], row["results"] = remediation.FAILED, [{"exit": 1}]
     (item,) = work.resolve([run], proposals=[row])
     assert not item.verified
+
+
+# ── one pending proposal per procedure ───────────────────────────────────────
+
+
+def test_a_procedure_already_waiting_is_found_by_its_commands(tmp_path):
+    """Five identical read-only checks were parked in one day on production, one
+    per re-fire of one condition, each with its own button and its own clock.
+    The procedure is its commands — the half of a step that holds — so a second
+    run proposing the same commands finds the row already waiting."""
+    steps = [{"action": "check", "command": "echo status --account x", "target": "账户状态", "risk": "low"}]
+    pid = remediation.propose(tmp_path, "probe:alerts:1", steps)
+
+    relabelled = [{"action": "verify", "command": "echo status --account x", "target": "account status", "risk": "low"}]
+    assert remediation.pending_duplicate(tmp_path, relabelled) == pid, "same command, different label: same procedure"
+    assert remediation.pending_duplicate(tmp_path, [{"command": "echo other"}]) is None
+    assert remediation.pending_duplicate(tmp_path, [{"action": "x"}]) is None, "no commands is no procedure"
+
+
+def test_history_is_not_a_pending_duplicate(tmp_path):
+    """Executed, rejected or expired rows are history; the same procedure proposed
+    after them is a fresh question with its own button."""
+    steps = [{"action": "check", "command": "echo status", "risk": "low"}]
+    executed = remediation.propose(tmp_path, "probe:alerts:1", steps)
+    row = remediation.load(tmp_path, executed)
+    row["status"] = "executed"
+    remediation.save(tmp_path, row)
+    assert remediation.pending_duplicate(tmp_path, steps) is None
+
+    expired = remediation.propose(tmp_path, "probe:alerts:2", steps)
+    row = remediation.load(tmp_path, expired)
+    row["created_at"] = time.time() - (remediation.APPROVAL_WINDOW_SECONDS + 60)
+    remediation.save(tmp_path, row)
+    assert remediation.pending_duplicate(tmp_path, steps) is None
+
+    live = remediation.propose(tmp_path, "probe:alerts:3", steps)
+    assert remediation.pending_duplicate(tmp_path, steps) == live
+
+
+def test_a_re_fire_reuses_the_pending_proposal_instead_of_parking_a_sixth(tmp_path):
+    """The service-level rule: the second run's report proposes the same
+    procedure, and the run points at the row already waiting — one file, one
+    button, one clock — and says it did."""
+    import asyncio
+    from dataclasses import replace
+
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    report = (
+        'ok\n```remediation\n[{"action":"check","command":"echo status","target":"the account","risk":"low"}]\n```\n'
+    )
+
+    async def finished(service, key):
+        for _ in range(300):
+            run = service.get(key)
+            if run and run.finished:
+                return run
+            await asyncio.sleep(0.01)
+        raise AssertionError(f"{key} never finished")
+
+    async def scenario():
+        engine = FakeEngine()
+        engine.result = replace(engine.result, text=report)
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        service.start({"message": "alert", "sessionKey": "k1", "_meta": {"title": "T"}})
+        first = await finished(service, "k1")
+        service.start({"message": "alert again", "sessionKey": "k2", "_meta": {"title": "T"}})
+        second = await finished(service, "k2")
+        await service.shutdown()
+        return first, second
+
+    first, second = asyncio.run(scenario())
+    assert first.meta["remediation_proposal"] == second.meta["remediation_proposal"]
+    assert second.meta.get("remediation_proposal_reused") is True
+    assert "remediation_proposal_reused" not in first.meta
+    assert len(remediation.list_all(tmp_path)) == 1, "one procedure, one row"

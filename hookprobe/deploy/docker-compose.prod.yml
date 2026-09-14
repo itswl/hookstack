@@ -107,6 +107,13 @@ services:
       - "127.0.0.1:8088:8088"
     volumes:
       - ../../probe-data:/data
+      # Operator-written files the service reads and the agent must never
+      # write: the decline list today, the remediation allowlists when they
+      # are armed. Read-only, and outside /data on purpose — /data is the
+      # agent's workdir, and a gate keyed on a file the agent can edit is not
+      # a gate. Only the .example files are tracked; the real list names real
+      # alert families.
+      - ../../hookprobe/deploy/operator:/etc/hookprobe/operator:ro
       # The read-only user skills layer. Point HOOKPROBE_USER_SKILLS at any
       # skills library (e.g. a repo's .agents/skills, so the skills version with
       # the service they drive); the default is an empty host dir so the mount is
@@ -154,6 +161,11 @@ services:
       HOOKPROBE_AGENT_NAME: ${HOOKPROBE_AGENT_NAME:-investigator}
       HOOKPROBE_AGENT_ROLE: ${HOOKPROBE_AGENT_ROLE:-investigates the alerts the judge says are worth a person, read-only, and reports back through the pipe}
       HOOKPROBE_ESCALATE_LEVELS: ${HOOKPROBE_ESCALATE_LEVELS:-critical,high}
+      # The families this node has no instrument for, declined at the event
+      # door: a file of full-match regexes over alert titles, mounted read-only
+      # from hookprobe/deploy/operator/ (see volumes). Unset = decline nothing.
+      HOOKPROBE_DECLINE_PATTERNS: ${HOOKPROBE_DECLINE_PATTERNS:-}
+      HOOKPROBE_SYNTHETIC_KEY_PREFIXES: ${HOOKPROBE_SYNTHETIC_KEY_PREFIXES:-}
       # Who may continue an investigation by replying in its chat thread: sender
       # ids (ou_…), or `*` for anyone the bridge forwards from the group. Empty =
       # nobody, which is the default until an operator decides.

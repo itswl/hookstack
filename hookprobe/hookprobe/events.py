@@ -41,7 +41,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from hookprobe import actions, remediation
+from hookprobe import actions, decline, remediation
 from hookprobe.runs import Run
 from hookprobe.service import NotResumableError, RunBusyError, RunService
 from hookprobe.settings import Settings
@@ -677,6 +677,20 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
             return {"status": "skipped", "reason": f"level {level or 'unknown'} below escalation bar"}
         if not title:
             raise HTTPException(status_code=400, detail="event has no title")
+        # The families this node has no instrument for are declined here, not
+        # investigated and then reported unreachable. Rule-driven escalations
+        # only: a person asking from chat has said they want a run.
+        if not chat_sender:
+            declined_by = decline.decline_reason(settings.decline_patterns, title)
+            if declined_by:
+                logger.info(
+                    "declined at the door: no instrument for this family title=%r pattern=%r", title[:80], declined_by
+                )
+                return {
+                    "status": "skipped",
+                    "reason": "declined: this node has no instrument for this family",
+                    "pattern": declined_by,
+                }
 
         source = str(event.get("source") or "unknown")[:_SOURCE_MAX]
         event_id = event.get("event_id")

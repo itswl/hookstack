@@ -338,6 +338,23 @@ class Settings:
     automation_tiers: dict[str, str]
     # Severities that may wake a person, as a comma-separated list.
     escalate_levels: frozenset[str]
+    # Path to a file of full-match regexes over alert TITLES this node declines
+    # at its event door — the families it has no instrument for; unset = decline
+    # nothing. One per line, `#` comments, hot-read on every event like the
+    # remediation allowlist, and it fails OPEN on a bad line: a typo must not
+    # silently stop every investigation. Rule-driven escalations only — a run a
+    # person opened from chat is never declined, and /hooks/agent is untouched.
+    # Measured before it existed (2026-09-14): the platform upstream had excluded
+    # four families from investigation because the investigator cannot reach
+    # their cloud account, and the pipe's own escalation leg then funded twenty
+    # investigations of one of them in a week, 70% of the investigator's spend.
+    decline_patterns: Path | None
+    # Session-key prefixes that mark a run SYNTHETIC — a drill, a by-hand check,
+    # a wiring test — so it is kept out of the books: no runbook is distilled
+    # from it, it anchors no re-fire answer and vouches for nothing, and the
+    # weekly page and the work board leave it out. Comma-separated. Three of the
+    # twenty runbooks on the production shelf were distilled from such runs.
+    synthetic_key_prefixes: frozenset[str]
     # The closed vocabulary this instance is allowed to CONCLUDE with, so a
     # report can steer the next hop instead of only being read. Empty (default)
     # is off. The set is declared by the operator and the agent picks from
@@ -504,6 +521,12 @@ class Settings:
             memory_auto_apply=_flag("HOOKPROBE_MEMORY_AUTO_APPLY", True),
             automation_tiers=automation.parse_tiers(os.environ.get("HOOKPROBE_AUTOMATION_TIERS", "")),
             escalate_levels=frozenset(part.strip().lower() for part in levels.split(",") if part.strip()),
+            decline_patterns=_path_env("HOOKPROBE_DECLINE_PATTERNS"),
+            synthetic_key_prefixes=frozenset(
+                part.strip()
+                for part in (os.environ.get("HOOKPROBE_SYNTHETIC_KEY_PREFIXES") or "manual:,drill:").split(",")
+                if part.strip()
+            ),
             verdicts=frozenset(
                 part.strip().lower() for part in os.environ.get("HOOKPROBE_VERDICTS", "").split(",") if part.strip()
             ),
