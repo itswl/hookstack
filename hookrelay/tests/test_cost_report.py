@@ -456,3 +456,26 @@ def test_the_golden_gate_verdict_is_dated_on_the_page() -> None:
 
     page = cost_report.render(cost_report.compute(JUDGE, None, None, None, hours=168, now=NOW))
     assert "**Golden gate**: no recorded run on this host" in page, "absence is a sentence, not a green"
+
+
+def test_the_loudest_condition_is_named_beside_the_wake_count() -> None:
+    """196 wake=yes cards a week read as a spread; 174 of them from one flapping
+    rule is a different fact, and the digest decision of 2026-08-12 waits on
+    exactly that fact — so the page names it."""
+    recent = [{"title": "rule-a", "wake_someone": "yes"}] * 8 + [
+        {"title": "rule-b", "wake_someone": "yes"},
+        {"title": "rule-b", "wake_someone": "no"},
+        {"title": "rule-c", "wake_someone": "yes"},
+    ]
+    r = cost_report.compute(dict(JUDGE, recent=recent), None, None, None, hours=168, now=NOW)
+    assert r["judge"]["attention"]["loudest"] == {"title": "rule-a", "wake_yes": 8}
+    page = cost_report.render(r)
+    assert "**Loudest condition**: 8 of the 11 wake=yes cards (73%) came from one condition — rule-a" in page
+    assert "the number the 2026-08-12 digest decision waits on" in page
+
+    spread = [{"title": f"rule-{i}", "wake_someone": "yes"} for i in range(11)]
+    page = cost_report.render(cost_report.compute(dict(JUDGE, recent=spread), None, None, None, hours=168, now=NOW))
+    assert "1 of the 11 wake=yes cards (9%)" in page and "digest decision waits on" not in page
+
+    page = cost_report.render(cost_report.compute(JUDGE, None, None, None, hours=168, now=NOW))
+    assert "Loudest condition" not in page, "no listing, no claim"

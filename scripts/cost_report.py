@@ -182,6 +182,15 @@ def compute(
         }
         floor = int((routes.get("rule") or {}).get("count") or 0)
         att = s.get("attention") or {}
+        # The one condition behind most of the week's delivered cards, from the
+        # recent listing. The 2026-08-12 note left the digest question open until
+        # "repeated cards from one condition" hurt; this is that number, named,
+        # so the decision can be taken from the page rather than from a grep.
+        loud: dict[str, int] = {}
+        for row in judge.get("recent") if isinstance(judge.get("recent"), list) else []:
+            if isinstance(row, dict) and str(row.get("wake_someone") or "").lower() == "yes":
+                loud[str(row.get("title") or "?")] = loud.get(str(row.get("title") or "?"), 0) + 1
+        loudest = max(loud.items(), key=lambda kv: kv[1]) if loud else None
         interruptions = int(att.get("interruptions") or 0)
         conditions = int(att.get("conditions") or 0)
         wake_no = int(att.get("wake_no") or 0)
@@ -204,6 +213,7 @@ def compute(
                 "repeats": int(att.get("repeats") or 0),
                 "wake_yes": int(att.get("wake_yes") or 0),
                 "wake_no": wake_no,
+                "loudest": {"title": loudest[0], "wake_yes": loudest[1]} if loudest else None,
                 "likely_flapping": int(att.get("likely_flapping") or 0),
                 "mattered": int(att.get("mattered") or 0),
                 "did_not_matter": int(att.get("did_not_matter") or 0),
@@ -550,6 +560,19 @@ def render(r: dict[str, Any]) -> str:
         out += [
             f"- **Interruptions**: {a['interruptions']} across {a['conditions']} conditions · repeats {a['repeats']} ({_pct(a['repeats'], a['interruptions'])}) · likely flapping {a['likely_flapping']}",
             f"- **Kept from a person**: wake=no {a['wake_no']} · wake=yes {a['wake_yes']} → **{a['delivered_per_condition']} delivered cards per condition**",
+        ]
+        if a.get("loudest"):
+            loud = a["loudest"]
+            out.append(
+                f"- **Loudest condition**: {loud['wake_yes']} of the {a['wake_yes']} wake=yes cards "
+                f"({_pct(loud['wake_yes'], a['wake_yes'])}) came from one condition — {loud['title']}"
+                + (
+                    "; one condition is most of the week's cards, which is the number the 2026-08-12 digest decision waits on"
+                    if a["wake_yes"] and loud["wake_yes"] * 2 >= a["wake_yes"]
+                    else ""
+                )
+            )
+        out += [
             f"- **Worth, as ruled by people**: mattered {a['mattered']} · did not matter {a['did_not_matter']} · ruled {a['ruled']}"
             + (f" · quiet regrets {a['quiet_regrets']}" if a.get("quiet_regrets") not in (None, "") else ""),
         ]
