@@ -32,10 +32,10 @@ hookstack 是一个面向 Agent 的工作执行平台。它把团队本来就有
 - **一张人可以裁定的卡片。** 值得、不值得、静默、批准 —— 每个按钮在卡片发出前就签了名，每次点击都记录在案，每个裁定都回流到 runbook 和每周那一页。
 - **调查会留下东西。** 跑完的运行把自己蒸馏成 runbook；同一条件再次出现是追加一个 case；被人裁定为"不值得"的条件，之后的重复触发直接由 runbook 以 $0 回答。对一次进行中的调查追问，成本约为重新跑一次的十分之一，实测。
 - **修复，人在环里。** 调查员提出方案；一次签名的批准才会逐步对照允许清单执行，以 argv 而非 shell 运行，落在一个凭证就是全部爆炸半径的节点上。
-- **每次判定都计价，每周都算账。** 一页读三份账本，把实测和反事实并排放：路由省掉了什么、runbook 答掉了什么、线上臂和影子臂比起来如何 —— 量不出来的，用文字说明。
+- **每次判定都计价，每周都算账。** 一页读三份账本，把实测和反事实并排放：路由省掉了什么、runbook 答掉了什么 —— 量不出来的，用文字说明。
 - **每个事件一页。** `/audit/{event_id}` 列出每一跳的摘要、决策步骤、投递和人的动作；`/trace/{id}` 回放正文；`/timeline` 把链条归成事件。
 - **关得住的 agent。** 默认只读并在启动时实测、工具闭集清单、会出声拒绝的预算上限，以及二十八条结构性边界，每一条都写明它**挡不住**什么（[containment](https://github.com/itswl/hookstack/blob/main/docs/containment.md)）。
-- **你的模型，你的群。** 调查员接任何 Anthropic 方言的端点，判官接任何 OpenAI 兼容的端点，包括本地模型；影子臂在真实流量上对比 prompt 或模型，再决定是否上线。卡片经管道与桥之间的一个小协议送达聊天工具（[docs/bridge-protocol.md](https://github.com/itswl/hookstack/blob/main/docs/bridge-protocol.md)）—— 今天是飞书，钉钉、企微是自带插件，换一个平台就是再写一个桥 —— 或者作为签名 JSON 送到任意 webhook；OpenTelemetry 默认开启，而且由调查器自己接收：每次运行的时间瀑布就在它自己的页面上，不用部署任何 collector；指定了 collector 就原样再转发一份。
+- **你的模型，你的群。** 调查员接任何 Anthropic 方言的端点，判官接任何 OpenAI 兼容的端点，包括本地模型。卡片经管道与桥之间的一个小协议送达聊天工具（[docs/bridge-protocol.md](https://github.com/itswl/hookstack/blob/main/docs/bridge-protocol.md)）—— 今天是飞书，钉钉、企微是自带插件，换一个平台就是再写一个桥 —— 或者作为签名 JSON 送到任意 webhook；OpenTelemetry 默认开启，而且由调查器自己接收：每次运行的时间瀑布就在它自己的页面上，不用部署任何 collector；指定了 collector 就原样再转发一份。
 
 ## 十分钟，不要 key，不花钱
 
@@ -146,9 +146,7 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 ## 产品演进蓝图与高级模式
 
 1.  **提案型自愈（Remediation Loops）—— 第一版已落地。** 调查员提出方案；卡片带 `action_secret` 签名的 `[批准执行]` / `[拒绝]` 按钮；批准后逐步对照允许清单执行，以 argv 而非 shell 运行，落在一个姿态为 `danger-only`、凭证就是全部爆炸半径的节点上 —— 启动时的姿态检查把它读回来（[怎么做](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md#security-model)）。还没做的是凭证：目前没有任何已部署节点持有写主体，所以这条闭环是用只读凭证端到端演练过的 —— 批准这条路端到端验证过了，对真实系统的效果还没有。
-2.  **SRE 专属的 RLHF（自我进化）：** 捕获人类在卡片上点击“其实不重要”、“确认恢复”的反馈，自动转换为标准 JSONL 数据集。该数据集自动输入本地模型 SFT 循环或 Prompt 微调，让大脑随使用时间的增加而越来越懂企业的业务。
-3.  **本地轻量级模型（vLLM/Ollama）验证：** 判官本来就对任何 OpenAI 兼容端点说话，所以“零 API 成本、完全离线”的 Qwen/Llama 决策脑今天就是一份配置（[怎么配](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)）。还没做的是**测量**：黄金集从未在 7B 模型上跑过，而 `missed` / `false_quiet` 这两个数字，是离线部署在信任它之前必须先看到的。
-4.  **影子对比审计视图（Shadow Brain Audit）：** 支持多个 Prompt 版本或模型分支并行评测，并在 Web 控制台上进行可视化分歧度对比审计，在无生产风险前提下测试最佳决策质量。
+2.  **本地轻量级模型（vLLM/Ollama）验证：** 判官本来就对任何 OpenAI 兼容端点说话，所以“零 API 成本、完全离线”的 Qwen/Llama 决策脑今天就是一份配置（[怎么配](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)）。还没做的是**测量**：黄金集从未在 7B 模型上跑过，而 `missed` / `false_quiet` 这两个数字，是离线部署在信任它之前必须先看到的。
 
 ---
 

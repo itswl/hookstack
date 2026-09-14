@@ -15,9 +15,14 @@ is real but concentrated, so it is answered in order:
    afternoon). The wake axis is the one that matters and the one the old
    rulings lack.
 2. Rules a person confirms wake=yes earn explicit per-rule escalation —
-   configuration in the deployment's escalation leg (on production that is
-   the WebhookWise deep-analysis side; the relay escalation route is
-   deliberately absent there — coordinate before touching).
+   configuration in the deployment's escalation leg. On production that leg
+   now has TWO homes, not one: the WebhookWise deep-analysis door and the
+   relay's own `verdict-to-me → to-probe` route, which this note once recorded
+   as deliberately absent. Measured 2026-09-14: one condition reached the
+   investigator 35 times through the relay route and 19 times through the
+   deep-analysis door in five days, so the same rule is escalated twice. Which
+   leg keeps the job is the decision to take before any per-rule config is
+   written — coordinate before touching either.
 3. Verdict-gated escalation (a pipe route on the judge-notify return, keyed
    on wake) gets a design note only if the long tail appears: judge-only
    signal spread across too many rules for per-rule config to chase.
