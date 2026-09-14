@@ -12,7 +12,7 @@ and `meta.alert_name` in practice):
       "meta":     {"alert_name", "source", "importance", "brain", "rule_name",
                    "correlation_id", "is_recovery", "is_periodic_reminder",
                    "event_id", "timestamp"},
-      "analysis": {"summary", "event_type", "impact_scope", "confidence"},
+      "analysis": {"summary", "detail", "event_type", "impact_scope", "confidence"},
       "identity": {"project": "...", "env": "prod", ...},   # meaningful values
       "links":    [{"text": "...", "url": "..."}],
       "actions":  [{"text": "Acknowledge", "value": {...}}]   # pre-signed by the brain

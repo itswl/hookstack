@@ -35,3 +35,13 @@ inputs are the contract, and a second brain joining the loop has to speak it.
   same contract stated once more in configuration.
 - Adding a field to the renderer means updating every member that returns results;
   the dialect is shared, so it is a stack-scoped change, never a local one.
+
+## Addendum 2026-09-14
+
+`analysis.detail` is an optional fourth key: the source alert's own words
+(annotation text, else the platform message), which the platform sends since
+its 0.3.1. The `ww` source's body template reads summary and detail together, so
+the judge weighs the fact the rule's author wrote rather than an emoji and a
+rule name — the platform answers 77% of alerts from cache or by rule, and for
+those the summary IS the rule name. Optional on purpose: a member that does not
+send it changes nothing, and the template's missing-key rule renders it empty.

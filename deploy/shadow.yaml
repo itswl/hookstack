@@ -45,7 +45,13 @@ sources:
   - name: ww
     secret: ${WW_RELAY_SECRET}
     title: "{meta.alert_name}"
-    body: "{analysis.summary}"
+    # The platform's one-line summary, then the alert's own words
+    # (`analysis.detail`, since the platform's 0.3.1). For the 77% of alerts the
+    # platform answers from cache or by rule the summary is an emoji and the rule
+    # name, and the judge was judging a title: the same business rule came back
+    # low 88 times and high 81 in thirty days. A missing key renders empty and
+    # the trailing newline is stripped, so an older platform sends what it did.
+    body: "{analysis.summary}\n{analysis.detail}"
     level: "{meta.importance}"
     # The platform states the fact; top-level flag, never a field (identity).
     recovery: "{meta.is_recovery}"
