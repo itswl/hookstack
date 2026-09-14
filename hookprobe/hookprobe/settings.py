@@ -387,6 +387,22 @@ class Settings:
     # runbook is a stronger claim than declining a not-worth-it one.
     runbook_answer_days: int
 
+    # Hours after a REAL investigation of a condition during which a re-fire at
+    # the same level, with no recovery recorded between, is answered from that
+    # investigation's report at $0 instead of buying a cold start; 0 = off (the
+    # default). The third $0 path, and the one that waits for no ruling: the TTL
+    # path above needs a standing not_worth_it and the vouched path needs a
+    # useful press on the last real run, and on the deployment this was measured
+    # on (2026-09-14) both verdicts arrive days after the money is spent — one
+    # SES condition re-fired every four hours through a day, six cold starts
+    # reached one finding, and the patrol's `useful` landed two days later. The
+    # coalesce window (minutes) never sees a four-hour cadence. Bounded: at most
+    # `service._REFIRE_ANSWER_MAX` answers per real run, a runbook answer never
+    # anchors the next, a changed level or a recovery ends the licence, and
+    # `{"force": true}` bypasses it. Never a silence — the re-fire still delivers
+    # a card, marked $0 and answered_from_runbook, naming the run it answered from.
+    refire_answer_hours: int
+
     # Volume retention (days): case files and engine transcripts older than
     # this are pruned daily. 0 keeps everything — the case files are the
     # agent's episodic memory, so deletion is a choice, never a surprise.
@@ -460,6 +476,7 @@ class Settings:
             ruling_ttl_days=max(0, _int("HOOKPROBE_RULING_TTL_DAYS", 14)),
             ruling_reverify_days=max(1, _int("HOOKPROBE_RULING_REVERIFY_DAYS", 7)),
             runbook_answer_days=max(0, _int("HOOKPROBE_RUNBOOK_ANSWER_DAYS", 0)),
+            refire_answer_hours=max(0, _int("HOOKPROBE_REFIRE_ANSWER_HOURS", 0)),
             coalesce_window_seconds=max(0, _int("HOOKPROBE_COALESCE_WINDOW_SECONDS", 1800)),
             consolidate_at=max(0, _int("HOOKPROBE_CONSOLIDATE_AT", 5)),
             remediation_allowlist=_path_env("HOOKPROBE_REMEDIATION_ALLOWLIST"),

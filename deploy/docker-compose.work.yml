@@ -285,6 +285,7 @@ services:
       # Empty keeps the documented default either way.
       HOOKPROBE_SELFTEST_EVERY_SECONDS: ${HOOKPROBE_SELFTEST_EVERY_SECONDS:-}
       HOOKPROBE_RUNBOOK_ANSWER_DAYS: ${HOOKPROBE_RUNBOOK_ANSWER_DAYS:-}
+      HOOKPROBE_REFIRE_ANSWER_HOURS: ${HOOKPROBE_REFIRE_ANSWER_HOURS:-}
       HOOKPROBE_SKILLS: ${HOOKPROBE_SKILLS:-}
       # Lives inside the volume above, so it is hot-editable like the system
       # prompt and needs no mount of its own. Servers reachable from a container

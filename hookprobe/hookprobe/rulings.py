@@ -131,6 +131,9 @@ def payloads(rulings: list[dict[str, Any]], *, model: str, secret: str) -> list[
 # credential and a new failure mode, for a fact this process produced itself.
 
 _LOCAL = "rulings.jsonl"
+# A person's ruling carries `ruled_by: operator:<id>` and an identity in the
+# same `source|title` shape the patrol builds, with this word as the source.
+OPERATOR_PREFIX = "operator"
 
 
 def condition_of(identity: str) -> str:
@@ -144,14 +147,31 @@ def condition_of(identity: str) -> str:
     return (parts[1] if len(parts) >= 2 else parts[0]).strip()
 
 
-def record_local(workdir: Path, filed: list[dict[str, Any]], *, model: str) -> None:
+def record_local(workdir: Path, filed: list[dict[str, Any]], *, model: str, ruled_by: str = "") -> None:
     """Append what was filed, before it is sent. Local first, so a judge outage
     (or an unconfigured one) does not also cost this service its own memory of
-    the verdicts it produced."""
+    the verdicts it produced. `ruled_by` is written only when given: a patrol's
+    row carries the model that inferred it and nothing else, which is how the
+    rows have always read."""
     path = Path(workdir) / _LOCAL
+    author = {"ruled_by": ruled_by} if ruled_by else {}
     with path.open("a", encoding="utf-8") as handle:
         for row in filed:
-            handle.write(json.dumps({**row, "model": model, "at": time.time()}, ensure_ascii=False) + "\n")
+            handle.write(json.dumps({**row, **author, "model": model, "at": time.time()}, ensure_ascii=False) + "\n")
+
+
+def file_operator_ruling(workdir: Path, *, title: str, verdict: str, why: str, by: str) -> dict[str, Any]:
+    """A PERSON's standing verdict on a condition, recorded locally with its author.
+
+    The identity is `operator|<title>` so `condition_of` reads it exactly like a
+    patrol's, and `ruled_by` is what `standing` ranks on. Local only, on purpose:
+    the judge's `ai_rulings` table holds the model's opinions under the model's
+    name, and a person's does not belong there under one. Returns the row as
+    written. Validation is the caller's — this writes what it is handed.
+    """
+    row = {"identity": f"{OPERATOR_PREFIX}|{title.strip()}", "verdict": verdict, "why": why.strip()[:_WHY_MAX]}
+    record_local(workdir, [row], model="", ruled_by=f"{OPERATOR_PREFIX}:{by.strip() or 'console'}")
+    return row
 
 
 def standing(workdir: Path, title: str, *, ttl_days: int) -> dict[str, Any] | None:
@@ -162,6 +182,13 @@ def standing(workdir: Path, title: str, *, ttl_days: int) -> dict[str, Any] | No
     weekly patrol refiles every ruling it can still defend, so a verdict
     nothing has refiled is a verdict whose evidence nobody has looked at
     lately, and the gate must not keep citing it.
+
+    One exception to latest-wins, and it is the whole reason a person can file
+    one: a ruling with `ruled_by` under `operator` outranks every inferred one
+    for the same condition WHILE IT IS CURRENT. Without that, the Thursday
+    patrol's refile would overwrite a decision with an inference and the
+    person would never learn why the gate stopped listening. Past its TTL the
+    person's ruling lapses like any other and the newest current row answers.
     """
     if ttl_days <= 0 or not title.strip():
         return None
@@ -172,6 +199,7 @@ def standing(workdir: Path, title: str, *, ttl_days: int) -> dict[str, Any] | No
         return None
     wanted = title.strip()
     newest: dict[str, Any] | None = None
+    newest_operator: dict[str, Any] | None = None
     for line in lines:
         try:
             row = json.loads(line)
@@ -183,6 +211,12 @@ def standing(workdir: Path, title: str, *, ttl_days: int) -> dict[str, Any] | No
             continue
         if newest is None or float(row.get("at") or 0) >= float(newest.get("at") or 0):
             newest = row
-    if newest is None or (time.time() - float(newest.get("at") or 0)) > ttl_days * 86400:
-        return None
-    return newest
+        if str(row.get("ruled_by") or "").startswith(OPERATOR_PREFIX) and (
+            newest_operator is None or float(row.get("at") or 0) >= float(newest_operator.get("at") or 0)
+        ):
+            newest_operator = row
+    horizon = time.time() - ttl_days * 86400
+    for candidate in (newest_operator, newest):
+        if candidate is not None and float(candidate.get("at") or 0) >= horizon:
+            return candidate
+    return None

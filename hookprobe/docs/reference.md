@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (75)
+## Environment (76)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -50,6 +50,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_RULING_TTL_DAYS` | `14` | How long a standing not_worth_it ruling may keep answering a condition from its runbook instead of starting a paid engine run |
 | `HOOKPROBE_RULING_REVERIFY_DAYS` | `7` | A ruled-useless condition still gets a REAL investigation this often — the evidence behind a ruling goes stale, and a gate that never re-checks would keep citing last month's case… |
 | `HOOKPROBE_RUNBOOK_ANSWER_DAYS` | `0` | How long a condition whose last REAL investigation a person ruled USEFUL may answer a re-fire from that runbook instead of paying for a cold-start, 0 = off (the default) |
+| `HOOKPROBE_REFIRE_ANSWER_HOURS` | `0` | Hours after a REAL investigation of a condition during which a re-fire at the same level, with no recovery recorded between, is answered from that investigation's report at $0 inst… |
 | `HOOKPROBE_COALESCE_WINDOW_SECONDS` | `1800` | Storm coalescing at the event door: a re-fire of the same alert (same source + title, new event id) within this many seconds continues the existing investigation instead of funding… |
 | `HOOKPROBE_CONSOLIDATE_AT` | `5` | Consolidation: at this many accumulated cases, a runbook triggers one agent run that drafts a curated procedure from the case pile |
 | `HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS` | `_cooldown_default()` | Remediation cooldown: seconds a target is left alone after a procedure has acted on it |
@@ -87,7 +88,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_GATE_HOME` | *(empty)* | The agent's home, whose settings and skills are inputs too |
 | `HOOKPROBE_GATE_MCP` | *(empty)* | The MCP tools this node may call, from mcp_tools |
 
-## Routes (60)
+## Routes (61)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -124,6 +125,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/v1/remediations` | Open remediation proposals, newest first, each saying whether it is still runnable |
 | POST | `/v1/remediations/{proposal_id}/approve` | The one click that makes anything run |
 | POST | `/v1/remediations/{proposal_id}/reject` | Refuse a parked proposal; it keeps its file, marked rejected |
+| POST | `/v1/rulings` | A person rules on a CONDITION — is this alert worth investigating again |
 | GET | `/v1/runs` | Finished runs, newest first |
 | POST | `/v1/runs/rulings` | File verdicts on several investigations at once — was this RUN worth it |
 | GET | `/v1/runs/{session_key}` | One run whole: turns, meta, ruling, cost |

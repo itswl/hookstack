@@ -392,7 +392,10 @@ buying a contradiction.
 of cases consolidate into one procedure; a condition with a standing
 *not-worth-it* ruling answers its re-fires from that runbook at no cost — and
 still earns a real investigation on a schedule, because a ruling nobody
-re-checks is a prejudice with a timestamp.
+re-checks is a prejudice with a timestamp. A re-fire a few hours after a real
+investigation, at the same level with no recovery between, is answered from
+that investigation instead of bought again, because on the deployment this was
+measured on the ruling arrives days after the money is spent.
 
 **Judgement quality itself.** A golden set of labelled production incidents
 replays through the judge's prompt on every deploy, and a prompt that

@@ -87,6 +87,17 @@ _RETRY_MESSAGE = (
 # needs a different number, it needs it for a reason worth writing down here.
 _RECOVERY_WINDOW_SECONDS = 24 * 3600
 
+# How many re-fires one real investigation may answer before the next re-fire
+# buys a real look regardless of the window. Fixed rather than configurable for
+# the same reason as the recovery window: an alert flapping every five minutes
+# with no recovery between would otherwise be answered from one report for the
+# whole window, and ten is enough to bend the SES-shaped curve (six re-fires a
+# day) without being a number anyone tunes.
+_REFIRE_ANSWER_MAX = 10
+# How much of the anchoring report a re-fire answer carries. The runbook slot
+# is 2500; the finding is the thing being reused, so it gets a little more.
+_STANDING_FINDING_MAX = 3000
+
 # One continuation per run, ever. The counter is persisted on the run, so a
 # process that crashes on every boot settles the second time instead of buying
 # a turn on each restart.
@@ -295,7 +306,11 @@ class RunService:
                 run.meta["meta_derived"] = "prompt"
         self._store.create(run)
         self._board_changed()
-        answer = None if payload.get("force") else (self._runbook_answer(run) or self._runbook_answer_verified(run))
+        answer = (
+            None
+            if payload.get("force")
+            else (self._runbook_answer(run) or self._runbook_answer_verified(run) or self._refire_answer(run))
+        )
         if answer is not None:
             self._finish_without_engine(run, answer)
             return run
@@ -403,6 +418,115 @@ class RunService:
                 "answered_from_runbook": True,
                 "how_to_reinvestigate": (
                     'POST /hooks/agent with {"force": true}; a real run also recurs once the window lapses'
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def _refire_answer(self, run: Run) -> str | None:
+        """Answer a re-fire of a condition this node investigated FOR REAL a few
+        hours ago from that investigation's report, instead of paying to derive
+        it again.
+
+        The third $0 path, and the one that waits for no ruling. The two above
+        wait for a verdict — a standing not_worth_it, or a useful press on the
+        last real run — and on the deployment this was measured on the verdict
+        arrives days after the money is spent: one SES condition re-fired every
+        four hours through 2026-09-07/08, six cold starts at $0.65–2.71 reached
+        one finding and five proposed the same read-only check, and the patrol's
+        `useful` landed on the Wednesday. The coalesce window is minutes and
+        never sees a four-hour cadence; this does.
+
+        Every clause is a reason to investigate ANYWAY, cheapest-first:
+
+        * off unless `refire_answer_hours` is set — answering from a report is a
+          claim about the world, and the default makes none;
+        * never for a patrol, a consolidation, a task or a brief, or anything a
+          person asked for in chat — a person asking deserves a run;
+        * the newest REAL run of the same (source, title) must be a clean,
+          completed one inside the window, and it is the anchor. A runbook answer
+          never anchors — only a run that looked vouches, or a chain of answers
+          would cite itself past the window and forever. A newer real run that
+          FAILED forfeits the anchor: the last look did not finish, so this one
+          must;
+        * the level must not have moved — a `high` that comes back `critical` is
+          a different question;
+        * no recovery may be recorded on the condition since the anchor started.
+          An alert that ended and fired again is a new episode. `record_recovery`
+          annotates the NEWEST run of the condition, which may be one of these
+          answers, so every run since the anchor is checked and not the anchor
+          alone;
+        * at most _REFIRE_ANSWER_MAX answers per anchor, so an alert flapping
+          every five minutes with no recovery still buys a real look.
+
+        Never a silence: the reply is a report that DELIVERS like any other,
+        marked answered-from-runbook and $0, carrying the standing finding, the
+        runbook when one exists, and how to force a real run. `meta.refire_of`
+        names the anchor so the board and the report agree on what answered.
+        """
+        hours = self._settings.refire_answer_hours
+        meta = run.meta or {}
+        title = str(meta.get("title") or "").strip()
+        if hours <= 0 or not title or meta.get("patrol") or meta.get("consolidates"):
+            return None
+        if str(meta.get("kind") or "alert") != "alert" or meta.get("asked_by") or meta.get("thread_root"):
+            return None
+        source = str(meta.get("source") or "")
+        level = str(meta.get("level") or "").strip().lower()
+        now = time.time()
+        condition = [  # newest first, like the store
+            other
+            for other in self._store.list_runs(limit=200)
+            if other.session_key != run.session_key
+            and str((other.meta or {}).get("title") or "") == title
+            and str((other.meta or {}).get("source") or "") == source
+            and not (other.meta or {}).get("notice")
+            and not (other.meta or {}).get("patrol")
+            and not (other.meta or {}).get("consolidates")
+        ]
+        anchor = next((other for other in condition if not (other.meta or {}).get("answered_from_runbook")), None)
+        if anchor is None or anchor.status != COMPLETED or anchor.error or not anchor.text:
+            return None
+        anchored_at = anchor.finished_at or anchor.created_at
+        if anchored_at < now - hours * 3600:
+            return None
+        if str((anchor.meta or {}).get("level") or "").strip().lower() != level:
+            return None
+        since_anchor = [other for other in condition if other.created_at >= anchor.created_at]
+        if any((other.meta or {}).get("recovered_at") for other in since_anchor):
+            return None
+        answers = sum(1 for other in since_anchor if (other.meta or {}).get("answered_from_runbook"))
+        if answers >= _REFIRE_ANSWER_MAX:
+            return None
+        manifest = self._settings.workdir / ".claude" / "skills" / slug(title) / "SKILL.md"
+        try:
+            procedure = manifest.read_text(encoding="utf-8").split(CASES_MARKER, 1)[0].strip()
+        except OSError:
+            procedure = ""  # a report is enough to answer from; the runbook is a bonus
+        age_hours = (now - anchored_at) / 3600
+        run.meta["refire_of"] = anchor.session_key
+        return json.dumps(
+            {
+                "summary": (
+                    f"已按 {age_hours:.1f} 小时前对同一条件的真实调查直接作答，未启动引擎（$0）。"
+                    f"级别未变（{level or '未标'}），期间无恢复记录；这是那次调查之后的第 {answers + 1} 次重发。"
+                    "看着不一样就用 force 重跑一次真查。"
+                ),
+                "root_cause": (
+                    f"同一条件 {age_hours:.1f} 小时前已真实调查（session {anchor.session_key}），"
+                    "本次未重新验证；当时的结论见 standing_finding。"
+                ),
+                "verdict": "recurring_condition",
+                "refire_of": anchor.session_key,
+                "anchor_hours_ago": round(age_hours, 1),
+                "refires_since_anchor": answers + 1,
+                "standing_finding": anchor.text[:_STANDING_FINDING_MAX],
+                "runbook": procedure[:2500],
+                "answered_from_runbook": True,
+                "how_to_reinvestigate": (
+                    'POST /hooks/agent with {"force": true}; a real run also recurs once the window lapses, '
+                    f"the level changes, a recovery arrives, or after {_REFIRE_ANSWER_MAX} answers"
                 ),
             },
             ensure_ascii=False,

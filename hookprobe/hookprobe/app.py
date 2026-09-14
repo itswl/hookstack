@@ -52,11 +52,13 @@ from hookprobe import (
     ops,
     posture,
     remediation,
+    rulings,
     selftest,
     suggestions,
     telemetry,
     work,
 )
+from hookprobe.distill import slug
 from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
@@ -428,6 +430,54 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             "inferred": inferred,
         }
         return results
+
+    @app.post("/v1/rulings", dependencies=[Depends(require_token)])
+    async def file_condition_ruling(payload: dict[str, Any]) -> dict[str, Any]:
+        """A person rules on a CONDITION — is this alert worth investigating again.
+
+            {"title": "<alert title>", "verdict": "worth_it" | "not_worth_it", "why": "...", "by": "<optional id>"}
+
+        The condition axis had one writer, the weekly ai-rulings patrol, and no
+        door for a person: `rulings.jsonl` rows carried no author and `standing`
+        was latest-wins, so a verdict written by hand would have been overwritten
+        by the next Thursday's inference — measured on production 2026-09-14,
+        where the two SES conditions that took 70% of the week's investigator
+        spend were ruled worth_it by the patrol and nobody could say otherwise.
+        This files the ruling with `ruled_by: operator:<by>`, which `standing`
+        prefers over an inferred one while it is current. Same TTL as any
+        ruling, because a decision nobody re-checks is still a prejudice with a
+        timestamp, and the reverify clause still buys a real run on schedule.
+
+        Console bearer only — the agent's is refused on every non-GET — so an
+        injected instruction cannot rule its own condition not worth looking at.
+        The answer says what the ruling DOES, because a verdict that gates
+        nothing yet should not read as if it did.
+        """
+        title = str(payload.get("title") or "").strip()
+        verdict = str(payload.get("verdict") or "").strip()
+        why = str(payload.get("why") or "").strip()
+        by = str(payload.get("by") or "").strip() or "console"
+        if not title or verdict not in rulings.VERDICTS or not why:
+            raise HTTPException(status_code=400, detail="needs title, verdict worth_it|not_worth_it, and why")
+        row = rulings.file_operator_ruling(settings.workdir, title=title, verdict=verdict, why=why, by=by)
+        current = rulings.standing(settings.workdir, title, ttl_days=settings.ruling_ttl_days)
+        runbook_present = (settings.workdir / ".claude" / "skills" / slug(title) / "SKILL.md").is_file()
+        if verdict == "not_worth_it" and runbook_present:
+            consequence = "re-fires answer from the runbook at $0 while a real run inside the reverify window vouches"
+        elif verdict == "not_worth_it":
+            consequence = "no runbook to answer from yet; the ruling stands and gates nothing until one is distilled"
+        else:
+            consequence = "worth_it: re-fires keep buying a real investigation"
+        return {
+            "title": title,
+            "verdict": verdict,
+            "ruled_by": f"{rulings.OPERATOR_PREFIX}:{by}",
+            "identity": row["identity"],
+            "standing": current is not None and current.get("verdict") == verdict,
+            "ttl_days": settings.ruling_ttl_days,
+            "runbook_present": runbook_present,
+            "consequence": consequence,
+        }
 
     @app.get("/v1/runs/{session_key}", dependencies=[Depends(require_token)])
     async def run_detail(session_key: str) -> dict[str, Any]:
