@@ -204,6 +204,14 @@ deploy — `missed` (judged below every accepted severity) and `false_quiet`
 (wake=no against a label that says a person must act; the pipe DROPS cards on
 that answer). Everything else is reported and allowed through.
 
+Since 2026-09-14 the run also passes `--record /data/eval-gate.json`, which
+writes the verdict beside the ledger — counts, the vote count, a timestamp and
+a `thin` flag for a pass on fewer firing rows than the gate's floor; never ids
+or alert text, because the judge's `/status` echoes the file as `eval_gate` and
+the weekly page prints it dated. The verdict used to live in a terminal that
+scrolled off; a green earned on nine firing rows now reads as thin on the page
+exactly as it does on the console.
+
 Rules the first live day taught, worth more than the mechanism:
 
 - **Expectations may be sets** (`"importance": ["high", "medium"]`) — two

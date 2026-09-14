@@ -1574,3 +1574,20 @@ def test_empty_is_the_same_as_unset(monkeypatch) -> None:
 
     moved = {k: (unset[k], empty[k]) for k in unset if unset[k] != empty[k]}
     assert not moved, f"passing these knobs empty is not the same as leaving them unset: {moved}"
+
+
+async def test_status_carries_the_last_recorded_gate_verdict(app_client, tmp_path):
+    """deploy.sh records the golden gate's verdict beside the ledger; /status
+    echoes it, and says None — not a green — while no deploy has run it here."""
+    body = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()
+    assert body["eval_gate"] is None
+
+    (tmp_path / "eval-gate.json").write_text(
+        json.dumps({"at": 1.0, "verdict": "green", "firing_cases": 9, "thin": True}), encoding="utf-8"
+    )
+    body = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()
+    assert body["eval_gate"]["verdict"] == "green" and body["eval_gate"]["thin"] is True
+
+    (tmp_path / "eval-gate.json").write_text("not json", encoding="utf-8")
+    body = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()
+    assert body["eval_gate"] is None, "a damaged record reads as no record, never as a 500 on the board"

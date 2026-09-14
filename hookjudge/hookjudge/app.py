@@ -369,6 +369,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.judge_and_record = _judge_and_record
     app.state.judge_tasks = set()
 
+    def _eval_gate() -> dict[str, Any] | None:
+        """The last recorded golden-gate verdict, read from beside the ledger."""
+        path = Path(app_settings.db_path).parent / "eval-gate.json"
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return row if isinstance(row, dict) else None
+
     def _read_guard(token: str | None, authorization: str | None) -> None:
         configured = app_settings.read_token
         if not configured:
@@ -600,6 +609,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "summary": await store.summary(now_ts() - max(1, window_hours) * 3600),
             "recent": await store.recent(limit, route=route, q=q),
+            # The golden gate's last verdict as deploy.sh recorded it beside the
+            # ledger: counts and a timestamp. None until a deploy has run the
+            # gate on this host — which is itself the fact worth showing.
+            "eval_gate": _eval_gate(),
         }
 
     @app.get("/disagreements")

@@ -20,9 +20,12 @@ read as "decline everything".
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import time
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("hookprobe.decline")
 
@@ -55,3 +58,55 @@ def decline_reason(path: Path | None, title: str) -> str:
         if pattern.fullmatch(title):
             return pattern.pattern
     return ""
+
+
+_LEDGER = "declines.jsonl"
+
+
+def record(workdir: Path, title: str, pattern: str, *, at: float | None = None) -> None:
+    """One line per decline — when, which title, which pattern. Append-only and
+    tiny (a few lines a day), so the weekly page can say what the list saved
+    instead of the saving being a log line nobody greps. Best effort: a door
+    that could not write its ledger still declines."""
+    row = {"at": round(time.time() if at is None else at, 3), "title": title[:200], "pattern": pattern[:200]}
+    try:
+        with (workdir / _LEDGER).open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        logger.warning("could not record a decline in %s", workdir / _LEDGER, exc_info=True)
+
+
+def tally(workdir: Path, path: Path | None, *, since: float) -> dict[str, Any]:
+    """What the list did inside a window, three-valued on purpose.
+
+    `configured` false means there is no list: "declined 0" then is not a
+    result, it is the absence of a mechanism, and the page must not read it as
+    "the list found nothing". `patterns` is how many lines the list has right
+    now, so a list that is set but empty (or all typos) is visible too.
+    """
+    patterns = load_patterns(path)
+    declined = 0
+    conditions: set[str] = set()
+    by_pattern: dict[str, int] = {}
+    try:
+        lines = (workdir / _LEDGER).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or float(row.get("at") or 0) < since:
+            continue
+        declined += 1
+        conditions.add(str(row.get("title") or ""))
+        key = str(row.get("pattern") or "")
+        by_pattern[key] = by_pattern.get(key, 0) + 1
+    return {
+        "configured": path is not None,
+        "patterns": len(patterns),
+        "declined": declined,
+        "conditions": len(conditions),
+        "by_pattern": by_pattern,
+    }

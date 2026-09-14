@@ -110,3 +110,59 @@ def test_the_level_bar_still_comes_first(tmp_path):
     with _client(tmp_path, FakeEngine(), decline_patterns=_list(tmp_path, r"\[MAIL\].*")) as client:
         answer = client.post("/hooks/event", json=dict(EVENT, level="info")).json()
         assert answer["status"] == "skipped" and "below escalation bar" in answer["reason"]
+
+
+def test_a_decline_is_a_ledger_line_and_the_tally_is_three_valued(tmp_path):
+    """The saving used to be a log line nobody greps. A window's count of
+    declines, per pattern, is what the weekly page prints — and "no list" has to
+    read differently from "the list matched nothing"."""
+    listed = _list(tmp_path, r"\[MAIL\].*", r"\[MQ\].*")
+    now = 1_000_000.0
+    decline.record(tmp_path, "[MAIL] bounce 9%", r"\[MAIL\].*", at=now - 60)
+    decline.record(tmp_path, "[MAIL] bounce 9%", r"\[MAIL\].*", at=now - 120)
+    decline.record(tmp_path, "[MQ] consumers 0", r"\[MQ\].*", at=now - 180)
+    decline.record(tmp_path, "[MAIL] complaint 0.3%", r"\[MAIL\].*", at=now - 10 * 86400)
+    with (tmp_path / "declines.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write("not json\n")
+
+    week = decline.tally(tmp_path, listed, since=now - 7 * 86400)
+    assert week == {
+        "configured": True,
+        "patterns": 2,
+        "declined": 3,
+        "conditions": 2,
+        "by_pattern": {r"\[MAIL\].*": 2, r"\[MQ\].*": 1},
+    }, "the old row is outside the window and the bad line is skipped, not fatal"
+
+    unlisted = decline.tally(tmp_path, None, since=now - 7 * 86400)
+    assert unlisted["configured"] is False and unlisted["patterns"] == 0
+    assert unlisted["declined"] == 3, "the ledger still counts what an earlier list did"
+
+    empty = decline.tally(tmp_path, _list(tmp_path, "# nothing yet"), since=now - 7 * 86400)
+    assert empty["configured"] is True and empty["patterns"] == 0, "a list that is set but empty is visible as such"
+
+
+def test_the_door_records_what_it_declined_and_the_route_counts_it(tmp_path):
+    engine = FakeEngine()
+    with _client(tmp_path, engine, decline_patterns=_list(tmp_path, r"\[MAIL\].*")) as client:
+        assert client.get("/v1/declines").status_code == 401, "a read of the tally is behind the console bearer"
+        before = client.get("/v1/declines", headers=AUTH).json()
+        assert before["configured"] is True and before["declined"] == 0 and before["hours"] == 168
+
+        client.post("/hooks/event", json=EVENT)
+        client.post("/hooks/event", json=dict(EVENT, event_id=6))
+        client.post("/hooks/event", json=dict(EVENT, event_id=7, title="[MAIL] complaint rate 0.3%"))
+        client.post("/hooks/event", json=dict(EVENT, event_id=8, title="disk 88% on cache-3"))
+
+        after = client.get("/v1/declines?hours=1", headers=AUTH).json()
+        assert after["declined"] == 3 and after["conditions"] == 2 and after["hours"] == 1
+        assert after["by_pattern"] == {r"\[MAIL\].*": 3}
+        assert engine.calls == 1, "the one title the list does not name was investigated"
+        lines = (tmp_path / "declines.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 3 and all('"pattern"' in line for line in lines)
+
+
+def test_without_a_list_the_tally_says_there_is_no_list(tmp_path):
+    with _client(tmp_path, FakeEngine()) as client:
+        body = client.get("/v1/declines", headers=AUTH).json()
+        assert body["configured"] is False and body["patterns"] == 0 and body["declined"] == 0

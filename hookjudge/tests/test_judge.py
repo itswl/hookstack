@@ -1278,3 +1278,44 @@ async def test_a_5xx_is_retried_but_a_4xx_is_not(monkeypatch):
     # owns the one 400 that does.
     _, calls = await _verdict_with(monkeypatch, [httpx.Response(401, text="bad key", request=req)])
     assert len(calls) == 1, "4xx is answered, not retried"
+
+
+def test_the_gate_verdict_is_recorded_as_counts_and_never_ids(tmp_path):
+    """The record lives on the judge's volume and is echoed by /status and the
+    weekly page, so it carries counts, a timestamp and the thin flag — nothing
+    that names an alert. And it is written for a red gate too: "last gate: red"
+    on the page is the point."""
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "eval_runner_record", Path(__file__).resolve().parent.parent / "scripts" / "eval.py"
+    )
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+
+    report = {
+        "route": "ai",
+        "cases": 32,
+        "firing_cases": 9,
+        "recovery_cases": 23,
+        "recovery_under_called": 11,
+        "missed": 0,
+        "missed_ids": [],
+        "false_quiet": 0,
+        "false_quiet_ids": [],
+        "importance_accuracy": 0.9,
+    }
+    path = tmp_path / "data" / "eval-gate.json"
+    row = runner.record_gate(path, report, votes=3, at=1_000.0)
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written == row
+    assert written["verdict"] == "green" and written["thin"] is True, "9 firing rows is under the gate's floor"
+    assert written["votes"] == 3 and written["at"] == 1_000.0
+    assert not any(k.endswith("_ids") for k in written), "ids stay in the console, off the volume"
+    assert "importance_accuracy" not in written, "the record is the gate's verdict, not the whole report"
+
+    red = dict(report, missed=1, missed_ids=["golden-7"], firing_cases=16)
+    row = runner.record_gate(path, red, votes=1)
+    assert row["verdict"] == "red" and row["missed"] == 1 and row["thin"] is False
+    assert "golden-7" not in path.read_text(encoding="utf-8")

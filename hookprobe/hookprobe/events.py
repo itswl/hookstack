@@ -686,6 +686,7 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
                 logger.info(
                     "declined at the door: no instrument for this family title=%r pattern=%r", title[:80], declined_by
                 )
+                decline.record(settings.workdir, title, declined_by)
                 return {
                     "status": "skipped",
                     "reason": "declined: this node has no instrument for this family",

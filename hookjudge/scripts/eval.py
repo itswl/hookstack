@@ -158,6 +158,34 @@ async def judge_one(client: httpx.AsyncClient, settings: Settings, row: dict[str
 MIN_GATE_FIRING_CASES = 15
 
 
+def record_gate(path: Path, report: dict[str, Any], *, votes: int, at: float | None = None) -> dict[str, Any]:
+    """The gate's verdict as a dated fact, written where the judge can read it.
+
+    Counts only — no ids, no rule keys, no alert text — because the file lives
+    on the judge's data volume and is echoed by `/status` and the weekly page.
+    `thin` says the gate ran on too few firing rows to mean much, by the same
+    threshold the run prints to stderr, so the page cannot show a green that
+    the console would have qualified.
+    """
+    verdict = "red" if (report["missed"] or report["false_quiet"]) else "green"
+    row = {
+        "at": time.time() if at is None else at,
+        "route": report["route"],
+        "votes": votes,
+        "cases": report["cases"],
+        "firing_cases": report["firing_cases"],
+        "recovery_cases": report["recovery_cases"],
+        "recovery_under_called": report["recovery_under_called"],
+        "missed": report["missed"],
+        "false_quiet": report["false_quiet"],
+        "thin": report["firing_cases"] < MIN_GATE_FIRING_CASES,
+        "verdict": verdict,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+    return row
+
+
 def summarize(rows: list[dict[str, Any]], unreviewed: int, route: str) -> dict[str, Any]:
     total = len(rows) or 1
     # Recovery payloads are scored, reported, and kept OUT of `missed`.
@@ -250,6 +278,12 @@ async def main() -> int:
     # 2026-08-24 the pipe drops the card on that answer). Everything else is
     # reported, argued about, and allowed through; these two stop a deploy.
     parser.add_argument("--gate", action="store_true")
+    parser.add_argument(
+        "--record",
+        type=Path,
+        help="write the gate's verdict here — counts and a timestamp, never ids — so the judge's /status and the "
+        "weekly page can say when the golden set last ran and what it found",
+    )
     # Replays per case. Judgement on borderline instances is stochastic: the
     # first live gate flipped red/green on identical input, and a flaky gate
     # teaches the SKIP_EVAL reflex faster than any real regression would. With
@@ -364,6 +398,10 @@ async def main() -> int:
         # Ids and aggregates only — no alert text, so a result file is safe to share.
         args.out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"\nwrote {args.out}")
+    if args.record:
+        # Written before the verdict is acted on, so a red gate is recorded too:
+        # the page saying "last gate: red" is the point, not an accident.
+        record_gate(args.record, report, votes=max(1, args.votes))
     if args.gate and (report["missed"] or report["false_quiet"]):
         bad = set(report["missed_ids"]) | set(report["false_quiet_ids"])
         for r in rows:

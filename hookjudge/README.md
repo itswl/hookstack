@@ -241,7 +241,7 @@ a judge that answered `wake=no` on an alert a person then called useful.
 | ------ | ---------- | ------------------------------------------------ |
 | POST   | `/events`  | the pipe's event. Answers **202** immediately.    |
 | POST   | `/feedback`| a human pressed a button. Answers **202**.        |
-| GET    | `/status`  | ledger JSON: routes, cost, attention, returns, recent |
+| GET    | `/status`  | ledger JSON: routes, cost, attention, returns, recent, `eval_gate` (the last recorded golden-gate verdict, or null) |
 | GET    | `/live`    | the board's wake-up line: NDJSON, `changed` per burst of writes, `ping` through the quiet |
 | GET    | `/metrics` | Prometheus text                                   |
 | GET    | `/disagreements` | the review queue: platform vs judge, unlabeled     |

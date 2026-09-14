@@ -90,7 +90,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_GATE_HOME` | *(empty)* | The agent's home, whose settings and skills are inputs too |
 | `HOOKPROBE_GATE_MCP` | *(empty)* | The MCP tools this node may call, from mcp_tools |
 
-## Routes (61)
+## Routes (62)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -116,6 +116,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/v1/automation/{cls}/{item_id}/regret` | A sampling review, after the fact, saying an auto-applied action was wrong |
 | GET | `/v1/budget` | The breaker's arithmetic: window spend, ceiling, cache ratio and the worth line |
 | GET | `/v1/config` | The operational knobs, redacted: secret VALUES never appear — booleans say whether they are set |
+| GET | `/v1/declines` | What the decline list did inside a window: events declined at the door, distinct conditions, per pattern |
 | GET | `/v1/live` | The session list's wake-up line, the same shape the other two boards use |
 | GET | `/v1/mcp` | What the next run would load — read fresh from the config file |
 | GET | `/v1/memory` | CLAUDE.md as the engine will read it, plus its path |

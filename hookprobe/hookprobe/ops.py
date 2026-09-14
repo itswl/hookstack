@@ -31,13 +31,14 @@ different doors:
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import PlainTextResponse
 
-from hookprobe import __version__, blockers
+from hookprobe import __version__, blockers, decline
 from hookprobe.engine import _load_mcp_servers, _system_prompt_append
 from hookprobe.files import system_prompt_path
 from hookprobe.service import RunService
@@ -211,6 +212,18 @@ def register(
             "config": str(settings.mcp_config) if settings.mcp_config else None,
             "servers": described,
         }
+
+    @app.get("/v1/declines", dependencies=[Depends(guard)])
+    async def declines(hours: int = 168) -> dict[str, Any]:
+        """What the decline list did inside a window: events declined at the door, distinct conditions, per pattern.
+
+        Three-valued on purpose: `configured` false is "there is no list", not
+        "the list found nothing". The weekly page reads this so a refusal that
+        saved a paid run is a number on the page, not a log line nobody greps.
+        """
+        window = max(1, hours)
+        since = time.time() - window * 3600
+        return {"hours": window, **decline.tally(settings.workdir, settings.decline_patterns, since=since)}
 
     @app.get("/v1/budget", dependencies=[Depends(guard)])
     async def budget() -> dict[str, Any]:

@@ -159,6 +159,7 @@ def compute(
     work: dict | None = None,
     proposals: list | None = None,
     nodes: dict | None = None,
+    declines: dict | None = None,
     hours: float,
     now: float,
 ) -> dict[str, Any]:
@@ -194,6 +195,9 @@ def compute(
             "rule_floor": floor,
             "avoided_verdicts": sum(free_routes.values()),
             "avoided_cost": round(sum(free_routes.values()) * avg_paid, 4),
+            # The golden gate's last verdict, as deploy.sh recorded it on the
+            # judge's volume. None until a deploy has run the gate there.
+            "eval_gate": _eval_gate(judge.get("eval_gate"), now=now),
             "attention": {
                 "interruptions": interruptions,
                 "conditions": conditions,
@@ -258,9 +262,39 @@ def compute(
             "listing_truncated": len(runs) >= 200
             and min((float(r.get("finished_at") or now) for r in runs), default=now) >= since,
         }
+    if isinstance(declines, dict):
+        # What the decline list saved, at this week's average paid run — the
+        # same counterfactual arithmetic as the runbook line, and labelled as
+        # such. Kept three-valued: "no list" is not "the list matched nothing".
+        avg_run = float((report.get("investigator") or {}).get("avg_run") or 0.0)
+        declined = int(declines.get("declined") or 0)
+        report["declines"] = {
+            "configured": bool(declines.get("configured")),
+            "patterns": int(declines.get("patterns") or 0),
+            "declined": declined,
+            "conditions": int(declines.get("conditions") or 0),
+            "avoided_cost": round(declined * avg_run, 4),
+        }
     if isinstance(budget, dict):
         report["budget"] = budget
     return report
+
+
+def _eval_gate(row: Any, *, now: float) -> dict[str, Any] | None:
+    """The recorded gate verdict with its age, or None when none was recorded."""
+    if not isinstance(row, dict) or not row.get("verdict"):
+        return None
+    at = float(row.get("at") or 0)
+    return {
+        "verdict": str(row["verdict"]),
+        "age_days": round((now - at) / 86400, 1) if at else None,
+        "firing_cases": int(row.get("firing_cases") or 0),
+        "recovery_cases": int(row.get("recovery_cases") or 0),
+        "recovery_under_called": int(row.get("recovery_under_called") or 0),
+        "missed": int(row.get("missed") or 0),
+        "false_quiet": int(row.get("false_quiet") or 0),
+        "thin": bool(row.get("thin")),
+    }
 
 
 def compare_arms(live_rows: list | None, shadows: list[tuple[str, list | None]]) -> dict[str, Any]:
@@ -496,6 +530,18 @@ def render(r: dict[str, Any]) -> str:
             + (f" · rule floor {j['rule_floor']} (a degradation, not a saving)" if j["rule_floor"] else ""),
             f"- **Counterfactual**: {j['avoided_verdicts']} verdicts answered without a model call ≈ **{_money(j['avoided_cost'])} avoided**",
         ]
+        g = j.get("eval_gate")
+        if not g:
+            out.append("- **Golden gate**: no recorded run on this host — a deploy records one")
+        else:
+            age = "age unknown" if g["age_days"] is None else f"{g['age_days']} days ago"
+            out.append(
+                f"- **Golden gate at the last deploy**: **{g['verdict']}** {age} · "
+                f"{g['firing_cases']} firing rows, {g['recovery_cases']} recovery rows "
+                f"({g['recovery_under_called']} under-called)"
+                + (f" · missed {g['missed']} · false quiet {g['false_quiet']}" if g["verdict"] != "green" else "")
+                + (" — **thin**: too few firing rows for a green to mean much" if g["thin"] else "")
+            )
     a = (j or {}).get("attention")
     out += ["", "## Attention", ""]
     if not a:
@@ -530,6 +576,22 @@ def render(r: dict[str, Any]) -> str:
         ]
         if inv.get("listing_truncated"):
             out.append("- _The run listing was capped; counts above may be low._")
+    d = r.get("declines")
+    if inv and not d:
+        out.append("- _Declines at the door: not read (the node predates `/v1/declines`, or it was unreachable)._")
+    elif d and not d["configured"]:
+        out.append("- **The door declines nothing by list** — no `HOOKPROBE_DECLINE_PATTERNS` on this node")
+    elif d and not d["declined"]:
+        out.append(
+            f"- **Declined at the door**: nothing this window — the list has {d['patterns']} pattern"
+            f"{'' if d['patterns'] == 1 else 's'} and none matched"
+        )
+    elif d:
+        out.append(
+            f"- **Declined at the door**: {d['declined']} event{'' if d['declined'] == 1 else 's'} across "
+            f"{d['conditions']} condition{'' if d['conditions'] == 1 else 's'} ≈ **{_money(d['avoided_cost'])} avoided** "
+            "(each priced at this week's average paid run)"
+        )
     b = r.get("budget")
     if isinstance(b, dict) and b.get("enabled"):
         out.append(
@@ -674,6 +736,7 @@ def main() -> int:
     # what a piece of work is and what state it is in, and this page reports it.
     probe_token = os.environ.get("HOOKPROBE_TOKEN", "")
     work = _get(f"{primary.rstrip('/')}/v1/work?limit=500", probe_token) if primary else None
+    declines = _get(f"{primary.rstrip('/')}/v1/declines?hours={int(args.hours)}", probe_token) if primary else None
     proposals = _get(f"{primary.rstrip('/')}/v1/remediations", probe_token) if primary else None
     if isinstance(proposals, dict):
         proposals = proposals.get("proposals")
@@ -708,6 +771,7 @@ def main() -> int:
         work=work if isinstance(work, dict) else None,
         proposals=proposals if isinstance(proposals, list) else None,
         nodes=nodes,
+        declines=declines if isinstance(declines, dict) else None,
         hours=args.hours,
         now=now,
     )

@@ -129,6 +129,14 @@ investigator billed, how many re-fires a runbook answered for $0, what people
 ruled and what they have not, the budget, and the pipe's priced chains and
 incidents.
 
+Since 2026-09-14 two gate verdicts are on it as well. What the decline list
+did — events declined at the event door, distinct conditions, priced at the
+week's average paid run and labelled as such — read from `GET /v1/declines`,
+and kept three-valued: a node with no list, a list that matched nothing and a
+node too old to answer are three different sentences. And the judge's golden
+gate at the last deploy, dated, with its firing-row count and the same `thin`
+qualifier the console prints, read from the judge's `/status`.
+
 Since 2026-09-09 `--probe` is repeatable (or comma-separated), and a
 deployment running several investigators gets one line per node saying how much
 of its work waits on a person and how much was abandoned — with a node that

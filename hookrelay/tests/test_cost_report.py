@@ -401,3 +401,58 @@ def test_the_posture_refusals_are_reported_rather_than_recorded_and_unread() -> 
     quiet = [{"session_key": "probe:c", "status": "completed", "finished_at": NOW - 60, "cost_usd": 0.4}]
     page = cost_report.render(cost_report.compute(None, None, None, quiet, hours=168, now=NOW))
     assert "**The posture refused nothing** this window" in page, "a quiet window says so, not '0 calls across 0 runs'"
+
+
+def test_the_doors_declines_are_three_valued_on_the_page() -> None:
+    """A refusal that saved a paid run is a number on the page — and "no list"
+    must not read as "the list matched nothing", nor an old node as zero."""
+    runs = [{"session_key": "probe:a", "status": "completed", "finished_at": NOW - 60, "cost_usd": 2.0}]
+    declined = {"configured": True, "patterns": 4, "declined": 5, "conditions": 2, "by_pattern": {"x": 5}}
+    r = cost_report.compute(None, None, None, runs, declines=declined, hours=168, now=NOW)
+    assert r["declines"]["avoided_cost"] == 10.0, "five declines at this week's $2.00 average paid run"
+    page = cost_report.render(r)
+    assert "**Declined at the door**: 5 events across 2 conditions ≈ **$10.00 avoided**" in page
+
+    quiet = dict(declined, declined=0, conditions=0, by_pattern={})
+    page = cost_report.render(cost_report.compute(None, None, None, runs, declines=quiet, hours=168, now=NOW))
+    assert "**Declined at the door**: nothing this window — the list has 4 patterns and none matched" in page
+
+    unlisted = {"configured": False, "patterns": 0, "declined": 0, "conditions": 0, "by_pattern": {}}
+    page = cost_report.render(cost_report.compute(None, None, None, runs, declines=unlisted, hours=168, now=NOW))
+    assert "**The door declines nothing by list**" in page
+
+    page = cost_report.render(cost_report.compute(None, None, None, runs, hours=168, now=NOW))
+    assert "Declines at the door: not read" in page, "a node that answered no tally is unread, not zero"
+
+
+def test_the_golden_gate_verdict_is_dated_on_the_page() -> None:
+    """The gate ran at every deploy and its verdict lived in a scrolled-off
+    terminal. On the page it is dated, and a green on too few firing rows is
+    qualified in the same breath — the page cannot out-claim the console."""
+    thin = dict(
+        JUDGE,
+        eval_gate={
+            "at": NOW - 3 * 86400,
+            "verdict": "green",
+            "firing_cases": 9,
+            "recovery_cases": 23,
+            "recovery_under_called": 11,
+            "missed": 0,
+            "false_quiet": 0,
+            "thin": True,
+        },
+    )
+    page = cost_report.render(cost_report.compute(thin, None, None, None, hours=168, now=NOW))
+    assert (
+        "**Golden gate at the last deploy**: **green** 3.0 days ago · 9 firing rows, 23 recovery rows (11 under-called)"
+        in page
+    )
+    assert "**thin**: too few firing rows" in page
+
+    red = dict(thin, eval_gate=dict(thin["eval_gate"], verdict="red", missed=1, firing_cases=16, thin=False))
+    page = cost_report.render(cost_report.compute(red, None, None, None, hours=168, now=NOW))
+    gate_line = page.split("Golden gate")[1].split("\n")[0]
+    assert "**red**" in gate_line and "missed 1 · false quiet 0" in gate_line and "thin" not in gate_line
+
+    page = cost_report.render(cost_report.compute(JUDGE, None, None, None, hours=168, now=NOW))
+    assert "**Golden gate**: no recorded run on this host" in page, "absence is a sentence, not a green"
