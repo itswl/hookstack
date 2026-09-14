@@ -1,11 +1,14 @@
 ---
-title: Four instruments in one day reported success about a tree, a moment or a machine they were not looking at
+title: Ten instruments in three days: eight reported success about a set they never examined, two answered truthfully and were misread
 status: proposed
 date: 2026-09-12
 scope: stack
 ---
 
 ## Decision
+
+*Written 2026-09-12 after four of these; extended 2026-09-14 to ten, and to
+the second countermeasure, which the first version did not have.*
 
 Record the class, and fix only the part that can be fixed without building a
 capability: a check that cannot look where the reader assumes should NAME where
@@ -40,6 +43,29 @@ not the one being asked about, and reported success.
    the guard's own rules over `git ls-tree` blobs, was that two of the four tags
    carried an identifier.
 
+5. **`gh run view --log`** (hookstack-34, sampling CI logs for identifiers).
+   Returned **0 hits over 0 lines** — the command had produced no log at all.
+   Caught only because the line count was printed beside the hit count.
+6. **`git-filter-repo --replace-text`** (mine, scrubbing the internal tool
+   name). Printed *"New history written… Completely finished"* and changed
+   nothing: the guard's rule matches case-insensitively, filter-repo's literal
+   form does not, and the occurrence was mixed-case against a lowercase
+   literal derived from the rule. `HEAD` not moving was the only tell.
+7. **A `cat-file --batch` scanner** (mine). Skipped non-blob objects without
+   consuming their payload, desyncing the pipe on the first tree. Three runs
+   hung across eight minutes while "no output yet" read as "still working".
+   `ps` showing 0.1s of CPU is what exposed it.
+8. **`until [ -s file ]`** (mine, waiting for a gate). Satisfied instantly by a
+   `git log` line written earlier in the same pipeline, so the gate was declared
+   finished while still running.
+9. **`git reset --hard origin/main`** (hookstack-34, after the repo was
+   recreated). `git fetch` had FAILED — the fresh repo did not know the key —
+   and the reset then succeeded against a three-hour-old remote-tracking ref,
+   exit 0. Caught by printing the resulting SHA beside the expected one.
+10. **`gh api -X PATCH … validity_checks=enabled`** (the operator's own
+    command). Returned 200 with the field still `disabled`. Silent no-op, and
+    only a fresh `GET` showed it.
+
 **The through-line is hookstack-34's sentence and it is better than mine:**
 every one was an instrument reporting success about a tree, a moment or a
 machine it was not actually looking at. Not a wrong answer — an answer to a
@@ -49,6 +75,33 @@ different question, in the shape of the expected one.
 (4) were both *silent*: no error, no warning, a success line. Had either said
 what it had examined, the mismatch would have been visible in the same glance
 that read the verdict.
+
+**But there is a second failure mode with a different countermeasure, and a
+note recording only the first teaches half the lesson.** hookstack-34's
+distinction: printing the denominator catches an instrument that examined
+nothing. It does nothing when the instrument ran fine, returned a real result,
+and the reader attributes it to the wrong cause. Two of these, both on
+2026-09-14 while verifying the Python 3.14 image:
+
+* The spawned gate answered `{}` under 3.14 and looked like a broken
+  containment boundary on a new interpreter. **The 3.12 control answered `{}`
+  too** — the payload was missing `hook_event_name`, and neither image was
+  broken.
+* The suite in-image reported `2 failed, 619 passed` and the two looked like
+  3.14 regressions. **Identical under 3.12** — the ad-hoc harness was missing
+  `scripts/` and `.github/`.
+
+Both results were true. Both would have been reported as findings about 3.14.
+What made them uninterpretable as findings was running the known-good control
+BEFORE attributing a cause — and neither would have been caught by printing
+what was examined, because what was examined was correct.
+
+So the pair, and they are not substitutes:
+
+| countermeasure | catches |
+| --- | --- |
+| print what was examined beside the verdict | the instrument that examined nothing and said success |
+| run the known-good control before attributing a cause | the instrument that ran, answered truthfully, and was misread |
 
 ## Consequences
 
