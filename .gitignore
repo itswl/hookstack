@@ -50,3 +50,5 @@ hookjudge/eval/results/
 # Only the .example files are shared.
 hookprobe/deploy/operator/*
 !hookprobe/deploy/operator/*.example
+# the timer's dated pages (scripts/weekly_page.sh); host-only, never curated
+reports/

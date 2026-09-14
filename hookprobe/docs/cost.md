@@ -129,6 +129,13 @@ investigator billed, how many re-fires a runbook answered for $0, what people
 ruled and what they have not, the budget, and the pipe's priced chains and
 incidents.
 
+Since 2026-09-15 it arrives by itself: `scripts/weekly_page.sh` runs the report
+from inside the compose network on a timer (the pipe publishes no host port, so
+a host-side run always printed the pipe section as unread), writes a dated page
+under `WEEKLY_PAGE_DIR`, and posts the headline lines through the pipe's watch
+door at level `low` — the operator reads it where the cards are, and the
+investigator declines it by level.
+
 Since 2026-09-14 two gate verdicts are on it as well. What the decline list
 did — events declined at the event door, distinct conditions, priced at the
 week's average paid run and labelled as such — read from `GET /v1/declines`,
