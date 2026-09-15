@@ -58,7 +58,7 @@ No checkout and no build: everything runs from published images, and the stub mo
 
 Real credentials in `.env` make the stub step aside, and `--profile probe` adds the investigator.
 
-The published images are `0.3.0`, and they now run the current design: the pipe sends a neutral card model and `lark-bridge`, in webhook mode against the sink, renders it — no Lark account needed. Up to `0.2.0` the quickstart's pipe rendered the Feishu card itself, which is the one thing the published demo used to do differently from the source compose.
+The published images are `0.3.2`, and they run the current design: the pipe sends a neutral card model and `lark-bridge`, in webhook mode against the sink, renders it — no Lark account needed. Up to `0.2.0` the quickstart's pipe rendered the Feishu card itself, which is the one thing the published demo used to do differently from the source compose.
 
 ## The Three Services
 

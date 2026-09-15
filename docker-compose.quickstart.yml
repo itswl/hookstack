@@ -32,7 +32,7 @@ name: hookstack
 
 services:
   hookrelay:
-    image: ghcr.io/itswl/hookrelay:0.3.0
+    image: ghcr.io/itswl/hookrelay:0.3.2
     container_name: hs-hookrelay
     restart: unless-stopped
     environment:
@@ -65,7 +65,7 @@ services:
       - sink
 
   hookjudge:
-    image: ghcr.io/itswl/hookjudge:0.3.0
+    image: ghcr.io/itswl/hookjudge:0.3.2
     container_name: hs-hookjudge
     restart: unless-stopped
     environment:
@@ -95,7 +95,7 @@ services:
   # operator would actually have received. It runs from the pipe's own image
   # because that image now carries it — one fewer thing to pull, and no mount.
   sink:
-    image: ghcr.io/itswl/hookrelay:0.3.0
+    image: ghcr.io/itswl/hookrelay:0.3.2
     container_name: hs-sink
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/sink.py"]
@@ -108,7 +108,7 @@ services:
   # exactly the hop a real deployment makes to a custom bot's incoming URL.
   # `ops-feishu` in the baked config is `type: bridge` and points here.
   lark-bridge:
-    image: ghcr.io/itswl/lark-bridge:0.3.0
+    image: ghcr.io/itswl/lark-bridge:0.3.2
     container_name: hs-lark-bridge
     restart: unless-stopped
     environment:
@@ -126,7 +126,7 @@ services:
   # not a model: it reports itself as `stub-4o-mini`. Point the judge's AI vars
   # at a real provider and this stops being used.
   stub-ai:
-    image: ghcr.io/itswl/hookjudge:0.3.0
+    image: ghcr.io/itswl/hookjudge:0.3.2
     container_name: hs-stub-ai
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/stub_ai.py"]
@@ -137,7 +137,7 @@ services:
   # stays hermetic. High/critical alerts then ALSO get a deep read-only
   # investigation, whose report returns through the pipe to the same channels.
   hookprobe:
-    image: ghcr.io/itswl/hookprobe:0.3.0
+    image: ghcr.io/itswl/hookprobe:0.3.2
     container_name: hs-hookprobe
     profiles: ["probe"]
     restart: unless-stopped
