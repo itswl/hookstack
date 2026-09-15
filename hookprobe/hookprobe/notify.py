@@ -98,6 +98,11 @@ class ReturnDelivery:
                     # the platform can file this report on that alert's page.
                     # "" when nothing carried one.
                     "reference": str(run.meta.get("reference") or ""),
+                    # How long the investigation took, wall clock, so a platform
+                    # filing this report can show a duration beside the others.
+                    "duration_seconds": round(max(0.0, float(run.finished_at or 0) - float(run.created_at or 0)), 3)
+                    if run.finished_at and run.created_at
+                    else 0.0,
                     "status": run.status,
                     "cost_usd": run.cost_usd,
                     "error": run.error,

@@ -63,6 +63,8 @@ def test_the_reference_is_kept_on_the_run_and_echoed_on_the_report(tmp_path, mon
     assert posted, "a relay-born run reports back"
     assert posted[-1]["meta"]["reference"] == "2630"
     assert posted[-1]["meta"]["event_id"] == 3301, "the pipe's own id still travels too"
+    duration = posted[-1]["meta"]["duration_seconds"]
+    assert isinstance(duration, float) and duration >= 0.0, "wall-clock length of the run, for the platform's page"
 
 
 def test_an_event_without_a_reference_reports_an_empty_one(tmp_path, monkeypatch):
