@@ -84,3 +84,39 @@ async def test_the_reference_rides_the_delivery_row_into_the_brains_payload(stor
     sent = json.loads(body)
     assert sent["reference"] == "2630" and sent["fields"] == {"origin": ""}
     assert "payload" not in sent and "_idempotency_key" not in sent
+
+
+def test_touch_names_a_channel_that_must_exist():
+    cfg = Config.from_dict(
+        {
+            "sources": [{"name": "s", "secret": "", "title": "{t}"}],
+            "channels": [{"name": "to-platform-touch", "type": "generic", "url": "https://platform.example/touch"}],
+            "routes": [{"name": "all", "source": "*", "send_to": ["to-platform-touch"]}],
+            "touch": {"forward_to": "to-platform-touch"},
+        }
+    )
+    assert cfg.touch_forward_to == "to-platform-touch"
+    assert _config().touch_forward_to == "", "absent means no touch channel, as before"
+    import pytest
+
+    from hookrelay.config import ConfigError
+
+    with pytest.raises(ConfigError):
+        Config.from_dict(
+            {
+                "sources": [{"name": "s", "secret": "", "title": "{t}"}],
+                "channels": [{"name": "c", "type": "generic", "url": "https://c.example/"}],
+                "routes": [{"name": "all", "source": "*", "send_to": ["c"]}],
+                "touch": {"forward_to": "nowhere"},
+            }
+        )
+
+
+async def test_the_ledger_answers_an_events_reference_and_the_chain_origin_carries_it(store: Store):
+    cfg = _config(reference="{meta.event_id}")
+    result = await handle_hook(store, cfg, cfg.sources["platform"], ENVELOPE, now=1000.0)
+    event_id = int(result["event_id"])
+    assert await store.event_reference(event_id) == "2630"
+    assert await store.event_reference(event_id + 1000) == "", "an unknown event has none, not an error"
+    trip = await store.round_trip(event_id)
+    assert trip is not None and str(trip["origin"].get("reference")) == "2630", "the origin row the thread lookup reads"

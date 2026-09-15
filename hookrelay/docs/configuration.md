@@ -509,6 +509,23 @@ Every honoured press is a ledger row, and `GET /trace/{event_id}` returns them
 under `human_actions` — so the timeline answers "and what did a person do about
 it", not only what the machine did.
 
+## 4b. A person touched it — `touch`
+
+```yaml
+touch:
+  forward_to: to-platform-touch
+```
+
+A card press (any `card_actions` kind) and a reply under a card are the two
+things only a person does. When `touch.forward_to` names a channel, each is
+ALSO delivered there as a normalized event carrying the alert's `reference`
+(the sending platform's own id, see `sources[].reference`) — so the platform
+can count the touch as the acknowledgement of the incident that alert belongs
+to, without anyone pressing a second button. Presses without a reference (a
+card about something the platform did not send) are not forwarded; a thread
+reply always is, and the platform answers 200 to one it cannot place. Nothing
+automatic — a verdict, a report — travels this way.
+
 ## 5. Nobody was awake — `escalation`
 
 An alert can be judged well, dressed well and delivered well, and still be

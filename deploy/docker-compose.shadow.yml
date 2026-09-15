@@ -45,6 +45,10 @@ services:
       # secret it verifies — mirror of its DEEP_ANALYSIS_REPORT_INTAKE_SECRET.
       WW_REPORT_INTAKE_URL: ${WW_REPORT_INTAKE_URL:?set the platform's report intake URL in .env}
       WW_REPORT_INTAKE_SECRET: ${WW_REPORT_INTAKE_SECRET:?mirror DEEP_ANALYSIS_REPORT_INTAKE_SECRET into .env}
+      # The platform's incident touch door (its /v1/incidents/touch) and the
+      # secret it verifies — mirror of its INCIDENT_TOUCH_SECRET.
+      WW_TOUCH_URL: ${WW_TOUCH_URL:?set the platform's touch door URL in .env}
+      WW_TOUCH_SECRET: ${WW_TOUCH_SECRET:?mirror INCIDENT_TOUCH_SECRET into .env}
       SHADOW_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
       # The silent-audit sample rate for quiet-wake-no (work.yaml equivalent
       # is off). 0 = off, the shipping default; hookrelay's own ${...} has no

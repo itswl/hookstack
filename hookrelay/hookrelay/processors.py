@@ -222,6 +222,8 @@ class ThreadLookupProcessor:
             code = str(options.get("skip_code") or "unknown_thread")
             ctx.steps.append({"gate": name, "result": "dropped", "skip_code": code, "root": root[:80]})
             return ("skip", code)
+        if found.get("reference"):
+            ctx.extracted["reference"] = str(found["reference"])
         ctx.extracted["fields"].update(
             {
                 "thread_root": root,

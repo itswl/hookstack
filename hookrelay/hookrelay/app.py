@@ -645,6 +645,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             "body": f"{actor or 'an operator'} pressed {kind} on {correlation_id or f'event #{event_id}'}",
             "level": "info",
             "fields": {"kind": kind, "actor": actor},
+            "reference": await app.state.store.event_reference(int(event_id)) if event_id else "",
         }
         action_event_id = await app.state.store.insert_event(
             _ACTION_SOURCE,
@@ -655,6 +656,9 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             correlation_id=correlation_id or None,
         )
         await app.state.store.enqueue_delivery(action_event_id, configured.forward_to, now)
+        touch_to = app.state.config.touch_forward_to
+        if touch_to and extracted["reference"]:
+            await app.state.store.enqueue_delivery(action_event_id, touch_to, now)
         return f"forwarded {kind} to {configured.forward_to}"
 
     # ── read side ─────────────────────────────────────────────────────────

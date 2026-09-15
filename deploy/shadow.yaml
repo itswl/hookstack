@@ -234,6 +234,16 @@ channels:
     secret: ${WW_REPORT_INTAKE_SECRET}
     options: {payload: raw}
 
+  # A person touched an alert — pressed its card, replied under it — and the
+  # platform counts that as the acknowledgement of the incident the alert
+  # belongs to. Normalized event with the alert's `reference`; the platform
+  # answers 200 to one it cannot place. Machines never travel this channel.
+  - name: to-platform-touch
+    type: generic
+    url: ${WW_TOUCH_URL}
+    secret: ${WW_TOUCH_SECRET}
+    options: {payload: normalized}
+
   - name: to-probe-action
     type: generic
     url: http://hookprobe:8088/hooks/action
@@ -330,7 +340,7 @@ routes:
   # through probe-notify. Nothing unresolved reaches this route: the stage skips it.
   - name: thread-to-probe
     source: lark-thread
-    send_to: [to-probe]
+    send_to: [to-probe, to-platform-touch]
     priority: 100
     stop: true
 
@@ -414,6 +424,10 @@ pipeline:
 # silences and a press would quiet the SHADOW's copy of an alert, not the
 # platform's notification. Muting a shadow is muting the observer, and that is
 # not something to make one click away.
+# Every press is also a touch (see the to-platform-touch channel).
+touch:
+  forward_to: to-platform-touch
+
 card_actions:
   useful:
     forward_to: to-judge-feedback

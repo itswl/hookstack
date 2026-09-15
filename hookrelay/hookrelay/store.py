@@ -522,6 +522,11 @@ class Store:
         )
         return [dict(row) for row in await cursor.fetchall()]
 
+    async def event_reference(self, event_id: int) -> str:
+        cursor = await self.read.execute("SELECT reference FROM events WHERE id = ?", (event_id,))
+        row = await cursor.fetchone()
+        return str(row["reference"] or "") if row is not None else ""
+
     async def thread_context(self, platform_message_id: str) -> dict[str, Any] | None:
         """What a reply under a card we sent is about: the chain, and the
         investigation session in it, if any.
@@ -582,6 +587,7 @@ class Store:
             # The body too: a card's title says what happened, its body says
             # what to. See the `about` field in processors.thread_lookup.
             "body": str(trip["origin"].get("body") or ""),
+            "reference": str(trip["origin"].get("reference") or ""),
         }
 
     async def mark_failed(
@@ -923,6 +929,7 @@ class Store:
     async def _event_row(self, event_id: int) -> dict[str, Any] | None:
         cursor = await self.read.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.body, e.level, e.fields_json, e.correlation_id,"
+            " e.reference,"
             "       e.payload_json, d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id WHERE e.id = ?",
             (event_id,),

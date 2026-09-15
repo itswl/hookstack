@@ -318,6 +318,10 @@ class Config:
     pipeline: tuple[PipelineStage, ...] = DEFAULT_PIPELINE
     card_actions: dict[str, CardAction] = field(default_factory=dict)
     escalation: Escalation | None = None
+    # `touch: {forward_to: <channel>}` — a person's press or reply is ALSO
+    # delivered here (with the alert's `reference`), so the platform that sent
+    # the alert can count the touch as its acknowledgement.
+    touch_forward_to: str = ""
 
     @classmethod
     def from_file(cls, path: str) -> Config:
@@ -573,6 +577,9 @@ class Config:
                     f"card_actions.{name}: needs forward_to — only 'silence' is something the pipe can do itself"
                 )
             card_actions[name] = CardAction(kind=name, forward_to=forward_to, params=dict(spec.get("params") or {}))
+        touch_forward_to = str((raw.get("touch") or {}).get("forward_to") or "")
+        if touch_forward_to and touch_forward_to not in channels:
+            raise ConfigError(f"touch: forward_to {touch_forward_to!r} is not a configured channel")
 
         escalation: Escalation | None = None
         raw_escalation = raw.get("escalation") or {}
@@ -598,6 +605,7 @@ class Config:
             routes=routes and tuple(routes) or (),
             pipeline=pipeline,
             card_actions=card_actions,
+            touch_forward_to=touch_forward_to,
             escalation=escalation,
         )
 
