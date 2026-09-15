@@ -120,7 +120,11 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          # GHCR_TOKEN, when set, is a personal token of the package owner with
+          # write:packages: the registry decides by package OWNERSHIP, and these
+          # four packages were created by the repository this one replaced, so
+          # the job token can be refused however the workflow's permissions read.
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
       - id: version
         run: |
           raw="${{ inputs.version || github.ref_name }}"
@@ -160,7 +164,11 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          # GHCR_TOKEN, when set, is a personal token of the package owner with
+          # write:packages: the registry decides by package OWNERSHIP, and these
+          # four packages were created by the repository this one replaced, so
+          # the job token can be refused however the workflow's permissions read.
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
       - id: version
         run: |
           raw="${{ inputs.version || github.ref_name }}"
