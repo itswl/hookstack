@@ -6,6 +6,17 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # By hand, for a version whose tag already exists: the day the registry
+  # refused a push for reasons that were not the code's (2026-09-15, a package
+  # still owned by the repository this one replaced), re-running the tag's
+  # workflow would have carried the same fault. This builds from the chosen
+  # ref and stamps the version given; the tag stays where it is.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to publish, with or without a leading v"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -87,6 +98,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
+      # One package refusing a push must not cancel the other three: each
+      # image is its own promise, and the failure that taught this was a
+      # registry permission, not a build.
+      fail-fast: false
       matrix:
         # The fourth image is the chat bridge (docs/bridge-protocol.md): the
         # sidecar that renders the pipe's card model for Feishu, as an app or
@@ -107,7 +122,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          raw="${{ inputs.version || github.ref_name }}"
+          echo "version=${raw#v}" >> "$GITHUB_OUTPUT"
       # Only the immutable version tag here. `:latest` is moved by the promote
       # job below, once all four have succeeded — see the comment there.
       - uses: docker/build-push-action@v7
@@ -145,7 +162,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          raw="${{ inputs.version || github.ref_name }}"
+          echo "version=${raw#v}" >> "$GITHUB_OUTPUT"
       - name: move :latest to this release
         run: |
           for service in hookrelay hookjudge hookprobe lark-bridge; do
