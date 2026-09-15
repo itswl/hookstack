@@ -41,6 +41,10 @@ services:
       HOOKRELAY_CONFIG: /etc/hookrelay/shadow.yaml
       HOOKRELAY_WORKER_INTERVAL: "0.5"
       WW_RELAY_SECRET: ${WW_RELAY_SECRET:?mirror FORWARD_RELAY_SECRET into .env}
+      # The platform's report intake (its /v1/deep-analyses/intake), and the
+      # secret it verifies — mirror of its DEEP_ANALYSIS_REPORT_INTAKE_SECRET.
+      WW_REPORT_INTAKE_URL: ${WW_REPORT_INTAKE_URL:?set the platform's report intake URL in .env}
+      WW_REPORT_INTAKE_SECRET: ${WW_REPORT_INTAKE_SECRET:?mirror DEEP_ANALYSIS_REPORT_INTAKE_SECRET into .env}
       SHADOW_INGEST_SECRET: ${SHADOW_INGEST_SECRET:?set SHADOW_INGEST_SECRET in .env}
       # The silent-audit sample rate for quiet-wake-no (work.yaml equivalent
       # is off). 0 = off, the shipping default; hookrelay's own ${...} has no

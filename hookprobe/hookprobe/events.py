@@ -725,6 +725,12 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
             "kind": kind or "alert",
             "work_id": _work_id(fields, request, session_key),
         }
+        # The sending platform's own id for this alert, when the pipe carried
+        # one. Echoed on the report (notify.py) so the platform's alert page can
+        # find the investigation the pipe started on its own.
+        reference = str(event.get("reference") or "").strip()[:200]
+        if reference:
+            meta["reference"] = reference
         # A run opened from a chat topic answers INTO that topic: the pipe hands
         # the topic's root along, and the report carries it back (notify.py).
         topic_root = str(fields.get("thread_root") or "").strip()[:120]

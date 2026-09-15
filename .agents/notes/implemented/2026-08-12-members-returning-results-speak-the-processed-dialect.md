@@ -45,3 +45,11 @@ the judge weighs the fact the rule's author wrote rather than an emoji and a
 rule name — the platform answers 77% of alerts from cache or by rule, and for
 those the summary IS the rule name. Optional on purpose: a member that does not
 send it changes nothing, and the template's missing-key rule renders it empty.
+
+## Addendum 2026-09-15
+
+`meta.reference` is an optional key on a member's RESULT: the sending
+platform's own id for the alert the result is about, echoed from the
+`reference` the pipe carried in (Source.reference, extracted beside fields).
+A platform's report intake reads it to file the result on that alert's page;
+a member that never received one sends it empty.

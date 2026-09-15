@@ -307,6 +307,14 @@ name within a day, which works because the judge strips the "it ended"
 decoration before sending, so a firing and its recovery arrive under one name.
 A recovery for a condition this node never investigated is a named skip.
 
+Since 2026-09-15 an event may also carry `reference`: the sending platform's own
+id for the alert, which the pipe extracts from its source template beside the
+fields (never in them — an id per event would split a firing from its recovery
+in the judge's identity). The run keeps it in `meta.reference` and the report
+echoes it, so the platform can file an investigation this pipe started on its
+own onto the alert page it is about. Empty when nothing carried one.
+
+
 `/ui#approvals` is the other half: every procedure waiting for approval, every
 memory line an investigation proposed, and every report nobody has ruled on, with
 the buttons. It answers "what do I owe", which is deliberately wider than "what is

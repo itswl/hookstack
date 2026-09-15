@@ -31,14 +31,19 @@ def extract_event(source: Source, payload: Any) -> dict[str, Any]:
     if not source.templates:  # defensive: config always fills this
         level_raw = render(source.level, payload).lower() if source.level else ""
         level = source.level_map.get(level_raw, level_raw) or "info"
-        return {
+        extracted: dict[str, Any] = {
             "title": render(source.title, payload) or f"webhook from {source.name}",
             "body": render(source.body, payload),
             "level": level,
             "fields": {name: render(tpl, payload) for name, tpl in source.fields.items()},
             "_template": "inline",
         }
-    return select(source.templates, payload).extract(payload, door=source.name)
+    else:
+        extracted = select(source.templates, payload).extract(payload, door=source.name)
+    # The sender's own id for this event, when the source names where it lives.
+    if source.reference:
+        extracted["reference"] = render(source.reference, payload)[:200]
+    return extracted
 
 
 def fingerprint(source: Source, extracted: dict[str, Any]) -> str:

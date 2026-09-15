@@ -84,6 +84,12 @@ class Source:
     level: str
     # Optional recovery-flag template (see ExtractTemplate.recovery).
     recovery: str = ""
+    # Optional template for the SENDING platform's own id of this event, e.g.
+    # "{meta.event_id}". Carried to brains as `reference` — beside fields, never
+    # in them: fields feed the judge's identity, and an id that differs per
+    # event would split a firing from its recovery. A brain echoes it in
+    # `meta.reference`, which is how its report finds the alert page it is about.
+    reference: str = ""
     # Ordered extraction templates; one door, many payload shapes. Always at
     # least one entry (the inline title/body/level form becomes template
     # "inline"), so selection can never come up empty.
@@ -378,6 +384,7 @@ class Config:
                 body=str(item.get("body", "{body}")),
                 level=str(item.get("level", "")),
                 recovery=str(item.get("recovery", "")),
+                reference=str(item.get("reference", "")),
                 adapter=str(item.get("adapter", "default")),
                 level_map={str(k).lower(): str(v) for k, v in (item.get("level_map") or {}).items()},
                 fields={str(k): str(v) for k, v in (item.get("fields") or {}).items()},

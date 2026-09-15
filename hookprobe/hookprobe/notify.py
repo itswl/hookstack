@@ -94,6 +94,10 @@ class ReturnDelivery:
                     # reply started the turn; "" for a first report. The pipe
                     # carries it to a channel that can reply in-thread.
                     "thread_root": str(run.meta.get("thread_root") or ""),
+                    # The sending platform's own id for the alert, echoed so
+                    # the platform can file this report on that alert's page.
+                    # "" when nothing carried one.
+                    "reference": str(run.meta.get("reference") or ""),
                     "status": run.status,
                     "cost_usd": run.cost_usd,
                     "error": run.error,

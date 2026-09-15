@@ -55,6 +55,11 @@ sources:
     level: "{meta.importance}"
     # The platform states the fact; top-level flag, never a field (identity).
     recovery: "{meta.is_recovery}"
+    # The platform's own id for this alert, carried to the investigator beside
+    # fields (never in them: an id per event would split a firing from its
+    # recovery in the judge's identity). The investigator echoes it, and
+    # report-to-me hands the report back to the platform's intake with it.
+    reference: "{meta.event_id}"
     # Fields feed the judge's IDENTITY. Anything that differs between a
     # firing and its recovery (a recovery flag, an event_type that flips to
     # 恢复, the reminder bit) would split the pair into two identities and the
@@ -219,6 +224,16 @@ channels:
     secret: ${HOOKPROBE_EVENT_SECRET}
     options: {payload: normalized}
 
+  # The platform's report intake: the investigator's own envelope, verbatim
+  # and signed, so an investigation the pipe started on its own lands on the
+  # alert page it is about (meta.reference). The platform answers 200 to an
+  # envelope without a reference — recorded, not retried.
+  - name: to-platform
+    type: generic
+    url: ${WW_REPORT_INTAKE_URL}
+    secret: ${WW_REPORT_INTAKE_SECRET}
+    options: {payload: raw}
+
   - name: to-probe-action
     type: generic
     url: http://hookprobe:8088/hooks/action
@@ -307,7 +322,7 @@ routes:
   # to shadow-to-judges would be handed to a brain as though it were an alert.
   - name: report-to-me
     source: probe-notify
-    send_to: [to-me]
+    send_to: [to-me, to-platform]
     priority: 100
     stop: true
   # A reply that resolved to one of our chains goes to the investigator, which

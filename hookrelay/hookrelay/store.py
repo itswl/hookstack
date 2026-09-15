@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS events (
     -- identity, and a flag that flips between firing and recovery would
     -- split the pair.
     is_recovery INTEGER,
+    reference TEXT,
     -- When a second delivery was sent because nobody had touched this alert.
     -- NULL = never escalated, which is also what every row says when the
     -- feature is off. Stamped BEFORE the deliveries are enqueued, so it bounds
@@ -161,8 +162,8 @@ class Transaction:
     ) -> int:
         cursor = await self._db.execute(
             "INSERT INTO events (source, received_at, fingerprint, title, body, level, fields_json, payload_json,"
-            "                   correlation_id, is_recovery)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "                   correlation_id, is_recovery, reference)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 source,
                 now,
@@ -175,6 +176,7 @@ class Transaction:
                 correlation_id or None,
                 # Tri-state: absent key -> NULL (nothing stated), bool -> 0/1.
                 (int(bool(extracted["is_recovery"])) if "is_recovery" in extracted else None),
+                str(extracted.get("reference") or "") or None,
             ),
         )
         return int(cursor.lastrowid or 0)
@@ -335,6 +337,9 @@ class Store:
             )
         if "escalated_at" not in columns:
             await db.execute("ALTER TABLE events ADD COLUMN escalated_at REAL")
+        if "reference" not in columns:
+            # The sending platform's own id for the event (Source.reference).
+            await db.execute("ALTER TABLE events ADD COLUMN reference TEXT")
 
     async def close(self) -> None:
         if self._read_db is not None:
@@ -470,7 +475,7 @@ class Store:
     async def due_deliveries(self, now: float, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.read.execute(
             "SELECT d.*, e.source, e.title, e.body, e.level, e.fields_json, e.payload_json, e.received_at,"
-            " e.is_recovery"
+            " e.is_recovery, e.reference"
             " FROM deliveries d JOIN events e ON e.id = d.event_id"
             " WHERE d.status = 'queued' AND d.next_attempt_at <= ? ORDER BY d.id LIMIT ?",
             (now, limit),

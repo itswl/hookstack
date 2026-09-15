@@ -155,6 +155,16 @@ pipeline whose enrichment cannot be enumerated — an `http` brain, or a plugin
 processor — is not judged at all: refusing honest config is worse than missing
 a typo.
 
+**`reference`** (optional, per source) — a template for the SENDING platform's own
+id of the event, e.g. `"{meta.event_id}"`. Rendered at ingest beside the fields,
+never into them: fields feed the judge's identity, and an id that differs on
+every event would split a firing from its recovery. It travels to brains as a
+top-level `reference` in the normalized payload, and a brain echoes it as
+`meta.reference` on its result — which is how a platform's report intake files
+an investigation this pipe started on its own onto the alert page it is about.
+Missing path renders empty, like every template here.
+
+
 **A filter may keep a silent-audit sample.** A `filter` drops what it matches; set `sample_pct` and a deterministic fraction PASSES instead, delivered and banner-marked, so the thing a filter quietly swallows can occasionally be looked at. The case it was built for: the judge drops ~64% of cards on `wake=no`, and the regret counter that would say whether that was right reads 0 because a card never delivered cannot be pressed — a number nothing can move is not a measurement. `sample_by` is the STABLE key (default `title`), so one condition is always sampled or never; sampling per fire would deliver a storm's Nth restatement and look like dedup broke. sha256, so the sample survives a restart. A sampled card carries `fields.audit_sample` so the ledger separates it from a real delivery, and the banner so a person knows they were NOT going to be paged. Off by default, and worth nothing on a channel nobody can press.
 
 The single-shape inline form (`title:`/`body:`/`level:` directly on the source)

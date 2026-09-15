@@ -190,6 +190,8 @@ async def _drain_channel(
             # Only when the source template stated it (tri-state column);
             # absent means the receiver falls back to its own detection.
             **({"is_recovery": bool(row["is_recovery"])} if row["is_recovery"] is not None else {}),
+            # The sender's own id for this event, when its source named one.
+            **({"reference": row["reference"]} if row["reference"] else {}),
             # The original inbound payload, for raw-mode channels. Normalized
             # channels never serialize it (generic strips it before signing).
             "payload": json.loads(row["payload_json"] or "null"),
