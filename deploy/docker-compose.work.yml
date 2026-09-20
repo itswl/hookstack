@@ -750,6 +750,13 @@ services:
       # `origin` prefix the contract checker splits on.
       CHAT_TOOL_PREFIX: ${WATCH_CHAT_TOOL:?set WATCH_CHAT_TOOL in .env}
       WATCH_SCAN_FILE: /timer-state/scan.json
+      # 降频名单：这些 feed 的新消息攒 WATCH_BATCH_MINUTES 再一次性端给模型，游标
+      # 不动所以一条不丢。名字是内部标识符，只活在 .env。实测依据（2026-09-20，
+      # 最近 90 轮）：47 轮的全部内容只来自三个高音量群 feed，其中 71% 整轮
+      # [SILENT]，每轮 $0.18；攒 60 分钟后这些轮大部分变 $0。名单外的 feed——
+      # 尤其 Mentions（14% SILENT，几乎条条真）——保持 20 分钟一跳不受影响。
+      WATCH_BATCH_FEEDS: ${WATCH_BATCH_FEEDS:-}
+      WATCH_BATCH_MINUTES: ${WATCH_BATCH_MINUTES:-60}
       # Read once, only if scan.json does not exist yet: takes over the 47 feed
       # cursors the node had accumulated instead of re-flooring them.
       WATCH_SEED_STATE: /node-state/${WATCH_STATE_FILE}
