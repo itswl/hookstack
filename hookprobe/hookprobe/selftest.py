@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import socket
+import subprocess  # nosec B404 — one fixed-shape curl, see engine_endpoint_answers
 import sys
 import time
 import urllib.error
@@ -260,8 +261,81 @@ async def run(settings: Settings) -> dict[str, Any]:
         await agent_token_cannot_write(settings),
         await posture_still_holds(settings),
         audit_is_tamper_evident(settings),
+        await engine_endpoint_answers(settings),
     ]
     return _roll_up(checks)
+
+
+async def engine_endpoint_answers(settings: Settings, ask: Any = None) -> dict[str, Any]:
+    """The one boundary this file could not see: the model gateway answering.
+
+    The outage of 2026-09-21/22 — the gateway's host went 404 at the root for
+    ~33 hours on production and ~17 on the work stack — sailed past all seven
+    checks above, because none of them asks whether the engine can run. Failed
+    rounds kept producing honest failure reports and the hourly watch stayed
+    `held: true` throughout: every boundary held, the brain was gone.
+
+    A real one-token call, not a reachability GET: the dead-gateway symptom was
+    an HTTP 404, which a liveness probe would have read as "server answered".
+    Only a completion answers "the engine can actually run" — auth, model id,
+    WAF and routing included.
+
+    Uses curl in a subprocess, deliberately: the gateway sits behind
+    Cloudflare bot rules, and this process's urllib gets 1010-fingerprinted
+    where curl and the Node runtime pass. Measured on 2026-09-22 — a urllib
+    probe here would false-alarm hourly while real runs succeed.
+
+    Spends ~1 input token and ~1 output token per pass, hourly, on purpose:
+    that is the price of catching the next outage inside an hour instead of
+    inside a day.
+    """
+
+    base = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip().rstrip("/")
+    token = (os.environ.get("ANTHROPIC_AUTH_TOKEN") or "").strip()
+    if not base or not token:
+        return _check(
+            "the engine endpoint answers",
+            None,
+            "no engine endpoint/key in this process's environment",
+            "nothing here can decide; a node with no engine env is not wrong",
+        )
+
+    def curl() -> tuple[int, str]:
+        argv = [
+            "curl",
+            "-s",
+            "--max-time",
+            "20",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            base + "/v1/messages",
+            "-H",
+            "authorization: Bearer " + token,
+            "-H",
+            "anthropic-version: 2023-06-01",
+            "-H",
+            "content-type: application/json",
+            "-d",
+            json.dumps({"model": settings.model, "max_tokens": 1, "messages": [{"role": "user", "content": "1"}]}),
+        ]
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=30)  # nosec B603 — fixed shape
+        return done.returncode, (done.stdout or "").strip()
+
+    runner = curl if ask is None else ask
+    try:
+        code, body = await asyncio.to_thread(runner)
+    except Exception as exc:  # noqa: BLE001 — curl missing or hung is unproven, not passed
+        return _check("the engine endpoint answers", None, f"could not ask: {type(exc).__name__}: {exc}"[:200], "")
+    ok = code == 0 and body == "200"
+    detail = f"HTTP {body or code} from {base} (model {settings.model})"
+    return _check(
+        "the engine endpoint answers",
+        ok,
+        detail,
+        "every investigation this node runs would fail",
+    )
 
 
 class Watch:

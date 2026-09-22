@@ -303,3 +303,40 @@ def test_the_watch_survives_a_pass_that_raises(tmp_path, monkeypatch) -> None:
     slept = asyncio.run(two_passes())
     assert calls["n"] == 2, "the raising pass did not stop the loop"
     assert slept[0] == 60, "the first pass waits: a process still starting is not one under test"
+
+
+def test_the_engine_endpoint_check_answers_from_a_real_call() -> None:
+    """The outage of 2026-09-21/22 — gateway 404 at the root for ~33h on prod —
+    sailed past all seven boundaries, because none asked whether the engine can
+    run. This check asks with a real one-token completion, not a liveness GET:
+    the dead-gateway symptom WAS an HTTP response (404), which "server
+    answered" would have read as healthy."""
+    settings = make_settings(None, workdir=None, model="gpt-5.6-luna")
+
+    def ok():
+        return 0, "200"
+
+    def dead_gateway():
+        return 0, "404"
+
+    def refused():
+        return 7, ""
+
+    import asyncio
+
+    got = asyncio.run(selftest.engine_endpoint_answers(settings, ask=ok))
+    assert got["held"] is True and "HTTP 200" in got["detail"]
+    got = asyncio.run(selftest.engine_endpoint_answers(settings, ask=dead_gateway))
+    assert got["held"] is False and "404" in got["detail"], "an answered 404 is the outage, not health"
+    got = asyncio.run(selftest.engine_endpoint_answers(settings, ask=refused))
+    assert got["held"] is False
+
+
+def test_the_engine_endpoint_check_is_unproven_without_engine_env(monkeypatch) -> None:
+    """A node with no engine env in this process is not wrong — it is a
+    question this check cannot ask. `held: null`, never a pass."""
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    settings = make_settings(None, workdir=None, model="m")
+    got = asyncio.run(selftest.engine_endpoint_answers(settings, ask=lambda: (0, "200")))
+    assert got["held"] is None
