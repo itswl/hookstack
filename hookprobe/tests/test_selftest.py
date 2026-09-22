@@ -305,12 +305,20 @@ def test_the_watch_survives_a_pass_that_raises(tmp_path, monkeypatch) -> None:
     assert slept[0] == 60, "the first pass waits: a process still starting is not one under test"
 
 
-def test_the_engine_endpoint_check_answers_from_a_real_call() -> None:
+def test_the_engine_endpoint_check_answers_from_a_real_call(monkeypatch) -> None:
     """The outage of 2026-09-21/22 — gateway 404 at the root for ~33h on prod —
     sailed past all seven boundaries, because none asked whether the engine can
     run. This check asks with a real one-token completion, not a liveness GET:
     the dead-gateway symptom WAS an HTTP response (404), which "server
-    answered" would have read as healthy."""
+    answered" would have read as healthy.
+
+    The env vars are SET, not ambient: on the developer's machine the shell
+    carries a real ANTHROPIC_BASE_URL/TOKEN (it must, to run anything), and a
+    test that read them passed there and failed on CI with held=None — three
+    red commits before anyone read CI back. A test of "the check answers" owns
+    the whole question, including the env it reads."""
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gateway.invalid")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-test-not-a-real-key")
     settings = make_settings(None, workdir=None, model="gpt-5.6-luna")
 
     def ok():
