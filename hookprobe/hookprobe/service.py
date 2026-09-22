@@ -45,7 +45,7 @@ from hookprobe import (
     suggestions,
 )
 from hookprobe.distill import CASES_MARKER, slug
-from hookprobe.engine import EngineResult, price_tokens, transient
+from hookprobe.engine import EngineResult, price_tokens, transient, unreachable
 from hookprobe.notify import ReturnDelivery
 from hookprobe.reports import (
     budget_report,
@@ -1798,6 +1798,7 @@ class RunService:
         self._record_turn(run, result)
         self._settle(run)
         self._schedule_return(run)
+        self._alarm_if_node_wide(run, reason)
         logger.warning("run failed session=%s reason=%s", run.session_key, reason)
 
     async def _file_rulings(self, run: Run, filed: list[dict[str, Any]]) -> None:
@@ -1845,6 +1846,52 @@ class RunService:
         )
         with urllib.request.urlopen(request, timeout=10):  # noqa: S310 — operator URL  # nosec B310
             pass
+
+    def _alarm_if_node_wide(self, run: Run, reason: str) -> None:
+        """A failure that is about the NODE says so out loud, once.
+
+        The hourly selftest can only find an outage longer than an hour. The
+        gateway was 403 for about thirty-five minutes on 2026-09-22, between
+        two ticks: the selftest said `held` on both sides of it and the only
+        thing that actually noticed was a run dying mid-investigation, in a log
+        nobody reads. Runs are the dense signal — they fail the moment the
+        thing breaks — so a node-wide failure now takes the same road the
+        selftest's does, around the pipe, behind the same quiet window (one per
+        channel, 10 minutes by default, suppressed count folded into the next).
+
+        Detached like the return delivery: nothing on this side is waiting, and
+        an alarm must never be able to turn "the run failed" into "the request
+        died". `notify.alarm` already refuses to raise; this adds the second
+        half, which is that the scheduling cannot either.
+        """
+        why = unreachable(reason)
+        if not why:
+            return
+        run.meta["node_wide_failure"] = why
+        if not self._settings.alarm_url:
+            # Recorded, not sent: a node with no channel failing silently is a
+            # state an operator has to be able to see on the run itself.
+            run.meta["alarm"] = "no channel"
+            logger.error("node-wide failure with no alarm channel session=%s why=%s", run.session_key, why)
+            return
+        text = (
+            f"{why}\n"
+            f"run: {run.session_key}\n"
+            f"error: {reason[:200]}\n"
+            "every investigation this node runs would fail the same way until this is fixed"
+        )
+        task = asyncio.create_task(self._alarm_and_record(run, text))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _alarm_and_record(self, run: Run, text: str) -> None:
+        run.meta["alarm"] = "sent" if await self.alarm(text) else "suppressed"
+        logger.error(
+            "node-wide failure session=%s why=%s alarm=%s",
+            run.session_key,
+            run.meta.get("node_wide_failure"),
+            run.meta["alarm"],
+        )
 
     def _schedule_return(self, run: Run) -> None:
         """The family loop: relay-born runs report back to the pipe. Detached,

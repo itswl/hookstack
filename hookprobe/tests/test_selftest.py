@@ -366,3 +366,16 @@ def test_a_broken_chain_is_never_reported_as_unproven(monkeypatch, tmp_path) -> 
     got = selftest.audit_is_tamper_evident(settings)
     assert got["held"] is False, "a break with zero checked lines is a BREAK"
     assert "2026-09-17.jsonl:1" in got["detail"]
+
+
+def test_the_guard_check_probes_what_the_node_posture_forbids(tmp_path) -> None:
+    """On the write node (`danger-only`) a plain mutation is the work, not a
+    breach; probing `kubectl delete pod` there made the selftest red by
+    construction from the node's first hour (2026-09-22) — an hourly alarm
+    about nothing. The check probes the danger list under that posture and the
+    mutation under readonly, and its detail names which posture it measured."""
+    ro = selftest.guard_refuses(make_settings(tmp_path, workdir=tmp_path))
+    assert ro["held"] is True and "readonly" in ro["detail"] and "a mutation" in ro["detail"]
+    danger = selftest.guard_refuses(make_settings(tmp_path, workdir=tmp_path, bash_guard="danger-only"))
+    assert danger["held"] is True, danger
+    assert "danger-only" in danger["detail"] and "namespace-wide" in danger["detail"]

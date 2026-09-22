@@ -69,6 +69,19 @@ COMPOSE_NAME = re.compile(r"((?:HOOKPROBE|HOOKRELAY|HOOKJUDGE)_[A-Z0-9_]+)")
 # loudly rather than passing on a short list.
 FLOOR = {"hookprobe": 60, "hookrelay": 18, "hookjudge": 20}
 
+# Knobs that are per NODE, not per stack. "Reachable from a compose" is the
+# wrong question for these: on 2026-09-22 HOOKPROBE_ALARM_URL was passed to
+# probe-plan alone, the work node's selftest failed on a dead gateway and logged
+# `alarm=no channel`, and this check said every knob was reachable — it was,
+# from one service. A probe node is any service whose environment carries
+# HOOKPROBE_MODEL; each of these must appear in every one of them.
+EVERY_PROBE_NODE: dict[str, str] = {
+    "HOOKPROBE_ALARM_URL": (
+        "the alarm is what a node says when its own selftest fails; a node without it fails silently"
+    ),
+    "HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS": "the alarm's rate limit travels with the alarm",
+}
+
 NOT_A_KNOB: dict[str, str] = {
     "HOOKPROBE_AGENT_TOKEN": (
         "generated per process when empty, and that is the shipping posture: nothing to configure, "
@@ -127,6 +140,36 @@ def knobs_passed() -> set[str]:
     return passed
 
 
+SERVICE_HEADER = re.compile(r"^  ([a-z][a-z0-9-]*):\s*$")
+
+
+def probe_nodes_missing() -> list[str]:
+    """`<compose>: <service> lacks <KNOB>` for every probe node a compose defines
+    without one of the per-node knobs. Parsed by indentation, not YAML, so this
+    runs under the same bare python3 the rest of the gate does."""
+    missing: list[str] = []
+    for compose in sorted(ROOT.glob("**/docker-compose*.yml")):
+        if ".venv" in compose.parts or "node_modules" in compose.parts:
+            continue
+        blocks: dict[str, list[str]] = {}
+        current: str | None = None
+        for line in compose.read_text(encoding="utf-8").splitlines():
+            header = SERVICE_HEADER.match(line)
+            if header:
+                current = header.group(1)
+                blocks[current] = []
+            elif current is not None:
+                blocks[current].append(line)
+        for service, body in blocks.items():
+            text = "\n".join(body)
+            if "HOOKPROBE_MODEL:" not in text:
+                continue
+            for knob in EVERY_PROBE_NODE:
+                if f"{knob}:" not in text:
+                    missing.append(f"{compose.relative_to(ROOT)}: {service} lacks {knob}")
+    return missing
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="print every knob and whether a compose passes it")
@@ -171,8 +214,26 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+    lacking = probe_nodes_missing()
+    if lacking:
+        print(
+            f"knobs: {len(lacking)} per-node knob(s) missing from a probe node — reachable from ONE service "
+            "is not reachable from THIS one:",
+            file=sys.stderr,
+        )
+        for line in lacking:
+            print(f"  {line}", file=sys.stderr)
+        print(
+            "\nAdd the knob to that service's `environment:` block (the same `${NAME:-}` passthrough the "
+            "other probe nodes carry), or remove it from EVERY_PROBE_NODE in this file with the reason.",
+            file=sys.stderr,
+        )
+        return 1
     exempt = f", {len(NOT_A_KNOB)} deliberately not settable" if NOT_A_KNOB else ""
-    print(f"knobs: every one of {len(read)} settings a service reads is reachable from a compose{exempt}")
+    print(
+        f"knobs: every one of {len(read)} settings a service reads is reachable from a compose{exempt}; "
+        f"{len(EVERY_PROBE_NODE)} per-node knob(s) present on every probe node"
+    )
     return 0
 
 

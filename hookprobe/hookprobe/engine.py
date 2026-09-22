@@ -646,6 +646,53 @@ def transient(error: str) -> bool:
     return any(marker in lowered for marker in _TRANSIENT_MARKERS)
 
 
+# Failures that are about the NODE, not about this investigation: whatever the
+# question was, every run here would die the same way. Keyed off the same error
+# text `transient` reads, and deliberately narrow — a condition that wakes an
+# operator has to be one they can act on, and "this run hit its context window"
+# is not one of them.
+#
+# Why it exists: the model gateway 404'd for 33 hours (2026-09-21) and again
+# 403'd for half an hour (2026-09-22), and on neither day did anything say so
+# out loud. The hourly selftest added after the first outage MISSED the second
+# entirely — it began after one tick and was fixed before the next. Polling an
+# hourly question can only find an outage longer than an hour; the runs
+# themselves are the dense signal, because they fail the moment the thing
+# breaks. This turns each such failure into news, once, behind the alarm's own
+# quiet window.
+_NODE_WIDE: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("401", "invalid api key", "authentication"), "the gateway is rejecting this node's key"),
+    (("403",), "the gateway is refusing this node"),
+    (("402", "insufficient balance", "quota"), "the account behind the gateway cannot pay"),
+    (
+        ("connection error", "connection refused", "connection reset", "name or service not known", "dns"),
+        "the gateway is unreachable from this node",
+    ),
+    (("404",), "the gateway answers, but not at the endpoint or model this node asks for"),
+)
+
+
+def unreachable(error: str) -> str | None:
+    """Why EVERY run on this node would fail right now, or None.
+
+    None is the common answer and the important one: a refusal, a timeout, a
+    context window, a tool that broke — those are about one investigation, and
+    an operator woken for them learns to ignore the channel, which is how an
+    alarm stops working. This fires only for the engine itself being shut,
+    skint or absent.
+    """
+    lowered = " ".join(str(error or "").split()).lower()
+    if not lowered:
+        return None
+    # A restart of our own is not the gateway's fault and must never page.
+    if "shutdown" in lowered or "interrupted by a restart" in lowered:
+        return None
+    for markers, why in _NODE_WIDE:
+        if any(marker in lowered for marker in markers):
+            return why
+    return None
+
+
 # How an engine's own error line opens. Checked against the head of the text,
 # because a provider error is a line and an answer is prose or JSON.
 _ERROR_LINE_MARKERS = ("api error", "error:", "http error", "connection", "parseerror", "exception")

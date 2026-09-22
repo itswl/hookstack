@@ -152,6 +152,12 @@ services:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-quickstart-token}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      # Where this node says so when its own hourly selftest fails. Empty here
+      # by default — a quickstart has nobody to page — but carried, because a
+      # probe node that cannot report its own failure fails silently, and the
+      # knob check requires every probe node to have it for that reason.
+      HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
+      HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Any Anthropic-dialect provider: base URL, token and model aliases move
       # together. See the provider notes in hookprobe/README.md.

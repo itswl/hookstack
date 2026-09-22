@@ -405,6 +405,11 @@ services:
       NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      # The alarm channel is per NODE, not per stack: on 2026-09-22 the work
+      # node's selftest failed on a dead gateway and logged `alarm=no channel`
+      # because only probe-plan had been given this knob. Every probe carries it.
+      HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
+      HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       HOOKPROBE_EVENT_SECRET: ${WATCH_EVENT_SECRET:-}
@@ -587,6 +592,11 @@ services:
       NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      # The alarm channel is per NODE, not per stack: on 2026-09-22 the work
+      # node's selftest failed on a dead gateway and logged `alarm=no channel`
+      # because only probe-plan had been given this knob. Every probe carries it.
+      HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
+      HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       # `:?` and not `:-`. This is the door that starts runs which change
