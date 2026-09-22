@@ -147,7 +147,7 @@ services:
       - ./egress-proxy/proxy.py:/app/proxy.py:ro
     environment:
       EGRESS_ALLOW: >-
-        ${EGRESS_ALLOW:-model-gateway.example,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
+        ${EGRESS_ALLOW:-open.larksuite.com,model-gateway.example,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
 
   probe-plan:
     build:
@@ -216,6 +216,12 @@ services:
       NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      # Who wakes when this node cannot work. The selftest watch reports here
+      # hourly on a failing boundary — including, since 2026-09-22, "the engine
+      # endpoint answers". Without it a dead model gateway is visible only as
+      # an ever-growing pile of failed rounds.
+      HOOKPROBE_ALARM_URL: ${HOOKPROBE_ALARM_URL:-}
+      HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS: ${HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS:-600}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
