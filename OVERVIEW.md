@@ -1,9 +1,11 @@
 # hookstack — an overview
 
-hookstack is a work operations platform for agents: a signal arrives, an agent
-picks the work up and keeps one session on it, plans what it would do, stops for
-a person on anything that writes, has its result verified, and leaves an audit
-record behind.
+hookstack puts agents on a team's production signals without handing them the
+keys: a signal arrives, a pipe signs and prices it, an agent investigates it
+read-only — measured read-only at startup — keeps one session on it, stops for
+a person on anything that writes, and leaves a priced, audited record behind.
+The investigator is the product; the pipe and the judge are the smallest
+alerting front end for a team that has none.
 
 This document is written in the vocabulary of one signal — how does an ALERT get
 handled — and it is worth saying once at the top that this is the ORIGIN rather

@@ -1,15 +1,17 @@
 ---
 title: hookstack
-description: Run agents in production and account for them afterwards — a signed, priced, replayable bus for agent handovers, plus an agent runner, read-only by default, that you can use entirely on its own.
+description: Put agents on your production signals without handing them the keys — a pipe that signs, routes and prices every signal, an investigator that runs read-only and proves it at startup, and an audited result that reaches a person. Self-hosted; the investigator also runs entirely on its own.
 ---
 
 **English** · [中文](zh/)
 
-**Turn the signals a team already has into agent work that actually finishes — tracked, approved, verified, and accounted for.**
+**Put agents on your production signals without handing them the keys.**
 
-hookstack is a work operations platform for agents. It takes the signals a team already has — alerts, webhooks, chat messages, tickets, timers, monitoring events, and a person simply asking — and turns each one into a piece of **work** that an agent carries to an end: it picks the work up, keeps one session across every follow-up and every restart, plans what it would do, stops for a person on anything that writes, has its result verified, and leaves an audit record behind. Every hop is signed, every model call is priced, and one page a week says what the machine spent and what it saved — with the numbers a person can go and check.
+hookstack lets an SRE or platform team put an agent on call. A signal arrives — an alert, a chat mention, a ticket, a timer, a person asking — and a pipe signs, routes and prices it; an agent investigates it **read-only, and is measured read-only at startup**; what comes back reaches a person as an audited, priced report with buttons a person can rule with. Nothing touches production without a signed press, and the one loop that could — remediation — is rehearsed end to end but not yet live against a write credential.
 
-Built for SRE, platform and operations teams who want agents doing real work without handing them the keys: agents run read-only by default and are measured against that at startup, behind scoped credentials, budget ceilings and a closed list of tools. Alerts are where it was hardened and they are still the busiest door — not the shape. The same pipe, on the same code, carries an operator's own work signals to a planner and a human-approved handoff ([two deployments, one codebase](https://github.com/itswl/hookstack/blob/main/docs/deployments.md)). What it does **not** have yet: teams as a first-class thing — one deployment is one workspace, the chat sender allowlist and the console token are the whole of "who", and there are no roles, no per-person permissions and no tenancy.
+**The investigator is the product.** It is one unattended agent run behind an HTTP contract that terminates, in the OpenClaw-compatible trigger/poll dialect, so an alerting platform that already has an analysis backend switches by changing a URL — which is how it runs in production today, behind an alerting platform an operator already had. The pipe and the judge beside it are the smallest alerting front end for a team that has none: adapt any webhook, decide cheaply whether a person needs to act now, deliver to chat, keep the ledger. Alerts are where all of it was hardened and they are still the busiest door — not the only one. The same pipe, on the same code, carries an operator's own work signals to a planner and a human-approved handoff ([two deployments, one codebase](deployments.md)).
+
+What hookstack is **not**: a general work-management platform, a multi-tenant SaaS, an alerting platform, or an agent framework. One deployment is one team — the chat sender allowlist and the console token are the whole of "who"; there are no roles, no per-person permissions and no tenancy, by decision rather than by omission. The work vocabulary the boards use — work items, agents, *verified*, *closed without anyone stepping in* — is the frame the ledgers are read in, not a platform promise; where that frame is headed, and what would have to be true first, is in the [roadmap](#product-roadmap--advanced-patterns).
 
 ## The shape of the work
 
@@ -154,6 +156,8 @@ The repository runs two deployments that share every line of service code. One c
 ---
 
 ## Product Roadmap & Advanced Patterns
+
+Where this is headed is a wider frame than the front page claims: the same pipe, contract and containment carrying a team's other work signals — chat asks, tickets, timers — to a verified end, which the [second deployment](deployments.md) already does for one operator. The front page will say so the day the evidence does: a deployment that is not the operator's own, a piece of work on production that spans more than one node (of 244 work items measured on 2026-09-08, none did), and a person who answers the cards. Until then the frame stays a frame, and the two items below are what is actually next.
 
 1.  **Proposal-based Auto-healing (Remediation Loops) — shipped in its first form.** The investigator proposes; the card carries cryptographically signed `[Approve]` / `[Reject]` buttons; an approve runs each step against an allowlist, as an argv and never through a shell, on a node whose posture is `danger-only` and whose credential is the whole blast radius — read back by the startup posture check ([how](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md#security-model)). What is still open is the credential: no deployed node holds a write principal yet, so the loop has been rehearsed end to end with read-only credentials — the approval path is proven end to end, its effect on a live system is not yet.
 2.  **Local Model Validation (vLLM/Ollama):** The judge already speaks to any OpenAI-compatible base, so a zero-cost, fully offline Qwen/Llama brain is configuration today ([how](https://github.com/itswl/hookstack/blob/main/hookjudge/README.md#local-and-self-hosted-models)). What is not yet done is the measurement: the golden set has never been run against a 7B model, and `missed` / `false_quiet` on one are the numbers an air-gapped deployment needs before it trusts it.

@@ -1,6 +1,7 @@
 title: hookstack
 description: >-
-  Turn a noisy stream of signals into a few priced, signed, auditable
-  interruptions — a content-blind pipe, a cheap judge, and an agent
-  investigator (read-only by default) you can also run on its own.
+  Put agents on your production signals without handing them the keys — a
+  pipe that signs, routes and prices every signal, an investigator that runs
+  read-only and proves it at startup, and an audited result that reaches a
+  person. Self-hosted; the investigator also runs entirely on its own.
 theme: jekyll-theme-cayman
