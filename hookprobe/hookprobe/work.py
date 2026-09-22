@@ -160,6 +160,18 @@ def _artifacts(run: Run) -> list[dict[str, Any]]:
     installed = str((run.distilled or {}).get("installed") or "")
     if installed:
         out.append({"kind": "runbook", "ref": installed, "name": installed})
+    patch = (run.meta or {}).get("patch")
+    if patch:
+        # A work run's deliverable. The name is the size because that is what
+        # the board can use; the text is a link away (GET /v1/runs/{key}/patch)
+        # and the clone's history is the ground truth beside it.
+        out.append(
+            {
+                "kind": "patch",
+                "ref": run.session_key,
+                "name": f"patch +{patch['adds']}/-{patch['dels']} in {patch['files']} file(s)",
+            }
+        )
     return out
 
 

@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from hookprobe import (
     __version__,
@@ -506,6 +506,24 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if record is None:
             raise HTTPException(status_code=404, detail="no posture check recorded")
         return record
+
+    @app.get("/v1/runs/{session_key}/patch", dependencies=[Depends(require_token)])
+    async def run_patch(session_key: str) -> Response:
+        """The diff a work run left behind, as text/plain — reviewable, quotable,
+        `git apply`-able. 404 when the run produced none: an absent patch is not
+        an error to render, it is "nothing to review".
+
+        The agent wrote the block this file comes from, so the file is a copy of
+        what it CLAIMED, not ground truth — the clone's commit history is. This
+        route exists so the reviewer does not have to know where the clone
+        lives; the verification that the two agree is the review itself.
+        """
+        path = settings.workdir / "patches" / f"{session_key}.patch"
+        try:
+            body = path.read_text(encoding="utf-8")
+        except OSError:
+            raise HTTPException(status_code=404, detail="no patch on this run") from None
+        return Response(content=body, media_type="text/plain; charset=utf-8")
 
     @app.get("/v1/runs/{session_key}/audit", dependencies=[Depends(require_token)])
     async def run_audit(session_key: str) -> dict[str, Any]:

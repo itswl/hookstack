@@ -90,7 +90,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_GATE_HOME` | *(empty)* | The agent's home, whose settings and skills are inputs too |
 | `HOOKPROBE_GATE_MCP` | *(empty)* | The MCP tools this node may call, from mcp_tools |
 
-## Routes (62)
+## Routes (63)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -135,6 +135,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/v1/runs/{session_key}/audit` | The accountability record of one run: what posture it held, what it cost, every tool call it made and every one the guards refused, and whether its steering inputs changed under it |
 | POST | `/v1/runs/{session_key}/distill` | A skill draft for what this run learned — returned, never saved |
 | POST | `/v1/runs/{session_key}/handoff` | Hand this run's report to the pipe, for whichever node the operator wired that door to |
+| GET | `/v1/runs/{session_key}/patch` | The diff a work run left behind, as text/plain — reviewable, quotable, git apply-able |
 | POST | `/v1/runs/{session_key}/retry` | Human takeover: try a failed investigation again from the board |
 | POST | `/v1/runs/{session_key}/ruling` | One run, ruled from the sessions page — and told what the ruling DID |
 | GET | `/v1/runs/{session_key}/stream` | The open session's steps, pushed as they happen (NDJSON, one per line) |

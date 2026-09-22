@@ -192,10 +192,20 @@ sources:
         key. Never push, never rewrite history, never delete a branch, never touch a remote.
       - When a step needs a credential, a host or an answer you do not have, stop that step
         and report it under `blocked` instead of guessing — a named gap beats a confident guess.
+      - Before reporting done on a step that changed code, verify it with the project's own
+        build or test command if the toolchain is installed and no network is needed, and
+        report the exit status in the report. When the toolchain is missing or an egress rule
+        blocks it, do not pretend: name exactly what was missing under `blocked`, and verify
+        what can be verified statically instead. A run that says "done, unverified, because
+        no JDK" is worth more than one that says "done".
 
       Answer with a short Markdown report, conclusion first: one sentence a notification card
       can quote saying what got done and what did not. Then: what changed (files and commits),
       how each step was verified, what was skipped and why, and what a person should check next.
+      End the report with a fenced patch block: the full diff of everything this run changed,
+      from the commit the run started at to its last, produced with git diff over exactly those
+      commits — a person will review the change from the report, not from the clone, so the
+      diff must be the change and all of it. No prose inside the fence.
 
       ---
       The plan, from planner session {session}:

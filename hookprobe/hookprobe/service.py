@@ -38,6 +38,7 @@ from hookprobe import (
     blockers,
     distill,
     distill_loop,
+    patches,
     remediation,
     rulings,
     run_rulings,
@@ -1419,6 +1420,27 @@ class RunService:
                 ",".join(f"{g['kind']}:{g['name'] or 'probe'}" for g in gaps),
                 run.session_key,
             )
+        # What it changed, as a reviewable patch. Written to a file rather
+        # than onto the meta — a diff is an artifact, not metadata, and meta
+        # travels into cards and boards. The meta keeps the bookkeeping; the
+        # console links to GET /v1/runs/{key}/patch for the text itself.
+        patch = patches.extract(run.text)
+        if patch:
+            try:
+                patch_dir = self._settings.workdir / "patches"
+                patch_dir.mkdir(parents=True, exist_ok=True)
+                (patch_dir / f"{run.session_key}.patch").write_text(patch + "\n", encoding="utf-8")
+                run.meta["patch"] = patches.counts(patch)
+                logger.info(
+                    "run produced a patch +%d/-%d session=%s",
+                    run.meta["patch"]["adds"],
+                    run.meta["patch"]["dels"],
+                    run.session_key,
+                )
+            except OSError as exc:
+                # The report and the commits in the clone are intact; only the
+                # review copy is missing. Say so rather than fail the run.
+                logger.warning("patch lift failed session=%s: %s", run.session_key, exc)
         steps = remediation.extract(run.text)
         if steps:
             try:

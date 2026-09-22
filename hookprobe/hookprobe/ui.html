@@ -951,6 +951,17 @@ async function renderDetail(startPolling) {
     ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");
   $("#prov").innerHTML = provenanceHtml(run);
+  // A work run's deliverable, one click away. The patch file is the agent's
+  // copy of what it claims to have changed; the clone's history is ground
+  // truth. Showing the link here means nobody has to know where the clone
+  // lives to start a review.
+  if (run.meta && run.meta.patch) {
+    const pt = run.meta.patch;
+    $("#prov").innerHTML +=
+      `<div style="margin-top:6px"><a href="/v1/runs/${encodeURIComponent(run.session_key)}/patch" ` +
+      `target="_blank">review the patch</a> · +${pt.adds}/−${pt.dels} in ${pt.files} file(s) · ` +
+      `verify against the clone before pushing — the push stays yours</div>`;
+  }
   // What this run's tool output appeared to contain. Loud, and above the
   // transcript rather than in the audit tab: to learn that a run's context had
   // been filled with a live credential you used to have to SSH in and grep,
