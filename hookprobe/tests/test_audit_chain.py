@@ -220,3 +220,54 @@ def test_a_report_carries_the_head_home(tmp_path: Path, monkeypatch) -> None:
 
     assert posted[-1]["meta"]["audit_head"] == expected
     assert len(expected) == 64
+
+
+def test_a_window_that_starts_after_genesis_does_not_break_the_chain(tmp_path: Path) -> None:
+    """THE bug this suite missed for six days of production: verify_chain seeded
+    its walk at `_CHAIN_SEED` and demanded the first line it saw name it — but
+    once genesis rolled out of the CHAIN_DAYS window (2026-09-17, a week after
+    chaining shipped), the first in-window line legitimately named *yesterday*,
+    and every hourly check "broke" at line 1 while the chain was intact.
+
+    The first chained line in a window is the entry root: its own hash must
+    recompute, and where it points is outside the window's business — that is
+    what the off-box anchor is for.
+    """
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    # One continuous chain across a month of day files — the .chain file's job,
+    # recreated here by carrying `prev` across days the way append() does.
+    prev = audit._CHAIN_SEED
+    for day in range(1, 32):
+        date = time.strftime("%Y-%m-%d", time.localtime(time.time() - (31 - day) * 86400))
+        rows = []
+        for i in range(3):
+            body = {"ts": day * 100 + i, "session": "s", "tool": "Bash", "detail": f"{day}-{i}", "prev": prev}
+            body["hash"] = audit._line_hash(body)
+            rows.append(body)
+            prev = body["hash"]
+        (audit_dir / f"{date}.jsonl").write_text(
+            "\n".join(json.dumps(x, ensure_ascii=False) for x in rows) + "\n", encoding="utf-8"
+        )
+
+    report = audit.verify_chain(audit_dir, days=7)
+    assert report["intact"] is True, report
+    assert report["checked"] == 21 and report["broken_at"] is None
+
+    # A genuine break inside the window is still caught, including at a file's
+    # first line — the seeding must not become a way to restart the chain.
+    newest = sorted(audit_dir.glob("*.jsonl"))[-1]
+    rows = [json.loads(x) for x in newest.read_text().splitlines() if x.strip()]
+    rows[1]["detail"] = "edited after the fact"
+    newest.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in rows) + "\n", encoding="utf-8")
+    report = audit.verify_chain(audit_dir, days=7)
+    assert report["intact"] is False and report["broken_at"] is not None
+
+    # And a mid-window file claiming genesis is a break too, not a new root.
+    rows = [json.loads(x) for x in newest.read_text().splitlines() if x.strip()]
+    rows[0]["prev"] = audit._CHAIN_SEED  # rewind the link; recompute so only the LIE is wrong
+    rows[0].pop("hash")
+    rows[0]["hash"] = audit._line_hash(rows[0])
+    newest.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in rows) + "\n", encoding="utf-8")
+    report = audit.verify_chain(audit_dir, days=7)
+    assert report["intact"] is False, report

@@ -202,6 +202,17 @@ def audit_is_tamper_evident(settings: Settings) -> dict[str, Any]:
         report = audit.verify_chain(settings.workdir / "audit")
     except Exception as exc:  # noqa: BLE001
         return _check("the audit trail is tamper-evident", None, f"could not verify: {exc}", "")
+    # 断链永远排在"还没有链"前面说。2026-09-17 起的六天里，一个窗口起点的判定
+    # bug 让 verify 返回 checked=0 且 intact=False，这个函数的早退把它报成了
+    # unproven——"可能断了"和"还没开始"是两个答案，而每小时日志里的 WARN 没有人
+    # 看得到。顺序就是语义。
+    if not report["intact"]:
+        return _check(
+            "the audit trail is tamper-evident",
+            False,
+            f"CHAIN BREAKS AT {report['broken_at']}",
+            "the audit is what an investigation is reconstructed from",
+        )
     if report["checked"] == 0:
         # Nothing chained yet is not a pass: a node that has recorded no linked
         # lines has demonstrated nothing about its record.
@@ -214,8 +225,6 @@ def audit_is_tamper_evident(settings: Settings) -> dict[str, Any]:
     detail = f"{report['checked']} linked line(s) verify"
     if report["unchained"]:
         detail += f", {report['unchained']} from before the chain existed"
-    if not report["intact"]:
-        detail = f"CHAIN BREAKS AT {report['broken_at']}"
     return _check(
         "the audit trail is tamper-evident",
         report["intact"],

@@ -183,7 +183,20 @@ def verify_chain(audit_dir: Path, days: int = CHAIN_DAYS) -> dict[str, Any]:
                     }
                 continue
             started = True
-            if _line_hash(line) != line["hash"] or str(line.get("prev") or "") != previous:
+            if _line_hash(line) != line["hash"]:
+                return {
+                    "intact": False,
+                    "checked": checked,
+                    "unchained": unchained,
+                    "broken_at": f"{path.name}:{number}",
+                }
+            if not checked and str(line.get("prev") or "") != previous:
+                # 窗口的第一条链行指向窗外——创世滚出 CHAIN_DAYS 之后这恒为真，
+                # 2026-09-17 起每次校验都在这里"断"，而链根本没断。窗口内的链从这
+                # 一行的自身 hash 起步：它指向哪里是窗外的事，锚定靠 off-box 的
+                # meta.audit_head，不靠这里的种子。
+                previous = str(line.get("prev") or previous)
+            elif str(line.get("prev") or "") != previous:
                 return {
                     "intact": False,
                     "checked": checked,

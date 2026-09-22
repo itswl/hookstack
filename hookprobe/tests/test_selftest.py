@@ -340,3 +340,21 @@ def test_the_engine_endpoint_check_is_unproven_without_engine_env(monkeypatch) -
     settings = make_settings(None, workdir=None, model="m")
     got = asyncio.run(selftest.engine_endpoint_answers(settings, ask=lambda: (0, "200")))
     assert got["held"] is None
+
+
+def test_a_broken_chain_is_never_reported_as_unproven(monkeypatch, tmp_path) -> None:
+    """2026-09-17..22 on production: a window-seeding bug in verify_chain made
+    it return checked=0 AND intact=False, and this check's early return tested
+    `checked == 0` first — so six days of "the chain breaks at line 1" were
+    reported as `unproven: no chained lines yet`. An unproven that is really a
+    break is the worst of both: no alarm, and a log line nobody reads. The
+    order is the semantics: intact is tested first, always."""
+    settings = make_settings(tmp_path, workdir=tmp_path)
+
+    def broken_window(_dir):
+        return {"intact": False, "checked": 0, "unchained": 0, "broken_at": "2026-09-17.jsonl:1"}
+
+    monkeypatch.setattr(selftest.audit, "verify_chain", broken_window)
+    got = selftest.audit_is_tamper_evident(settings)
+    assert got["held"] is False, "a break with zero checked lines is a BREAK"
+    assert "2026-09-17.jsonl:1" in got["detail"]
