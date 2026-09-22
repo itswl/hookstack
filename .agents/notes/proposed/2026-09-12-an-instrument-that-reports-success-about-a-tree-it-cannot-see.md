@@ -1,5 +1,5 @@
 ---
-title: Fourteen instruments in eleven days: eleven reported success about a set they never examined, three answered truthfully and were misread
+title: Fifteen instruments in eleven days, and the fifteenth was caught by a check comparing a claim with its artifact
 status: proposed
 date: 2026-09-12
 scope: stack
@@ -9,8 +9,10 @@ scope: stack
 
 *Written 2026-09-12 after four of these; extended 2026-09-14 to ten, and to
 the second countermeasure, which the first version did not have; extended
-2026-09-22 to fourteen, when the guard this note is about was itself the
-instrument — twice in one commit.*
+2026-09-22 to fifteen, when the guard this note is about was itself the
+instrument — twice in one commit — and a sixteenth countermeasure appeared,
+because the fifteenth failure could not have been caught by either of the
+first two.*
 
 Record the class, and fix only the part that can be fixed without building a
 capability: a check that cannot look where the reader assumes should NAME where
@@ -89,6 +91,15 @@ not the one being asked about, and reported success.
     read as "the fix did not work" when the fix had not happened. Verify the
     write landed before measuring its effect; never chain the two.
 
+15. **The patch lift, returning a third of a patch** (mine, 2026-09-22). A
+    non-greedy `(.*?)``` ` stopped at the first three backticks inside the diff
+    it was lifting — and a diff of a README that documents an endpoint ADDS a
+    fenced code block, so the truncation is the common case, not the corner.
+    What it returned began `diff --git`, parsed, applied, and read as a whole
+    patch: 44 lines of a 168-line change. Neither countermeasure above would
+    have caught it. It examined the right report. It was not misread. It
+    produced a well-formed, confident, wrong answer.
+
 **The through-line is hookstack-34's sentence and it is better than mine:**
 every one was an instrument reporting success about a tree, a moment or a
 machine it was not actually looking at — and on 2026-09-22 the instrument was
@@ -126,6 +137,20 @@ So the pair, and they are not substitutes:
 | --- | --- |
 | print what was examined beside the verdict | the instrument that examined nothing and said success |
 | run the known-good control before attributing a cause | the instrument that ran, answered truthfully, and was misread |
+| compare the claim against the artifact it describes | the instrument that examined the right thing and produced a well-formed wrong answer |
+
+**The third one arrived by accident and is the reason to write this section
+again.** `patches.verify` was built to catch an agent inventing a diff: it
+finds the clone commits carrying the run's key and compares their diff with the
+one in the report. On its first real firing it reported `DIFFERS from the
+clone` — and the agent had done nothing wrong. The lift standing next to it had
+truncated the patch. A check aimed at a dishonest author caught a defective
+reader, because both produce the same observable: **what we stored is not what
+is on disk.**
+
+That generalises, and it is the cheapest of the three to add: wherever a
+component's output CLAIMS to describe something that still exists, compare them.
+The comparison does not need to know which side is wrong to be worth having.
 
 ## Consequences
 
