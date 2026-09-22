@@ -106,6 +106,61 @@ def tracked_files() -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
+def untracked_files() -> list[str]:
+    """New files not yet added and not ignored: what the NEXT commit could take.
+
+    2026-09-22: a new test fixture carrying a real project name sat untracked
+    while the local gate ran `git ls-files`, printed a clean verdict over 440
+    tracked files, and the file was added and committed a minute later. CI,
+    which sees only tracked files at a commit, caught it — after the push. The
+    gate exists to catch this BEFORE the push, so it has to look at what a
+    commit could carry, not only at what the last one did. Ignored files stay
+    out: `.env`, `work-data/`, `data/watch/` hold real names on purpose.
+    """
+    out = subprocess.run(  # nosec B603 B607
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [line for line in out.splitlines() if line]
+
+
+def unpushed_messages() -> list[tuple[str, str]] | None:
+    """(short sha, message) for every commit the next push would publish, or
+    None when there is no upstream ref to measure against.
+
+    The file scan cannot see a commit message, and on 2026-09-22 the project
+    name that sat in the fixture also sat in the message of the commit that
+    added it — the file would have been fixed by hand and the message would
+    have stayed public. Messages leave the machine on push, so the boundary is
+    upstream..HEAD. When that range cannot be computed the caller SAYS so;
+    a clean scan of nothing is the failure this whole file is about.
+    """
+    for ref in ("@{upstream}", "origin/main"):
+        probe = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "--verify", "--quiet", ref], cwd=ROOT, capture_output=True, text=True
+        )
+        if probe.returncode == 0:
+            break
+    else:
+        return None
+    out = subprocess.run(  # nosec B603 B607
+        ["git", "log", "--format=%h%x00%B%x01", f"{ref}..HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    records: list[tuple[str, str]] = []
+    for record in out.split("\x01"):
+        if "\x00" in record:
+            sha, body = record.split("\x00", 1)
+            records.append((sha.strip(), body))
+    return records
+
+
 def main() -> int:
     rules = load_patterns()
     # An EMPTY list is as useless as a missing one, and far easier to end up with:
@@ -133,7 +188,10 @@ def main() -> int:
     compiled = [(re.compile(pattern, re.I), reason) for pattern, reason in rules]
     problems: list[str] = []
 
-    for name in tracked_files():
+    files = tracked_files()
+    seen = set(files)
+    extra = [name for name in untracked_files() if name not in seen]
+    for name in files + extra:
         if name in EXEMPT:
             continue
         path = ROOT / name
@@ -148,6 +206,12 @@ def main() -> int:
                 if pattern.search(line):
                     problems.append(f"{name}:{line_no}: {reason}")
 
+    messages = unpushed_messages()
+    for sha, body in messages or []:
+        for pattern, reason in compiled:
+            if pattern.search(body):
+                problems.append(f"commit {sha} message: {reason}")
+
     for problem in problems:
         print(f"  FAIL  {problem}")
     if problems:
@@ -158,9 +222,17 @@ def main() -> int:
     # pasted: a paste that loses tabs drops those rules silently, because a line
     # without a tab cannot say why it is forbidden and is skipped. Printing the
     # count turns "I hope the secret is right" into something a log can answer.
+    # Every set examined is named beside the verdict, including the one that
+    # could not be: a reader who assumes messages were scanned when they were
+    # not is the reader this line exists for.
+    scanned_messages = (
+        "commit messages NOT scanned (no upstream ref here)"
+        if messages is None
+        else f"{len(messages)} unpushed commit message(s)"
+    )
     print(
-        f"no estate identifiers: {len(tracked_files())} tracked file(s) in {scanned_tree()} "
-        f"clean against {len(rules)} rule(s)"
+        f"no estate identifiers: {len(files)} tracked + {len(extra)} untracked file(s) in {scanned_tree()}, "
+        f"{scanned_messages}, clean against {len(rules)} rule(s)"
     )
     return 0
 

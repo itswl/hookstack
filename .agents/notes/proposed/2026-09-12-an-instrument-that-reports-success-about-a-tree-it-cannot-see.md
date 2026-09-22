@@ -1,5 +1,5 @@
 ---
-title: Ten instruments in three days: eight reported success about a set they never examined, two answered truthfully and were misread
+title: Fourteen instruments in eleven days: eleven reported success about a set they never examined, three answered truthfully and were misread
 status: proposed
 date: 2026-09-12
 scope: stack
@@ -8,7 +8,9 @@ scope: stack
 ## Decision
 
 *Written 2026-09-12 after four of these; extended 2026-09-14 to ten, and to
-the second countermeasure, which the first version did not have.*
+the second countermeasure, which the first version did not have; extended
+2026-09-22 to fourteen, when the guard this note is about was itself the
+instrument — twice in one commit.*
 
 Record the class, and fix only the part that can be fixed without building a
 capability: a check that cannot look where the reader assumes should NAME where
@@ -66,9 +68,31 @@ not the one being asked about, and reported success.
     command). Returned 200 with the field still `disabled`. Silent no-op, and
     only a fresh `GET` showed it.
 
+11. **`git ls-files` as the gate's file list** (mine, 2026-09-22). The estate
+    guard scanned tracked files; a new test fixture carrying a real project
+    name was untracked when the gate ran. Green over 440 files, committed a
+    minute later, red on CI after the push. The guard now scans what the next
+    commit could take (`--others --exclude-standard`) and prints both counts.
+12. **Nothing scanned commit messages** (mine, same commit). The same name sat
+    in the message. Fixing the file by hand would have left the message
+    public; only a scan of `upstream..HEAD` messages found it — and found it
+    because the tracking ref was stale-behind, which is the one time a stale
+    ref helps. The guard now scans that range and SAYS when it cannot.
+13. **`cd "$DIR"` with an empty variable** (mine, 2026-09-22). The variable was
+    unset, `cd ""` fell back to the current directory, and `git log` answered
+    confidently about the wrong repository. Caught because the content did
+    not match the claim under test — the report said README, the log said
+    deploy files — not because anything errored.
+14. **A fix script that never ran** (mine, twice the same afternoon). A relative
+    path resolved against a drifted cwd, the script raised, and the gate that
+    followed in the same command ran over the UNFIXED tree. Its red verdict
+    read as "the fix did not work" when the fix had not happened. Verify the
+    write landed before measuring its effect; never chain the two.
+
 **The through-line is hookstack-34's sentence and it is better than mine:**
 every one was an instrument reporting success about a tree, a moment or a
-machine it was not actually looking at. Not a wrong answer — an answer to a
+machine it was not actually looking at — and on 2026-09-22 the instrument was
+the estate guard itself, the check this note exists to keep honest. Not a wrong answer — an answer to a
 different question, in the shape of the expected one.
 
 **Which makes the fix a reporting fix before it is a capability fix.** (3) and
@@ -80,8 +104,8 @@ that read the verdict.
 note recording only the first teaches half the lesson.** hookstack-34's
 distinction: printing the denominator catches an instrument that examined
 nothing. It does nothing when the instrument ran fine, returned a real result,
-and the reader attributes it to the wrong cause. Two of these, both on
-2026-09-14 while verifying the Python 3.14 image:
+and the reader attributes it to the wrong cause. Two on
+2026-09-14 while verifying the Python 3.14 image, and (13) above:
 
 * The spawned gate answered `{}` under 3.14 and looked like a broken
   containment boundary on a new interpreter. **The 3.12 control answered `{}`
