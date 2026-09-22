@@ -675,6 +675,18 @@ services:
       # simulate-principal-policy answers `allowed` for Describe/Get and
       # `implicitDeny` for TerminateInstances, DeleteObject and CreateUser.
       - ../work-data/probe-plan-secrets/aws:/data/aws:ro
+      #
+      # /data/code — the tree the plan is ABOUT, and the one mount here that is
+      # WRITABLE, because this is the node that does the work. Same path as the
+      # planner's read-only mount, so a plan's file paths resolve unchanged on
+      # this side. What it points at is the blast radius for file changes: start
+      # with a scratch copy of one checkout (the default directory is empty until
+      # you fill it), read the runner's commits back, and only then point it at
+      # the real tree. Nothing here holds a push credential, so a change stays
+      # local until a person moves it. The eight `danger-only` refusals and the
+      # input guard still apply; everything else this node may do to the tree is
+      # decided by this line.
+      - ${PROBE_WORK_CODE:-../work-data/probe-work-code}:/data/code
     ports:
       - "127.0.0.1:8090:8088"
 
