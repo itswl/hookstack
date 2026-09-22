@@ -41,7 +41,11 @@ import os
 import re
 from typing import Any
 
-_BLOCK = re.compile(r"```blocked\s*\n(.*?)```", re.DOTALL)
+# `blocked:` with a colon is what a runner wrote on 2026-09-22 (trial 4) after
+# being told "a fenced block labelled blocked", and the strict fence matched
+# nothing — a gap declared in the agreed shape, dropped on a punctuation mark.
+# Be liberal in what a report may write; the JSON inside is still strict.
+_BLOCK = re.compile(r"```blocked:?\s*\n(.*?)```", re.DOTALL)
 _MAX = 6
 _KINDS = ("credential", "egress", "question", "probe")
 

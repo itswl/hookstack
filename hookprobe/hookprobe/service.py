@@ -1434,7 +1434,16 @@ class RunService:
                 # The clone the diff claims to describe is mounted here, so the
                 # claim is checked, not stored: commits carrying this run's key
                 # are found and their diff compared with the block.
-                run.meta["patch"].update(patches.verify(patch, self._settings.workdir / "code", run.session_key))
+                # Every name this run's commits could carry, the plan's first:
+                # the brief asks the runner to open its message with the PLAN's
+                # key, which is not the key of the run doing the committing.
+                run.meta["patch"].update(
+                    patches.verify(
+                        patch,
+                        self._settings.workdir / "code",
+                        [run.meta.get("work_id"), run.meta.get("session"), run.session_key],
+                    )
+                )
                 logger.info(
                     "run produced a patch +%d/-%d matches_clone=%s commits=%s session=%s",
                     run.meta["patch"]["adds"],

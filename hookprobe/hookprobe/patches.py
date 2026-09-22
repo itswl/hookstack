@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 import subprocess  # nosec B404
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -95,34 +96,44 @@ def _normalise(diff: str) -> str:
     return "\n".join(kept).strip()
 
 
-def verify(patch: str, code_root: Path, session_key: str) -> dict[str, Any]:
+def verify(patch: str, code_root: Path, keys: Sequence[str | None] | str) -> dict[str, Any]:
     """Is the lifted diff the diff of commits that exist?
 
     Looks under `code_root` (the clone mount, `/data/code` on the work node)
-    for a repository whose history carries `session_key` in a commit message
-    — the brief's own convention — and compares the combined diff of those
+    for a repository whose history carries one of `keys` in a commit message —
+    the brief's own convention — and compares the combined diff of those
     commits with `patch`. Returns `repo`, `commits` (short shas, newest first,
     like every list here) and `matches`: True, False, or None when no commit
-    carried the key.
+    carried any key.
 
-    None is the loud case. The first live run committed exactly what its diff
-    said; the reason this exists is the run that will not, and "no commit
-    found for this run" is what that run's page should say, in those words,
-    rather than a diff nobody can apply.
+    `keys` is plural because the run and the work are not named the same
+    thing. The brief tells the runner to open its commit message with THE
+    PLAN's session key; the run doing the committing is `probe:plan-approved:N`.
+    Handed only the latter (2026-09-22, trial 4) this searched for a string no
+    commit would ever carry and reported `matches: null` over a commit sitting
+    in the clone, correctly written — a verifier looking in the right repo for
+    the wrong name, which reads exactly like the failure it exists to catch.
+
+    None is the loud case and it stays loud: "no commit found for this run"
+    is what that run's page should say, in those words, rather than a diff
+    nobody can apply.
     """
     absent: dict[str, Any] = {"repo": None, "commits": [], "matches": None}
-    if not session_key or not code_root.is_dir():
+    wanted = [str(k).strip() for k in ([keys] if isinstance(keys, str) else keys) if str(k or "").strip()]
+    if not wanted or not code_root.is_dir():
         return absent
     for candidate in sorted(code_root.iterdir()):
         if not (candidate / ".git").exists():
             continue
-        try:
-            out = _git(
-                candidate, "log", "--all", "--reverse", "--fixed-strings", f"--grep={session_key}", "--format=%H"
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        shas = out.split()
+        shas: list[str] = []
+        for key in wanted:
+            try:
+                out = _git(candidate, "log", "--all", "--reverse", "--fixed-strings", f"--grep={key}", "--format=%H")
+            except (OSError, subprocess.SubprocessError):
+                continue
+            shas = out.split()
+            if shas:
+                break
         if not shas:
             continue
         try:

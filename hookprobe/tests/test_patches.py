@@ -196,3 +196,41 @@ def test_the_patch_is_checked_against_the_commits_that_carry_the_key(tmp_path) -
     unbacked = patches.verify(real, code, "probe:plan-approved:8")
     assert unbacked["matches"] is None and unbacked["commits"] == []
     assert patches.verify(real, tmp_path / "nowhere", "probe:plan-approved:7")["matches"] is None
+
+
+def test_verify_looks_for_the_plan_key_not_only_the_run_key(tmp_path) -> None:
+    """The run and the work are not named the same thing. The brief tells the
+    runner to open its commit message with THE PLAN's session key, while the
+    run doing the committing is `probe:plan-approved:N`. Handed only the
+    latter (trial 4, 2026-09-22) verify searched for a string no commit would
+    carry and said `matches: null` over a correctly written commit — a
+    verifier looking in the right repo for the wrong name."""
+    code = tmp_path / "code"
+    repo = code / "demo-job"
+    repo.mkdir(parents=True)
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "README.md").write_text("# demo-job\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", "chore: readme")
+    (repo / "README.md").write_text("# demo-job\n服务说明。\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(
+        repo,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@x",
+        "commit",
+        "-q",
+        "-m",
+        "trial:plan-to-work:20260922T1710 document service README",
+    )
+    real = _git(repo, "diff", "HEAD~1", "HEAD")
+
+    # The run's own key alone finds nothing — and says so rather than guessing.
+    assert patches.verify(real, code, "probe:plan-approved:549")["matches"] is None
+    # The candidate list, plan key first, finds it.
+    got = patches.verify(real, code, ["trial:plan-to-work:20260922T1710", None, "probe:plan-approved:549"])
+    assert got["matches"] is True and got["commits"] and got["repo"] == "demo-job"
+    # A bare string still works: this is the one-key call site's shape.
+    assert patches.verify(real, code, "trial:plan-to-work:20260922T1710")["matches"] is True

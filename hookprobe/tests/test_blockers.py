@@ -122,3 +122,16 @@ def test_the_task_prompt_still_asks_for_all_four(tmp_path) -> None:
     assert "OPENING SENTENCE" in _TASK_MESSAGE
     # And the loop that makes a paste cheaper than a new investigation.
     assert "same investigation" in _TASK_MESSAGE
+
+
+def test_the_fence_may_carry_a_colon() -> None:
+    """Told "a fenced block labelled blocked", a runner wrote ```blocked: and
+    the strict fence matched nothing (trial 4, 2026-09-22) — a gap declared in
+    the agreed shape and dropped on a punctuation mark. Liberal in the fence,
+    strict in the JSON."""
+    body = '[{"kind": "credential", "name": "MAVEN_SETTINGS", "answers": "would let the build run"}]'
+    for fence in ("```blocked\n", "```blocked:\n"):
+        got = blockers.extract(fence + body + "\n```")
+        assert len(got) == 1 and got[0]["name"] == "MAVEN_SETTINGS", fence
+    # Still strict about what is inside.
+    assert blockers.extract("```blocked:\nnot json\n```") == []
