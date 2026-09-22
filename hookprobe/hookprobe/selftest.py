@@ -295,6 +295,18 @@ async def run(settings: Settings) -> dict[str, Any]:
     return _roll_up(checks)
 
 
+# What curl's exit code MEANS, for the handful a gateway actually produces. The
+# number alone sends a reader to a manual page at the moment they least want one.
+_CURL_REASONS = {
+    6: "the gateway's name did not resolve",
+    7: "nothing accepted a connection",
+    28: "connected, then nothing came back before the timeout",
+    35: "the TLS handshake failed",
+    60: "the gateway's certificate was not trusted",
+}
+_ENGINE_TIMEOUT = 20
+
+
 async def engine_endpoint_answers(settings: Settings, ask: Any = None) -> dict[str, Any]:
     """The one boundary this file could not see: the model gateway answering.
 
@@ -334,7 +346,7 @@ async def engine_endpoint_answers(settings: Settings, ask: Any = None) -> dict[s
             "curl",
             "-s",
             "--max-time",
-            "20",
+            str(_ENGINE_TIMEOUT),
             "-o",
             "/dev/null",
             "-w",
@@ -358,7 +370,17 @@ async def engine_endpoint_answers(settings: Settings, ask: Any = None) -> dict[s
     except Exception as exc:  # noqa: BLE001 — curl missing or hung is unproven, not passed
         return _check("the engine endpoint answers", None, f"could not ask: {type(exc).__name__}: {exc}"[:200], "")
     ok = code == 0 and body == "200"
-    detail = f"HTTP {body or code} from {base} (model {settings.model})"
+    # `%{http_code}` is "000" when curl received no response at all, which reads
+    # as a status code the server sent and is not one. The operator alarm of
+    # 2026-09-22 said `HTTP 000 from <gateway>` while curl's own answer was
+    # "timed out with 0 bytes received" — the useful half, thrown away by
+    # `-s -o /dev/null`. Say what curl said, and keep the numeric code for
+    # anyone who wants to look it up.
+    detail = (
+        f"HTTP {body} from {base} (model {settings.model})"
+        if code == 0 and body and body != "000"
+        else f"no response from {base} in {_ENGINE_TIMEOUT}s — {_CURL_REASONS.get(code, 'curl failed')} (curl {code})"
+    )
     return _check(
         "the engine endpoint answers",
         ok,

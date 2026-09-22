@@ -379,3 +379,25 @@ def test_the_guard_check_probes_what_the_node_posture_forbids(tmp_path) -> None:
     danger = selftest.guard_refuses(make_settings(tmp_path, workdir=tmp_path, bash_guard="danger-only"))
     assert danger["held"] is True, danger
     assert "danger-only" in danger["detail"] and "namespace-wide" in danger["detail"]
+
+
+def test_no_response_is_not_reported_as_a_status_code(monkeypatch) -> None:
+    """curl writes "000" into `%{http_code}` when nothing came back, and the
+    operator alarm of 2026-09-22 rendered that as `HTTP 000 from <gateway>` —
+    which reads as a code the server sent. It sent nothing. The gateway's
+    origin was hung; Cloudflare returned 524 after 100s, well past curl's 20.
+    Say what curl said."""
+    settings = make_settings(None, workdir=None, model="gpt-5.6-luna")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gateway.invalid")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-test-not-a-real-key")
+
+    got = asyncio.run(selftest.engine_endpoint_answers(settings, ask=lambda: (28, "000")))
+    assert got["held"] is False
+    assert "000" not in got["detail"], got["detail"]
+    assert "nothing came back" in got["detail"] and "curl 28" in got["detail"]
+
+    # A real status the gateway DID send still reads as one.
+    refused = asyncio.run(selftest.engine_endpoint_answers(settings, ask=lambda: (0, "403")))
+    assert refused["held"] is False and "HTTP 403" in refused["detail"]
+    ok = asyncio.run(selftest.engine_endpoint_answers(settings, ask=lambda: (0, "200")))
+    assert ok["held"] is True and "HTTP 200" in ok["detail"]
