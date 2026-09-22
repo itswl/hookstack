@@ -1431,10 +1431,16 @@ class RunService:
                 patch_dir.mkdir(parents=True, exist_ok=True)
                 (patch_dir / f"{run.session_key}.patch").write_text(patch + "\n", encoding="utf-8")
                 run.meta["patch"] = patches.counts(patch)
+                # The clone the diff claims to describe is mounted here, so the
+                # claim is checked, not stored: commits carrying this run's key
+                # are found and their diff compared with the block.
+                run.meta["patch"].update(patches.verify(patch, self._settings.workdir / "code", run.session_key))
                 logger.info(
-                    "run produced a patch +%d/-%d session=%s",
+                    "run produced a patch +%d/-%d matches_clone=%s commits=%s session=%s",
                     run.meta["patch"]["adds"],
                     run.meta["patch"]["dels"],
+                    run.meta["patch"]["matches"],
+                    ",".join(run.meta["patch"]["commits"]) or "-",
                     run.session_key,
                 )
             except OSError as exc:

@@ -190,8 +190,11 @@ sources:
       - Record changes as local git commits, one per logical step, author
         "work runner <work-runner@hookstack.local>", message starting with the plan's session
         key. Never push, never rewrite history, never delete a branch, never touch a remote.
-      - When a step needs a credential, a host or an answer you do not have, stop that step
-        and report it under `blocked` instead of guessing — a named gap beats a confident guess.
+      - When a step needs a credential, a host, a toolchain or an answer you do not have, stop
+        that step and declare it in a fenced block labelled blocked: a JSON list, one entry per
+        gap, each with kind (credential, egress, question or probe), name (or command, for a
+        probe) and answers (what having it would let you finish). A named gap beats a confident
+        guess, and the block is what gets counted — prose about a gap is not.
       - Before reporting done on a step that changed code, verify it with the project's own
         build or test command if the toolchain is installed and no network is needed, and
         report the exit status in the report. When the toolchain is missing or an egress rule
@@ -202,10 +205,11 @@ sources:
       Answer with a short Markdown report, conclusion first: one sentence a notification card
       can quote saying what got done and what did not. Then: what changed (files and commits),
       how each step was verified, what was skipped and why, and what a person should check next.
-      End the report with a fenced patch block: the full diff of everything this run changed,
-      from the commit the run started at to its last, produced with git diff over exactly those
-      commits — a person will review the change from the report, not from the clone, so the
-      diff must be the change and all of it. No prose inside the fence.
+      End the report with one fenced diff block (the fence labelled diff): the full output of
+      git diff from the commit the run started at to its last commit — a person will review the
+      change from the report, not from the clone, so the diff must be the change and all of it,
+      and it must be the diff of commits that exist, never a diff you composed by hand. No prose
+      inside the fence. A run that changed nothing ends with no diff block and says so.
 
       ---
       The plan, from planner session {session}:

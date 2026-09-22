@@ -165,11 +165,19 @@ def _artifacts(run: Run) -> list[dict[str, Any]]:
         # A work run's deliverable. The name is the size because that is what
         # the board can use; the text is a link away (GET /v1/runs/{key}/patch)
         # and the clone's history is the ground truth beside it.
+        matches = patch.get("matches")
+        backed = (
+            " · matches the clone"
+            if matches is True
+            else " · DIFFERS from the clone"
+            if matches is False
+            else " · no commit found for it"
+        )
         out.append(
             {
                 "kind": "patch",
                 "ref": run.session_key,
-                "name": f"patch +{patch['adds']}/-{patch['dels']} in {patch['files']} file(s)",
+                "name": f"patch +{patch['adds']}/-{patch['dels']} in {patch['files']} file(s)" + backed,
             }
         )
     return out

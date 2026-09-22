@@ -6,7 +6,7 @@ are complete exactly when they are invisible: nothing outside
 to review them has to know where to look. The handoff's whole promise is that
 the review stays human — and a review nobody can find is not a review.
 
-So the brief's report contract ends with a fenced ```patch block carrying the
+So the brief's report contract ends with a fenced ```diff block carrying the
 run's full diff, and this module is the lift: the same shape as
 ```remediation and ```blocked, for the same reason — prose at the bottom of a
 report is read by a person once and by nothing ever again.
@@ -16,19 +16,31 @@ bookkeeping on the run (`meta["patch"]`: file, lines, adds, dels). The diff is
 an artifact, not metadata: it can be tens of KB, and meta travels with the run
 into cards, boards and telemetry.
 
-What this does NOT do: validate that the patch matches the commits on disk.
-The agent writes the block, so a patch that lies about the tree is possible
-the same way a mislabelled `risk` is possible — the floor is "the obvious
-form, honestly reported". The review it exists to serve is the check; if the
-diff and the clone ever disagree, that is a finding about the runner, and the
-commit history in the clone is the ground truth to diff against.
+The agent writes the block, so on its own the patch is a CLAIM about the
+tree. But the clone it claims to describe is mounted in this same container,
+and the brief tells the runner to commit with the plan's session key in the
+message and to end with `git diff` over exactly those commits. Both halves are
+checkable, so `verify` checks them: the commits carrying the key are found and
+their combined diff compared with the block. `matches` on the run's meta is
+True, False, or None (no commit carried the key: an unbacked diff). The
+review still happens from the report — but now the report says whether the
+clone agrees with it, instead of leaving that to whoever remembers to look.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess  # nosec B404
+from pathlib import Path
+from typing import Any
 
-_BLOCK = re.compile(r"```patch\s*\n(.*?)```", re.DOTALL)
+# `diff` first: it is the fence the runner actually writes. The first live run
+# (2026-09-22) was told "a fenced patch block", produced a textbook unified diff
+# under ```diff — the label every Markdown renderer colours — and the lift,
+# matching ```patch only, returned 404 on a report that carried the whole
+# change. The contract names the content; the label is whichever of the two
+# conventional ones the model reaches for.
+_BLOCK = re.compile(r"```(?:diff|patch)\s*\n(.*?)```", re.DOTALL)
 _MAX = 128 * 1024
 
 
@@ -38,15 +50,15 @@ def extract(text: str) -> str:
     Must start with a `diff --git` line: a fenced block that is not a diff is
     a contract violation worth dropping rather than storing, because the thing
     downstream of it (a person clicking "review the patch") would get prose
-    where they expected a diff.
+    where they expected a diff. The LAST valid block wins: the contract puts the
+    patch at the end of the report, and a report may quote an earlier diff
+    while explaining what it found.
     """
-    match = _BLOCK.search(text or "")
-    if not match:
-        return ""
-    body = match.group(1).strip()
-    if not body.startswith("diff --git"):
-        return ""
-    return body[:_MAX]
+    for match in reversed(list(_BLOCK.finditer(text or ""))):
+        body = match.group(1).strip()
+        if body.startswith("diff --git"):
+            return body[:_MAX]
+    return ""
 
 
 def counts(patch: str) -> dict[str, int]:
@@ -60,3 +72,71 @@ def counts(patch: str) -> dict[str, int]:
         elif line.startswith("diff --git"):
             files += 1
     return {"adds": adds, "dels": dels, "files": files}
+
+
+# git's well-known empty tree: what a root commit is diffed against.
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def _git(repo: Path, *args: str) -> str:
+    # Fixed argv, no shell; the only variable parts are a repo path under the
+    # code mount and a session key passed as a fixed string, never a pattern.
+    done = subprocess.run(  # nosec B603 B607
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True, timeout=30
+    )
+    return done.stdout
+
+
+def _normalise(diff: str) -> str:
+    # Two `git diff` invocations over the same commits differ only in `index`
+    # lines (abbreviation length follows the object count) and trailing
+    # whitespace. Everything else is the change, and must be identical.
+    kept = [line.rstrip() for line in (diff or "").splitlines() if not line.startswith("index ")]
+    return "\n".join(kept).strip()
+
+
+def verify(patch: str, code_root: Path, session_key: str) -> dict[str, Any]:
+    """Is the lifted diff the diff of commits that exist?
+
+    Looks under `code_root` (the clone mount, `/data/code` on the work node)
+    for a repository whose history carries `session_key` in a commit message
+    — the brief's own convention — and compares the combined diff of those
+    commits with `patch`. Returns `repo`, `commits` (short shas, newest first,
+    like every list here) and `matches`: True, False, or None when no commit
+    carried the key.
+
+    None is the loud case. The first live run committed exactly what its diff
+    said; the reason this exists is the run that will not, and "no commit
+    found for this run" is what that run's page should say, in those words,
+    rather than a diff nobody can apply.
+    """
+    absent: dict[str, Any] = {"repo": None, "commits": [], "matches": None}
+    if not session_key or not code_root.is_dir():
+        return absent
+    for candidate in sorted(code_root.iterdir()):
+        if not (candidate / ".git").exists():
+            continue
+        try:
+            out = _git(
+                candidate, "log", "--all", "--reverse", "--fixed-strings", f"--grep={session_key}", "--format=%H"
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        shas = out.split()
+        if not shas:
+            continue
+        try:
+            theirs = _git(candidate, "diff", f"{shas[0]}^", shas[-1])
+        except subprocess.CalledProcessError:
+            try:
+                theirs = _git(candidate, "diff", _EMPTY_TREE, shas[-1])  # a root commit has no parent
+            except (OSError, subprocess.SubprocessError):
+                return {"repo": candidate.name, "commits": [s[:7] for s in reversed(shas)], "matches": False}
+        except OSError:
+            return {"repo": candidate.name, "commits": [s[:7] for s in reversed(shas)], "matches": False}
+        return {
+            "repo": candidate.name,
+            "commits": [s[:7] for s in reversed(shas)],
+            "matches": _normalise(theirs) == _normalise(patch),
+        }
+    return absent
