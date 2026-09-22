@@ -41,7 +41,23 @@ from typing import Any
 # matching ```patch only, returned 404 on a report that carried the whole
 # change. The contract names the content; the label is whichever of the two
 # conventional ones the model reaches for.
-_BLOCK = re.compile(r"```(?:diff|patch)\s*\n(.*?)```", re.DOTALL)
+# The closing fence must open its own line. A unified diff that ADDS a fenced
+# code block — a README documenting an endpoint, which is most of them — carries
+# `+```text` inside it, and a non-greedy `(.*?)```` stops dead on those three
+# characters. Trial 5 (2026-09-22) returned 44 of its 168 diff lines that way:
+# the runner wrote the whole change, the lift truncated it, and a reviewer would
+# have reviewed a third of a patch believing it was all of it. Caught only
+# because `verify` compared the stored patch against the clone and said they
+# DIFFER — the check finding a bug in the code standing next to it.
+#
+# Column zero exactly, for the close and the open. Leading whitespace is NOT
+# allowed, and that is the harder half of the call: a unified diff's CONTEXT
+# lines begin with a single space, so a README that already had a fence shows
+# up as ` ```text` — indistinguishable from a fence indented inside a list item.
+# One of the two has to lose, and the diff-of-a-Markdown-file is the case this
+# system actually produces, while the brief asks for the block at the end of the
+# report rather than nested in a list.
+_BLOCK = re.compile(r"^```(?:diff|patch)[^\n]*\n(.*?)^```", re.DOTALL | re.MULTILINE)
 _MAX = 128 * 1024
 
 

@@ -234,3 +234,69 @@ def test_verify_looks_for_the_plan_key_not_only_the_run_key(tmp_path) -> None:
     assert got["matches"] is True and got["commits"] and got["repo"] == "demo-job"
     # A bare string still works: this is the one-key call site's shape.
     assert patches.verify(real, code, "trial:plan-to-work:20260922T1710")["matches"] is True
+
+
+NESTED = """完成 README 补全。
+
+```diff
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,9 @@
+ # demo-job
++
++### 健康检查
++
++`HealthController` 在根路径下接受 GET 和 POST：
++
++```text
++GET  /
++POST /
++```
++
++返回 `{"status":"ok"}`。
+```
+"""
+
+
+def test_a_diff_that_adds_a_code_fence_is_lifted_whole() -> None:
+    """THE bug trial 5 found (2026-09-22): a README documenting an endpoint adds
+    a fenced block, so the diff CONTAINS `+```text`, and a non-greedy
+    `(.*?)``` ` stopped dead on it — 44 of 168 lines stored, and a reviewer
+    would have reviewed a third of a patch believing it was all of it.
+
+    It was caught only because `verify` compared the stored patch with the
+    clone and said they DIFFER: the check finding a bug in the code beside it.
+    The closing fence must open its own line; a diff prefix pushes a nested one
+    off column zero, which is exactly the distinction."""
+    got = patches.extract(NESTED)
+    assert got.startswith("diff --git")
+    assert "+```text" in got, "the nested fence is part of the change"
+    assert got.rstrip().endswith('+返回 `{"status":"ok"}`。'), "the block runs to its own closing fence"
+    assert patches.counts(got)["adds"] == 11
+
+
+def test_a_fence_on_a_context_line_does_not_close_the_block() -> None:
+    """The harder half of the column-zero rule. A unified diff's CONTEXT lines
+    begin with a single space, so a file that ALREADY had a code fence appears
+    inside the diff as ` ```text` — one space from being a closing fence.
+    Requiring column zero refuses it, which is why an indented fence is not
+    accepted either: the two are indistinguishable, and this is the case this
+    system produces."""
+    body = (
+        "```diff\n"
+        "diff --git a/README.md b/README.md\n"
+        "--- a/README.md\n"
+        "+++ b/README.md\n"
+        "@@ -1,5 +1,6 @@\n"
+        " # demo\n"
+        " \n"
+        " ```text\n"
+        " GET /\n"
+        " ```\n"
+        "+新增一行说明。\n"
+        "```\n"
+    )
+    got = patches.extract(body)
+    assert got.rstrip().endswith("+新增一行说明。"), got[-60:]
+    assert patches.counts(got)["adds"] == 1
