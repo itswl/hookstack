@@ -39,6 +39,7 @@ import secrets
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -329,7 +330,7 @@ def _number(value: Any) -> float:
         return 0.0
 
 
-def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize(lines: list[dict[str, Any]], price: Callable[[Any], float | None] | None = None) -> dict[str, Any]:
     """Waterfall items and totals from the compact lines.
 
     A model call ends at its event's timestamp and lasted `duration_ms`; so does
@@ -399,9 +400,29 @@ def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
                 "cache_read_tokens": attrs.get("cache_read_tokens"),
                 "cache_creation_tokens": attrs.get("cache_creation_tokens"),
             }
+            # The runtime's own figure for this call is its list price for a
+            # model it may not be the one billing — on this stack's gateway
+            # model, 30 to 60 times the rate. With the node's rates declared the
+            # call is priced from its tokens instead, the way its turn is, so
+            # "costliest: #3 $0.45" cannot sit under a header that says $0.03.
+            priced = (
+                price(
+                    {
+                        "input_tokens": attrs.get("input_tokens"),
+                        "output_tokens": attrs.get("output_tokens"),
+                        "cache_read_input_tokens": attrs.get("cache_read_tokens"),
+                        "cache_creation_input_tokens": attrs.get("cache_creation_tokens"),
+                    }
+                )
+                if price is not None
+                else None
+            )
+            if priced is not None and abs(priced - _number(attrs.get("cost_usd"))) > 1e-6:
+                item["recorded_cost_usd"] = attrs.get("cost_usd")
+                item["cost_usd"] = priced
             items.append(item)
             model_ms += duration_ms
-            call_cost = _number(attrs.get("cost_usd"))
+            call_cost = priced if priced is not None else _number(attrs.get("cost_usd"))
             cost += call_cost
             slot = models.setdefault(model, {"calls": 0, "ms": 0, "cost_usd": 0.0})
             slot["calls"] += 1

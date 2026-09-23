@@ -15,8 +15,10 @@ import hashlib
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 from hookprobe.files import atomic_write
 
@@ -127,6 +129,25 @@ class Run:
         return self.status in (COMPLETED, FAILED)
 
 
+def turn_cost(turn: dict[str, Any], price: Callable[[Any], float | None] | None = None) -> float | None:
+    """One recorded turn's cost, the way every reader in this service reads it.
+
+    Priced from the tokens the turn recorded when the node declares its rates
+    (`price` is then the node's pricer), otherwise the dollar figure recorded
+    with it. ONE function because the same turn is counted in five places —
+    the budget window, the run list and its spend bars, the run page, the work
+    board — and on 2026-09-23 lowering a ceiling showed what happens when they
+    disagree: a breaker that refuses at a number no page shows. A turn with no
+    usage keeps its recorded figure, so a runtime that reports dollars and no
+    tokens is still counted.
+    """
+    priced = price(turn.get("usage")) if price is not None else None
+    if priced is not None:
+        return priced
+    cost = turn.get("cost_usd")
+    return float(cost) if cost is not None else None
+
+
 class RunStore:
     def __init__(self, results_dir: Path) -> None:
         self._results_dir = results_dir
@@ -172,21 +193,39 @@ class RunStore:
     def active_count(self) -> int:
         return sum(1 for run in self._runs.values() if not run.finished)
 
-    def spend_since(self, cutoff: float) -> float:
-        """Recorded model spend across all origins from turns finished after `cutoff`.
+    def spend_since(self, cutoff: float, reprice: Callable[[Any], float | None] | None = None) -> float:
+        """Model spend across all origins from turns finished after `cutoff`.
 
         In-flight turns have no recorded cost yet, so the figure trails reality
         by at most max_concurrent unfinished runs — the breaker reading it is
         a brake, not an invoice.
+
+        `reprice`, when the node declares its rates, prices each turn from the
+        TOKENS it recorded instead of adding up the dollar figure stored beside
+        them. The stored figure is whatever priced the turn at the time, and on
+        a node that had no rates that was the runtime's own table: the work
+        stack ran for weeks on the CLI's list prices for a model it was not the
+        one billing, 30 to 60 times the gateway's rate. Declaring the rates
+        fixed the NEXT turn and left the breaker adding up the old ones — so
+        lowering a ceiling to its real-dollar size on the same day tripped it
+        on money that was never spent, and the watcher would have been refused
+        for most of the following day (2026-09-23). Tokens are measured; the
+        stored dollars were an opinion. The records themselves are not
+        rewritten: what a run was priced at when it ran stays on the run.
+
+        A turn with no usage keeps its stored cost, so a runtime that reports
+        dollars and no tokens is still counted.
         """
         self._scan_disk_once()
         total = 0.0
         for run in self._runs.values():
             for turn in run.turns:
                 finished = turn.get("finished_at")
-                cost = turn.get("cost_usd")
-                if finished and cost and finished >= cutoff:
-                    total += float(cost)
+                if not finished or finished < cutoff:
+                    continue
+                cost = turn_cost(turn, reprice)
+                if cost:
+                    total += cost
         return total
 
     def unpriced_since(self, cutoff: float) -> int:

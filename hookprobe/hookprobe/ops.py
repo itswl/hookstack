@@ -236,6 +236,12 @@ def register(
         window = {
             "window_hours": settings.budget_window_hours,
             "spent_usd": round(spend, 6),
+            # Which table the figure above comes from. `declared rates` is this
+            # node's HOOKPROBE_PRICE_* over recorded tokens; `runtime estimate`
+            # is whatever the runtime reported, which for a model it does not
+            # bill is its own list price. The local work stack read 30 to 60
+            # times high that way for weeks, and nothing on this page said so.
+            "priced_by": "declared rates" if service.pricer() is not None else "runtime estimate",
             # The prefix an investigation pays for is the harness's, not ours,
             # so the only lever left is reuse — which means this is the number
             # to watch. Reads over EVERYTHING the prompts were made of — fresh,

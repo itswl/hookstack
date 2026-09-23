@@ -32,7 +32,7 @@ import json
 import logging
 import time
 import urllib.error
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -63,7 +63,7 @@ from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
 from hookprobe.retention import prune
-from hookprobe.runs import INFERRED_BY_PREFIX, RUNNING, Run
+from hookprobe.runs import INFERRED_BY_PREFIX, RUNNING, Run, turn_cost
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
 from hookprobe.wire import constant_time_eq
@@ -113,7 +113,7 @@ def _prompt_digests_now(settings: Settings) -> dict[str, str | None]:
     return digests
 
 
-def _summary(run: Run) -> dict[str, Any]:
+def _summary(run: Run, price: Callable[[Any], float | None] | None = None) -> dict[str, Any]:
     # The alert's name when the run knows it — stated by the event door or read
     # back out of a platform prompt — and only then the raw message, which for
     # agent-door runs is a page of instruction boilerplate that made the board
@@ -123,7 +123,12 @@ def _summary(run: Run) -> dict[str, Any]:
     # refusal) is a counted turn, and dropping it fell back to run.cost_usd —
     # erasing the very distinction the ledger keeps between "nobody counted
     # this" (None) and "this was free" (0.0).
-    turn_costs = [cost for cost in (t.get("cost_usd") for t in run.turns) if cost is not None]
+    # Priced the way the budget window prices them (runs.turn_cost), so the
+    # spend bars and this row add up to what the breaker counts. The recorded
+    # figure rides alongside when repricing changed it — the run is not
+    # rewritten, and a reader comparing against an old export can see why.
+    turn_costs = [cost for cost in (turn_cost(t, price) for t in run.turns) if cost is not None]
+    recorded = [cost for cost in (t.get("cost_usd") for t in run.turns) if cost is not None]
     return {
         "session_key": run.session_key,
         "status": run.status,
@@ -132,6 +137,11 @@ def _summary(run: Run) -> dict[str, Any]:
         "turn_count": len(run.turns) + (0 if run.finished else 1),
         # The session's whole bill, not the last turn's.
         "cost_usd": sum(turn_costs) if turn_costs else run.cost_usd,
+        **(
+            {"recorded_cost_usd": round(sum(recorded), 6)}
+            if price is not None and recorded and abs(sum(recorded) - sum(turn_costs)) > 1e-6
+            else {}
+        ),
         "model": run.model,
         "model_endpoint": run.model_endpoint,
         "engine_session_id": run.engine_session_id,
@@ -362,7 +372,8 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             runs = [
                 run for run in runs if not run.ruling and run.status != RUNNING and not (run.meta or {}).get("notice")
             ]
-        return [_summary(run) for run in runs]
+        price = service.pricer()
+        return [_summary(run, price) for run in runs]
 
     @app.post("/v1/runs/{session_key}/ruling", dependencies=[Depends(require_token)])
     async def rule_one_run(session_key: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -488,8 +499,23 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         run = service.get(session_key)
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
+        record = asdict(run)
+        price = service.pricer()
+        if price is not None:
+            # Each turn priced as the budget window prices it; the recorded
+            # figure kept beside it when the two differ. The run file is not
+            # touched — this is how it READS at this node's declared rates.
+            for turn in record["turns"]:
+                cost = turn_cost(turn, price)
+                if cost is not None and turn.get("cost_usd") is not None and abs(cost - float(turn["cost_usd"])) > 1e-6:
+                    turn["recorded_cost_usd"] = turn["cost_usd"]
+                    turn["cost_usd"] = cost
+            last = record["turns"][-1] if record["turns"] else None
+            if last is not None and "recorded_cost_usd" in last and record.get("cost_usd") is not None:
+                record["recorded_cost_usd"] = record["cost_usd"]
+                record["cost_usd"] = last["cost_usd"]
         return {
-            **asdict(run),
+            **record,
             "inputs_now": _prompt_digests_now(settings),
             "links": _run_links(settings.relay_ui_url, run.meta),
             # What this run's tool output appeared to contain. Read from the
@@ -573,7 +599,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         not emit) — empty, not absent, so the page can say so."""
         if service.get(session_key) is None:
             raise HTTPException(status_code=404, detail="session not found")
-        shape = telemetry.summarize(telemetry.read(settings.workdir, session_key))
+        shape = telemetry.summarize(telemetry.read(settings.workdir, session_key), service.pricer())
         return {"session_key": session_key, **shape}
 
     @app.post("/otel/v1/{signal}")
@@ -799,6 +825,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         """
         items = work.resolve(
             service.list_runs(limit=limit),
+            price=service.pricer(),
             proposals=remediation.list_all(settings.workdir, limit=200),
             suggestions=[row for row in suggestions.load(settings.workdir) if str(row.get("status") or "") == "open"],
         )

@@ -527,7 +527,7 @@ function renderSpend(runs) {
       return `<span class="spend-bar" title="${label} · $${d.cost.toFixed(3)} · ${d.count} run${d.count === 1 ? "" : "s"}">` +
         `<i style="height:${h}px"></i></span>`;
     }).join("") +
-    `<span class="spend-total">14d $${total.toFixed(2)}</span>`;
+    `<span class="spend-total"${runs.some((x) => x.recorded_cost_usd != null) ? ` title="priced from recorded tokens at this node's declared rates"` : ""}>14d $${total.toFixed(2)}</span>`;
 }
 
 async function refreshList() {
@@ -549,7 +549,7 @@ async function refreshList() {
           ${guardFlag(x)}
           <span>${x.turn_count} turn${x.turn_count > 1 ? "s" : ""}</span>
           ${x.model ? `<span>${esc(modelWithEndpoint(x.model, x.model_endpoint))}</span>` : ""}
-          ${x.cost_usd ? `<span>$${Number(x.cost_usd).toFixed(3)}</span>` : ""}
+          ${x.cost_usd ? `<span${x.recorded_cost_usd != null ? ` title="at this node's rates; recorded $${Number(x.recorded_cost_usd).toFixed(3)}"` : ""}>$${Number(x.cost_usd).toFixed(3)}</span>` : ""}
           <span>${fmtTime(x.created_at)}</span>
         </div>
       </div>`).join("");
@@ -926,6 +926,10 @@ async function renderDetail(startPolling) {
   // What this conversation has cost so far, next to what it is: a follow-up is
   // cheap to ask for and the running total is the only thing that says otherwise.
   const spent = (run.turns || []).reduce((sum, turn) => sum + (Number(turn.cost_usd) || 0), 0);
+  const repriced = (run.turns || []).some((turn) => turn.recorded_cost_usd != null);
+  const recordedSpent = repriced
+    ? (run.turns || []).reduce((sum, turn) => sum + (Number(turn.recorded_cost_usd ?? turn.cost_usd) || 0), 0)
+    : null;
   const turnCount = (run.turns || []).length;
   // How much of this session's context was reused rather than paid for again.
   // The prefix an investigation carries is the harness's ~29k, not ours to trim,
@@ -947,6 +951,10 @@ async function renderDetail(startPolling) {
     `${run.session_key} · ${run.status}` +
     (run.model ? ` · ${modelWithEndpoint(run.model, run.model_endpoint)}` : "") +
     (turnCount ? ` · ${turnCount} turn${turnCount > 1 ? "s" : ""} $${spent.toFixed(4)}` : "") +
+    // A turn the API repriced carries what it was recorded at. Said once, in
+    // words, because two dollar figures for one run with no reason given is
+    // the thing repricing exists to prevent (runs.turn_cost).
+    (recordedSpent !== null ? ` at this node's rates (recorded $${recordedSpent.toFixed(4)})` : "") +
     (hit === null ? "" : ` · context reuse ${hit}% (read ${fmtTok(tok.cached)} · wrote ${fmtTok(tok.written)})`) +
     ` · engine session ${run.engine_session_id || "—"}` +
     (run.error ? ` · ${run.error}` : "");

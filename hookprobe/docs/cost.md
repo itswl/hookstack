@@ -82,6 +82,25 @@ nothing at all, which is what leaves a ceiling unable to bind. It is still
 *priced* and not *billed*: a rate goes stale and a gateway can charge for
 something these four numbers do not name.
 
+**Declaring rates late reprices the past, not just the future.** Once a node
+declares its rates, every recorded turn is read at them from its recorded
+tokens — the budget window, the run list and its spend bars, the run page, the
+waterfall and the work board all go through one function (`runs.turn_cost`),
+and a figure that changed carries `recorded_cost_usd` beside it; the run files
+are not rewritten. `GET /v1/budget` says which table its spend came from in
+`priced_by`: `declared rates` or `runtime estimate`. Measured on the local work
+stack on 2026-09-23: weeks of turns recorded at the CLI's list price for the
+gateway's model read 30 to 60 times the gateway's rate, and with only the NEXT
+turn priced correctly, lowering a ceiling to its real-dollar size the same day
+would have tripped the breaker on money that was never spent.
+
+The gateway's own ledger is not the reference either. LiteLLM's per-call cost
+headers on the Anthropic-shaped path billed neither cache writes nor cache
+reads — two identical 10,424-token cacheable calls were each charged for 3
+input tokens — while the upstream charges an uncached prompt token at the input
+rate. The default of pricing writes at the input rate is the one that matches
+what the upstream bills.
+
 **What the ceiling can see.** `GET /v1/budget` reports `spend_visibility` in
 three states, because two of them are not the same answer: `measured` (nothing
 in the window went unpriced, so the spend is the spend), `floor` (some turns

@@ -1062,7 +1062,26 @@ class RunService:
         second.
         """
         cutoff = time.time() - self._settings.budget_window_hours * 3600
-        return self._store.spend_since(cutoff)
+        return self._store.spend_since(cutoff, self.pricer())
+
+    def pricer(self) -> Callable[[Any], float | None] | None:
+        """This node's price for a set of recorded tokens, or None when it
+        declares no rates.
+
+        Handed to every reader of a recorded cost (runs.turn_cost), so the
+        budget window, the run list, the run page, the waterfall and the work
+        board all price a turn the same way. With rates declared, a turn is
+        priced from its TOKENS — measured — rather than from the dollar figure
+        stored beside them, which on a node that had no rates was the runtime's
+        own table for a model it was not billing (the local work stack, 30 to
+        60 times the gateway's rate for weeks). Without rates this is None and
+        every reader keeps the recorded figure, which is the pre-existing
+        behaviour on any deployment that has not stated a rate.
+        """
+        rates = self._rates()
+        if not any(rate > 0 for rate in rates):
+            return None
+        return lambda usage: price_tokens(usage, rates)
 
     def refuse_for_budget(self, payload: dict[str, Any], *, origin: str, spent: float) -> Run:
         """Settle the session as a refused run — no engine, cost 0, loop completed.

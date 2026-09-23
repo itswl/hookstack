@@ -32,12 +32,13 @@ at each other.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from hookprobe.remediation import EXECUTED as PROCEDURE_EXECUTED
 from hookprobe.remediation import stale as proposal_stale
-from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run
+from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, turn_cost
 
 # The states a work item can be in. `received` is not among them on purpose:
 # the PRD's state list has one, but in this loop a run is executing the moment
@@ -208,6 +209,7 @@ def _applied_cleanly(row: dict[str, Any]) -> bool:
 def resolve(
     runs: list[Run],
     *,
+    price: Callable[[Any], float | None] | None = None,
     proposals: list[dict[str, Any]] | None = None,
     suggestions: list[dict[str, Any]] | None = None,
     now: float | None = None,
@@ -273,7 +275,9 @@ def resolve(
         item.follow_ups += len(meta.get("follow_ups") or [])
         item.turns += len(run.turns)
         item.updated_at = max(item.updated_at, run.finished_at or run.created_at)
-        costs = [c for c in (t.get("cost_usd") for t in run.turns) if c is not None]
+        # Priced like every other reader of a turn (runs.turn_cost), so the
+        # board's figure for a job is the figure the budget counted.
+        costs = [c for c in (turn_cost(t, price) for t in run.turns) if c is not None]
         item.cost_usd += sum(costs) if costs else (run.cost_usd or 0.0)
         item.artifacts.extend(_artifacts(run))
 
