@@ -19,6 +19,13 @@ and silently destroys uncommitted edits — twice.
 
 ## Deploying
 
+There is no deploy host since 2026-09-23: the production alert deployment was
+retired, and its host runs only the alerting platform now
+([docs/deployments.md](docs/deployments.md)). The one running deployment is the
+work stack on the operator's machine, recreated with `docker compose -p
+hookstack-work`. What follows is what a deploy host needs the day there is one
+again.
+
 Only via `scripts/deploy.sh` on the deploy host. It holds the knowledge that
 failed twice from memory: compose resolves `.env` relative to the compose
 FILE's directory (so `--env-file` must be spelled out), the `-p` project names
@@ -48,7 +55,7 @@ Sessions have collided twice: full-history rewrites for privacy scrubs, and
 racing deploys. Before history surgery or a deploy, check for peer sessions
 and say what you are about to do. On finding a rewritten remote: verify your
 content survived, cherry-pick unpushed work onto the rewrite, never
-force-push. The `patrols/` directory on the deploy host is deploy-local and
+force-push. The `patrols/` directory on a deploy host is deploy-local and
 untracked — coordinate ownership before editing it.
 
 ## Verify at the point of consumption
@@ -63,8 +70,8 @@ deletion gets audited before it executes.
 The same principle applies to the security guards: a unit test proves the
 shape check refuses a string a developer wrote, which is not the same as
 proving a real model cannot be steered into emitting a harmful one. The
-adversarial smokes run against a live model on the deploy host, where a
-provider key and the real image meet — `hookjudge` fences injection in its
+adversarial smokes run against a live model, where a provider key and
+the real image meet — `hookjudge` fences injection in its
 eval golden set, and `hookprobe/scripts/redteam_memory.py` drives injections
 through the investigator and asserts what actually reached CLAUDE.md. Run the
 latter after any change to `suggestions.py` or the memory-apply path.

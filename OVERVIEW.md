@@ -14,8 +14,9 @@ ticket, a timer or a person simply asking: a pipe accounts for every hop, nodes
 decide or investigate, work reaches an end and a person can see how. Those other
 signals run on this code today with no service change at all; if you have no
 alert stream, read "alert" as "signal" throughout and almost nothing else needs
-translating. The two deployments are compared in
-[docs/deployments.md](docs/deployments.md).
+translating. The two deployment shapes are compared in
+[docs/deployments.md](docs/deployments.md); the alert one ran in production
+until 2026-09-23 and was retired that day.
 
 hookstack's design philosophy is one job per component.
 **hookrelay** is the pipe — it adapts every monitoring dialect in and every
@@ -411,13 +412,18 @@ are a model's opinion of a model.
 
 ## Where this stands
 
-All of it runs unattended on a production alert stream: signatures on the
-outward doors, budgets and escalation tuned against the real noise floor,
-reports returning as cards a person can rule on from chat, remediation parked
-behind approval and an allowlist, and the whole deployment reproducible from
-this repository plus one `.env`. The numbers above are read from live boards;
-the loops are young, and the honest posture is the one the ledgers enforce —
-every claim of savings has a counter somebody can check.
+All of it ran unattended on a production alert stream from August until
+2026-09-23: signatures on the outward doors, budgets and escalation tuned
+against the real noise floor, reports returning as cards a person could rule on
+from chat, remediation parked behind approval and an allowlist, and the whole
+deployment reproducible from this repository plus one `.env`. That deployment
+was retired on 2026-09-23 at the operator's decision; its host now runs only the
+alerting platform it sat behind, and `deploy/shadow.yaml` with its compose stays
+here as the worked example of the alert shape. What runs today is the work
+deployment, on the operator's own machine. The numbers above were read from
+live boards while it ran; the loops are young, and the honest posture is the
+one the ledgers enforce — every claim of savings has a counter somebody can
+check.
 
 ## Where this sits in an AI-native SDLC
 
@@ -436,4 +442,4 @@ taken here, for the same reason: the investigator runs read-only by default
 and proves it at startup, cannot edit
 what steers its next run, its runbooks are written by the service and never
 through its own tools — and a red-team run drives injections at the memory
-path on the deploy host before an operator is asked to trust it.
+path against a live model before an operator is asked to trust it.

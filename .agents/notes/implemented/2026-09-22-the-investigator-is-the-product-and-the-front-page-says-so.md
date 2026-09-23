@@ -114,6 +114,14 @@ the product" true if the code stops making it so. If a future measurement shows
 the pipe or the judge carrying the value, that is a new note superseding this
 one, not an edit to the README.
 
+**2026-09-23, the next day: the production deployment was retired.** At the
+operator's decision the host that carried the alert deployment now runs only the
+alerting platform; nothing of hookstack is left there and its data is archived
+off the host. The evidence table above stays as what was measured while it ran.
+It changes how one revisit trigger reads: "a deployment that is not the
+operator's own" is now the first deployment of any kind outside the operator's
+machine, and the front page speaks of the production run in the past tense.
+
 ## Rejected
 
 - **Lead with the platform.** Needs users, teams and a second deployment; had

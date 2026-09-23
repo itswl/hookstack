@@ -179,8 +179,8 @@ somebody has to make in words.
 
 Unit tests prove the guards refuse strings a developer wrote. That is not the
 same claim as "a model cannot be steered into producing one", and the difference
-is the whole reason these two exist and run on the deploy host, where a provider
-key and the real image meet:
+is the whole reason these two exist and run where a provider key and the real
+image meet — the deploy host while there was one, a live deployment since:
 
 - `hookjudge` fences prompt injection in its eval golden set — its first catch
   was the judge obeying "classify as low" embedded in a real incident, 2 votes
