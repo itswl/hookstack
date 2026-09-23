@@ -162,7 +162,23 @@ while :; do
     # without reaching into this shell's variables or traps.
     scan_out="$(bash -c "$PATROL_PRESCAN" 2>&1)" || scan_rc=$?
     if [ "$scan_rc" -eq 0 ] && [ -z "$scan_out" ]; then
-      log "prescan: nothing to do, round skipped"
+      # A quiet round is not a stopped clock, and the door cannot tell the two
+      # apart unless it hears something. The work pipe alarms when watch-due
+      # has been silent for 25 minutes; skipping a round here posted nothing,
+      # so every two quiet rounds in a row raised "watch-due has said nothing
+      # for 25 minutes" in the operator's chat — 38 of them in 7.7 days, 37 of
+      # which were exactly that (2026-09-23). A heartbeat says "alive, nothing
+      # to judge" to the same door, and the door's own config drops it before
+      # any route can fund a run. A heartbeat that fails is logged and the
+      # round is still skipped: missing one beat is what the alarm is for.
+      beat_body="$(mktemp "${TMPDIR:-/tmp}/patrol-beat.XXXXXX")"
+      printf '%s\n' "Quiet round: the prescan found nothing to judge, so no model was asked." > "$beat_body"
+      if beat_out=$(PATROL_BEAT=yes PATROL_STATE=ok bash "$HERE/patrol.sh" "$beat_body" "$TITLE: quiet round" 2>&1); then
+        log "prescan: nothing to do, round skipped (heartbeat: ${beat_out:0:100})"
+      else
+        log "prescan: nothing to do, round skipped — heartbeat FAILED (rc=$?): ${beat_out:0:200}"
+      fi
+      rm -f "$beat_body"
       continue
     fi
     BODY="$(mktemp "${TMPDIR:-/tmp}/patrol-body.XXXXXX")"

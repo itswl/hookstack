@@ -54,6 +54,12 @@
 #                             spent for the day. Fix the cause, then retry with
 #                             an explicit key.
 #   PATROL_ENV                default prod — lands in fields.env
+#   PATROL_BEAT               set (e.g. yes) to send a HEARTBEAT instead of a round:
+#                             the payload gains `beat`, which a door can extract
+#                             into a field and a pipeline filter can drop before
+#                             any route funds a run. patrol-timer.sh sets it on a
+#                             quiet round so a door that alarms on silence knows
+#                             the clock is alive (relay target only).
 #   PATROL_STATE              default alerting — level_map turns it into `high`,
 #                             which is what gets the event past the probe's
 #                             HOOKPROBE_ESCALATE_LEVELS gate. A patrol posted at
@@ -146,6 +152,10 @@ else:
         "state": os.environ.get("PATROL_STATE", "alerting"),
         "env": os.environ.get("PATROL_ENV", "prod"),
     }
+    # A heartbeat, not a round: patrol-timer.sh on a quiet round. The door
+    # decides what that means; this only carries the word.
+    if os.environ.get("PATROL_BEAT"):
+        payload["beat"] = os.environ["PATROL_BEAT"]
 body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 pathlib.Path(os.environ["BODY_OUT"]).write_bytes(body)
 

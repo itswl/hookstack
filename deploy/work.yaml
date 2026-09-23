@@ -104,6 +104,10 @@ sources:
       # first round did `date`, grepped case files, called no MCP tool and
       # answered with the brief's own silence token — a blend of two prompts.
       kind: brief
+      # "yes" on a quiet round's heartbeat (patrol-timer.sh), empty on a real
+      # round. Its own field because `kind` above is fixed by this door, and a
+      # heartbeat must never look like a brief to a route.
+      beat: "{beat}"
 
   # probe-plan's report coming back. SIGNED, unlike the equivalent door in the
   # shadow deployment, and the difference is the threat model rather than a
@@ -469,6 +473,16 @@ routes:
     priority: 100
     stop: true
 pipeline:
+  # A quiet round's heartbeat: recorded, so watch-due's absence check sees the
+  # clock is alive, and dropped here, first, so it never reaches dedup, a
+  # silence, a thread lookup or a route that would fund a watcher run. Without
+  # it every two quiet rounds raised "watch-due has said nothing for 25
+  # minutes" — 38 alarms in 7.7 days, 37 of them about a timer that was fine
+  # and had correctly found nothing to judge (2026-09-23).
+  - type: filter
+    name: quiet-round
+    when: {source: watch-due, beat: "yes"}
+    skip_code: quiet_round
   - dedup
   - silence
   # Which card was this reply under, whose chain, whose session, which node.

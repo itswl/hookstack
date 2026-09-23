@@ -13,9 +13,14 @@ all looked healthy the entire time. It was found by a person asking.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
+import yaml
 
 from hookrelay.config import Config
+from hookrelay.pipeline import handle_hook
 
 CFG = {
     "sources": [
@@ -127,3 +132,54 @@ def test_the_window_opening_is_a_grace_not_an_alarm() -> None:
 def test_no_schedule_means_always_expected(cfg) -> None:
     """The default, and the behaviour every existing door keeps."""
     assert cfg.sources["watch-due"].expected_now(_at(6, 3, 0)) is True
+
+
+# ── the real work deployment: a quiet round must keep its door alive ────────
+WORK_YAML = Path(__file__).resolve().parents[2] / "deploy" / "work.yaml"
+
+
+def _work_config(monkeypatch) -> Config:
+    """deploy/work.yaml itself, loaded the way scripts/assert_topology.py loads
+    it: every ${NAME} it references seeded with a placeholder, and the timer's
+    schedule left open so the door is always expected."""
+    text = WORK_YAML.read_text(encoding="utf-8")
+    for name in set(re.findall(r"\$\{([A-Z0-9_]+)", text)):
+        monkeypatch.setenv(name, "https://placeholder.invalid/")
+    monkeypatch.setenv("WATCH_HOURS", "")
+    monkeypatch.setenv("WATCH_DAYS", "")
+    return Config.from_dict(yaml.safe_load(text))
+
+
+async def test_a_quiet_round_keeps_the_work_door_alive_without_funding_a_run(store, monkeypatch) -> None:
+    """38 absence alarms in 7.7 days on the work deployment, 37 of them 25
+    minutes after the last round that REACHED the pipe (2026-09-23): the timer
+    skipped quiet rounds by posting nothing, and `watch-due` was built to alarm
+    on exactly that silence. A quiet round now posts a heartbeat. This pins the
+    two halves on the shipped config: the heartbeat is RECORDED (so the absence
+    check, which reads the newest event on the door, sees the clock alive) and
+    DROPPED before any route (so it never funds a watcher run)."""
+    cfg = _work_config(monkeypatch)
+    door = cfg.sources["watch-due"]
+    t0 = 1_790_000_000.0
+
+    real = await handle_hook(
+        store, cfg, door, {"title": "watch", "message": "brief", "state": "alerting", "env": "prod"}, now=t0
+    )
+    assert real["outcome"] == "routed" and "to-watcher" in real["channels"], "a real round still goes to the watcher"
+
+    for n in (1, 2):
+        beat = await handle_hook(
+            store,
+            cfg,
+            door,
+            {"title": "watch: quiet round", "message": "quiet", "state": "ok", "env": "prod", "beat": "yes"},
+            now=t0 + 1200 * n,
+        )
+        assert beat["outcome"] == "skipped" and beat["skip_code"] == "quiet_round", beat
+        assert not beat.get("channels"), "a heartbeat reaches no channel"
+
+    last = await store.last_event_at("watch-due")
+    assert last == t0 + 2400, "heartbeats are events on the door"
+    check_at = t0 + 3000
+    assert check_at - last <= door.expect_every_seconds, "alive: no alarm"
+    assert check_at - t0 > door.expect_every_seconds, "without the heartbeats this was the false alarm"
