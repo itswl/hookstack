@@ -83,6 +83,15 @@ def _pump(a: socket.socket, b: socket.socket) -> None:
 
 class Handler(socketserver.StreamRequestHandler):
     timeout = 30
+    # Unbuffered reads. The default `rfile` is a buffered reader, and its first
+    # `readline` pulls up to the buffer size off the socket — so a client that
+    # sends its TLS ClientHello immediately behind `CONNECT` without waiting for
+    # the 200 has that hello swallowed into a buffer nobody reads again. The
+    # tunnel below then forwards from the raw socket, the handshake never
+    # arrives, and the connection hangs until a timeout that looks like the far
+    # side being slow. Found in this file's twin (2026-09-23) against a model
+    # gateway; the same code and the same defect are here.
+    rbufsize = 0
 
     def handle(self) -> None:
         try:

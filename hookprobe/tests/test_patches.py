@@ -300,3 +300,45 @@ def test_a_fence_on_a_context_line_does_not_close_the_block() -> None:
     got = patches.extract(body)
     assert got.rstrip().endswith("+新增一行说明。"), got[-60:]
     assert patches.counts(got)["adds"] == 1
+
+
+def test_the_clone_cannot_make_the_verifier_run_its_code(tmp_path) -> None:
+    """The verifier reads a repository the agent had write access to all run.
+
+    `.git/config` and `.gitattributes` are files in that clone, and several git
+    settings name a program git then runs — `diff.external` on every `git diff`,
+    a textconv driver on the paths an attribute selects. Either one would
+    execute HERE, in the service process, which holds the signing keys the
+    agent's own environment is blanked of. So the verifier that exists to check
+    the agent's claim would be the thing running the agent's code.
+
+    Both markers are a `touch` in this test's tmp directory: harmless if a
+    regression lets them run, which is the only reason they can be asserted on.
+    """
+    code = tmp_path / "code"
+    repo = code / "demo-job"
+    repo.mkdir(parents=True)
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "README.md").write_text("# demo-job\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", "chore: readme")
+    (repo / "README.md").write_text("# demo-job\n定时任务服务。\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", "probe:plan-approved:7 补全 README")
+    real = _git(repo, "diff", "HEAD~1", "HEAD")
+
+    external, textconv = tmp_path / "external.ran", tmp_path / "textconv.ran"
+    weapon = tmp_path / "weapon.sh"
+    weapon.write_text('#!/bin/sh\ntouch "$1"\nexit 0\n', encoding="utf-8")
+    weapon.chmod(0o755)
+    # Exactly what a run with a writable clone can leave behind for the next
+    # `git diff` in it: no privileges needed, just two files in its own tree.
+    with (repo / ".git" / "config").open("a", encoding="utf-8") as handle:
+        handle.write(f'[diff]\n\texternal = {weapon} {external}\n[diff "poison"]\n\ttextconv = {weapon} {textconv}\n')
+    (repo / ".gitattributes").write_text("* diff=poison\n", encoding="utf-8")
+
+    got = patches.verify(real, code, "probe:plan-approved:7")
+    assert not external.exists(), "the clone's diff.external ran in the service that verifies it"
+    assert not textconv.exists(), "the clone's textconv driver ran in the service that verifies it"
+    # And the check still does its job with those settings ignored.
+    assert got["matches"] is True and got["repo"] == "demo-job"

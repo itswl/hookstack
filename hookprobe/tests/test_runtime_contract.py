@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 from typing import Any
@@ -1004,3 +1006,51 @@ def test_the_claude_adapter_asks_the_same_question(tmp_path: Path) -> None:
     hook = _bash_guard_hook("danger-only", None, tmp_path, None)
     answer = asyncio.run(hook({"tool_input": {"command": "echo x > CLAUDE.md"}}, None, None))
     assert answer["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_the_withheld_secrets_cannot_be_read_back_out_of_the_service() -> None:
+    """The other half of the same boundary, and the half that made the list above decorative.
+
+    Every assertion up to here is about the environment the agent is HANDED.
+    The agent is also a child of this service under the same uid, and on Linux
+    that means `/proc/<service>/environ` — the values as they are, not as they
+    were blanked. Measured on hookprobe's own image (2026-09-24): a `sh -c`
+    grandchild, the shape of every Bash tool call, read the pipe's signing key
+    straight out of the parent.
+
+    Run in a subprocess because the call is deliberately irreversible: it would
+    make the test runner itself undumpable for every test after this one.
+    """
+    script = textwrap.dedent("""
+        import json, subprocess, sys
+        from pathlib import Path
+        sys.path.insert(0, sys.argv[1])
+        from hookprobe import gate
+
+        def a_child_reads_this_process() -> bool:
+            own = str(Path("/proc/self").resolve().name)
+            out = subprocess.run(["sh", "-c", f"cat /proc/{own}/environ 2>&1"], capture_output=True).stdout
+            return b"HOOKPROBE_EVENT_SECRET=the-real-secret" in out
+
+        has_proc = Path("/proc/self/environ").exists()
+        before = a_child_reads_this_process() if has_proc else None
+        verdict = gate.withhold_this_process_from_the_agent()
+        after = a_child_reads_this_process() if has_proc else None
+        print(json.dumps({"proc": has_proc, "before": before, "after": after, "verdict": verdict}))
+    """)
+    root = str(Path(__file__).resolve().parents[1])
+    done = subprocess.run(
+        [sys.executable, "-c", script, root],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "HOOKPROBE_EVENT_SECRET": "the-real-secret"},
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    result = json.loads(done.stdout)
+    if not result["proc"]:  # macOS: the readback needs /proc, and the answer says so rather than claiming a win
+        assert "no /proc" in result["verdict"]
+        pytest.skip("no /proc on this platform; the container check is in the decision note")
+    assert result["before"] is True, "the hole this closes was not reproduced, so the test proves nothing"
+    assert result["after"] is False, f"a same-uid child still reads the service: {result['verdict']}"
+    assert result["verdict"].startswith("on:")

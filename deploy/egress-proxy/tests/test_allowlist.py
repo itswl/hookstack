@@ -75,3 +75,44 @@ def test_whitespace_and_stray_commas_do_not_create_a_blank_rule(rule: str) -> No
     p = _with(rule)
     assert p.ALLOW == ("example.com",)
     assert not p.permitted("")
+
+
+def test_bytes_sent_right_behind_the_connect_reach_the_far_side() -> None:
+    """A client that starts TLS without waiting for the 200 must not lose its hello.
+
+    `StreamRequestHandler` buffers `rfile` by default, so the first `readline`
+    takes the ClientHello off the socket along with the request line and leaves
+    it in a buffer the tunnel never reads. The handshake then never arrives and
+    the connection hangs on a timeout that reads like a slow upstream — the
+    shape this was actually found as, on the twin of this file.
+    """
+    import socket
+    import socketserver
+    import threading
+
+    class Echo(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            self.request.settimeout(5)
+            self.request.sendall(b"echo:" + self.request.recv(1024))
+
+    upstream = socketserver.TCPServer(("127.0.0.1", 0), Echo)
+    port = upstream.server_address[1]
+    proxy = _with("127.0.0.1", str(port))
+    gateway = proxy.Server(("127.0.0.1", 0), proxy.Handler)
+    for server in (upstream, gateway):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        client = socket.create_connection(("127.0.0.1", gateway.server_address[1]), timeout=5)
+        client.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\nHost: x\r\n\r\n".encode() + b"early")
+        seen = b""
+        while b"echo:" not in seen:
+            chunk = client.recv(1024)
+            if not chunk:
+                break
+            seen += chunk
+        client.close()
+        assert seen.startswith(b"HTTP/1.1 200") and seen.endswith(b"echo:early"), seen
+    finally:
+        for server in (upstream, gateway):
+            server.shutdown()
+            server.server_close()

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import uvicorn
 
+from hookprobe import gate
 from hookprobe.app import create_app
 from hookprobe.runs import RunStore
 from hookprobe.runtimes import build_engine
@@ -63,6 +64,11 @@ def _warn_open_doors(settings: Settings) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    # Before anything spawns: the secrets gate.py blanks for the agent are in
+    # THIS process's environment, and the agent is a same-uid child that can
+    # read them out of /proc. Said at boot because "the agent cannot see the
+    # signing keys" is a claim an operator should be able to check in a log.
+    logging.getLogger("hookprobe").info("agent readback: %s", gate.withhold_this_process_from_the_agent())
     settings = Settings.load()
     settings.workdir.mkdir(parents=True, exist_ok=True)
     # $HOME holds the engine's session transcripts (~/.claude); the Dockerfile
