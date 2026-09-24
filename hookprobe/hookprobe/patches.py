@@ -29,6 +29,7 @@ clone agrees with it, instead of leaving that to whoever remembers to look.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess  # nosec B404
 from collections.abc import Sequence
@@ -95,11 +96,40 @@ def counts(patch: str) -> dict[str, int]:
 _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
+# The clone is writable BY THE AGENT for the whole run, `.git/config` and
+# `.gitattributes` included, and several git settings name a program git then
+# executes. `git diff` in that repository runs `diff.external` — as this
+# service, which holds the signing keys the agent is denied. The verifier that
+# exists to check the agent's claim would be the thing running the agent's code.
+#
+# Each is a FLAG, not a config override, and that distinction cost a debug
+# round: `-c diff.external=` does not mean "no external diff", it means "run the
+# empty string", and git stops with `external diff died` on the first file. The
+# flags are what turn the feature off — `--no-ext-diff` for `diff.external`,
+# `--no-textconv` for a driver a `.gitattributes` in the clone selects,
+# `--no-pager` for `core.pager`. `core.fsmonitor=false` is the one that has a
+# disabling VALUE. The env vars drop the system and global config files, which
+# this container has no business reading either way.
+#
+# Verified rather than reasoned about (2026-09-24): with `diff.external` and a
+# textconv driver planted in a clone's own `.git/config`, a plain `git diff`
+# runs both, this invocation runs neither, and the diff it returns is
+# byte-identical to the same commits' diff in a clean repository.
+_GIT_SAFE = ("--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null")
+_GIT_NO_PROGRAMS = ("--no-ext-diff", "--no-textconv")
+_GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0"}
+
+
 def _git(repo: Path, *args: str) -> str:
     # Fixed argv, no shell; the only variable parts are a repo path under the
     # code mount and a session key passed as a fixed string, never a pattern.
     done = subprocess.run(  # nosec B603 B607
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True, timeout=30
+        ["git", *_GIT_SAFE, "-C", str(repo), args[0], *_GIT_NO_PROGRAMS, *args[1:]],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+        env={**os.environ, **_GIT_ENV},
     )
     return done.stdout
 

@@ -34,6 +34,7 @@ is the bug that has already happened twice.
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
@@ -426,6 +427,49 @@ SECRETS_WITHHELD_FROM_AGENT = (
     "SHADOW_RETURN_URL",
     "WW_RELAY_SECRET",
 )
+
+# What the tuple above is worth without this call: nothing. The agent runs as a
+# CHILD of this service and under the SAME uid, so `cat /proc/1/environ` hands it
+# every value blanked in its own environment — the pipe's HMAC keys, the chat
+# app's credentials — by reading them out of the parent instead. Measured on
+# hookprobe's own image (2026-09-24): a `sh -c` grandchild, which is exactly the
+# shape of a Bash tool call, read `HOOKPROBE_EVENT_SECRET` straight out of the
+# service. The withholding was a boundary against a process that could walk
+# around it.
+#
+# `PR_SET_DUMPABLE = 0` makes this process's /proc entry root-owned, so a
+# same-uid reader is refused by the kernel rather than by a list. It is NOT
+# inherited across exec, so it protects this service only, which is the process
+# holding the secrets. Core dumps go with it, and so does this process's ability
+# to read its OWN /proc/self/* — `os.environ` is already in memory and unaffected.
+PR_SET_DUMPABLE = 4
+
+
+def withhold_this_process_from_the_agent() -> str:
+    """Refuse same-uid readers this process's memory and environment. Returns what actually happened.
+
+    Verified by trying the read the agent would try, because a `prctl` that
+    returned 0 and changed nothing looks identical to one that worked — the same
+    argument as every other check in this repository that reads the delivered
+    payload rather than the intent.
+    """
+    environ = Path("/proc/self/environ")
+    if not environ.exists():
+        return "no /proc on this platform: nothing to withhold, and no way to read it either"
+    try:
+        ctypes.CDLL(None, use_errno=True).prctl(PR_SET_DUMPABLE, 0, 0, 0, 0)
+    except (AttributeError, OSError) as exc:  # pragma: no cover - a libc without prctl
+        return f"prctl is unavailable ({type(exc).__name__}): a same-uid process can read this one"
+    try:
+        environ.read_bytes()
+    except PermissionError:
+        return "on: a process of this uid cannot read this service's environment or memory"
+    except OSError as exc:  # pragma: no cover - /proc present but unreadable for another reason
+        return f"unverified ({type(exc).__name__}): could not read back whether the withholding took"
+    return (
+        "OFF: this service's environment is still readable by its own children. "
+        "Running as root defeats PR_SET_DUMPABLE — the agent's secrets boundary needs a non-root uid"
+    )
 
 
 # W3C trace context, version 00, sampled. Emitted as `TRACEPARENT` because that
