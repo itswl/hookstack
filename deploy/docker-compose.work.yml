@@ -508,7 +508,11 @@ services:
       # The project key and the comment handle are NOT in the script: they come
       # from /data/secrets/atlassian.env, so the file stays publishable even
       # though it is not published.
-      - ../data/watch:/data/jira:ro
+      # deploy/watch/, TRACKED since 2026-09-24: this is code, and it used to sit
+      # under the gitignored data/ only because that is where the runtime volumes
+      # live. Still a bind mount, so an edit still applies on the next 20-min tick
+      # with no rebuild — the reason it was kept out of an image in the first place.
+      - ./watch:/data/jira:ro
     ports:
       - "127.0.0.1:8089:8088"
 
@@ -839,7 +843,7 @@ services:
       # The scanner and the reporting tool, one copy shared with probe-watch
       # (which mounts the same directory at /data/jira). Read-only in both: the
       # code that decides what a round even is must not be editable by the round.
-      - ../data/watch:/watch:ro
+      - ./watch:/watch:ro
       # The node's state, READ-ONLY. The timer judges it and must not be able to
       # edit the evidence.
       - ../work-data/probe-watch:/node-state:ro
