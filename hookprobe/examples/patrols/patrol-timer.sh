@@ -155,7 +155,39 @@ while :; do
   # The composed body is a temp file rather than an edit to the brief: the brief
   # is mounted read-only for the reason documented beside its volume, and a
   # findings section that accumulated across rounds would be the worst of both.
-  BODY="$BRIEF"
+  # A brief may carry `{{NAME}}` placeholders, filled from the environment. The
+  # judging rules are the same for every deployment and belong in the repository;
+  # WHO to interrupt and whose word carries weight are real people's names, and
+  # those belong in the deployment's .env with every other identifier.
+  #
+  # An unresolved placeholder REFUSES the round rather than rendering a hole.
+  # A brief that reads "判断哪些值得打断 " with the name missing still parses,
+  # still costs a model call, and quietly judges everything as unimportant —
+  # which from outside is indistinguishable from a quiet day. Refusing is loud:
+  # the log says which variable, and the pipe's absence alarm fires if it lasts.
+  BRIEF_RENDERED=""
+  BRIEF_NOW="$BRIEF"
+  if grep -q '{{[A-Z_][A-Z0-9_]*}}' "$BRIEF" 2>/dev/null; then
+    BRIEF_RENDERED="$(mktemp "${TMPDIR:-/tmp}/patrol-brief.XXXXXX")"
+    if ! BRIEF_IN="$BRIEF" BRIEF_OUT="$BRIEF_RENDERED" python3 -c '
+import os, re, sys
+text = open(os.environ["BRIEF_IN"], encoding="utf-8").read()
+missing = sorted({m for m in re.findall(r"{{([A-Z_][A-Z0-9_]*)}}", text) if not os.environ.get(m, "").strip()})
+if missing:
+    print(" ".join(missing), file=sys.stderr)
+    raise SystemExit(1)
+open(os.environ["BRIEF_OUT"], "w", encoding="utf-8").write(
+    re.sub(r"{{([A-Z_][A-Z0-9_]*)}}", lambda m: os.environ[m.group(1)], text))
+' 2>/tmp/patrol-brief-err; then
+      log "brief REFUSED: $BRIEF needs $(cat /tmp/patrol-brief-err) in the environment — round skipped"
+      rm -f "$BRIEF_RENDERED" /tmp/patrol-brief-err
+      continue
+    fi
+    rm -f /tmp/patrol-brief-err
+    BRIEF_NOW="$BRIEF_RENDERED"
+  fi
+
+  BODY="$BRIEF_NOW"
   if [ -n "${PATROL_PRESCAN:-}" ]; then
     scan_rc=0
     # bash -c, not eval: the command is configuration and runs as itself,
@@ -185,9 +217,9 @@ while :; do
     if [ "$scan_rc" -ne 0 ]; then
       log "prescan FAILED (rc=$scan_rc) — firing anyway so the failure gets reported"
       printf '%s\n\n---\n\n## ⚠️ PRESCAN FAILED (rc=%s)\n\n```\n%s\n```\n' \
-        "$(cat "$BRIEF")" "$scan_rc" "$scan_out" > "$BODY"
+        "$(cat "$BRIEF_NOW")" "$scan_rc" "$scan_out" > "$BODY"
     else
-      printf '%s\n\n---\n\n%s\n' "$(cat "$BRIEF")" "$scan_out" > "$BODY"
+      printf '%s\n\n---\n\n%s\n' "$(cat "$BRIEF_NOW")" "$scan_out" > "$BODY"
     fi
   fi
 
@@ -208,5 +240,6 @@ while :; do
   else
     log "FAILED (rc=$?): $out"
   fi
-  [ "$BODY" = "$BRIEF" ] || rm -f "$BODY"
+  [ "$BODY" = "$BRIEF_NOW" ] || rm -f "$BODY"
+  [ -z "$BRIEF_RENDERED" ] || rm -f "$BRIEF_RENDERED"
 done

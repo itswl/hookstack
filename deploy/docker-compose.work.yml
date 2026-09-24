@@ -776,6 +776,9 @@ services:
       # cost $0.25-0.95 each because the agent had to complete the whole scan to
       # find out there was nothing. See the three outcomes in patrol-timer.sh.
       PATROL_PRESCAN: python3 /watch/watch_scan.py
+      # The two names the tracked brief does not contain.
+      WATCH_OPERATOR: ${WATCH_OPERATOR:?set WATCH_OPERATOR in .env — the brief refuses to render without it}
+      WATCH_PRINCIPALS: ${WATCH_PRINCIPALS:?set WATCH_PRINCIPALS in .env — whose word carries weight}
       CHAT_MCP_URL: ${WATCH_CHAT_MCP_URL:-http://host.docker.internal:52222/mcp/}
       # The chat tool's own name, which is an internal one — from .env for the
       # same reason WATCH_STATE_FILE is. It is both the MCP tool prefix and the
@@ -860,7 +863,12 @@ services:
       # instructions, which is the persistence vector hookprobe.inputs exists to
       # refuse for CLAUDE.md and skills. The timer reads it; the watcher only
       # ever sees it as an event body.
-      - ../work-data/watch-brief:/brief:ro
+      # deploy/watch/brief.md, TRACKED since 2026-09-24. The judging rules are the
+      # same for every deployment; WHO to interrupt is not, so the file carries
+      # {{WATCH_OPERATOR}} / {{WATCH_PRINCIPALS}} and patrol-timer.sh fills them
+      # from the two variables below. An unset one REFUSES the round rather than
+      # rendering a hole — see the renderer's comment for why that matters.
+      - ./watch:/brief:ro
 
   # Opt-in, and worth opting into ONCE before the real webhooks go in:
   #
