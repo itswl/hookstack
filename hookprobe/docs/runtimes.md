@@ -2,7 +2,10 @@
 
 An investigation runs on an agent runtime. Which one is `HOOKPROBE_RUNTIME`:
 `claude` (the default, the Claude Agent SDK), `codex` (the Codex CLI) or `pi`.
-The choice is per node, and a deployment can run one of each.
+The choice is per node, and a deployment can run one of each. A fourth name,
+`replay`, is not a runtime: it is the rehearsal, a recorded investigation
+played back with no model behind it, and it has [its own section](#replay-the-rehearsal)
+because the reasons it is in the registry at all are the reasons this page exists.
 
 This page is about what a runtime has to be able to do before it is allowed to
 run one of these nodes, because the interesting part is not that a second
@@ -186,6 +189,40 @@ an unattended node spend all week and see nothing. A zero with tokens behind it
 is therefore reported as `None`; only a zero with nothing spent means free. When
 the model IS in the catalog the real figure is passed through, which makes pi
 the only non-Claude runtime here whose spend the breaker can see.
+
+## Replay — the rehearsal
+
+`HOOKPROBE_RUNTIME=replay` plays a recorded investigation instead of running one.
+The scripts ship inside the package (`hookprobe/replays/*.json`): each is the
+tool calls an investigation made, what they returned, the report it wrote, and
+the answer it gives to a follow-up. Every host, name and number in them was
+invented for the demo. The quickstart's investigator runs on it by default, so a
+person sees a report, a card with an approve button, an execution record and an
+audit page in the first ten minutes, with no key and no bill.
+
+What it does with the contract, obligation by obligation:
+
+| obligation | how a thing that runs no tool meets it |
+| --- | --- |
+| a gate before a tool | every recorded call is judged by `gate.deny_reason` — the one gate — before it is announced as done; each script carries exactly one call the read-only guard refuses (an `rm -rf`, a `kubectl rollout undo`), and the refusal is the gate's, not the script's |
+| an audit record | written by the adapter, one line per replayed call, in the spawned gate's shape plus `replayed: true` — a reader can never mistake the line for a live one |
+| a session id that outlives the process | derived from the session key, so a resume after a restart lands on the same id and the same script |
+| incremental events | `session` first, then `tool_use`/`tool_done` pairs, then `text`, paced so the board's live feed reads like a run |
+| cost or `None` | `0.0` beside a usage of zero tokens; a zero may mean free only when nothing was spent, and here nothing was |
+
+What it must never be: evidence. A rehearsal's report says so in its last
+section, and its procedure proposes only observations, so that approving it in
+a demo can damage nothing — the press, the allowlist, the execution record and
+the verification are what it exists to show. The allowlist the quickstart arms
+it with ships beside the scripts (`replays/rehearsal-allowlist`) and admits
+exactly those two observations; a real deployment writes its own file. No
+rehearsal node holds a credential worth investigating with.
+
+Why it is in the registry rather than a flag in `__main__`: the conformance
+suite reads the registry. The one adapter that could most easily be waved
+through as "just a demo" is therefore judged by the same suite as the runtimes
+(`tests/test_engine_replay.py` holds its own obligations), and the contract
+docstring has to name it or that suite fails.
 
 ## Adding another
 

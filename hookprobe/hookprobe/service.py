@@ -117,10 +117,13 @@ _RESUME_MESSAGE = (
 class Engine(Protocol):
     """The runtime contract: what this service needs from whatever runs a turn.
 
-    THREE adapters exist — `hookprobe/runtimes.py` is the registry and the list
-    is `claude`, `codex`, `pi`. This docstring was written when there was one,
+    THREE runtimes exist — `hookprobe/runtimes.py` is the registry and the list
+    is `claude`, `codex`, `pi` — and one rehearsal, `replay`, in the same
+    registry so the same suite judges it: a recorded investigation played back
+    through the same gate and recorder, with no model behind it
+    (engine_replay.py). This docstring was written when there was one adapter,
     against the question "what does a second have to fill", and each of the two
-    that followed corrected it on a point its author could not have known:
+    runtimes that followed corrected it on a point its author could not have known:
     codex, that a gate which cannot LAUNCH is not a gate, and pi, that a
     runtime reporting a price is more dangerous than one reporting nothing.
     Both corrections are below, in the obligations they belong to, because a

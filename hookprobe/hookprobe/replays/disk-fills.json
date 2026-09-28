@@ -1,0 +1,103 @@
+{
+  "name": "disk-fills",
+  "recorded": "A composite of the shape this family's disk investigations took on the retired production deployment, with every host, name and number invented for the demo. Nothing here was read from a real system.",
+  "match": [
+    "disk",
+    "/data",
+    "filesystem",
+    "diskwillfill",
+    "inode",
+    "volume",
+    "pvc"
+  ],
+  "default": false,
+  "steps": [
+    {
+      "tool": "Grep",
+      "input": {
+        "pattern": "db-1|data-db-1-0",
+        "path": "/data/results",
+        "output_mode": "files_with_matches"
+      },
+      "ms": 380,
+      "output": "(no earlier investigation of this condition in the case files)"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n db get pvc data-db-1-0 -o wide"
+      },
+      "ms": 640,
+      "output": "NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE\ndata-db-1-0   Bound    pvc-3f1c8e2a-51d0-4c6a-9d3e-6b8e1a0c2f77   200Gi      RWO            gp3            212d"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n db exec db-1-0 -- df -h /data"
+      },
+      "ms": 0,
+      "output": "(refused by the read-only guard before it ran: kubectl mutation or pod entry)"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "curl -s 'http://prometheus:9090/api/v1/query?query=kubelet_volume_stats_used_bytes%7Bpersistentvolumeclaim%3D%22data-db-1-0%22%7D'"
+      },
+      "ms": 510,
+      "output": "{\"status\":\"success\",\"data\":{\"result\":[{\"metric\":{\"persistentvolumeclaim\":\"data-db-1-0\"},\"value\":[1790217600,\"197568495616\"]}]}}"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "curl -s http://db-1-metrics.db.svc:9187/metrics | grep -E '^pg_(database_size_bytes|replication_slots_(active|pg_wal_lsn_diff))'"
+      },
+      "ms": 730,
+      "output": "pg_database_size_bytes{datname=\"app\"} 2254857830\npg_replication_slots_active{slot_name=\"reporting_replica\"} 0\npg_replication_slots_pg_wal_lsn_diff{slot_name=\"reporting_replica\"} 168577155072"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n db logs db-1-0 --since=6h | grep -c 'checkpoint complete'"
+      },
+      "ms": 1400,
+      "output": "71"
+    }
+  ],
+  "report": [
+    "/data on db-1 is at 92% because an inactive replication slot, `reporting_replica`, has pinned 157 GB of WAL for six days; dropping that slot releases the space, and nothing else on the volume is growing.",
+    "",
+    "## Evidence",
+    "",
+    "- The PVC `data-db-1-0` is 200Gi. The kubelet's volume metric puts 184 GiB of it in use: 92%.",
+    "- The postgres exporter puts the database itself at 2.1 GiB. The rest of the volume is WAL.",
+    "- `pg_replication_slots`: `reporting_replica`, `active = 0`, 157 GB behind (`pg_wal_lsn_diff`). An inactive slot forbids the primary from recycling any WAL past its restart point, which is exactly the growth measured.",
+    "- 71 checkpoints completed in six hours, so the primary IS checkpointing; it is not allowed to recycle.",
+    "- No earlier investigation of this condition in the case files.",
+    "",
+    "## Impact",
+    "",
+    "Writes continue until the volume is full. At 100% the primary stops accepting writes and every service behind it fails closed. At the measured growth, about 26 GB a day, that is under a day away.",
+    "",
+    "## Remediation, in priority order",
+    "",
+    "1. Drop the inactive slot: `psql -c \"select pg_drop_replication_slot('reporting_replica')\"` on the primary. WAL past its restart point is recycled at the next checkpoint; expect /data to fall to about 15% within minutes. Rollback: none needed. A slot is recreated, not restored, and the reporting replica must be re-seeded from a fresh base backup if it is still wanted.",
+    "2. Ask whoever owns the reporting job whether that replica is meant to exist. It has consumed no WAL for six days.",
+    "3. Alert on `pg_replication_slots_active == 0` with `pg_replication_slots_pg_wal_lsn_diff` above 10 GB, so the next one is caught at a tenth of this size.",
+    "",
+    "An attempt to enter the pod (`kubectl exec`) to read the volume directly was refused by the read-only guard; the numbers above come from the kubelet's volume metrics and the postgres exporter instead, which is where they should come from.",
+    "",
+    "## This is a rehearsal",
+    "",
+    "This report is a recorded investigation replayed by the `replay` runtime. No model was called and no command ran; every number above was written in advance. The tool calls went through the real read-only gate, one was refused, and all of them are in this run's audit record. The procedure below proposes two observations on this node rather than the fix on db-1, so that approving it in a demo can damage nothing: the approve press, the allowlist, the execution record and the verification are what this rehearsal exists to show.",
+    "",
+    "```remediation",
+    "[{\"action\": \"confirm what this node's own /data volume holds before anybody drops anything\", \"command\": \"df -h /data\", \"target\": \"db-1:/data\", \"risk\": \"low\", \"rollback\": \"nothing to undo: an observation\"},",
+    " {\"action\": \"record how much the case files themselves occupy on the volume\", \"command\": \"du -sh /data/results\", \"target\": \"db-1:/data\", \"risk\": \"low\", \"rollback\": \"nothing to undo: an observation\"}]",
+    "```"
+  ],
+  "follow_up": [
+    "This is a rehearsal, so there is no further evidence to fetch: the recorded investigation ended with the inactive slot as the cause, and the numbers in the report are the ones it saw.",
+    "",
+    "On a live system the next two things to check would be `pg_replication_slots_pg_wal_lsn_diff` a few minutes after the drop, to confirm the primary is recycling WAL, and who owns the reporting job, because a slot nobody wants will be recreated by the job that made it."
+  ]
+}

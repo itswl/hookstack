@@ -52,15 +52,17 @@ Screenshots are from one local Docker run started from nothing, not mockups — 
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
-docker compose -f docker-compose.quickstart.yml up -d   # pipe + judge + stub model + readable sink
+docker compose -f docker-compose.quickstart.yml up -d   # pipe + judge + stub model + investigator on a rehearsal + readable sink
 bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
 ```
 
-No checkout and no build: everything runs from published images, and the stub model and the sink ship inside them. To hack on it instead, clone and `docker compose up -d --build` — that file builds from source and is the one the gate tests.
+No checkout and no build: everything runs from published images, and the stub model, the rehearsal and the sink ship inside them. To hack on it instead, clone and `docker compose up -d --build` — that file builds from source and is the one the gate tests.
 
-Real credentials in `.env` make the stub step aside, and `--profile probe` adds the investigator.
+The demo ends on the loop, not on healthy containers: the disk alert is investigated (a recorded investigation, replayed through the real read-only gate — one of its calls is refused and the refusal is in the audit), the report comes back as a card whose approve button runs two allowlisted observations, the alert resolves, and the pipe's audit page shows the chain with the press in it. Every number in a rehearsal's report was written in advance and its last section says so.
 
-The published images are `0.3.2`, and they run the current design: the pipe sends a neutral card model and `lark-bridge`, in webhook mode against the sink, renders it — no Lark account needed. Up to `0.2.0` the quickstart's pipe rendered the Feishu card itself, which is the one thing the published demo used to do differently from the source compose.
+Real credentials in `.env` make the stub step aside; `HOOKPROBE_RUNTIME=claude`, `HOOKPROBE_MODEL` and a key make the investigator real.
+
+The published images are `0.4.0`, and they run the current design: the investigator is up from the first `up`, the pipe offers the approve and follow-up buttons on its cards, and `lark-bridge`, in webhook mode against the sink, renders the pipe's neutral card model — no Lark account needed. Up to `0.2.0` the quickstart's pipe rendered the Feishu card itself, which is the one thing the published demo used to do differently from the source compose.
 
 ## The Three Services
 

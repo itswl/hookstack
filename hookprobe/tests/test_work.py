@@ -103,6 +103,25 @@ def test_a_procedure_that_ran_clean_verifies_the_work_but_does_not_close_it() ->
     assert not item.verified, "a procedure cut off mid-run is exactly what this must not pass"
 
 
+def test_a_procedure_that_ran_clean_and_a_condition_that_ended_is_done() -> None:
+    """The one sequence the loop exists for: the steps ran, then the alert
+    resolved. The item was waiting in `verifying` for a ruling nobody was going
+    to give, because this branch never looked at the recovery the door had
+    already recorded on the run."""
+    applied = {
+        "id": "b" * 10,
+        "session_key": "probe:ww:1",
+        "status": remediation.EXECUTED,
+        "steps": [{"command": "a"}],
+        "results": [{"exit": 0}],
+    }
+    run = _run("probe:ww:1", meta={"recovered_at": time.time()})
+    (item,) = work.resolve([run], proposals=[applied])
+    assert item.verified and item.verified_by == "remediation", "the stronger witness keeps the credit"
+    assert item.recovered
+    assert item.state == work.DONE, "steps ran and the condition ended: nothing is owed"
+
+
 def test_a_ruling_verifies_and_closes_it() -> None:
     run = _run("probe:ww:1")
     run.ruling, run.ruled_at, run.ruled_by = "useful", time.time(), "operator"

@@ -101,6 +101,12 @@ class WorkItem:
     # cleared), in that order of strength.
     verified: bool = False
     verified_by: str = ""
+    # Whether the condition this work was about has ENDED, whichever witness
+    # verified the work. Kept apart from `verified_by` because the two answer
+    # different questions: a procedure that exited clean verifies the work
+    # (`remediation`), and the recovery that follows is what says it may stop
+    # waiting for a person to confirm — see `_state`.
+    recovered: bool = False
     # Whether the work needed a person to proceed — an approval to press, or a
     # question to answer mid-flight. NOT "a person started it": a request is not
     # an intervention, and the metric this feeds asks about intervention.
@@ -138,6 +144,7 @@ class WorkItem:
             "artifacts": self.artifacts,
             "verified": self.verified,
             "verified_by": self.verified_by,
+            "recovered": self.recovered,
             "hands_on": self.hands_on,
             "asked_by": self.asked_by,
             "thread_root": self.thread_root,
@@ -337,8 +344,10 @@ def resolve(
         # investigation was right or that the agent caused the ending — a
         # flapping alert clears on its own — so a ruling or a clean procedure
         # outranks it and this only fills the gap they leave.
-        if run.meta.get("recovered_at") and not item.verified:
-            item.verified, item.verified_by = True, "recovery"
+        if run.meta.get("recovered_at"):
+            item.recovered = True
+            if not item.verified:
+                item.verified, item.verified_by = True, "recovery"
 
         for row in by_session_suggestions.get(run.session_key, []):
             item.open.append(
@@ -371,10 +380,14 @@ def _state(item: WorkItem, runs: list[Run], now: float) -> str:
     if last is not None and last.status == FAILED:
         when = last.finished_at or last.created_at
         return ABANDONED if (now - when) > _ABANDONED_AFTER_SECONDS else NEEDS_HUMAN
-    if item.verified_by == "remediation" and any(o["kind"] == "ruling" for o in item.open):
+    if item.verified_by == "remediation" and not item.recovered and any(o["kind"] == "ruling" for o in item.open):
         # A procedure ran and every step came back 0, but nobody has said the
         # condition actually cleared. On an unattended deployment items can sit
         # here, and that is the true reading: the loop closed its own half.
+        # The condition ENDING is the other half — the recovery door recorded
+        # it on the run — and until 2026-09-28 this branch did not look, so an
+        # item whose procedure ran and whose alert then resolved waited here
+        # for a ruling forever, which is the one sequence the loop is for.
         return VERIFYING
     return DONE
 

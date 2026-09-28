@@ -43,13 +43,15 @@ Seven steps, and each one names the thing that does it — so the positioning ab
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
-docker compose -f docker-compose.quickstart.yml up -d   # pipe + judge + stub model + readable sink
+docker compose -f docker-compose.quickstart.yml up -d   # pipe + judge + stub model + investigator on a rehearsal + readable sink
 bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
 ```
 
-No checkout and no build: everything runs from published images, and the stub model and the sink ship inside them. To hack on it instead, clone and `docker compose up -d --build` — that file builds from source and is the one the gate tests.
+No checkout and no build: everything runs from published images, and the stub model, the rehearsal and the sink ship inside them. To hack on it instead, clone and `docker compose up -d --build` — that file builds from source and is the one the gate tests.
 
-Real credentials in `.env` make the stub step aside, and `--profile probe` adds the investigator.
+The demo ends on the loop, not on healthy containers: the disk alert is investigated (a recorded investigation, replayed through the real read-only gate — one call refused, the refusal in the audit), the report comes back as a card whose approve button runs two allowlisted observations, the alert resolves, and the pipe's audit page shows the chain with the press in it. A rehearsal's numbers were written in advance and its last section says so.
+
+Real credentials in `.env` make the stub step aside; `HOOKPROBE_RUNTIME=claude`, `HOOKPROBE_MODEL` and a key make the investigator real.
 
 The agent runner ([hookprobe](#hookprobe-an-agent-run-behind-an-http-contract)) is useful entirely on its own, whether or not you care about alerts.
 

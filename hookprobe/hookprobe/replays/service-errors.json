@@ -1,0 +1,98 @@
+{
+  "name": "service-errors",
+  "recorded": "A composite of the shape this family's error-rate investigations took on the retired production deployment, with every service, name and number invented for the demo. Nothing here was read from a real system.",
+  "match": [],
+  "default": true,
+  "steps": [
+    {
+      "tool": "Grep",
+      "input": {
+        "pattern": "gateway|5xx",
+        "path": "/data/results",
+        "output_mode": "files_with_matches"
+      },
+      "ms": 350,
+      "output": "(no earlier investigation of this condition in the case files)"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n payments get pods -o wide"
+      },
+      "ms": 820,
+      "output": "gateway-7c9d8f-2xk4p       1/1  Running  0  9d\ngateway-7c9d8f-9qz1m       1/1  Running  0  9d\ncheckout-svc-5f6b7-h2m8t   1/1  Running  0  41m\ncheckout-svc-5f6b7-r7c3n   1/1  Running  0  41m"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n payments get rs -l app=checkout-svc --sort-by=.metadata.creationTimestamp -o custom-columns=NAME:.metadata.name,REV:.metadata.annotations.deployment\\.kubernetes\\.io/revision,AGE:.metadata.creationTimestamp"
+      },
+      "ms": 600,
+      "output": "NAME                     REV   AGE\ncheckout-svc-77b9d4      39    2026-09-17T08:02:11Z\ncheckout-svc-6c4f8a      40    2026-09-24T09:15:40Z\ncheckout-svc-5f6b7       41    2026-09-28T09:41:03Z"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n payments get deploy checkout-svc -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name==\"DB_POOL_SIZE\")].value}'"
+      },
+      "ms": 450,
+      "output": "16"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n payments logs deploy/gateway --since=15m | grep -c 'upstream timed out'"
+      },
+      "ms": 1400,
+      "output": "2317"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n payments top pods -l app=checkout-svc"
+      },
+      "ms": 690,
+      "output": "checkout-svc-5f6b7-h2m8t   412m   1890Mi\ncheckout-svc-5f6b7-r7c3n   398m   1874Mi"
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "kubectl -n payments rollout undo deploy/checkout-svc"
+      },
+      "ms": 0,
+      "output": "(refused by the read-only guard before it ran)"
+    }
+  ],
+  "report": [
+    "The gateway's 5xx burst is upstream timeouts from checkout-svc, which began at 09:41 when revision 41 rolled out with its connection pool cut from 64 to 16; rolling that revision back is the fix, and the gateway itself is healthy.",
+    "",
+    "## Evidence",
+    "",
+    "- Both gateway pods are 9 days old and Running; both checkout-svc pods are 41 minutes old, which is the deploy.",
+    "- The replica sets: revision 41 is 41 minutes old; revision 40 ran for four days. The only value that changed between them is `DB_POOL_SIZE`, 64 in revision 40 and 16 now.",
+    "- Gateway logs, last 15 minutes: 2,317 lines of `upstream timed out`, all naming checkout-svc.",
+    "- checkout-svc is not starved: 400m CPU and 1.9 GiB on each pod, well inside its limits. It is waiting on its own pool, not on the machine.",
+    "- No earlier investigation of this condition in the case files.",
+    "",
+    "## Impact",
+    "",
+    "About 8% of checkout requests fail at the gateway with a 5xx and retry from the client; the failing 8% are the ones that queue behind the 16 connections. Top-ups are on the same path.",
+    "",
+    "## Remediation, in priority order",
+    "",
+    "1. Roll checkout-svc back to revision 40: `kubectl -n payments rollout undo deploy/checkout-svc --to-revision=40`. Rollback of the rollback: `--to-revision=41` once the pool size is corrected.",
+    "2. Fix the pool size in the release that reintroduces revision 41's other changes; 64 was not arbitrary.",
+    "3. A deploy that changes a pool size should carry a canary; this one went to both pods at once.",
+    "",
+    "An attempt to roll the deployment back from inside the investigation was refused by the read-only guard, which is the point: the fix is a person's decision, and the report is where it is proposed.",
+    "",
+    "## This is a rehearsal",
+    "",
+    "This report is a recorded investigation replayed by the `replay` runtime. No model was called and no command ran; every number above was written in advance. The tool calls went through the real read-only gate, one was refused, and all of them are in this run's audit record. It proposes nothing to run: a rollback is not an observation, and a rehearsal only ever proposes observations."
+  ],
+  "follow_up": [
+    "This is a rehearsal, so there is no further evidence to fetch: the recorded investigation ended with revision 41's pool size as the cause, and the numbers in the report are the ones it saw.",
+    "",
+    "On a live system the next thing to check would be the gateway's timeout count again a minute after the rollback, which is what says the cause was the deploy and not something that merely coincided with it."
+  ]
+}

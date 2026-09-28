@@ -27,11 +27,13 @@ services:
       # The shipped example plugins, mounted read-only below: the DingTalk
       # dialect the stack config uses is one of them (chat_markdown_channels.py).
       HOOKRELAY_PLUGINS: /etc/hookrelay/plugins
-      # Where the escalation route delivers. Default: the sink wearing a
-      # /probe-standin path, so the plain stack shows the escalation shape
-      # without a model key. With `--profile probe`, set in .env:
-      #   HOOKPROBE_EVENT_URL=http://hookprobe:8088/hooks/event
-      HOOKPROBE_EVENT_URL: ${HOOKPROBE_EVENT_URL:-http://sink:9000/probe-standin}
+      # Where the escalation route delivers: the investigator's door, which is
+      # up by default on the rehearsal (see the hookprobe service). Point it at
+      # http://sink:9000/probe-standin to see the escalation shape alone.
+      HOOKPROBE_EVENT_URL: ${HOOKPROBE_EVENT_URL:-http://hookprobe:8088/hooks/event}
+      # Where a press on an investigator's card goes back to — the approve,
+      # follow-up and remember buttons the stack config offers forward here.
+      HOOKPROBE_ACTION_URL: ${HOOKPROBE_ACTION_URL:-http://hookprobe:8088/hooks/action}
       # Card actions. A demo value on purpose: without a secret no card carries a
       # button at all, so the whole return leg would be invisible here — and the
       # escalation sweep would disarm itself, which is correct behaviour but not
@@ -141,21 +143,29 @@ services:
       - ./hookjudge/examples:/examples:ro
     restart: unless-stopped
 
-  # The investigator is opt-in: it needs a real model key to be worth
-  # starting, so the plain `up` stays hermetic. Join it to the family with:
-  #   ANTHROPIC_API_KEY=sk-ant-... docker compose --profile probe up -d --build
-  # High/critical alerts then ALSO get a deep read-only investigation, whose
-  # report returns through the pipe's probe-notify door to the same channels.
+  # High/critical alerts get a deep read-only investigation whose report
+  # returns through the pipe's probe-notify door to the same channels.
+  # Up by default, on the `replay` rehearsal: a recorded investigation played
+  # back through the real read-only gate and audit, priced at nothing, so the
+  # plain `up` shows the whole loop — report, approve press, execution record,
+  # audit page — with no key. Set HOOKPROBE_RUNTIME, HOOKPROBE_MODEL and a key
+  # in .env to investigate for real; see hookprobe/docs/runtimes.md.
   hookprobe:
     build: ./hookprobe
     container_name: hs-hookprobe
-    profiles: ["probe"]
     environment:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
       # The pipe's board as your browser reaches it; a run links to its chain there.
       HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
-      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
+      # And this console as your browser reaches it, so a card links to its run.
+      HOOKPROBE_PUBLIC_URL: ${HOOKPROBE_PUBLIC_URL:-http://127.0.0.1:8088}
+      HOOKPROBE_RUNTIME: ${HOOKPROBE_RUNTIME:-replay}
+      HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-rehearsal}
+      # The allowlist the approve press is checked against: the one that ships
+      # with the rehearsal admits exactly the two observations its disk script
+      # proposes. A real deployment writes its own file and points here.
+      HOOKPROBE_REMEDIATION_ALLOWLIST: ${HOOKPROBE_REMEDIATION_ALLOWLIST:-/app/hookprobe/replays/rehearsal-allowlist}
       # Budget breaker for the autonomous door: window spend >= budget means
       # new escalations are refused (with a report card saying why). 0 = off.
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}
@@ -259,12 +269,13 @@ services:
     depends_on:
       - hookrelay
 
-  # A self-scraping Prometheus, so the investigator's prometheus MCP has
-  # something real to query. Opt-in with the investigator; useless alone.
+  # A self-scraping Prometheus, so a REAL investigator's prometheus MCP has
+  # something to query. Opt-in (`--profile prometheus`): the rehearsal reads
+  # nothing, so the default stack has no use for it.
   prometheus:
     image: prom/prometheus:v3.13.2
     container_name: hs-prometheus
-    profiles: ["probe"]
+    profiles: ["prometheus"]
     ports:
       - "127.0.0.1:9090:9090"
     restart: unless-stopped

@@ -18,6 +18,7 @@ cd "$(dirname "$0")/.."
 
 RELAY=http://127.0.0.1:8100
 JUDGE=http://127.0.0.1:8200
+PROBE=http://127.0.0.1:8088
 
 # The node under test, named rather than assumed. `STACK_BRAIN=mine` skips
 # hookjudge's own ledger assertions and leaves the dialect ones — that pair is
@@ -139,14 +140,16 @@ docker compose down -v >/dev/null 2>&1 || true
 docker compose up -d --build >/dev/null
 
 step "wait for health"
-for _ in $(seq 1 60); do
-  if curl -sf "$RELAY/healthz" >/dev/null 2>&1 && curl -sf "$JUDGE/healthz" >/dev/null 2>&1; then
-    echo "pipe and brain are up"; break
+for _ in $(seq 1 90); do
+  if curl -sf "$RELAY/healthz" >/dev/null 2>&1 && curl -sf "$JUDGE/healthz" >/dev/null 2>&1 \
+     && curl -sf "$PROBE/healthz" >/dev/null 2>&1; then
+    echo "pipe, brain and investigator are up"; break
   fi
   sleep 2
 done
 curl -sf "$RELAY/healthz" >/dev/null || fail "the pipe never became healthy"
 curl -sf "$JUDGE/healthz" >/dev/null || fail "the brain never became healthy"
+curl -sf "$PROBE/healthz" >/dev/null || fail "the investigator never became healthy"
 
 step "the shadow config is one the pipe can boot"
 # deploy/shadow.yaml is a hookrelay CONFIG file, not a compose file — the parse
@@ -175,15 +178,146 @@ fire() {
   curl -sf --max-time 10 -o /dev/null -X POST "$RELAY/hook/$1" \
     -H 'content-type: application/json' -d "$2" || fail "door $1 refused the event"
 }
+# The same, keeping the pipe's answer: the event id is how the investigator's
+# run for THIS alert is found (its session key is probe:<door>:<event id>).
+fire_id() {
+  curl -sf --max-time 10 -X POST "$RELAY/hook/$1" -H 'content-type: application/json' -d "$2" \
+    | python3 -c 'import sys, json; print(json.load(sys.stdin).get("event_id", ""))' || fail "door $1 refused the event"
+}
 
 step "drive every route"
 fire inbound '{"title":"Payment gateway 5xx rate 8.1%","message":"gateway-2 5xx at 8.1% over 5 minutes","state":"alerting","env":"prod"}'
 sleep 4
 fire inbound '{"title":"Payment gateway 5xx rate 8.1%","message":"gateway-2 5xx at 8.4% over 5 minutes","state":"alerting","env":"prod"}'
 sleep 4
-fire alertmanager '{"status":"firing","commonLabels":{"alertname":"DiskWillFill","env":"prod"},"alerts":[{"status":"firing","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},"annotations":{"summary":"k8s node disk usage 93%","description":"node-3 /var has 7% free"}}]}'
-sleep 4
+# Where the sink's log stood before this alert: the approve link searched for
+# below must be this alert's card, not an earlier run's.
+sink_before="$(docker compose logs --no-log-prefix sink 2>/dev/null | wc -l | tr -d ' ')"
+disk_id="$(fire_id alertmanager '{"status":"firing","commonLabels":{"alertname":"DiskWillFill","env":"prod"},"alerts":[{"status":"firing","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},"annotations":{"summary":"k8s node disk usage 93%","description":"node-3 /var has 7% free"}}]}')"
+[ -n "$disk_id" ] || fail "the alertmanager door answered without an event id"
+
+# ---------------------------------------------------------------------------
+# The loop the fourth alert starts, asserted BEFORE the recovery is fired: a
+# proposal is superseded the moment its condition ends (remediation.moved), so
+# the press has to land while the alert is still firing — which is also the
+# only order a person could have pressed it in.
+#
+# This is the first end-to-end check of the approve path that has ever run
+# outside a unit test. The retired production pipe never offered the button
+# (.agents/notes/proposed/2026-09-28-pilot-zero-read-back-and-the-order-of-the-next-ninety-days.md).
+# ---------------------------------------------------------------------------
+step "the rehearsal closes the loop: report, button, press, execution"
+# The token as the running container sees it — compose resolves .env from the
+# compose file's directory, so a value set there and one exported here can
+# differ, and a smoke that reads the wrong one asks a 401 to prove a loop.
+PROBE_TOKEN="$(docker compose exec -T hookprobe printenv HOOKPROBE_TOKEN 2>/dev/null || true)"
+pcurl() {
+  if [ -n "$PROBE_TOKEN" ]; then curl -sf -H "Authorization: Bearer $PROBE_TOKEN" "$@"; else curl -sf "$@"; fi
+}
+session="probe:alertmanager:${disk_id}"
+status=""
+for _ in $(seq 1 60); do
+  run="$(pcurl "$PROBE/v1/runs/$session" 2>/dev/null || true)"
+  status="$(RUN_JSON="$run" python3 - <<'PY'
+import json, os
+try:
+    print(json.loads(os.environ["RUN_JSON"]).get("status", ""))
+except Exception:
+    print("")
+PY
+)"
+  case "$status" in completed|failed) break ;; esac
+  sleep 1
+done
+[ "$status" = "completed" ] || fail "the investigator's run for the disk alert ended as '${status:-nothing}'"
+RUN_JSON="$run" python3 - <<'PY' || fail "the rehearsal's run does not read as it should"
+import json, os
+r = json.loads(os.environ["RUN_JSON"])
+calls = [e for e in r.get("events", []) if e.get("type") == "tool_use"]
+refused = [e for e in calls if e.get("error")]
+assert float(r.get("cost_usd") or 0) == 0.0, f"a rehearsal cost {r.get('cost_usd')}"
+assert len(calls) >= 5, f"only {len(calls)} recorded calls reached the feed"
+assert len(refused) == 1, f"{len(refused)} calls were refused; the script carries exactly one"
+assert r.get("turns") and r["turns"][0].get("guard_trips") == 1, "the refusal was not counted on the turn"
+print(f"run completed free: {len(calls)} recorded calls, 1 refused by the read-only gate and counted")
+PY
+proposals="$(pcurl "$PROBE/v1/remediations")" || fail "the investigator's proposals are unreadable"
+pid="$(PROPOSALS="$proposals" SESSION="$session" python3 - <<'PY'
+import json, os
+rows = [r for r in json.loads(os.environ["PROPOSALS"])["proposals"] if r.get("session_key") == os.environ["SESSION"] and r.get("status") == "proposed"]
+print(rows[0]["id"] if rows else "")
+PY
+)"
+[ -n "$pid" ] || fail "no proposal was parked for $session"
+echo "proposal $pid is parked"
+link=""
+for _ in $(seq 1 30); do
+  found="$(docker compose logs --no-log-prefix sink 2>/dev/null | tail -n +"$((sink_before + 1))" \
+    | { grep -oE '\[Approve[^]]*\]\((http[^)]*card-action\?t=[^)]+)\)' || true; } | tail -1)"
+  if [ -n "$found" ]; then
+    link="$(printf '%s' "$found" | sed -E 's/^.*\((http[^)]*)\)$/\1/')"
+    break
+  fi
+  sleep 1
+done
+[ -n "$link" ] || fail "no card in the sink carried an approve link — the pipe dropped the button (card_actions?) or the report never returned"
+echo "the card carries the button as a link; pressing it through the pipe's door"
+press="$(curl -sf -X POST "$link" -H 'content-type: application/json' -d '{"actor":"stack-smoke"}')" \
+  || fail "the pipe refused the press"
+PRESS_JSON="$press" python3 - <<'PY' || fail "the press did not forward to the investigator"
+import json, os
+p = json.loads(os.environ["PRESS_JSON"])
+assert p.get("kind") == "approve", p
+assert "to-probe-action" in str(p.get("outcome")), f"the press went nowhere: {p}"
+print("press recorded and forwarded:", p["outcome"])
+PY
+pstatus=""
+for _ in $(seq 1 60); do
+  proposals="$(pcurl "$PROBE/v1/remediations")"
+  pstatus="$(PROPOSALS="$proposals" PID="$pid" python3 - <<'PY'
+import json, os
+print(next((r["status"] for r in json.loads(os.environ["PROPOSALS"])["proposals"] if r["id"] == os.environ["PID"]), ""))
+PY
+)"
+  case "$pstatus" in executed|failed|rejected|superseded) break ;; esac
+  sleep 1
+done
+PROPOSALS="$proposals" PID="$pid" python3 - <<'PY' || fail "the approved procedure did not execute as the rehearsal says it does"
+import json, os
+row = next(r for r in json.loads(os.environ["PROPOSALS"])["proposals"] if r["id"] == os.environ["PID"])
+assert row["status"] == "executed", f"the procedure ended {row['status']}: {row.get('results')}"
+assert "stack-smoke" in str(row.get("approved_note")), "the press carried no actor"
+results = row.get("results") or []
+assert [r["command"] for r in results] == ["df -h /data", "du -sh /data/results"], results
+assert all(r["exit"] == 0 for r in results), results
+print("both steps ran as argv and exited 0; the approving actor is on the row")
+PY
+
+AUDIT_JSON="$(curl -sf "$RELAY/audit/$disk_id")" python3 - <<'PY' || fail "the pipe's audit record does not carry the press"
+import json, os
+rec = json.loads(os.environ["AUDIT_JSON"])
+presses = rec.get("human_actions") or []
+assert len(presses) == 1, f"expected one human action on the alert's record, saw {len(presses)}: {presses}"
+assert presses[0].get("kind") == "approve" and presses[0].get("actor") == "stack-smoke", presses
+sources = [h.get("source") for h in rec.get("hops") or []]
+assert "probe-notify" in sources, f"the investigator's report is not on the record: {sources}"
+print(f"the alert's audit record holds {len(sources)} hops and the approve press by its actor")
+PY
+
+sleep 2
 fire alertmanager '{"status":"resolved","commonLabels":{"alertname":"DiskWillFill","env":"prod"},"alerts":[{"status":"resolved","labels":{"alertname":"DiskWillFill","env":"prod","service":"k8s"},"annotations":{"summary":"k8s node disk usage 93%","description":"fell back to 41%"}}]}'
+sleep 3
+WORK_JSON="$(pcurl "$PROBE/v1/work")" SESSION="$session" python3 - <<'PY' || fail "the work board does not close the loop"
+import json, os
+session = os.environ["SESSION"]
+items = [i for i in json.loads(os.environ["WORK_JSON"]).get("items") or [] if session in (i.get("sessions") or []) or i.get("work_id") == session]
+assert items, "the disk investigation is not on the work board"
+item = items[0]
+assert item["verified"] and item["verified_by"] == "remediation", item
+assert item.get("recovered") is True, "the recovery never reached the work item"
+assert item["state"] == "done", f"steps ran and the condition ended, yet the item is {item['state']}"
+print("work item: done, verified by the procedure, condition ended")
+PY
 
 step "wait for the far end"
 # Wait on the LAST link, not a midpoint. A brain's ledger reaching four only

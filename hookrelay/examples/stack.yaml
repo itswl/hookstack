@@ -13,7 +13,12 @@ sources:
     title: "{title}"
     body: "{message}"
     level: "{state}"
-    level_map: {alerting: high, ok: info}
+    level_map: {alerting: high, ok: info, resolved: info}
+    # A stated recovery reaches the investigator as a fact about work it has
+    # already done (it verifies the run and spends nothing); a keyword in the
+    # title is a judgement and stays the brain's. `state: resolved` says it;
+    # `state: ok` only lowers the level.
+    recovery: "{state}"
     fields:
       env: "{env}"
       status: "{state}"
@@ -30,6 +35,9 @@ sources:
     body: "{alerts.0.annotations.description|alerts.0.annotations.summary}"
     level: "{alerts.0.status|status}"
     level_map: {firing: high, resolved: info}
+    # Alertmanager states the fact: status=resolved is the recovery flag, which
+    # is what lets the investigator verify the work its firing started.
+    recovery: "{alerts.0.status|status}"
     fields:
       status: "{alerts.0.status|status}"
       env: "{alerts.0.labels.env|commonLabels.env}"
@@ -77,10 +85,9 @@ channels:
     url: http://hookjudge:8200/events
     options: {payload: normalized}   # the brain wants the event, not a card
 
-  # Resolved from the environment: the plain stack points this at the sink's
-  # /probe-standin (so the escalation SHAPE is visible without a model key),
-  # and `--profile probe` points it at the real investigator. See the
-  # hookprobe service in the root compose.
+  # Resolved from the environment. The compose points this at the
+  # investigator's door, which is up by default on the rehearsal; point it at
+  # the sink's /probe-standin to see the escalation SHAPE alone.
   # Where a card press goes. `payload: raw` because the action envelope IS the
   # content — the pipe recorded the press as an event carrying it, and the brain
   # wants those bytes, not a normalized alert built around them. Unsigned like
@@ -91,14 +98,22 @@ channels:
     url: http://hookjudge:8200/feedback
     options: {payload: raw}
 
-  # Resolved from the environment: the plain stack points this at the sink's
-  # /probe-standin (so the escalation SHAPE is visible without a model key),
-  # and `--profile probe` points it at the real investigator. See the
-  # hookprobe service in the root compose.
+  # Resolved from the environment: the investigator's event door (see the
+  # hookprobe service in the root compose and in the quickstart).
   - name: to-probe
     type: generic
     url: ${HOOKPROBE_EVENT_URL}
     options: {payload: normalized}   # the investigator wants the event too
+
+  # Where a press on the investigator's card goes: approve, follow-up and
+  # remember all ride this channel back to its action door. `payload: raw` for
+  # the same reason as the judge's feedback channel — the envelope IS the
+  # content. Unsigned in this demo (HOOKPROBE_EVENT_SECRET is empty); a real
+  # deployment signs it with the same secret as the event door.
+  - name: to-probe-action
+    type: generic
+    url: ${HOOKPROBE_ACTION_URL}
+    options: {payload: raw}
 
   # People. The pipe sends a card MODEL to the chat bridge (docs/bridge-protocol.md);
   # the bridge renders the Feishu card and posts it — here, in webhook mode, to
@@ -158,11 +173,20 @@ routes:
 # stays OFF — otherwise both count and neither ledger describes reality.
 pipeline: [silence, routes]
 
-# The card's way back. A verdict DECLARES which buttons it deserves (that is
-# judgement, and hookjudge's); this decides which of those the demo actually
-# offers and where a press goes. `silence` is the pipe's own job, so it needs no
-# channel to reach. `approve` is absent on purpose: it runs commands, so it is
-# opt-in per deployment and the demo has nothing to approve.
+# The card's way back. A node DECLARES which buttons its report deserves (that
+# is judgement, and the judge's or the investigator's); this decides which of
+# those the deployment actually offers and where a press goes. A kind absent
+# here is dropped silently at delivery — which is how the retired production
+# pipe, whose list stopped at `remember`, delivered 741 cards without one
+# approve or follow-up button while the investigator declared them on every
+# report that proposed something. `silence` is the pipe's own job, so it needs
+# no channel to reach.
+#
+# `approve` runs commands, so it stays a per-deployment decision: this demo
+# offers it because the investigator's allowlist admits only two observations
+# (hookprobe/replays/rehearsal-allowlist) and the press is the thing the demo
+# exists to show. Copying this block into a real deployment is arming a door;
+# read the note above before doing it.
 #
 # Only takes effect with HOOKRELAY_ACTION_SECRET set — the compose file sets a
 # demo value. Empty means no card carries a button at all, because an unsigned
@@ -173,3 +197,9 @@ card_actions:
     forward_to: to-judge-feedback
   useless:
     forward_to: to-judge-feedback
+  followup:
+    forward_to: to-probe-action
+  approve:
+    forward_to: to-probe-action
+  remember:
+    forward_to: to-probe-action
