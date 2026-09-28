@@ -297,6 +297,7 @@ def test_relay_born_runs_report_back(tmp_path) -> None:
     assert payload["meta"]["importance"] == "high"
     assert payload["meta"]["status"] == "completed"
     assert payload["analysis"]["summary"] == "ok"
+    assert payload["analysis"]["detail"] == '{"summary": "ok"}', "the whole report rides beside the summary"
     assert payload["report"]["summary"] == "ok"  # extracted from the JSON answer
     assert verify_timestamped(
         "ret-secret",

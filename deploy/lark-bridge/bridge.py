@@ -410,6 +410,9 @@ class Handler(BaseHTTPRequestHandler):
                 {"ok": False, "error": "expected a card model or an interactive card"},
             )
             return
+        # The model's full text, if the brain sent one: it follows the card
+        # into the card's own thread once the card has a message id.
+        full_text = str(card.get("detail") or "") if protocol else ""
         if protocol:
             # As the app, actions are buttons that call back; through a webhook
             # they are links to the pipe's confirm page, at the base the pipe
@@ -439,7 +442,16 @@ class Handler(BaseHTTPRequestHandler):
             # The conformance hook: everything but the send. A bridge for any
             # platform answers this the same way, with its own rendering.
             logger.info("dry run: card rendered, not sent")
-            self._reply(200, {"ok": True, "dry_run": True, "message_id": "", "rendered": card})
+            self._reply(
+                200,
+                {
+                    "ok": True,
+                    "dry_run": True,
+                    "message_id": "",
+                    "rendered": card,
+                    "detail_chunks": len(render.detail_cards(full_text)),
+                },
+            )
             return
         ok, detail = send_webhook(card) if WEBHOOK_MODE else send_card(card, reply_to, chat_id)
         if ok:
@@ -448,6 +460,8 @@ class Handler(BaseHTTPRequestHandler):
                 "via webhook" if WEBHOOK_MODE else f"message_id={detail}",
                 " (in thread)" if reply_to and not WEBHOOK_MODE else "",
             )
+            if full_text:
+                follow_in_thread(full_text, detail)
             self._reply(200, {"ok": True, "message_id": detail})
         else:
             logger.error("card rejected by Lark: %s", detail)
@@ -463,6 +477,35 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+
+def follow_in_thread(text: str, message_id: str) -> int:
+    """The full text behind a card, posted under it in the card's own thread.
+
+    The card carries the summary; this carries what the summary was written
+    from, so a person on a phone can read the evidence before pressing a button
+    on it. Pilot zero's cards were read on a phone with no console within
+    reach, and a summary was all they ever said.
+
+    Never fatal, like `acknowledge`: the card has already landed by the time
+    this runs, and a part that failed to post must not be reported as a failed
+    card. A webhook has no threads, so it is told and skipped; returns how many
+    parts went.
+    """
+    if WEBHOOK_MODE or not message_id:
+        logger.info("detail not posted: %s", "a webhook has no threads" if WEBHOOK_MODE else "no message id came back")
+        return 0
+    cards = render.detail_cards(text)
+    posted = 0
+    for card in cards:
+        ok, answer = send_card(card, reply_to=message_id)
+        if not ok:
+            logger.warning("detail part %s of %s not posted: %s", posted + 1, len(cards), answer)
+            break
+        posted += 1
+    if posted:
+        logger.info("report followed the card into its thread: %s part(s)", posted)
+    return posted
 
 
 def acknowledge(event: dict, note: str) -> None:

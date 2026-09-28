@@ -40,6 +40,14 @@ from hookprobe.wire import sign_timestamped
 
 logger = logging.getLogger("hookprobe.notify")
 
+# The full report travels with the card, bounded: the pipe accepts 256 KiB a
+# body and a report is a few thousand characters; this cap is for the run
+# that quoted a log into its answer. The card shows the summary; a bridge that
+# can reply in a thread posts THIS under it, so the phone reads the evidence
+# the card was written from. Pilot zero's cards were read on a phone with no
+# way to reach the console, and the summary was all they ever carried.
+_DETAIL_MAX = 60_000
+
 
 class ReturnDelivery:
     """One service's outbound reports, and the alarm standing behind them."""
@@ -116,7 +124,14 @@ class ReturnDelivery:
                     # "{meta.verdict}"} and routes on it.
                     "verdict": verdict(run.text, self._settings.verdicts),
                 },
-                "analysis": {"summary": summary, "event_type": "investigation"},
+                "analysis": {
+                    "summary": summary,
+                    "event_type": "investigation",
+                    # The whole report, for the channels that can carry it
+                    # (docs/bridge-protocol.md, `detail`): the card quotes the
+                    # summary, the thread under it gets this.
+                    "detail": str(run.text or "")[:_DETAIL_MAX],
+                },
                 "identity": {"session": run.session_key},
                 "report": {"summary": summary, "text": run.text},
                 # What this report is worth a button for — the judgement is

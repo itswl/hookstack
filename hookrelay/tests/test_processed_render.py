@@ -88,6 +88,17 @@ def test_the_model_carries_every_block_as_facts():
         assert "\\" not in card[key], f"{key} is plain text — escaping is the renderer's, for its own dialect"
 
 
+def test_the_full_text_behind_the_summary_rides_the_model_as_detail():
+    """A brain may send its whole report; the pipe carries it, unread, for a
+    bridge that can put it under the card. Absent when the brain sent none —
+    a missing block is absent, not empty."""
+    assert "detail" not in _model()
+    result = {**RESULT, "analysis": {**RESULT["analysis"], "detail": "the whole report, every line of it"}}
+    card = _model(result)
+    assert card["detail"] == "the whole report, every line of it"
+    assert card["summary"] == RESULT["analysis"]["summary"], "the card still quotes the summary"
+
+
 def test_a_recovery_names_its_state_and_a_reminder_says_still_open():
     recovered = json.loads(json.dumps(RESULT))
     recovered["meta"]["is_recovery"] = True

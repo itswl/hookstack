@@ -11,7 +11,10 @@ the application** — which is the whole reason it exists: a custom bot can only
 send, so the buttons on its cards have nowhere to call back to, and it cannot
 reply inside a thread. When the pipe adds `reply_to`, the card goes out as a
 reply in that thread; when it adds `chat_id`, it goes to that chat, so one
-bridge serves several channels. A finished Feishu card from a `feishu`-type
+bridge serves several channels. When the card model carries `detail` — the
+investigator sends its whole report that way — the bridge posts it under the
+card, in the card's own thread, in pieces of a card each, so the evidence is
+readable where the card is read. A finished Feishu card from a `feishu`-type
 channel is still accepted and passed through, so either type can point here.
 
 **In.** The bridge dials out to Lark over a long connection and consumes two

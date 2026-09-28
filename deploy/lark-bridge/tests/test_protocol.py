@@ -154,3 +154,67 @@ def test_webhook_mode_posts_the_rendered_card_with_actions_as_links(server, monk
     (card,) = posted
     assert not [e for e in card["elements"] if e["tag"] == "action"]
     assert any("card-action?t=" in json.dumps(e) for e in card["elements"]), "actions rendered as links to the pipe"
+
+
+def _long_report(paragraphs: int = 12) -> str:
+    return "\n\n".join(f"paragraph {i} [{i}] " + "x" * 400 for i in range(paragraphs))
+
+
+def test_the_full_text_behind_a_card_follows_it_into_the_thread(server) -> None:
+    """The card quotes the summary; the pieces carry what it was written from,
+    each answering the card in its own thread. On a phone that thread is the
+    only place the evidence can be read."""
+    url, sent = server
+    body = _body(card={**FIXTURE["card"], "detail": _long_report()})
+    assert _post(url, body, _signed(body)) == (200, {"ok": True, "message_id": "om_sent_1"})
+    card, _reply_to, _chat_id = sent[0]
+    assert "paragraph 11" not in json.dumps(card), "the card itself stays a card"
+    parts = sent[1:]
+    assert len(parts) == 3, [len(json.dumps(p[0])) for p in parts]
+    assert all(reply_to == "om_sent_1" for _card, reply_to, _chat in parts), (
+        "every part answers the card, in its thread"
+    )
+    first, last = json.dumps(parts[0][0], ensure_ascii=False), json.dumps(parts[-1][0], ensure_ascii=False)
+    assert "paragraph 0 " in first and "paragraph 11 " in last
+    assert "part 3 of 3" in last and "console" not in last
+    content = parts[0][0]["elements"][0]["text"]["content"]
+    assert "\\[0\\]" in content, "payload text is escaped where lark_md renders it"
+
+
+def test_a_dry_run_counts_the_pieces_it_would_post(server) -> None:
+    url, sent = server
+    body = _body(card={**FIXTURE["card"], "detail": _long_report()})
+    status, answer = _post(url, body, {**_signed(body), "X-Hookstack-Dry-Run": "1"})
+    assert status == 200 and answer["dry_run"] and answer["detail_chunks"] == 3
+    assert sent == []
+    body = _body()
+    assert _post(url, body, {**_signed(body), "X-Hookstack-Dry-Run": "1"})[1]["detail_chunks"] == 0
+
+
+def test_a_webhook_delivery_keeps_the_card_and_leaves_the_detail_out(server, monkeypatch) -> None:
+    """A custom bot has no threads: the card goes, the detail does not, and
+    nothing pretends otherwise."""
+    url, sent = server
+    posted: list[dict] = []
+    monkeypatch.setattr(bridge, "WEBHOOK_MODE", True)
+    monkeypatch.setattr(bridge, "send_webhook", lambda card: (posted.append(card), (True, ""))[1])
+    body = _body(card={**FIXTURE["card"], "detail": _long_report()})
+    assert _post(url, body, _signed(body))[0] == 200
+    assert len(posted) == 1 and sent == []
+
+
+def test_a_part_that_fails_to_post_stops_the_rest_and_never_fails_the_card(server, monkeypatch) -> None:
+    url, sent = server
+    calls = {"n": 0}
+
+    def flaky(card: dict, reply_to: str = "", chat_id: str = "") -> tuple[bool, str]:
+        calls["n"] += 1
+        if calls["n"] == 3:
+            return False, "rate limited"
+        sent.append((card, reply_to, chat_id))
+        return True, "om_sent_1"
+
+    monkeypatch.setattr(bridge, "send_card", flaky)
+    body = _body(card={**FIXTURE["card"], "detail": _long_report()})
+    assert _post(url, body, _signed(body)) == (200, {"ok": True, "message_id": "om_sent_1"})
+    assert len(sent) == 2, "the card and the first part; the failed part stopped the rest"

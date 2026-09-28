@@ -30,6 +30,7 @@ bridge's URL:
     "tone":    "high",
     "lead":    "🔴 HIGH",
     "summary": "three large top-ups in nine minutes across two accounts",
+    "detail":  "… (optional: the full text behind the summary — a bridge that can reply in a thread posts it under the card, in pieces)",
     "crumb":   "demo-alarm · prod · Single top-up over 500",
     "impact":  "limited to the notification itself",
     "links":   [{"text": "Large top-up runbook", "url": "https://kb.example/runbook/42"}],
@@ -52,6 +53,16 @@ there (a `<at id=all>` in an alert title must not page a company). `actions`
 carry values the pipe already signed; a bridge puts them into buttons and
 returns them on a press without reading them.
 
+**The text behind the summary.** A brain may send the whole report as
+`analysis.detail`; the pipe carries it as `detail` on the model, unread. A
+bridge that delivers as an application posts it **under the card, in the
+card's own thread**, in pieces of a card's worth each, the last piece saying so
+when there was more than it would post; the card itself stays a card. A bridge
+that delivers through a webhook has no threads and leaves it out with a log
+line, as it does the thread hints. This is what makes a card readable where
+cards are read: the summary was written from this text, and a person ruling on
+a phone with no console in reach was ruling on a paragraph.
+
 Headers: `content-type: application/json`; when the channel has a `secret`,
 `X-Hook-Timestamp` (epoch seconds) and `X-Hook-Signature` = hex
 HMAC-SHA256(secret, `"{timestamp}.{body}"`) over the **exact bytes** posted —
@@ -68,7 +79,7 @@ the open, which is the visible failure everyone wants.
 
 **Dry run.** With the header `X-Hookstack-Dry-Run: 1` the bridge validates,
 authenticates and renders but does not send, answering
-`{"ok": true, "dry_run": true, "message_id": "", "rendered": <platform payload>}`.
+`{"ok": true, "dry_run": true, "message_id": "", "rendered": <platform payload>, "detail_chunks": <how many pieces the detail would have become>}`.
 This is the conformance hook: a deployment can prove the whole path except the
 last hop from inside its own network, and a new bridge can be tested without
 an account on its platform.
