@@ -47,7 +47,7 @@ from pathlib import Path
 # not hold produces no output at all, which is indistinguishable from success
 # unless somebody is counting. Change this number and STACK.md's "Nineteen
 # assertions" in the same commit; they are the same fact written twice.
-EXPECTED_ASSERTIONS = 19
+EXPECTED_ASSERTIONS = 20
 
 FAILURES: list[str] = []
 RAN: list[str] = []
@@ -138,11 +138,21 @@ def main() -> int:
         # get a floor and a parity rather than a total.
         blocks = sink.split("── delivery on")[1:]
         reports = sum(1 for block in blocks if "· investigation" in block)
-        judged = len(blocks) - reports
+        # And the last hop of the remediation contract: the approved procedure's
+        # verdict, told where the report went. One procedure ran (the disk
+        # alert's), the recovery held it, two dialects — exactly two cards, and
+        # the recovery's colour on them.
+        outcomes = sum(1 for block in blocks if "· fix held" in block)
+        judged = len(blocks) - reports - outcomes
         check(
             judged == 8,
             "no downstream received the same alert twice",
-            f"expected 8 judge cards, saw {judged} (plus {reports} investigation cards)",
+            f"expected 8 judge cards, saw {judged} (plus {reports} investigation cards, {outcomes} outcome cards)",
+        )
+        check(
+            outcomes == 2,
+            "the approved procedure's verdict reached every dialect",
+            f"expected 2 'fix held' cards, saw {outcomes}",
         )
         # Since 0.4.0 every front-door event reaches the investigator's own
         # door — nothing lands on the old /probe-standin — and both investigated

@@ -51,6 +51,7 @@ from hookprobe.reports import (
     budget_report,
     cooling_report,
     failure_report,
+    outcome_report,
     superseded_report,
     unanswered_report,
 )
@@ -1216,6 +1217,8 @@ class RunService:
         if held:
             self._board_changed()
             logger.info("remediation held session=%s procedures=%s", best.session_key, ",".join(r["id"] for r in held))
+            for row in held:
+                self.report_outcome(row, remediation.HELD, str(row.get("held_reason") or ""))
         return best
 
     def record_refire(self, run: Run, *, event_id: Any = None) -> list[dict[str, Any]]:
@@ -1231,6 +1234,8 @@ class RunService:
             logger.info(
                 "remediation did not hold session=%s procedures=%s", run.session_key, ",".join(r["id"] for r in rows)
             )
+            for row in rows:
+                self.report_outcome(row, remediation.DID_NOT_HOLD, str(row.get("held_reason") or ""))
         return rows
 
     def same_alert(self, source: str, title: str, window_seconds: int) -> Run | None:
@@ -1633,7 +1638,20 @@ class RunService:
     # What a notice needs from the run it is about: enough for the pipe to name
     # the alert, put the card in the right conversation and file it under the
     # right work. Everything else on a run's meta describes work this did none of.
-    _NOTICE_META = ("title", "source", "level", "event_id", "kind", "work_id", "thread_root")
+    _NOTICE_META = (
+        "title",
+        "source",
+        "level",
+        "event_id",
+        "kind",
+        "work_id",
+        "thread_root",
+        # The pipe's own handle for the alert and the platform's, so a notice's
+        # card is cut against the alert's chain and filed on its page like the
+        # report it follows (notify.py copies both).
+        "correlation_id",
+        "reference",
+    )
 
     def report_superseded(self, proposal_id: str, reason: str) -> Run | None:
         """Say in the chat that a pressed procedure did not run, and why.
@@ -1726,15 +1744,19 @@ class RunService:
         *,
         key: str,
         kind: str,
-        error: str,
+        error: str | None,
         text: str,
         extra: dict[str, Any] | None = None,
+        status: str = FAILED,
     ) -> Run | None:
         """One report-shaped message about work, delivered where that work lives.
 
         Relay-born runs only: a console-started run has no chat to answer into,
         and the console shows the state directly. Idempotent on the key, because
-        the two callers are both on redelivery paths.
+        the callers are all on redelivery or sweep paths. Failure-shaped by
+        default — every notice before the outcome one was a refusal — and
+        `status=COMPLETED` with no error for the one piece of good news this
+        node can bring, a fix that held.
         """
         if about.origin != "relay":
             return None
@@ -1761,15 +1783,80 @@ class RunService:
         notice.meta["notice"] = kind
         notice.meta.update(extra or {})
         self._store.create(notice)
-        notice.status = FAILED
+        notice.status = status
         notice.error = error
         notice.cost_usd = 0.0
         notice.text = text
         self._record_turn(notice, None)
         self._store.finish(notice)
         self._schedule_return(notice)
-        logger.warning("notice %s about=%s reason=%s", kind, about.session_key, error)
+        logger.log(
+            logging.WARNING if status == FAILED else logging.INFO,
+            "notice %s about=%s reason=%s",
+            kind,
+            about.session_key,
+            error or "good news",
+        )
         return notice
+
+    def report_outcome(self, row: dict[str, Any], outcome: str, reason: str) -> Run | None:
+        """Say where the report went what became of the procedure it proposed.
+
+        The remediation contract ends with a verdict — held, did not hold — that
+        until now lived on the row and the work board and nowhere a person
+        reads: the card in the chat said "approved and passed on" and stopped,
+        and the pipe's journey of the alert ended at the press. This is the last
+        hop: one notice per procedure, keyed on its id, because the evidence is
+        stamped once and a window closes once. Good news travels COMPLETED with
+        no error; a fix that did not hold is failure-shaped like every other
+        notice, and the work board reads it as such.
+        """
+        if str(row.get("status") or "") != remediation.EXECUTED or row.get("interrupted"):
+            return None  # a step that failed was told as itself when it happened; there is nothing to hold
+        run = self._store.get(str(row.get("session_key") or ""))
+        if run is None or outcome not in (remediation.HELD, remediation.DID_NOT_HOLD):
+            return None
+        held = outcome == remediation.HELD
+        pid = str(row.get("id") or "")
+        return self._notice(
+            run,
+            key=f"probe:outcome:{pid}",
+            kind="outcome",
+            status=COMPLETED if held else FAILED,
+            error=None if held else f"did not hold: {reason}",
+            text=outcome_report(outcome, reason, row),
+            extra={
+                "proposal": pid,
+                "outcome": outcome,
+                # What decided it: the recovery door, a re-fire, or the window
+                # closing with nothing said — the last is the weak form, and
+                # the card says so in the same words the row does.
+                "held_by": str(row.get("held_by") or "window"),
+                "approved_by": str(row.get("approved_by") or ""),
+            },
+        )
+
+    def sweep_outcomes(self, now: float | None = None) -> int:
+        """Every executed procedure whose verdict is in but untold, told once.
+
+        Two of the three verdicts arrive as events and are told at once
+        (`record_recovery`, `record_refire`); the third — the window closing
+        quietly — arrives as nothing at all, so a clock has to ask. The same
+        pass also catches a verdict whose notice never got out (this node was
+        down when it was decided). `_notice` is idempotent on the key, so this
+        may run as often as it likes.
+        """
+        told = 0
+        for row in remediation.list_all(self._settings.workdir, limit=200):
+            if str(row.get("status") or "") != remediation.EXECUTED or row.get("interrupted"):
+                continue
+            run = self._store.get(str(row.get("session_key") or ""))
+            if run is None:
+                continue
+            verdict, why = remediation.outcome(row, now, recovered_at=run.meta.get("recovered_at"))
+            if verdict in (remediation.HELD, remediation.DID_NOT_HOLD) and self.report_outcome(row, verdict, why):
+                told += 1
+        return told
 
     def reject_remediation(self, proposal_id: str) -> dict[str, Any]:
         row = remediation.reject(self._settings.workdir, proposal_id)

@@ -70,6 +70,12 @@ from hookprobe.wire import constant_time_eq
 
 logger = logging.getLogger("hookprobe.app")
 
+# How often the quiet verdict is looked for: a verification window that closed
+# with nothing said. A minute is late by at most a minute on a window measured
+# in hours, and a sweep reads two hundred small files, so it costs nothing worth
+# a knob.
+OUTCOME_SWEEP_SECONDS = 60
+
 _UI_PAGE = Path(__file__).with_name("ui.html")
 
 
@@ -219,13 +225,24 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         )
         service.recover_orphans()
         service.sweep_interrupted_remediations()
+        # Verdicts decided while this node was down, or by a window that closed
+        # in the quiet: told now, and then once a minute. The recovery and
+        # re-fire doors tell theirs the moment they arrive; this is for the
+        # third verdict, which arrives as nothing at all.
+        service.sweep_outcomes()
 
         async def retention_loop() -> None:
             while True:
                 await asyncio.to_thread(prune, settings.workdir, Path.home(), settings.retention_days)
                 await asyncio.sleep(86400)
 
+        async def outcome_loop() -> None:
+            while True:
+                await asyncio.sleep(OUTCOME_SWEEP_SECONDS)
+                service.sweep_outcomes()
+
         pruner = asyncio.create_task(retention_loop()) if settings.retention_days > 0 else None
+        outcomes = asyncio.create_task(outcome_loop())
         # And the boundaries, on a clock. `/v1/selftest` shipped run by nothing,
         # which makes it a claim rather than a check; this is what turns it into
         # one. A failure goes to the alarm channel — the same door the pipe's own
@@ -239,6 +256,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                 watcher.cancel()
             if pruner is not None:
                 pruner.cancel()
+            outcomes.cancel()
             # The other side of the sweep above: give the work in flight a
             # moment to record itself, so a graceful stop leaves less for the
             # next boot to clean up than a crash does.

@@ -109,16 +109,18 @@ bash scripts/stack-smoke.sh          # build, drive every route, assert, tear do
 KEEP=1 bash scripts/stack-smoke.sh   # leave it up to poke at
 ```
 
-Twenty-seven assertions, run in CI by `ci-stack`, and they come in two kinds
+Twenty-eight assertions, run in CI by `ci-stack`, and they come in two kinds
 that are worth keeping apart:
 
 - **Eight about the DIALECT** (`assert_dialect.py`), read from the pipe's own
   ledger and the sink: the node took the handover, signed its way back in,
   returned something the pipe could read and route, and the loop closed. Any
   async node passes these. Nothing in them reads the node's ledger.
-- **Nineteen about hookjudge** (`assert_stack.py`), read from that service's
-  `/status`: judged counts, the ai/reuse/recovery split, priced tokens,
-  identity, recovery inheritance. Properties of one implementation.
+- **Twenty about hookjudge and the sink** (`assert_stack.py`), read from that
+  service's `/status` and the sink's log: judged counts, the ai/reuse/recovery
+  split, priced tokens, identity, recovery inheritance, and the cards the
+  downstream received — including the approved procedure's verdict. Properties
+  of one implementation.
 
 That split is what makes hookstack's own acceptance test runnable rather than
 aspirational:

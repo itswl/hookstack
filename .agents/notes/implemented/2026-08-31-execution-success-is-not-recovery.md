@@ -88,3 +88,11 @@ A remediation class whose recovery a re-fire cannot witness (a config change
 that silently degrades instead of re-firing). That needs CISRE's stronger
 form — an explicit target re-read per runbook — and would be the moment to
 copy their recovery-contract idea properly rather than the cheap proxy.
+
+## Told, 2026-09-28
+
+The verdict now travels: a recovery, a re-fire or the window closing posts one
+notice through the investigator's return door — `<alert> · fix held` / `· fix
+did not hold` — so it reaches the chat thread and the pipe's journey of the
+alert. See
+[the-verdict-on-a-fix-is-told-where-the-report-went](2026-09-28-the-verdict-on-a-fix-is-told-where-the-report-went.md).

@@ -66,6 +66,16 @@ class ReturnDelivery:
         summary = with_fold_note(report_summary(run.text), folded(run.turns))
         summary = with_recovery_note(summary, run.meta.get("recovered_at"), run.finished_at)
         alert_title = str(run.meta.get("title") or run.session_key)
+        # What kind of message this is, in the card's name. A report is an
+        # investigation; the one notice that is news about a procedure rather
+        # than a refusal names its verdict, so a person scanning a thread — or
+        # the pipe's journey of the alert — reads "fix held" without opening it.
+        # A fix held BY A RECOVERY is also stated as one (`is_recovery`), so the
+        # card takes the recovery's colour: the condition did end.
+        kind = str(run.meta.get("notice") or "")
+        held = kind == "outcome" and str(run.meta.get("outcome") or "") == "held"
+        suffix = ("fix held" if held else "fix did not hold") if kind == "outcome" else "investigation"
+        ended = held and str(run.meta.get("held_by") or "") == "recovery"
         body = json.dumps(
             {
                 # The PROCESSED-EVENT dialect (hookrelay/processed.py): the
@@ -73,7 +83,8 @@ class ReturnDelivery:
                 # RESULT in the one shape every channel renderer knows how to
                 # dress. Speaking anything else renders as an empty card.
                 "meta": {
-                    "alert_name": f"{alert_title} · investigation",
+                    "alert_name": f"{alert_title} · {suffix}",
+                    **({"is_recovery": True} if ended else {}),
                     "source": str(run.meta.get("source") or "hookprobe"),
                     "importance": str(run.meta.get("level") or "medium"),
                     "event_id": run.meta.get("event_id"),
@@ -132,7 +143,7 @@ class ReturnDelivery:
                 },
                 "analysis": {
                     "summary": summary,
-                    "event_type": "investigation",
+                    "event_type": "remediation-outcome" if kind == "outcome" else "investigation",
                     # The whole report, for the channels that can carry it
                     # (docs/bridge-protocol.md, `detail`): the card quotes the
                     # summary, the thread under it gets this.
