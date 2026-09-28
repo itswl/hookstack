@@ -255,6 +255,14 @@ async def test_a_forwarded_press_rides_the_outbox(action_client):
     envelope = json.loads(rows[0]["payload_json"])
     assert envelope["action"] == {"kind": "followup", "params": {"prompt": "Why do you believe that?"}}
     assert envelope["correlation_id"] == "hr-1" and envelope["actor"] == "ou_x"
+    # And the ledger reads the press like every other event: routed, to the
+    # channel the button was configured with. It used to have deliveries and no
+    # decision, so the timeline showed the one hop a person made as "skipped ·
+    # ?" — accounted for everywhere except where the account is read.
+    (press,) = [e for e in await store.recent_events(5) if e["source"] == "card-action"]
+    assert press["outcome"] == "routed" and press["channels"] == ["probe-action"], press
+    assert press["skip_code"] is None
+    assert any(step.get("gate") == "card-action" and step.get("kind") == "followup" for step in press["steps"])
 
 
 async def test_a_press_the_deployment_no_longer_offers_is_refused(action_client):

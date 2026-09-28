@@ -655,10 +655,24 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             now,
             correlation_id=correlation_id or None,
         )
-        await app.state.store.enqueue_delivery(action_event_id, configured.forward_to, now)
+        channels = [configured.forward_to]
         touch_to = app.state.config.touch_forward_to
         if touch_to and extracted["reference"]:
-            await app.state.store.enqueue_delivery(action_event_id, touch_to, now)
+            channels.append(touch_to)
+        for channel in channels:
+            await app.state.store.enqueue_delivery(action_event_id, channel, now)
+        # A decision row like every other event's: the press was ROUTED, to
+        # these channels, by the button's configuration. Without it the event
+        # had deliveries and no outcome, and the timeline read the one hop a
+        # person made as "skipped · ?" — the press accounted for everywhere
+        # except where the account is read.
+        await app.state.store.insert_decision(
+            action_event_id,
+            "routed",
+            None,
+            channels,
+            [{"gate": "card-action", "kind": kind, "forwarded_to": channels}],
+        )
         return f"forwarded {kind} to {configured.forward_to}"
 
     # ── read side ─────────────────────────────────────────────────────────

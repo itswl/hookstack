@@ -326,6 +326,67 @@ class FilterProcessor:
         return PASS
 
 
+@registry.processor("fold")
+class FoldProcessor:
+    """One card per condition per window, on a RETURN door:
+    {when: {source: judge-notify, wake: "yes"}, window_seconds: 3600, key: title, skip_code: folded}.
+
+    Pacing, not judgment. The brain already said this verdict deserves a person
+    (wake=yes); what this stage decides is only that the same condition does not
+    deserve a person AGAIN inside the window. The repeat is recorded, skipped by
+    name, with the id of the card it folded into, so the ledger still describes
+    what a human saw — which is the objection the 2026-08-12 note raised against
+    a suppression the pipe could not account for. A recovery is never folded: it
+    ends the condition, and a "resolved" card nobody received is a firing nobody
+    can stop worrying about.
+
+    Measured on the retired production deployment's judge ledger (731 wake=yes
+    cards): one card per rule per hour would have folded 54% of them, per four
+    hours 67%; the loudest rule alone was 65% of every interruption, firing at a
+    fifteen-minute median gap. The person those cards were for stopped reading
+    them in the first week. Pinned to a return door by `when.source`, like the
+    wake filter above it; on a front door this would be dedup by another name,
+    and dedup's doctrine applies.
+
+    `key` is which extracted value names the condition — `title` by default,
+    or a field the door extracts (the judge's `rule`, say). What was DELIVERED
+    counts, not what arrived: a folded repeat does not extend the window, so a
+    flapping condition surfaces once per window rather than never.
+    """
+
+    async def run(self, rt: Runtime, ctx: EventContext, options: dict[str, Any]) -> Verdict:
+        name = options["_name"]
+        when: dict[str, Any] = options.get("when") or {}
+        context = ctx.routing_context()
+        if when and not all(_condition_matches(cond, context.get(key, "")) for key, cond in when.items()):
+            ctx.steps.append({"gate": name, "result": "not_applied"})
+            return PASS
+        if ctx.extracted.get("is_recovery"):
+            ctx.steps.append({"gate": name, "result": "pass", "why": "a recovery ends the condition; never folded"})
+            return PASS
+        key_field = str(options.get("key") or "title")
+        key = context.get(key_field, "")
+        if not key:
+            ctx.steps.append({"gate": name, "result": "pass", "why": f"no {key_field} to fold on"})
+            return PASS
+        window = max(0, int(options.get("window_seconds") or 3600))
+        prior = await rt.store.recent_routed(ctx.source.name, key_field, key, window, ctx.now)
+        if prior is None:
+            ctx.steps.append({"gate": name, "result": "pass"})
+            return PASS
+        code = str(options.get("skip_code") or "folded")
+        ctx.steps.append(
+            {
+                "gate": name,
+                "result": "folded",
+                "skip_code": code,
+                "into_event_id": prior["id"],
+                "seconds_ago": int(ctx.now - float(prior["received_at"])),
+            }
+        )
+        return ("skip", code)
+
+
 @registry.processor("http")
 class HttpProcessor:
     """Hand the event to an external brain, apply what it says.

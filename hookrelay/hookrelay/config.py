@@ -72,7 +72,7 @@ BUILTIN_EXTRACTED_NAMES = ("title", "body", "level")
 # Processors that cannot put a new name into an event's fields. The fingerprint
 # vocabulary is fully knowable only when the walk up to the fingerprint is made
 # of these (plus `set`, whose additions are written down in the config itself).
-_FIELD_PRESERVING_PROCESSORS = frozenset({"dedup", "silence", "routes", "filter"})
+_FIELD_PRESERVING_PROCESSORS = frozenset({"dedup", "silence", "routes", "filter", "fold"})
 
 
 @dataclass(frozen=True, slots=True)

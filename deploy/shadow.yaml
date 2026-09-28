@@ -378,6 +378,13 @@ routes:
 # A parse failure or a pre-wake row fails open into a card, never into silence.
 # Recoveries ride along by inheritance: a resolution card for a firing nobody
 # was interrupted for would be the same interruption one step later.
+# `fold` after it: a verdict the judge DID mark for a person is delivered once
+# per condition per hour, and the repeats inside that hour are skipped by name
+# (skip_code folded, each naming the card it folded into). Measured on this
+# deployment's own ledger before the stage existed: 731 wake=yes cards in five
+# weeks, 54% of them repeats inside an hour of a card already sent, and one
+# rule was 65% of every interruption. A recovery is never folded. The digest
+# at the hour's end — "N more, folded" — is the next step, not this one.
 pipeline:
   - name: quiet-wake-no
     type: filter
@@ -396,6 +403,11 @@ pipeline:
     sample_pct: ${QUIET_SAMPLE_PCT}
     sample_by: title
     sample_banner: "🔇 静默抽查 · 系统本不会为这条叫醒你，只想请你回头看一眼它判得对不对"
+  - name: fold-repeats
+    type: fold
+    when: {source: judge-notify, wake: "yes"}
+    window_seconds: 3600
+    skip_code: folded
   - silence
   # Which card was this reply under, and which chain and investigation is that?
   # Answered from the ledger (the platform id of every card we sent is on its

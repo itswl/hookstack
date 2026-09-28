@@ -151,6 +151,28 @@ class Transaction:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def recent_routed(
+        self, source: str, key_field: str, key: str, window_seconds: int, now: float
+    ) -> dict[str, Any] | None:
+        """The newest event through this door with this condition that was
+        actually ROUTED inside the window — what the fold stage anchors on.
+        Routed, not merely received: a folded repeat must not extend the
+        window, or a flapping condition would surface never instead of once."""
+        if key_field == "title":
+            where, value = "e.title = ?", key
+        else:
+            if not key_field.replace("_", "").isalnum():
+                return None
+            where, value = f"json_extract(e.fields_json, '$.{key_field}') = ?", key
+        cursor = await self._db.execute(
+            f"SELECT e.id, e.received_at FROM events e JOIN decisions d ON d.event_id = e.id"  # nosec B608
+            f" WHERE e.source = ? AND {where} AND d.outcome = 'routed' AND e.received_at >= ?"
+            " ORDER BY e.id DESC LIMIT 1",
+            (source, value, now - window_seconds),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
     async def insert_event(
         self,
         source: str,
@@ -459,6 +481,11 @@ class Store:
 
     async def recent_duplicate(self, fp: str, window_seconds: int, now: float) -> dict[str, Any] | None:
         return await Transaction(self.db).recent_duplicate(fp, window_seconds, now)
+
+    async def recent_routed(
+        self, source: str, key_field: str, key: str, window_seconds: int, now: float
+    ) -> dict[str, Any] | None:
+        return await Transaction(self.db).recent_routed(source, key_field, key, window_seconds, now)
 
     async def insert_decision(
         self, event_id: int, outcome: str, skip_code: str | None, channels: list[str], steps: list[dict[str, Any]]
