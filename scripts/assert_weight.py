@@ -178,8 +178,9 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # cause counted as one interruption — which no per-event component could see,
     # and it is a projection of what the ledger already holds, asking nothing new
     # of any node beyond the burst the judge already computed.
-    # 5700 -> 5800 on 2026-09-28, for the fold stage. Split: about +70 source,
-    # +40 code, so the doctrine question applies, and this is the one raise
+    # 5700 -> 5800 on 2026-09-28, for the fold stage and a decision row for a
+    # card press. Split, measured: +100 source, +62 code, so the doctrine
+    # question applies, and this is the one raise
     # where it is genuinely close: a stage that stops a card the brain said
     # deserved a person is judgment's neighbour. The argument that it is a
     # pipe property: it reads no content — only that the same condition, by
