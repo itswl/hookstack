@@ -315,3 +315,118 @@ async def test_a_sampled_card_is_marked_so_the_ledger_and_the_reader_can_tell(st
     assert body.startswith("AUDIT"), "the banner leads the card so a reader sees it first"
     assert "the summary" in body, "and the real summary still follows it"
     assert out["outcome"] == "routed"
+
+
+# ── fold: one card per condition per window, on the return door ──────────────
+
+
+def _fold_cfg(window: int = 3600, key: str = "title") -> Config:
+    return Config.from_dict(
+        {
+            "sources": [
+                {
+                    "name": "judge-notify",
+                    "secret": "",
+                    "title": "{meta.alert_name}",
+                    "body": "{analysis.summary}",
+                    "recovery": "{meta.is_recovery}",
+                    "fields": {"wake": "{meta.wake_someone}", "rule": "{meta.rule_name}"},
+                },
+                {"name": "grafana", "secret": "", "title": "{title}", "body": "{message}", "level": "high"},
+            ],
+            "channels": [{"name": "to-me", "type": "bridge", "url": "http://bridge:9000/send"}],
+            "routes": [
+                {"name": "verdict-to-me", "source": "judge-notify", "send_to": ["to-me"]},
+                {"name": "raw-to-me", "source": "grafana", "send_to": ["to-me"]},
+            ],
+            "pipeline": [
+                {
+                    "type": "fold",
+                    "name": "fold-repeats",
+                    "when": {"source": "judge-notify", "wake": "yes"},
+                    "window_seconds": window,
+                    "key": key,
+                    "skip_code": "folded",
+                },
+                "routes",
+            ],
+        }
+    )
+
+
+def _loud(name: str, rule: str = "", recovery: bool = False, body: str = "the summary") -> dict:
+    meta = {"alert_name": name, "wake_someone": "yes", "rule_name": rule or name}
+    if recovery:
+        meta["is_recovery"] = True
+    return {"meta": meta, "analysis": {"summary": body}}
+
+
+async def test_a_repeat_inside_the_window_is_folded_into_the_card_that_went(store):
+    """The first verdict for a condition reaches the person; the same condition
+    judged again inside the window does not, and the ledger says which card it
+    folded into and how long after — recorded, never silently dropped."""
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    first = await handle_hook(store, cfg, source, _loud("Log error spike", body="1,204 lines"), now=1000.0)
+    assert first["outcome"] == "routed" and first["channels"] == ["to-me"]
+    again = await handle_hook(store, cfg, source, _loud("Log error spike", body="1,311 lines"), now=1000.0 + 900)
+    assert again["outcome"] == "skipped" and again["skip_code"] == "folded"
+    step = next(s for s in again["steps"] if s.get("gate") == "fold-repeats")
+    assert step["result"] == "folded" and step["into_event_id"] == first["event_id"] and step["seconds_ago"] == 900
+    recent = await store.recent_events(1)
+    assert recent[0]["skip_code"] == "folded", "the ledger can find every folded repeat by name"
+    assert len(await store.due_deliveries(now=5000.0)) == 1, "one card, not two"
+
+
+async def test_the_window_is_anchored_on_what_was_delivered_not_on_what_arrived(store):
+    """A folded repeat must not extend the window: a condition firing every
+    fifteen minutes surfaces once an hour, not never."""
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    await handle_hook(store, cfg, source, _loud("Log error spike"), now=1000.0)
+    for minutes in (15, 30, 45):
+        out = await handle_hook(store, cfg, source, _loud("Log error spike"), now=1000.0 + minutes * 60)
+        assert out["skip_code"] == "folded"
+    surfaced = await handle_hook(store, cfg, source, _loud("Log error spike"), now=1000.0 + 3601)
+    assert surfaced["outcome"] == "routed", "the hour is measured from the card that went, not from the last repeat"
+    assert len(await store.due_deliveries(now=9000.0)) == 2
+
+
+async def test_a_recovery_and_a_different_condition_are_never_folded(store):
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    await handle_hook(store, cfg, source, _loud("Log error spike"), now=1000.0)
+    other = await handle_hook(store, cfg, source, _loud("Disk /data at 92%"), now=1001.0)
+    assert other["outcome"] == "routed", "another condition is another card"
+    resolved = await handle_hook(store, cfg, source, _loud("Log error spike", recovery=True), now=1002.0)
+    assert resolved["outcome"] == "routed", "a resolved card nobody received is a firing nobody can stop worrying about"
+    step = next(s for s in resolved["steps"] if s.get("gate") == "fold-repeats")
+    assert "never folded" in step["why"]
+
+
+async def test_the_fold_keys_on_the_field_the_door_extracts_when_told_to(store):
+    """Two titles, one rule: folded together when `key: rule`, apart by default."""
+    by_rule = _fold_cfg(window=3600, key="rule")
+    source = by_rule.sources["judge-notify"]
+    await handle_hook(store, by_rule, source, _loud("Log error spike on api-1", rule="log-error-spike"), now=1000.0)
+    out = await handle_hook(
+        store, by_rule, source, _loud("Log error spike on api-2", rule="log-error-spike"), now=1100.0
+    )
+    assert out["skip_code"] == "folded"
+    by_title = _fold_cfg(window=3600)
+    out = await handle_hook(
+        store, by_title, source, _loud("Log error spike on api-3", rule="log-error-spike"), now=1200.0
+    )
+    assert out["outcome"] == "routed", "by title these are three conditions"
+
+
+async def test_the_fold_leaves_every_other_door_and_every_quiet_verdict_alone(store):
+    cfg = _fold_cfg(window=3600)
+    twice = {"meta": {"alert_name": "Log error spike", "wake_someone": "no"}, "analysis": {"summary": "s"}}
+    for now in (1000.0, 1001.0):
+        out = await handle_hook(store, cfg, cfg.sources["judge-notify"], twice, now=now)
+        assert out["outcome"] == "routed", "wake=no is the wake filter's business, not this stage's"
+        assert next(s for s in out["steps"] if s.get("gate") == "fold-repeats")["result"] == "not_applied"
+    raw = {"title": "db down", "message": "x"}
+    for now in (2000.0, 2001.0):
+        assert (await handle_hook(store, cfg, cfg.sources["grafana"], raw, now=now))["outcome"] == "routed"

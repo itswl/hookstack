@@ -1,13 +1,15 @@
 ---
 title: Reuse saves money, not attention — pick an owner for noise before closing it
-status: proposed
+status: archived
 date: 2026-08-12
 scope: stack
 ---
 
 ## Decision
 
-Leave it open, deliberately, and keep both closures on record. The paired posture
+**Closed 2026-09-28 by [[one-card-per-condition-per-hour-on-the-return-door]]: the evidence this note waited for arrived** — the person the cards were for stopped reading them, and 54% of five weeks' wake=yes cards were repeats inside an hour of a card already sent. Closure 2 below is the one built, with the objection to it answered: the pipe records every folded repeat by name with the card it folded into, so the ledger still describes what a human saw.
+
+As decided then: leave it open, deliberately, and keep both closures on record. The paired posture
 turns the pipe's deduplication **off** on the grounds that the brain owns noise
 accounting; the brain currently accounts only for spend. A storm of N restatements
 therefore costs one verdict and still sends N identical cards.

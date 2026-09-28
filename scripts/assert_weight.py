@@ -178,6 +178,19 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # cause counted as one interruption — which no per-event component could see,
     # and it is a projection of what the ledger already holds, asking nothing new
     # of any node beyond the burst the judge already computed.
+    # 5700 -> 5800 on 2026-09-28, for the fold stage. Split: about +70 source,
+    # +40 code, so the doctrine question applies, and this is the one raise
+    # where it is genuinely close: a stage that stops a card the brain said
+    # deserved a person is judgment's neighbour. The argument that it is a
+    # pipe property: it reads no content — only that the same condition, by
+    # the door's own extracted key, was delivered inside the window — and it
+    # records every repeat by name with the card it folded into, which is the
+    # objection the 2026-08-12 note raised against a suppression the pipe
+    # could not account for. Pinned to a return door; on a front door it is
+    # dedup, and dedup's doctrine already says where that belongs. The number
+    # behind it: 731 wake=yes cards on the retired production deployment, 54%
+    # of them repeats inside an hour of a card already sent, and the person
+    # they were for stopped reading in the first week.
     # 5400 -> 5500 on 2026-09-07, for the accountability record (/audit). Split:
     # +~70 source, +~55 code, so the doctrine question applies, and this is the
     # pipe's own thesis made into a document: "every message accounted for,
@@ -237,7 +250,7 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # make the ceiling an argument against good structure. What the measure is
     # for is "one person can read this service end to end", and that is a
     # property of the service.
-    "hookrelay": (5700, Path("hookrelay/README.md")),
+    "hookrelay": (5800, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

@@ -213,8 +213,27 @@ pipeline:
     sample_pct: 0                      # 5 = deterministic 1-in-20 PASS instead of drop
     sample_by: title                   #   the STABLE key to sample on
     sample_banner: "audit — not paged"  #   prepended to the card so a reader knows
+  - type: fold                         # one card per condition per window, on a RETURN door
+    name: fold-repeats
+    when: {source: judge-notify, wake: "yes"}
+    window_seconds: 3600
+    key: title                         # or a field the door extracts (the judge's `rule`)
+    skip_code: folded
   - routes
 ```
+
+**`fold` is pacing on a return door, not judgment.** The brain said this
+verdict deserves a person; the stage decides only that the same condition does
+not deserve a person again inside the window. The repeat is skipped by name
+(`folded`) with the id of the card it folded into on its own trace, so the
+ledger still describes what a human saw. A recovery is never folded, and the
+window is anchored on the card that was **delivered**, not on the last repeat,
+so a condition firing every fifteen minutes surfaces once an hour rather than
+never. Measured on the retired production deployment's judge ledger before this
+existed: 731 wake=yes cards in five weeks, one card per rule per hour would have
+folded 54% of them, the loudest rule alone was 65% of every interruption. Pin it
+with `when.source` to a return door; on a front door it is dedup by another
+name and dedup's doctrine applies.
 
 `when` conditions (same everywhere — routes, filter, set):
 
