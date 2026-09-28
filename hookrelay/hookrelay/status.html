@@ -541,7 +541,10 @@
     });
     return best;
   }
-  var PRESS_WORDS = { useful: "ruled useful", useless: "ruled useless", followup: "asked why", remember: "remembered", approve: "approved", silence: "silenced" };
+  var PRESS_WORDS = { useful: "ruled useful", useless: "ruled useless", followup: "asked why", follow_up: "replied", remember: "remembered", approve: "approved", silence: "silenced", replied: "replied" };
+  // A platform's opaque user id is an identity the pipe keeps, not a name a
+  // reader can use; on the board it reads as "somebody" and stays on the row.
+  function who(actor) { return /^(ou_|on_|oc_|om_)[0-9a-f]{12,}$/i.test(String(actor || "")) ? "somebody" : String(actor || "somebody"); }
   function recoveryFor(originAt, row) {
     var best = null;
     Object.keys(rowsById).forEach(function (id) {
@@ -612,7 +615,7 @@
       line = "Approved" + (approver ? " by " + esc(approver) : "") + " · nothing has answered yet";
     } else if (presses.length) {
       state = { cls: "", text: PRESS_WORDS[lastPressKind] || lastPressKind };
-      line = "<b>" + esc(lastPress.actor || presses[presses.length - 1].sender || "somebody") + "</b> " + esc(PRESS_WORDS[lastPressKind] || lastPressKind) + " " + esc(rel(t0, presses[presses.length - 1].at)) +
+      line = "<b>" + esc(who(lastPress.actor || presses[presses.length - 1].sender)) + "</b> " + esc(PRESS_WORDS[lastPressKind] || lastPressKind) + " " + esc(rel(t0, presses[presses.length - 1].at)) +
         (runs.length ? " · " + esc(plural(runs.length, "answer", "answers")) + (cost ? " for " + esc(money(cost)) : "") : "");
     } else if (hops.length === 1 && age < 7200 && !QUIET_KINDS[kind]) {
       state = { cls: "info", text: "in flight" };
@@ -851,7 +854,7 @@
     } else step("investigated", "", null, '<span class="dim">nobody investigated' + (origin.outcome === "routed" ? " — or nothing has come back yet" : "") + "</span>");
     if (presses.length) {
       step("person", "done", presses[presses.length - 1].pressed_at,
-        presses.map(function (p) { return "<b>" + esc(p.actor || "somebody") + "</b> pressed <b>" + esc(p.kind) + "</b>"; }).join(" · "),
+        presses.map(function (p) { return "<b>" + esc(who(p.actor)) + "</b> pressed <b>" + esc(p.kind) + "</b>"; }).join(" · "),
         presses.map(function (p) { return esc(p.kind) + " · " + esc(p.outcome || "") + ' <span class="swhen">' + esc(rel(t0, p.pressed_at)) + "</span>"; }).join("<br>"));
     } else if (asked.length) step("person", "warn", null, "<b>nobody has answered yet</b> — the card asked: " + esc(asked.join(" · ")));
     else step("person", "", null, '<span class="dim">nothing to press</span>');
@@ -865,7 +868,7 @@
       var fx = fixes[fixes.length - 1], fxf = fx.fields || {}, sess = fxf.session || fxf.session_key || "";
       step("fix", heldTitle(fx.title) ? "ok" : "bad", fx.received_at, "<b>" + (heldTitle(fx.title) ? "held" : "did not hold") + "</b> · " + esc(String(fx.body || "").slice(0, 400)),
         "<b>" + esc(fx.source) + "</b>" + (sess ? " · " + esc(sess) : "") + consoleLink(fx.source, sess, "open the row") + ' <span class="swhen">' + esc(rel(t0, fx.received_at)) + "</span>");
-    } else if (approved.length) step("fix", "warn", null, "<b>approved</b> by " + esc(approved[0].actor || "somebody") + " — the procedure ran, and the condition has not answered yet");
+    } else if (approved.length) step("fix", "warn", null, "<b>approved</b> by " + esc(who(approved[0].actor)) + " — the procedure ran, and the condition has not answered yet");
     else step("fix", "", null, '<span class="dim">no procedure was approved</span>');
 
     return '<div class="stepper">' + steps.map(function (s) {
