@@ -251,7 +251,22 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # make the ceiling an argument against good structure. What the measure is
     # for is "one person can read this service end to end", and that is a
     # property of the service.
-    "hookrelay": (5800, Path("hookrelay/README.md")),
+    # 5800 -> 5900 on 2026-09-28, for one alert's journey from any handle it
+    # left behind. Split, under the 2026-09-05 rule: +96 source, **+58 code**,
+    # so the doctrine question applies. The answer: `/trace` already assembled
+    # a chain; what was added is (1) resolving a HANDLE to an event — the
+    # `hr-` correlation, a session key or work id a return door extracted into
+    # a field, the platform id of a card — every one of which the pipe itself
+    # minted or copied, matched as identifiers and never read; (2) "what the
+    # condition did afterwards", a recovery or a re-fire of the same source
+    # and title, which is the same key the fold stage already uses; and (3)
+    # the ledger's copy of a card losing the live token that pressed its
+    # button, a leak, not a feature. All three are accounting — receive,
+    # route, deliver, ACCOUNT — and none is a judgement about content. The
+    # page that reads it (status.html, not in this number) calls nothing but
+    # this service; what a node did inside is a link to that node's console,
+    # which is where the 2026-09-08 note drew the line and where it stays.
+    "hookrelay": (5900, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

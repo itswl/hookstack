@@ -301,9 +301,16 @@ gets its reading gathered under the original alert. A brain that cannot quote
 it still lands in the ledger; it just is not grouped. Contract, not
 requirement.
 
-`GET /trace/{event_id}` assembles the group from either end (ask about a
+`GET /trace/{ref}` assembles the group from either end (ask about a
 return, get the same view), with each brain's **latency** — the number that
-answers "what does the slow one buy us":
+answers "what does the slow one buy us". `ref` may be any handle the journey
+left behind: the event id, the `hr-<id>` above, a session key or work id a
+return door extracted into `fields.session` / `fields.session_key` /
+`fields.work_id`, or the platform id of a card the pipe sent — the ledger
+resolves it, so a person holding a session key from a console or a card from
+a chat lands on the same page. The answer also carries `recoveries` and
+`refires`: later events of the same source and title within a day, which is
+what a verdict on a fix is measured against.
 
 ```json
 {"origin": {"id": 86, "title": "Single top-up over 500", "deliveries": [...]},

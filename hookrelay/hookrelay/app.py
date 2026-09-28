@@ -858,19 +858,24 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 )
         return {"window_hours": window, "checked": len(rows), **counts, "cards": unseen_rows}
 
-    @app.get("/trace/{event_id}", dependencies=[Depends(_read_guard)])
+    @app.get("/trace/{ref}", dependencies=[Depends(_read_guard)])
     async def round_trip(
-        event_id: int,
+        ref: str,
     ) -> dict[str, Any]:
-        """One alert's whole journey: the original, where it fanned out to, and
-        what each processing system sent back.
+        """One alert's whole journey, from any handle it left behind: the
+        original, where it fanned out to, what each processing system sent
+        back, what a person pressed, and what the condition did afterwards.
 
-        The comparison view. Every brain received the SAME payload, so the
-        differences in what came back are differences in their judgement — not
-        in their input. Works from either end: ask about a return and you get
-        the group assembled around its origin.
+        `ref` is an event id, the `hr-<id>` the pipe stamps on egress, a session
+        key or work id a return door extracted, or the platform id of a card the
+        pipe sent — each one minted or copied by the pipe itself, so the lookup
+        reads identifiers and never content. Works from either end: ask about a
+        return and you get the group assembled around its origin. Also the
+        comparison view: every brain received the SAME payload, so differences
+        in what came back are differences in judgement, not in input.
         """
-        trip = await app.state.store.round_trip(event_id)
+        event_id = await app.state.store.resolve_ref(ref)
+        trip = await app.state.store.round_trip(event_id) if event_id is not None else None
         if trip is None:
             raise HTTPException(status_code=404, detail="no such event")
         return trip

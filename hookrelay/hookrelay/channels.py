@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import time
 from typing import Any
 
@@ -80,13 +81,22 @@ def _prebuilt(channel: Channel, message: dict[str, Any]) -> Any | None:
 # The alert content is what answers a receiver's dispute; the signature is
 # derived, reproducible, and nobody's evidence.
 _SIGNING_KEYS = ("sign",)
+# And the buttons. A minted action token is `<base64url claims>.<hex hmac>`
+# (actions.mint), single-use and live for a day — and a ledger row that kept
+# one, served by /trace under the same read guard, let anyone who could reach
+# the board press "approve" on somebody else's behalf. Matched by SHAPE rather
+# than by key, because the same token sits under `hookrelay_action` in a
+# bridge envelope and inside a `?t=` link in a dialect that renders text. The
+# label beside it stays: "what was asked" is evidence, the key that answers
+# it is not.
+_ACTION_TOKEN = re.compile(r"[A-Za-z0-9_-]{32,}\.[0-9a-f]{64}")
 
 
 def redact_for_ledger(body: bytes | None) -> str | None:
     """The bytes that left the socket, minus anything that authenticates them."""
     if body is None:
         return None
-    text = body.decode("utf-8", "replace")
+    text = _ACTION_TOKEN.sub("[redacted]", body.decode("utf-8", "replace"))
     try:
         parsed = json.loads(text)
     except ValueError:

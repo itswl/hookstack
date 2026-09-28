@@ -75,8 +75,12 @@ sources:
       session: "{meta.session_key}"
       probe_status: "{meta.status}"
       cost_usd: "{meta.cost_usd}"
-      # hookprobe never sees the pipe's correlation id; it echoes the event id
-      # it was handed, which is what puts the report in the alert's chain.
+      # The event id the investigator was handed, which is what puts the
+      # report in the alert's chain (the pipe resolves the bare id and its own
+      # hr- spelling alike). The report also echoes `meta.correlation_id`, the
+      # pipe's hr- handle from the delivery header — that one the pipe reads
+      # when it cuts the report's buttons, so a press lands in the alert's
+      # chain; a door written for an older investigator keeps working.
       correlation_id: "{meta.event_id}"
 
 channels:

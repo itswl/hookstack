@@ -234,9 +234,64 @@ def test_an_unknown_kind_is_refused_before_anything_is_claimed(tmp_path: Path) -
         assert not (tmp_path / actions.DIRNAME).exists(), "a kind we do not speak claims nothing"
 
 
+def test_a_press_on_the_report_card_finds_the_run_by_the_pipes_correlation(tmp_path: Path) -> None:
+    """A button cut from the REPORT card carries the report's own event id, not
+    the alert's — so the id the door keyed the session on never comes home on
+    that press. What does is the pipe's `hr-<alert id>`: kept at intake from
+    the delivery header, echoed on the report, and read here. Before that,
+    every follow-up pressed on an investigation card answered "no run"."""
+    engine = FakeEngine(result=EngineResult(text=REPORT, message_count=2, cost_usd=0.5, session_id="sdk-1"))
+    client = _client(tmp_path, engine)
+    with client:
+        body = json.dumps(EVENT).encode()
+        headers = {"Content-Type": "application/json", "X-Hook-Correlation-Id": "hr-5", **sign_timestamped("", body)}
+        assert client.post("/hooks/event", content=body, headers=headers).json()["status"] == "accepted"
+        run = _drain(client, "probe:inbound:5")
+        assert run["meta"]["correlation_id"] == "hr-5", "the pipe's handle is kept apart from the work id"
+        assert run["meta"]["work_id"] == "hr-5", "and still stands in for the work id when nothing stated one"
+
+        # The press as the pipe sends it for a report card: event 77 is the
+        # report's own row in the pipe's ledger, which this node has never seen.
+        response = _press(client, "followup", params={"prompt": "Which pod?"}, correlation_id="hr-5", event_id=77)
+        assert response.status_code == 202, response.text
+        assert response.json()["status"] == "investigating"
+        assert response.json()["sessionKey"] == "probe:inbound:5"
+        _drain(client, "probe:inbound:5")
+    assert engine.calls == 2 and "Which pod?" in engine.messages[1]
+
+
+def test_the_returned_report_echoes_the_alerts_correlation(tmp_path: Path) -> None:
+    """The pipe cuts the report card's buttons against `meta.correlation_id`
+    when the report carries one, so the press lands in the alert's chain and a
+    verdict ruling names a judgement the judge actually has."""
+
+    async def scenario() -> dict[str, Any]:
+        settings = make_settings(tmp_path, return_url="http://pipe.invalid/probe-notify")
+        store = RunStore(tmp_path / "results")
+        run = Run(session_key="probe:inbound:5", run_id="r1", status=COMPLETED, text="fine", origin="relay")
+        run.meta = {"title": "t", "source": "inbound", "event_id": 5, "correlation_id": "hr-5"}
+        recorder = _Recorder(settings, store)
+        await recorder.deliver(run, (0.0,))
+        return json.loads(recorder.bodies[-1])
+
+    posted = asyncio.run(scenario())
+    assert posted["meta"]["correlation_id"] == "hr-5"
+    assert posted["meta"]["event_id"] == 5, "the bare id stays: a door written for an older report still keys on it"
+
+    async def unrouted() -> dict[str, Any]:
+        settings = make_settings(tmp_path, return_url="http://pipe.invalid/probe-notify")
+        run = Run(session_key="web:2026", run_id="r2", status=COMPLETED, text="fine")
+        run.meta = {"title": "t", "source": "console"}
+        recorder = _Recorder(settings, RunStore(tmp_path / "results"))
+        await recorder.deliver(run, (0.0,))
+        return json.loads(recorder.bodies[-1])
+
+    assert asyncio.run(unrouted())["meta"]["correlation_id"] == "", "a run nothing routed here quotes nothing"
+
+
 def test_a_followup_resumes_the_session_the_card_came_from(tmp_path: Path) -> None:
-    """The card carries the alert's event id, which is the one identifier both
-    sides agree on — hookprobe never saw the pipe's correlation id."""
+    """The card from the VERDICT carries the alert's event id, which both sides
+    agree on; the report card's press is the test above."""
     client, engine = _investigated(tmp_path)
     with client:
         response = _press(client, "followup", params={"prompt": "Which pod exhausted the pool?"})

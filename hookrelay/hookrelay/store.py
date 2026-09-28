@@ -801,9 +801,55 @@ class Store:
         cursor = await self.read.execute("SELECT * FROM silences WHERE until_ts > ? ORDER BY id DESC", (now,))
         return [dict(row) for row in await cursor.fetchall()]
 
+    async def resolve_ref(self, ref: str) -> int | None:
+        """The event a person means, from any handle the journey left behind.
+
+        Every handle here is one the pipe minted or copied, so each is
+        answerable from its own ledger without reading a byte of content: an
+        event id; the `hr-<id>` stamped on egress; a session key or a work id
+        a return door extracted into `fields.session` / `fields.session_key` /
+        `fields.work_id`; the platform id of a card the pipe sent, or the root
+        of a topic a person opened (the same two handles thread_context reads);
+        and, last, the event id the investigator embeds in its own
+        `probe:<door>:<id>` key — so a run whose report never came home still
+        finds its alert. Newest first where a handle could name several rows,
+        because the freshest is the one a person is looking at.
+
+        None means "nothing in this ledger answers to that", which the caller
+        turns into a 404 rather than into the newest event.
+        """
+        text = str(ref or "").strip()[:200]
+        if not text:
+            return None
+        if text.isdigit():
+            return int(text)
+        if text.startswith("hr-") and text[3:].isdigit():
+            return int(text[3:])
+        cursor = await self.read.execute(
+            "SELECT id FROM events WHERE json_extract(fields_json, '$.session') = ?"
+            " OR json_extract(fields_json, '$.session_key') = ? OR json_extract(fields_json, '$.work_id') = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (text, text, text),
+        )
+        row = await cursor.fetchone()
+        if row is not None:
+            return int(row["id"])
+        cursor = await self.read.execute(
+            "SELECT event_id AS id FROM deliveries WHERE platform_message_id = ?"
+            " UNION ALL SELECT id FROM events WHERE json_extract(fields_json, '$.thread_root') = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (text, text),
+        )
+        row = await cursor.fetchone()
+        if row is not None:
+            return int(row["id"])
+        tail = text.rsplit(":", 1)[-1]
+        return int(tail) if text.count(":") >= 2 and tail.isdigit() else None
+
     async def round_trip(self, event_id: int) -> dict[str, Any] | None:
         """Assemble one alert's whole journey: the original, where it fanned
-        out to, and what each brain sent back.
+        out to, what each brain sent back, what a person pressed, and what the
+        condition did afterwards.
 
         This is the view that makes several processing systems COMPARABLE — the
         same payload went to each of them, so the differences in what came back
@@ -867,7 +913,42 @@ class Store:
         human = [dict(row) for row in await cursor.fetchall()]
         for act in human:
             act["latency_seconds"] = round(float(act["pressed_at"]) - float(origin["received_at"]), 3)
-        return {"origin": origin, "returns": [r for r in returns if r is not None], "human_actions": human}
+        # And what the condition did AFTERWARDS, which is what every verdict on
+        # a fix is measured against: a recovery the source stated (the
+        # investigator's "held", the judge's pair) and a re-fire of the same
+        # source and title (its "did not hold"). Keyed the way the fold stage
+        # keys a repeat, bounded to a day and a dozen rows, because a tick that
+        # repeats its title every twenty minutes would otherwise list its whole
+        # future here. Identifiers and outcomes only — the pipe still reads no
+        # content to say "it fired again".
+        recoveries: list[dict[str, Any]] = []
+        refires: list[dict[str, Any]] = []
+        since = float(origin["received_at"])
+        cursor = await self.read.execute(
+            "SELECT e.id, e.received_at, e.level, e.is_recovery, d.outcome, d.skip_code, d.channels_json"
+            " FROM events e LEFT JOIN decisions d ON d.event_id = e.id"
+            " WHERE e.source = ? AND e.title = ? AND e.id != ? AND e.received_at > ? AND e.received_at <= ?"
+            " ORDER BY e.received_at LIMIT 12",
+            (origin["source"], origin["title"], anchor_id, since, since + 86400),
+        )
+        for row in await cursor.fetchall():
+            later = {
+                "id": int(row["id"]),
+                "received_at": row["received_at"],
+                "level": row["level"],
+                "outcome": row["outcome"],
+                "skip_code": row["skip_code"],
+                "channels": json.loads(row["channels_json"] or "[]"),
+                "latency_seconds": round(float(row["received_at"]) - since, 3),
+            }
+            (recoveries if row["is_recovery"] else refires).append(later)
+        return {
+            "origin": origin,
+            "returns": [r for r in returns if r is not None],
+            "human_actions": human,
+            "recoveries": recoveries,
+            "refires": refires,
+        }
 
     async def audit_record(self, event_id: int) -> dict[str, Any] | None:
         """One operation as a record somebody can be held to: every hop, every
@@ -956,7 +1037,7 @@ class Store:
     async def _event_row(self, event_id: int) -> dict[str, Any] | None:
         cursor = await self.read.execute(
             "SELECT e.id, e.source, e.received_at, e.title, e.body, e.level, e.fields_json, e.correlation_id,"
-            " e.reference,"
+            " e.reference, e.is_recovery,"
             "       e.payload_json, d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id WHERE e.id = ?",
             (event_id,),
@@ -972,7 +1053,7 @@ class Store:
         event["payload"] = json.loads(event.pop("payload_json") or "null")
         cursor = await self.read.execute(
             # …and per delivery, the exact body that left the socket.
-            "SELECT id, channel, status, attempts, last_error, sent_at, sent_body"
+            "SELECT id, channel, status, attempts, last_error, sent_at, sent_body, platform_message_id"
             " FROM deliveries WHERE event_id = ? ORDER BY id",
             (event_id,),
         )

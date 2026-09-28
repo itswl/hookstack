@@ -98,6 +98,12 @@ class ReturnDelivery:
                     # carry it and a person can follow one piece of work across
                     # the two nodes that did it (hookprobe/work.py).
                     "work_id": str(run.meta.get("work_id") or run.session_key),
+                    # The pipe's handle for the ALERT this run investigated
+                    # (X-Hook-Correlation-Id on the delivery that opened it),
+                    # echoed so the pipe cuts this report's buttons against the
+                    # alert's chain rather than the report's own event. "" for
+                    # a run nothing routed here.
+                    "correlation_id": str(run.meta.get("correlation_id") or ""),
                     # The chat thread this report belongs in, when a person's
                     # reply started the turn; "" for a first report. The pipe
                     # carries it to a channel that can reply in-thread.

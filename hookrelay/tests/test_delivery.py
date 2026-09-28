@@ -167,6 +167,33 @@ async def test_the_ledger_keeps_the_alert_but_not_what_signs_it(cfg):
     assert channels.redact_for_ledger(None) is None
 
 
+async def test_the_ledger_keeps_the_button_label_but_not_the_token_that_presses_it():
+    """A minted action token is single-use and live for a day, and /trace serves
+    the ledger's copy of every card under a read guard that is open until a
+    token is configured. Kept, it let anyone who could reach the board press
+    "approve" on somebody else's behalf. The LABEL stays — what a card asked is
+    evidence; the key that answers it is not — and so does everything else."""
+    from hookrelay import actions, channels
+
+    token = actions.mint("s3", kind="approve", event_id=7, correlation_id="hr-7", params={"ref": "abc"}, now=1000.0)
+    envelope = {
+        "card": {"title": "db down", "actions": [{"text": "Approve", "value": {"hookrelay_action": token}}]},
+        # The dialect that renders a link instead: the same token, URL-encoded
+        # the way the bridge encodes it (the token's own alphabet needs none).
+        "text": f"[Approve](https://pipe.example/card-action?t={token})",
+    }
+    wire = json.dumps(envelope, ensure_ascii=False).encode()
+    assert token in wire.decode()
+
+    stored = channels.redact_for_ledger(wire)
+    assert stored is not None and token not in stored
+    parsed = json.loads(stored)
+    assert parsed["card"]["title"] == "db down"
+    assert parsed["card"]["actions"][0]["text"] == "Approve"
+    assert parsed["card"]["actions"][0]["value"]["hookrelay_action"] == "[redacted]"
+    assert parsed["text"] == "[Approve](https://pipe.example/card-action?t=[redacted])"
+
+
 async def test_rate_limit_defers_without_burning_attempts(store, cfg, settings, monkeypatch):
     # Two events → two mirror deliveries; mirror allows 1/minute.
     await _route_one(store, cfg, now=1000.0)
