@@ -10,7 +10,9 @@
 #
 # Streams (/live, /v1/live, …/stream) are NDJSON held open; flush_interval -1
 # hands each line on as it arrives instead of buffering the response.
-:80 {
+# :8000, not :80 — the container drops every capability, and binding a port
+# under 1024 needs one it no longer has; the compose maps 127.0.0.1:8000 to it.
+:8000 {
 	encode zstd gzip
 
 	handle_path /plan/* {
