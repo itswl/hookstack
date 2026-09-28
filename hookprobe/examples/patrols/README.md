@@ -303,3 +303,24 @@ Worth knowing before you read a report and believe more than it says:
   runs an argv, never a shell), so the token would have to be a literal — in a
   proposal file, in the case file, on the card. The brief says propose in
   prose; a human runs it.
+
+## The morning card
+
+Not a patrol — nothing is investigated — but the same shape: a host clock posts
+one signal through the pipe's `watch` door. `scripts/needs_you.py` reads the
+pipe's two feeds (`/timeline`, `/status`) and computes the board's four figures
+the way the board does — cards that asked and nobody pressed, alerts in flight,
+dead letters, conditions that ended or fixes that held in the last day — and
+`scripts/needs_you.sh` posts them as a `low`, `kind: report` signal, which the
+work deployment's `just-tell-me` route turns into one card in the watch group
+and funds no run. So "what needs me" reaches the phone every working morning
+without anybody opening a page:
+
+```
+35 9 * * 1-5 cd $HOME/Documents/hookstack && scripts/needs_you.sh >> $HOME/Library/Logs/hookstack-needs-you.log 2>&1
+```
+
+The wrapper reads the pipe's read token and the door secret from the
+deployment `.env`; nothing is typed into the crontab line. A card that says
+*Nothing waiting on you* is still sent: it is also the proof the clock, the
+pipe and the chat were all up this morning.
