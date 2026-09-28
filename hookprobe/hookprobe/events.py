@@ -512,7 +512,7 @@ def _approve(service: RunService, params: dict[str, Any], *, actor: str, correla
         raise HTTPException(status_code=400, detail="approve needs params.ref naming the proposal")
     note = f"card press by {actor or 'an unnamed operator'} ({correlation_id or 'no correlation id'})"
     try:
-        row = service.approve_remediation(ref, note=note)
+        row = service.approve_remediation(ref, note=note, actor=actor)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="no such proposal") from exc
     except remediation.Cooling as exc:
@@ -752,7 +752,9 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
             prior = service.same_alert(source, title, settings.coalesce_window_seconds)
             if prior is not None and not prior.finished:
                 # Already being investigated right now; the re-fire adds no
-                # question the running session is not about to answer.
+                # question the running session is not about to answer. It is
+                # still evidence about any procedure this work already ran.
+                service.record_refire(prior, event_id=event_id)
                 return {
                     "status": "coalesced",
                     "state": "investigating",
@@ -789,6 +791,10 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
                 else:
                     run.meta["refires"] = int(run.meta.get("refires") or 0) + 1
                     run.meta["level"] = level
+                    # A procedure that ran and the condition fired again: the
+                    # procedure did not hold, and the row says so before the
+                    # follow-up turn says anything.
+                    service.record_refire(run, event_id=event_id)
                     return {"status": "coalesced", "sessionKey": run.session_key, "runId": run.run_id}
 
         # The budget breaker guards this door only — the one path that spends

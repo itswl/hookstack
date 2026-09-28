@@ -640,3 +640,52 @@ def test_a_press_that_arrives_after_the_condition_ended_runs_nothing(tmp_path: P
         superseded = [r for r in listed if r["session_key"] == f"probe:superseded:{proposal_id}"]
         assert superseded, "the refusal reached no chat and no board"
         assert superseded[0]["cost_usd"] == 0.0
+
+
+def test_an_approve_press_puts_its_actor_on_the_row(tmp_path: Path) -> None:
+    """Who approved what, as a field. The card door knew the presser all along
+    and wrote them into a free-text note; the row now carries them where a
+    reader — the board, the audit, the smoke — can ask."""
+    allow = tmp_path / "allow.txt"
+    allow.write_text("kubectl rollout restart deploy/gateway-2 -n prod\n", encoding="utf-8")
+    client, _engine = _investigated(tmp_path, remediation_allowlist=allow)
+    try:
+        detail = client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()
+        pid = detail["meta"]["remediation_proposal"]
+        answer = _press(client, "approve", params={"ref": pid}, actor="ou_ops_lead").json()
+        assert answer["status"] == "approved", answer
+        for _ in range(400):
+            row = remediation.load(tmp_path, pid)
+            if row and row["status"] in (remediation.EXECUTED, remediation.FAILED):
+                break
+            time.sleep(0.01)
+        assert row["approved_by"] == "ou_ops_lead"
+        assert "ou_ops_lead" in row["approved_note"], "the note still reads as it did"
+        listed = client.get("/v1/remediations", headers=AUTH).json()["proposals"]
+        mine = next(r for r in listed if r["id"] == pid)
+        assert mine["approved_by"] == "ou_ops_lead"
+        # The recorded command is a kubectl this test host does not have, so
+        # the procedure FAILS here — and a failed procedure has no outcome to
+        # hold: the field is present and empty, never a claim.
+        assert "outcome" in mine and (mine["outcome"] == "" or mine["status"] == remediation.EXECUTED)
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_a_console_approval_says_console_unless_told_a_name(tmp_path: Path) -> None:
+    allow = tmp_path / "allow.txt"
+    allow.write_text("kubectl rollout restart deploy/gateway-2 -n prod\n", encoding="utf-8")
+    client, _engine = _investigated(tmp_path, remediation_allowlist=allow)
+    try:
+        pid = client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()["meta"]["remediation_proposal"]
+        assert (
+            client.post(f"/v1/remediations/{pid}/approve", json={"by": "the on-call"}, headers=AUTH).status_code == 200
+        )
+        for _ in range(400):
+            row = remediation.load(tmp_path, pid)
+            if row and row["status"] in (remediation.EXECUTED, remediation.FAILED):
+                break
+            time.sleep(0.01)
+        assert row["approved_by"] == "the on-call"
+    finally:
+        client.__exit__(None, None, None)

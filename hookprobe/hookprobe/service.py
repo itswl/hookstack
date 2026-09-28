@@ -1207,7 +1207,31 @@ class RunService:
             self._store.annotate(best)
             self._board_changed()
             logger.info("condition recovered session=%s title=%s", best.session_key, title[:80])
+        # And the procedures this work ran: the condition ending is the evidence
+        # an executed procedure was waiting for. Stamped whenever it arrives —
+        # evidence is evidence — and only once, so a retry changes nothing.
+        held = remediation.evidence(
+            self._settings.workdir, best.session_key, held=True, by="recovery", event_id=event_id
+        )
+        if held:
+            self._board_changed()
+            logger.info("remediation held session=%s procedures=%s", best.session_key, ",".join(r["id"] for r in held))
         return best
+
+    def record_refire(self, run: Run, *, event_id: Any = None) -> list[dict[str, Any]]:
+        """The condition fired again. For a procedure that ran inside the
+        verification window this is the evidence it did NOT hold; nothing is
+        run, nothing is retired, the row and the audit simply say so. The
+        re-fire itself is handled by the door (a follow-up turn, or nothing
+        while one is in flight); this only records what it means for the work
+        already done."""
+        rows = remediation.evidence(self._settings.workdir, run.session_key, held=False, by="refire", event_id=event_id)
+        if rows:
+            self._board_changed()
+            logger.info(
+                "remediation did not hold session=%s procedures=%s", run.session_key, ",".join(r["id"] for r in rows)
+            )
+        return rows
 
     def same_alert(self, source: str, title: str, window_seconds: int) -> Run | None:
         """The session already investigating this condition, if one is claimable.
@@ -1558,7 +1582,7 @@ class RunService:
         """
         return suggestions.resolve(self._settings.workdir, suggestion_id, accept=True)
 
-    def approve_remediation(self, proposal_id: str, note: str = "") -> dict[str, Any]:
+    def approve_remediation(self, proposal_id: str, note: str = "", actor: str = "") -> dict[str, Any]:
         """The operator's click, and the only path that runs anything. The gate
         checks and the execution are hookprobe.remediation's; what belongs here
         is the task the sequence runs in, because shutdown has to wait for it.
@@ -1574,6 +1598,7 @@ class RunService:
             allowlist=self._settings.remediation_allowlist,
             high_risk_allowlist=self._settings.remediation_high_risk_allowlist,
             note=note,
+            actor=actor,
             at=self.proposal_cursor(proposal_id),
             cooldown=self._settings.remediation_cooldown_seconds,
         )
@@ -1760,6 +1785,7 @@ class RunService:
             # an operator narrowing it mid-procedure should stop what has not run.
             allowlist=self._settings.remediation_allowlist,
             high_risk_allowlist=self._settings.remediation_high_risk_allowlist,
+            verify_seconds=self._settings.remediation_verify_seconds,
         )
         self._board_changed()
 

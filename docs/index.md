@@ -24,7 +24,7 @@ Seven steps, and each one names the thing that does it — so the positioning ab
 | **the session persists** | one engine session per piece of work: a reply in the chat thread continues it for cents, a re-fire joins it instead of funding a cold start, and a restart resumes it rather than losing what it gathered |
 | **a plan is executed** | the planner writes what it would do; a person hands it to the work runner, the one node not on `readonly` |
 | **a person confirms** | every button is signed before the card leaves; a procedure runs only after an approval, step by step against an allowlist, as an argv and never through a shell — and expires after a day |
-| **the result is verified** | a ruling, or the procedure's own steps exiting 0, or the condition itself ending — the board says which, and counts the work that closed with nobody stepping in |
+| **the result is verified** | a person's ruling; or the procedure's steps exiting 0 and the condition then ending, or not firing again inside the window; or the condition itself ending — exit 0 alone is not a witness, and the board says which one spoke, and counts the work that closed with nobody stepping in |
 | **the audit settles** | one page per event with every hop, digest, decision and human action; a flight recorder of every tool call the agent cannot edit; a timing waterfall per run; a weekly page over all three ledgers |
 
 ## What you get

@@ -449,7 +449,8 @@ def render(r: dict[str, Any]) -> str:
                 f"- **Opened**: {w['opened']} pieces of work · **completed** {w['completed']} ({w['completion_pct']}%) "
                 f"· **ended without an answer** {w['ended_without_answer_pct']}%",
                 f"- **Verified**: {w['verified_pct'] if w['verified_pct'] is not None else '—'}% of completed work — "
-                "a person's ruling, its own procedure exiting 0, or the condition ending",
+                "a person's ruling, its own procedure holding (exit 0 and the condition then ending, or not "
+                "firing again inside the window), or the condition ending",
                 f"- **Closed with nobody stepping in**: {w['closed_unattended']} ({w['closed_unattended_pct']}%) — "
                 "the north star: finished, verified, and it never had to stop and ask",
                 f"- **Time to first useful result**: {_dur(w['first_result_p50_seconds'])} (median)",

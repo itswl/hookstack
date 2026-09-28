@@ -318,6 +318,43 @@ assert item.get("recovered") is True, "the recovery never reached the work item"
 assert item["state"] == "done", f"steps ran and the condition ended, yet the item is {item['state']}"
 print("work item: done, verified by the procedure, condition ended")
 PY
+# Exit 0 was not the witness: the recovery was, and the row says so.
+PROPOSALS="$(pcurl "$PROBE/v1/remediations")" PID="$pid" python3 - <<'PY' || fail "the procedure's outcome is not the recovery's answer"
+import json, os
+row = next(r for r in json.loads(os.environ["PROPOSALS"])["proposals"] if r["id"] == os.environ["PID"])
+assert row.get("outcome") == "held" and row.get("held_by") == "recovery", (row.get("outcome"), row.get("held_by"), row.get("outcome_reason"))
+assert row.get("approved_by") == "stack-smoke", row.get("approved_by")
+print("procedure held: the condition ended after it ran, approved by the actor on the row")
+PY
+
+# ---------------------------------------------------------------------------
+# A person's ruling on a VERDICT, read back from the judge's ledger. On the
+# retired production deployment seven such presses were recorded by the pipe
+# as forwarded and never reached a judgement row; the pipe's "forwarded" is
+# therefore not the check — the row is.
+# ---------------------------------------------------------------------------
+step "a person's ruling on a verdict reaches the judge's ledger"
+found="$(docker compose logs --no-log-prefix sink 2>/dev/null \
+  | { grep -oE '\[Worth waking me\]\((http[^)]*card-action\?t=[^)]+)\)' || true; } | head -1)"
+[ -n "$found" ] || fail "no judge card in the sink carried a ruling button"
+vlink="$(printf '%s' "$found" | sed -E 's/^.*\((http[^)]*)\)$/\1/')"
+vpress="$(curl -sf -X POST "$vlink" -H 'content-type: application/json' -d '{"actor":"stack-smoke"}')" \
+  || fail "the pipe refused the ruling press"
+printf '%s' "$vpress" | grep -q '"kind": *"useful"' || fail "the press was not a ruling: $vpress"
+ruled=""
+for _ in $(seq 1 30); do
+  ruled="$(JUDGE_JSON="$(curl -sf "$JUDGE/status")" python3 - <<'PY'
+import json, os
+rows = json.loads(os.environ["JUDGE_JSON"]).get("recent") or []
+hit = [r for r in rows if r.get("mattered") == "yes" and r.get("mattered_actor") == "stack-smoke"]
+print(hit[0].get("title", "") if hit else "")
+PY
+)"
+  [ -n "$ruled" ] && break
+  sleep 1
+done
+[ -n "$ruled" ] || fail "the judge's ledger holds no ruling by stack-smoke — the press was forwarded and dropped, the shape production lost seven rulings to"
+echo "the judge's ledger holds the ruling, on the right verdict: $ruled"
 
 step "wait for the far end"
 # Wait on the LAST link, not a midpoint. A brain's ledger reaching four only

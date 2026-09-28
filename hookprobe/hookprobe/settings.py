@@ -41,6 +41,14 @@ def _float(name: str, default: float) -> float:
         return default
 
 
+def _verify_default() -> int:
+    """The verification window's default, from the module that owns the rule —
+    imported lazily for the reason `_cooldown_default` gives."""
+    from hookprobe.remediation import VERIFY_SECONDS
+
+    return VERIFY_SECONDS
+
+
 def _cooldown_default() -> int:
     """The remediation cooldown's default, from the module that owns the rule.
 
@@ -242,6 +250,13 @@ class Settings:
     # armed at all. 0 disables it, including the refusal to run two procedures
     # against one target at the same time.
     remediation_cooldown_seconds: int
+
+    # How long an executed procedure waits for the condition to answer before
+    # the board calls it held: a recovery inside the window (or after it)
+    # holds it, a re-fire inside it says it did not hold, and the window
+    # closing quietly holds it weakly and says so. Exit 0 alone verifies
+    # nothing — the contract of 2026-08-31, landed 09-28. 0 turns it off.
+    remediation_verify_seconds: int
 
     # Storm coalescing at the event door: a re-fire of the same alert (same
     # source + title, new event id) within this many seconds continues the
@@ -500,6 +515,7 @@ class Settings:
             blast_radius=_path_env("HOOKPROBE_BLAST_RADIUS"),
             remediation_high_risk_allowlist=_path_env("HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST"),
             remediation_cooldown_seconds=max(0, _int("HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS", _cooldown_default())),
+            remediation_verify_seconds=max(0, _int("HOOKPROBE_REMEDIATION_VERIFY_SECONDS", _verify_default())),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             relay_ui_url=os.environ.get("HOOKPROBE_RELAY_UI_URL", "").strip().rstrip("/"),
