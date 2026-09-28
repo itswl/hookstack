@@ -1,8 +1,16 @@
 # Two deployments, one codebase
 
-This repository runs two deployments that share every line of service code and
+This repository ran two deployments that share every line of service code and
 agree on almost nothing else. They are the clearest answer to what hookstack
 actually is: the graph is config, and two useful graphs look nothing alike.
+
+**Status, 2026-09-23.** The alert deployment (`deploy/shadow.yaml`) was retired
+at the operator's decision. Its host now runs only the alerting platform it sat
+behind, nothing of hookstack is left there, and its data is archived off the
+host. Its configuration stays in this repository as the worked example of the
+alert shape, and everything below about it is a record of how it ran. The work
+deployment (`deploy/work.yaml`) runs on the operator's own machine and is the
+only one running.
 
 | | `deploy/shadow.yaml` | `deploy/work.yaml` |
 |---|---|---|
