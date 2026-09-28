@@ -112,6 +112,20 @@ deployment whose contract is "task AND high buys a plan" has to express the
 `kind` half in its ROUTE TABLE — left as one fan-out, a `note` at `high` quietly
 funds a plan nobody asked for.
 
+**One address.** Since 2026-09-28 each deployment carries a gateway
+(`deploy/gateway/*.Caddyfile`, a plain Caddy proxy on `127.0.0.1:8000`) that
+serves every board under one origin: the pipe's board at the root, each
+brain's console under a prefix with the path stripped — `/plan/`, `/watch/`,
+`/work/` on the work deployment, `/judge/` and `/probe/` on the demo. The
+consoles address their own API relative to where they are mounted, so the same
+single-file page works on its own port and inside the one site; the pipe's
+links to a node's console (`HOOKRELAY_UI_LINKS`) and a run's link back to its
+chain (`HOOKPROBE_RELAY_UI_URL`) are site paths and the gateway's address, so a
+reader never leaves 8000. The proxy holds no token and injects none: every
+board still asks the browser for its own credential (the three investigators
+of the work deployment share one, so it is typed once). The direct ports stay
+published for the scripts and the smoke.
+
 **Posture: read-only on both, plus one `danger-only` node on the work side.**
 Every investigator that faces an event door runs `HOOKPROBE_BASH_GUARD=readonly`
 on both deployments, and since 2026-09-07 each one measures its mounted

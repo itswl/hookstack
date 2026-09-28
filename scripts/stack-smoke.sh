@@ -336,6 +336,24 @@ print("procedure held: the condition ended after it ran, approved by the actor o
 PY
 
 # ---------------------------------------------------------------------------
+# One address for every board. The gateway is a plain proxy: the pipe at the
+# root, the brains under a prefix with the path stripped — and each console
+# addresses its own API relative to where it is mounted, which is the part a
+# page test cannot see. So: the pipe's health at the root, each brain's under
+# its prefix, and the investigator's console page served under /probe/ui.
+# ---------------------------------------------------------------------------
+step "one address serves the pipe and both brains"
+GATEWAY=http://127.0.0.1:8000
+for _ in $(seq 1 30); do curl -sf --max-time 3 "$GATEWAY/healthz" >/dev/null && break; sleep 1; done
+curl -sf --max-time 5 "$GATEWAY/healthz" | grep -q '"ok"' || fail "the gateway does not reach the pipe at the root"
+curl -sf --max-time 5 "$GATEWAY/judge/healthz" | grep -q '"ok"' || fail "the gateway does not reach the judge under /judge/"
+curl -sf --max-time 5 "$GATEWAY/probe/healthz" | grep -q '"ok"' || fail "the gateway does not reach the investigator under /probe/"
+# grep -c, not -q: -q quits at the first match, curl gets EPIPE on a 125 KB page, and pipefail reads that as a failure.
+[ "$(curl -sf --max-time 5 "$GATEWAY/probe/ui" | grep -c 'const BASE = location.pathname')" -ge 1 ] || fail "the investigator's console is not served under its prefix"
+[ "$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "$GATEWAY/probe/v1/agent" -H "Authorization: Bearer $PROBE_TOKEN")" = "200" ] || fail "the investigator's API does not answer under its prefix"
+echo "gateway: pipe at /, judge under /judge/, investigator under /probe/ — one address"
+
+# ---------------------------------------------------------------------------
 # One page for the whole journey. The checks above read three services to
 # follow one alert; the pipe's /trace answers to the investigator's session
 # key — a handle the pipe never minted — and already holds the report, the

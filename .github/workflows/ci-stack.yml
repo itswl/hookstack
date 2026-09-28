@@ -76,6 +76,11 @@ jobs:
         run: python3 scripts/check-docs.py
       - name: the three pages share one design language
         run: python3 scripts/assert_design.py
+      # Behind the gateway each board sits under a prefix; a request that
+      # starts at the origin's root works on the board's own port and breaks
+      # inside the one site, and only a browser would notice.
+      - name: every board addresses its service relative to where it is mounted
+        run: python3 scripts/assert_mount_aware.py
       - name: agent notes keep their shape
         run: python3 scripts/assert_agent_notes.py
       # ESTATE_GUARD_REQUIRED makes a missing list a failure: an unset secret

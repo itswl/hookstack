@@ -147,5 +147,5 @@ def test_the_board_reads_the_journey_from_a_handle():
     handle sent to /trace untouched — the ledger does the resolving."""
     page = Path(__file__).resolve().parents[1].joinpath("hookrelay", "status.html").read_text(encoding="utf-8")
     assert 'data-tab="journey"' in page and 'id="panel-journey"' in page
-    assert "#journey=" in page and 'fetch("/trace/" + encodeURIComponent(ref)' in page
+    assert "#journey=" in page and 'fetch(BASE + "/trace/" + encodeURIComponent(ref)' in page
     assert "setInterval" not in page, "boards are pushed, not polled"

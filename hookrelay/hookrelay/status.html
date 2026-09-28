@@ -144,6 +144,15 @@
   .step .fine b { color: var(--text); font-weight: 500; }
   .step .fine a.btn { margin-left: 4px; }
 
+  .step details.more summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .step details.more summary:hover { color: var(--text); }
+  .report { margin: 6px 0 0; padding: 10px 12px; background: #0a0d13; border: 1px solid var(--border); border-radius: 8px;
+            color: #c9d1dc; font: 12.5px/1.6 var(--ui); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; }
+  .diff { margin: 6px 0 0; padding: 10px 12px; background: #0a0d13; border: 1px solid var(--border); border-radius: 8px;
+          font-family: var(--mono); font-size: 12px; line-height: 1.5; overflow: auto; max-height: 480px; white-space: pre; }
+  .diff .add { color: var(--ok); } .diff .del { color: var(--bad); } .diff .hunk { color: var(--accent); } .diff .meta { color: var(--muted); }
+  .blocked { color: var(--warn); }
+
   /* ── quiet rows: folded, compact ── */
   .fold summary { cursor: pointer; color: var(--muted); font-size: 12.5px; padding: 8px 0; list-style: none; }
   .fold summary::-webkit-details-marker { display: none; }
@@ -404,6 +413,10 @@
   "use strict";
   var TOKEN_KEY = "hookrelay-read-token";
   var ADMIN_KEY = "hookrelay-admin-token";
+  // Where this board is mounted: "" at the root of its own port, or a prefix
+  // behind the gateway that serves the family under one address. Every request
+  // and every link the page builds is relative to it.
+  var BASE = location.pathname.replace(/\/$/, "");
 
   // ── small helpers ──
   function esc(v) {
@@ -759,7 +772,7 @@
         var chain = d.getAttribute("data-chain"), box = document.getElementById("op-" + chain);
         if (!box || box.getAttribute("data-loaded")) return;
         box.setAttribute("data-loaded", "1");
-        readJSON("/trace/" + encodeURIComponent(chain)).then(function (trip) {
+        readJSON(BASE + "/trace/" + encodeURIComponent(chain)).then(function (trip) {
           box.innerHTML = trip ? stepper(trip) + journeyFoot(trip) : '<div class="empty">the journey is unavailable</div>';
         });
       });
@@ -767,7 +780,7 @@
   }
 
   function loadNow() {
-    return Promise.all([readJSON("/status?limit=400"), readJSON("/timeline?limit=100")]).then(function (both) {
+    return Promise.all([readJSON(BASE + "/status?limit=400"), readJSON(BASE + "/timeline?limit=100")]).then(function (both) {
       var st = both[0], tl = both[1];
       if (!st || !tl) return;
       statusData = st; timelineData = tl;
@@ -797,6 +810,56 @@
   });
   document.getElementById("nowSearch").addEventListener("input", function (e) { nowFilter.q = e.target.value.trim(); lastNowSig = ""; renderNow(); });
   document.getElementById("nowSource").addEventListener("change", function (e) { nowFilter.source = e.target.value; lastNowSig = ""; renderNow(); });
+
+  // What a report carries besides its prose, read the way the investigator
+  // lifts them (patches.py, blockers.py, remediation.py): a fenced ```diff is
+  // the change, a fenced ```blocked is a JSON list of what stopped a step, a
+  // fenced ```remediation is the JSON list of steps proposed. The pipe holds
+  // the whole report in the return's payload, so the journey shows them
+  // without asking any node.
+  function reportText(payload) {
+    if (!payload || typeof payload !== "object") return "";
+    var analysis = payload.analysis || {}, report = payload.report || {};
+    return String(analysis.detail || report.text || "");
+  }
+  function fenced(text, label) {
+    var out = [], re = new RegExp("^```" + label + "[^\\n]*\\n([\\s\\S]*?)^```", "gm"), m;
+    while ((m = re.exec(text)) !== null) out.push(m[1]);
+    return out;
+  }
+  function parsedList(blocks) {
+    var items = [];
+    blocks.forEach(function (b) { try { var v = JSON.parse(b); if (Array.isArray(v)) items = items.concat(v); } catch (_e) { /* prose in the fence: not a list */ } });
+    return items;
+  }
+  function diffHtml(text) {
+    return text.split("\n").map(function (ln) {
+      var cls = /^\+\+\+|^---/.test(ln) ? "meta" : ln[0] === "+" ? "add" : ln[0] === "-" ? "del" : /^@@/.test(ln) ? "hunk" : "";
+      return cls ? '<span class="' + cls + '">' + esc(ln) + "</span>" : esc(ln);
+    }).join("\n");
+  }
+  function reportExtras(payload) {
+    var text = reportText(payload);
+    if (!text.trim()) return "";
+    var diffs = fenced(text, "diff"), blocked = parsedList(fenced(text, "blocked")), steps = parsedList(fenced(text, "remediation"));
+    var out = "";
+    if (steps.length) {
+      out += '<div class="fine"><b>proposed:</b> ' + steps.map(function (st) {
+        return esc(st.command || st.action || "?") + (st.risk ? ' <span class="swhen">' + esc(st.risk) + "</span>" : "");
+      }).join(" · ") + "</div>";
+    }
+    if (blocked.length) {
+      out += '<div class="fine blocked"><b>blocked:</b> ' + blocked.map(function (b) {
+        return esc(b.kind || "?") + " · " + esc(b.name || b.command || "") + (b.answers ? " — " + esc(String(b.answers).slice(0, 120)) : "");
+      }).join("<br>") + "</div>";
+    }
+    if (diffs.length) {
+      var joined = diffs.join("\n"), n = joined.split("\n").length;
+      out += '<details class="more"><summary>the change · ' + esc(plural(n, "line", "lines")) + ' of diff</summary><pre class="diff">' + diffHtml(joined) + "</pre></details>";
+    }
+    out += '<details class="more"><summary>the report · ' + esc(text.length) + ' chars</summary><pre class="report">' + esc(text) + "</pre></details>";
+    return out;
+  }
 
   // ── the stepper: one alert's seven stages with everything each said, from /trace ──
   function decision(ev) {
@@ -839,7 +902,7 @@
     if (judged.length) {
       var j = judged[0], jf = j.fields || {};
       var chips = ["wake", "importance", "verdict"].filter(function (k) { return jf[k] != null && jf[k] !== ""; }).map(function (k) { return esc(k) + " " + esc(jf[k]); });
-      step("judged", "done", j.received_at, esc(j.body || j.title || ""), (chips.length ? chips.join(" · ") + "<br>" : "") + deliveryLines(j));
+      step("judged", "done", j.received_at, esc(j.body || j.title || ""), (chips.length ? chips.join(" · ") + "<br>" : "") + deliveryLines(j) + reportExtras(j.payload));
     } else if (shownStages.indexOf("judged") >= 0) step("judged", "", null, '<span class="dim">no verdict came back</span>');
     if (cards.length) {
       var chans = []; cards.forEach(function (c) { if (chans.indexOf(c.d.channel) < 0) chans.push(c.d.channel); });
@@ -850,7 +913,8 @@
     if (runs.length) {
       var first = runs[0], ff = first.fields || {};
       step("investigated", "done", first.received_at, esc(String(first.body || first.title || "").slice(0, 500)),
-        runs.map(function (r) { var f = r.fields || {}, sess = f.session || f.session_key || ""; return "<b>" + esc(r.source) + "</b> · " + esc(f.probe_status || f.status || "returned") + (f.cost_usd ? " · " + esc(money(f.cost_usd)) : "") + (sess ? " · " + esc(sess) : "") + consoleLink(r.source, sess) + ' <span class="swhen">' + esc(rel(t0, r.received_at)) + "</span>"; }).join("<br>"));
+        runs.map(function (r) { var f = r.fields || {}, sess = f.session || f.session_key || ""; return "<b>" + esc(r.source) + "</b> · " + esc(f.probe_status || f.status || "returned") + (f.cost_usd ? " · " + esc(money(f.cost_usd)) : "") + (sess ? " · " + esc(sess) : "") + consoleLink(r.source, sess) + ' <span class="swhen">' + esc(rel(t0, r.received_at)) + "</span>"; }).join("<br>") +
+        runs.map(function (r) { return reportExtras(r.payload); }).join(""));
     } else step("investigated", "", null, '<span class="dim">nobody investigated' + (origin.outcome === "routed" ? " — or nothing has come back yet" : "") + "</span>");
     if (presses.length) {
       step("person", "done", presses[presses.length - 1].pressed_at,
@@ -885,8 +949,8 @@
     [origin].concat(trip.returns || []).forEach(function (ev) { (ev.deliveries || []).forEach(function (d) { if (d.platform_message_id && ids.indexOf(d.platform_message_id) < 0) ids.push(d.platform_message_id); }); });
     return '<div class="jhead" style="margin:0 18px 16px"><div class="ids">' + ids.map(esc).join(" · ") + '</div><div class="acts">' +
       '<a class="btn tiny" href="#journey=' + encodeURIComponent(String(origin.id)) + '" data-journey="' + esc(origin.id) + '">open as a page</a>' +
-      '<a class="btn tiny" href="/audit/' + esc(origin.id) + '" target="_blank" rel="noopener">audit record</a>' +
-      '<a class="btn tiny" href="/trace/' + esc(origin.id) + '" target="_blank" rel="noopener">json</a></div></div>';
+      '<a class="btn tiny" href="' + esc(BASE) + '/audit/' + esc(origin.id) + '" target="_blank" rel="noopener">audit record</a>' +
+      '<a class="btn tiny" href="' + esc(BASE) + '/trace/' + esc(origin.id) + '" target="_blank" rel="noopener">json</a></div></div>';
   }
   function journeyHead(trip) {
     var origin = trip.origin || {}, t0 = Number(origin.received_at || 0);
@@ -905,7 +969,7 @@
     document.getElementById("jRef").value = ref;
     if (location.hash !== "#journey=" + encodeURIComponent(ref)) history.replaceState(null, "", "#journey=" + encodeURIComponent(ref));
     if (!quiet) { lastJourneySig = ""; box.innerHTML = '<div class="empty">loading…</div>'; }
-    fetch("/trace/" + encodeURIComponent(ref), { headers: readHeaders() })
+    fetch(BASE + "/trace/" + encodeURIComponent(ref), { headers: readHeaders() })
       .then(function (res) { return res.ok ? res.json() : { _status: res.status }; })
       .then(function (trip) {
         if (journeyRef !== ref) return;   // the reader asked for another one meanwhile
@@ -1019,7 +1083,7 @@
         var id = d.getAttribute("data-id"), box = document.getElementById("cmp-" + id);
         if (!box || box.getAttribute("data-loaded")) return;
         box.setAttribute("data-loaded", "1");
-        readJSON("/trace/" + id).then(function (trip) { box.innerHTML = trip ? roundTripInline(trip) : '<span class="hint">round trip unavailable</span>'; });
+        readJSON(BASE + "/trace/" + id).then(function (trip) { box.innerHTML = trip ? roundTripInline(trip) : '<span class="hint">round trip unavailable</span>'; });
       });
     });
   }
@@ -1138,14 +1202,14 @@
     var lift = e.target.closest("[data-lift-silence]");
     if (lift) {
       e.preventDefault();
-      fetch("/silences/" + lift.getAttribute("data-lift-silence"), { method: "DELETE", headers: adminHeaders() })
+      fetch(BASE + "/silences/" + lift.getAttribute("data-lift-silence"), { method: "DELETE", headers: adminHeaders() })
         .then(function (res) { if (!res.ok) alert("lift failed: admin token required (set it on the config tab)"); lastNowSig = ""; refreshActive(); });
       return;
     }
     var retry = e.target.closest("[data-retry-delivery]");
     if (retry) {
       e.preventDefault();
-      fetch("/deliveries/" + retry.getAttribute("data-retry-delivery") + "/retry", { method: "POST", headers: adminHeaders() })
+      fetch(BASE + "/deliveries/" + retry.getAttribute("data-retry-delivery") + "/retry", { method: "POST", headers: adminHeaders() })
         .then(function (res) { if (!res.ok) alert("retry failed: admin token required (set it on the config tab)"); lastLedgerSig = ""; refreshActive(); });
     }
   });
@@ -1159,7 +1223,7 @@
     loadConfig();
   });
   function loadConfig() {
-    fetch("/config", { headers: adminHeaders() }).then(function (res) {
+    fetch(BASE + "/config", { headers: adminHeaders() }).then(function (res) {
       if (res.status === 403) { showMsg("cfgMsg", false, "admin token required (HOOKRELAY_ADMIN_TOKEN in .env)"); return null; }
       if (!res.ok) { return res.json().then(function (d) { showMsg("cfgMsg", false, d.detail || res.status); return null; }); }
       return res.json();
@@ -1168,7 +1232,7 @@
     });
   }
   document.getElementById("cfgSave").addEventListener("click", function () {
-    fetch("/config", { method: "PUT", headers: adminHeaders(), body: document.getElementById("cfgEditor").value })
+    fetch(BASE + "/config", { method: "PUT", headers: adminHeaders(), body: document.getElementById("cfgEditor").value })
       .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
       .then(function (r) {
         if (r.ok) {
@@ -1178,7 +1242,7 @@
       });
   });
   document.getElementById("cfgReload").addEventListener("click", function () {
-    fetch("/config/reload", { method: "POST", headers: adminHeaders() })
+    fetch(BASE + "/config/reload", { method: "POST", headers: adminHeaders() })
       .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
       .then(function (r) {
         if (r.ok) { showMsg("cfgMsg", true, "reloaded from file"); loadConfig(); }
@@ -1186,7 +1250,7 @@
       });
   });
   document.getElementById("silCreate").addEventListener("click", function () {
-    fetch("/silences", {
+    fetch(BASE + "/silences", {
       method: "POST",
       headers: Object.assign({ "content-type": "application/json" }, adminHeaders()),
       body: JSON.stringify({
@@ -1202,7 +1266,7 @@
   });
   document.getElementById("exRun").addEventListener("click", function () {
     var box = document.getElementById("exResult");
-    fetch("/explain/" + encodeURIComponent(document.getElementById("exSource").value.trim()), {
+    fetch(BASE + "/explain/" + encodeURIComponent(document.getElementById("exSource").value.trim()), {
       method: "POST",
       headers: Object.assign({ "content-type": "application/json" }, adminHeaders()),
       body: document.getElementById("exPayload").value || "{}"
@@ -1277,7 +1341,7 @@
     liveConnect(url, headers, onChange);
   }
   // ── end live control ──────────────────────────────────────────────────────
-  wireLiveControl("/live", readHeaders, refreshActive);
+  wireLiveControl(BASE + "/live", readHeaders, refreshActive);
 })();
 </script>
 </body>
