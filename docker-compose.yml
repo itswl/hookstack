@@ -166,6 +166,10 @@ services:
       # with the rehearsal admits exactly the two observations its disk script
       # proposes. A real deployment writes its own file and points here.
       HOOKPROBE_REMEDIATION_ALLOWLIST: ${HOOKPROBE_REMEDIATION_ALLOWLIST:-/app/hookprobe/replays/rehearsal-allowlist}
+      # How long an executed procedure waits for the condition to answer
+      # before the board calls it held (exit 0 alone verifies nothing); the
+      # demo's recovery arrives seconds later, so the default is never reached.
+      HOOKPROBE_REMEDIATION_VERIFY_SECONDS: ${HOOKPROBE_REMEDIATION_VERIFY_SECONDS:-}
       # Budget breaker for the autonomous door: window spend >= budget means
       # new escalations are refused (with a report card saying why). 0 = off.
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}

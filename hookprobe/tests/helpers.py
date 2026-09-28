@@ -50,6 +50,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "blast_radius": None,
         "remediation_high_risk_allowlist": None,
         "remediation_cooldown_seconds": remediation.COOLDOWN_SECONDS,
+        "remediation_verify_seconds": remediation.VERIFY_SECONDS,
         "coalesce_window_seconds": 1800,
         "event_secret": "",
         "return_url": "",

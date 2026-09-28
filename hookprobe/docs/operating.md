@@ -254,7 +254,7 @@ reading the page:
 | **waiting on you** | a procedure is proposed and nothing runs until somebody presses |
 | **needs a human** | the last run failed within the last two days — including a refusal for budget |
 | **in flight** | a turn is running |
-| **verifying** | a procedure ran and every step exited 0, and nobody has said the condition cleared |
+| **verifying** | a procedure ran and every step exited 0, and the condition has not answered yet — no recovery, no re-fire, the verification window still open (`HOOKPROBE_REMEDIATION_VERIFY_SECONDS`) |
 | **done** | finished with nothing blocked |
 | **abandoned** | it failed and nobody came back to it inside two days |
 

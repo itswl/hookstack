@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (78)
+## Environment (79)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -55,6 +55,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_COALESCE_WINDOW_SECONDS` | `1800` | Storm coalescing at the event door: a re-fire of the same alert (same source + title, new event id) within this many seconds continues the existing investigation instead of funding… |
 | `HOOKPROBE_CONSOLIDATE_AT` | `5` | Consolidation: at this many accumulated cases, a runbook triggers one agent run that drafts a curated procedure from the case pile |
 | `HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS` | `_cooldown_default()` | Remediation cooldown: seconds a target is left alone after a procedure has acted on it |
+| `HOOKPROBE_REMEDIATION_VERIFY_SECONDS` | `_verify_default()` | How long an executed procedure waits for the condition to answer before the board calls it held: a recovery inside the window (or after it) holds it, a re-fire inside it says it di… |
 | `HOOKPROBE_AUTOMATION_TIERS` | *(empty)* | The declared ceiling per class of automation — see automation.py |
 | `HOOKPROBE_BUDGET_USD` | `0.0` | The budget breaker, guarding the only path that spends money without a human asking: once the window's recorded spend reaches budget_usd, the event door refuses NEW investigations… |
 | `HOOKPROBE_BUDGET_WINDOW_HOURS` | `24.0` | Window the spend ceiling is measured over |

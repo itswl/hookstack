@@ -1326,7 +1326,8 @@ async function openApprovals() {
       const row = b.closest(".ap-row"), act = b.dataset.act;
       b.disabled = true;
       try {
-        if (row.dataset.rem) await api(`/v1/remediations/${encodeURIComponent(row.dataset.rem)}/${act}`, { method: "POST" });
+        if (row.dataset.rem) await api(`/v1/remediations/${encodeURIComponent(row.dataset.rem)}/${act}`,
+          { method: "POST", body: JSON.stringify({ by: "console" }) });
         else if (row.dataset.mem) await api(`/v1/memory/suggestions/${encodeURIComponent(row.dataset.mem)}/${act}`, { method: "POST" });
         else if (act === "open") { select(row.dataset.run); return; }
         else await api(`/v1/runs/${encodeURIComponent(row.dataset.run)}/ruling`,
@@ -1799,7 +1800,9 @@ async function openActions() {
       const bar = r.status === "proposed"
         ? '<div class="skill-bar"><button class="rem-approve primary" data-id="' + attr(r.id) + '">approve &amp; run</button>' +
           '<button class="rem-reject danger" data-id="' + attr(r.id) + '">reject</button></div>'
-        : '<div class="rem-status ' + esc(r.status) + '">' + esc(r.status) + "</div>";
+        : '<div class="rem-status ' + esc(r.status) + '">' + esc(r.status) +
+          (r.outcome ? " · " + esc(r.outcome) + " — " + esc(r.outcome_reason || "") : "") +
+          (r.approved_by ? " · approved by " + esc(r.approved_by) : "") + "</div>";
       return '<div class="rem" data-id="' + attr(r.id) + '"><div class="rem-head">' +
         '<span class="badge ' + esc(r.status) + '">' + esc(r.status) + "</span>" +
         '<span class="when">from ' + esc(r.session_key) + " · " + esc(fmtTime(r.created_at)) + "</span></div>" +
@@ -1807,7 +1810,8 @@ async function openActions() {
     }).join("");
     $("#turns").querySelectorAll(".rem-approve").forEach((b) => (b.onclick = async () => {
       if (!confirm("approve and run every step of this proposal? each command runs exactly as written.")) return;
-      const r = await api("/v1/remediations/" + encodeURIComponent(b.dataset.id) + "/approve", { method: "POST" });
+      const r = await api("/v1/remediations/" + encodeURIComponent(b.dataset.id) + "/approve",
+        { method: "POST", body: JSON.stringify({ by: "console" }) });
       if (r.ok) openActions();
       else { const e = await r.json().catch(() => ({})); $("#hint").textContent = "approve failed: " + (e.detail || r.status); }
     }));

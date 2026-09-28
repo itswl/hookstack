@@ -789,6 +789,34 @@ def test_a_refire_joins_the_finished_investigation(tmp_path) -> None:
         assert detail["meta"]["level"] == "critical"
 
 
+def test_a_refire_at_the_door_is_evidence_against_the_procedure_that_ran(tmp_path) -> None:
+    """The door, not only the service: the same event that becomes a follow-up
+    turn stamps the executed procedure `did_not_hold` first."""
+    from hookprobe import remediation
+
+    report = 'root cause\n```remediation\n[{"action":"poke","command":"echo poke","risk":"low"}]\n```\n'
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    engine = FakeEngine(result=EngineResult(text=report, message_count=1, cost_usd=0.1, session_id="sdk-session-1"))
+    with make_client(tmp_path, engine, remediation_allowlist=allow) as client:
+        first = client.post("/hooks/event", json=EVENT).json()
+        detail = _drain(client, first["sessionKey"])
+        pid = detail["meta"]["remediation_proposal"]
+        assert client.post(f"/v1/remediations/{pid}/approve", json={"by": "me"}, headers=AUTH).status_code == 200
+        for _ in range(400):
+            row = remediation.load(tmp_path, pid)
+            if row["status"] in (remediation.EXECUTED, remediation.FAILED):
+                break
+            time.sleep(0.01)
+        assert row["status"] == remediation.EXECUTED and row.get("held") is None
+
+        refire = client.post("/hooks/event", json=dict(EVENT, event_id=6)).json()
+        assert refire["status"] == "coalesced"
+        _drain(client, first["sessionKey"])
+        row = remediation.load(tmp_path, pid)
+        assert row["held"] is False and row["held_by"] == "refire" and row["held_event"] == 6
+
+
 def test_a_refire_while_running_spends_nothing(tmp_path) -> None:
     """A live session already claims its alert; a re-fire adds no question."""
     engine = GatedEngine()

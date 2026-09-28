@@ -75,10 +75,11 @@ def test_an_open_proposal_blocks_the_work_and_names_the_command() -> None:
     assert {a["kind"] for a in item.artifacts} == {"report", "procedure"}
 
 
-def test_a_procedure_that_ran_clean_verifies_the_work_but_does_not_close_it() -> None:
-    """Every step exit 0 is the one verification this loop makes without a
-    person. Whether the condition actually cleared is the next signal's answer,
-    so the item waits in `verifying` rather than claiming to be done."""
+def test_a_procedure_that_ran_clean_waits_for_the_condition_to_answer() -> None:
+    """Every step exit 0 is where the commands' story ends, not the work's.
+    Whether the condition actually cleared is the next signal's answer, so the
+    item waits in `verifying` — unverified, not failed — until it comes; a
+    stamp from the recovery door verifies it, and only then."""
     steps = [{"command": "a"}, {"command": "b"}]
     applied = {
         "id": "a" * 10,
@@ -90,9 +91,21 @@ def test_a_procedure_that_ran_clean_verifies_the_work_but_does_not_close_it() ->
         "status": remediation.EXECUTED,
         "steps": steps,
         "results": [{"exit": 0}, {"exit": 0}],
+        "executed_at": time.time(),
+        "verifying_until": time.time() + 3600,
     }
     (item,) = work.resolve([_run("probe:ww:1")], proposals=[applied])
-    assert item.state == work.VERIFYING and item.verified and item.verified_by == "remediation"
+    assert item.state == work.VERIFYING and not item.verified and item.awaiting_evidence
+    assert any("verifying" in a["name"] for a in item.artifacts if a["kind"] == "procedure")
+
+    held = {**applied, "held": True, "held_by": "recovery", "approved_by": "ou_2"}
+    (item,) = work.resolve([_run("probe:ww:1")], proposals=[held])
+    assert item.state == work.DONE and item.verified and item.verified_by == "remediation"
+    assert any("held · approved by ou_2" in a["name"] for a in item.artifacts if a["kind"] == "procedure")
+
+    did_not = {**applied, "held": False, "held_by": "refire"}
+    (item,) = work.resolve([_run("probe:ww:1")], proposals=[did_not])
+    assert not item.verified and not item.awaiting_evidence and item.state == work.DONE
 
     half = {**applied, "results": [{"exit": 0}, {"exit": 1}]}
     (item,) = work.resolve([_run("probe:ww:1")], proposals=[half])

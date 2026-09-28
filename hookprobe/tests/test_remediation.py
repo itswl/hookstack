@@ -111,7 +111,7 @@ def test_an_approved_allowlisted_command_runs_and_is_audited(tmp_path):
                 break
             await asyncio.sleep(0.01)
         pid = run.meta["remediation_proposal"]
-        service.approve_remediation(pid)
+        service.approve_remediation(pid, actor="ops-lead")
         for _ in range(300):
             row = remediation.load(tmp_path, pid)
             if row["status"] in ("executed", "failed"):
@@ -125,6 +125,14 @@ def test_an_approved_allowlisted_command_runs_and_is_audited(tmp_path):
     assert "remediated" in row["results"][0]["output"]
     audit = list((tmp_path / "audit").glob("*.jsonl"))
     assert audit and "echo remediated" in audit[0].read_text()
+    # Who pressed is a field, not a phrase inside a note (pilot zero: a console
+    # click left no trace of a person at all, and a card press left one only
+    # inside free text).
+    assert row["approved_by"] == "ops-lead"
+    # And exit 0 opened a window rather than closing the question: the
+    # condition has not answered yet.
+    assert row["verifying_until"] > row["executed_at"]
+    assert remediation.outcome(row)[0] == remediation.VERIFYING
 
 
 def test_a_failing_step_stops_the_sequence(tmp_path):
@@ -974,19 +982,106 @@ def test_a_procedure_that_really_ran_verifies_its_work_item(tmp_path):
         for _ in range(300):
             row = remediation.load(tmp_path, run.meta["remediation_proposal"])
             if row["status"] in (remediation.EXECUTED, remediation.FAILED):
-                return run, row
+                return service, run, row
             await asyncio.sleep(0.01)
         raise AssertionError("never executed")
 
-    run, row = asyncio.run(scenario())
+    service, run, row = asyncio.run(scenario())
     assert row["status"] == remediation.EXECUTED, row
+    # Ran clean, and the condition has said nothing yet: the window is open,
+    # so the item waits rather than claiming the work is verified.
     (item,) = work.resolve([run], proposals=[row])
-    assert item.verified and item.verified_by == "remediation"
+    assert not item.verified and item.awaiting_evidence and item.state == work.VERIFYING
+    # The condition ends: the recovery door stamps the row, and the same row
+    # the writer left is what verifies the item.
+    service.record_recovery("alerts", "t", event_id=41)
+    held = remediation.load(tmp_path, row["id"])
+    assert held["held"] is True and held["held_by"] == "recovery" and held["held_event"] == 41
+    assert remediation.outcome(held)[0] == remediation.HELD
+    (item,) = work.resolve([service.get("probe:alerts:7")], proposals=[held])
+    assert item.verified and item.verified_by == "remediation" and item.state == work.DONE
+    assert any("held" in a["name"] for a in item.artifacts if a["kind"] == "procedure")
     # And the failure direction, from the same writer: a step that exits
-    # non-zero leaves `failed`, which is not a verification of anything.
+    # non-zero leaves `failed`, which is not a PROCEDURE's verification of
+    # anything — the recovery the door recorded on the run still verifies the
+    # work on its own, under its own, weaker name.
     row["status"], row["results"] = remediation.FAILED, [{"exit": 1}]
     (item,) = work.resolve([run], proposals=[row])
-    assert not item.verified
+    assert item.verified_by == "recovery"
+
+
+def test_a_refire_inside_the_window_means_the_procedure_did_not_hold(tmp_path):
+    """Execution success is not recovery (decided 2026-08-31). The commands
+    returned 0 and the alert fired again: the row says so, the audit says so,
+    and the board counts no verification."""
+    from hookprobe import work
+
+    report = 'ok\n```remediation\n[{"action":"probe","command":"echo done","risk":"low"}]\n```\n'
+
+    async def scenario():
+        service, _ = _approved(tmp_path, report, "echo .*\n")
+        service.start(
+            {"message": "Title: t\ngo", "sessionKey": "probe:alerts:8", "_meta": {"source": "alerts", "title": "t"}},
+            origin="relay",
+        )
+        run = await _finish(service, "probe:alerts:8")
+        service.approve_remediation(run.meta["remediation_proposal"], actor="ou_1")
+        for _ in range(300):
+            row = remediation.load(tmp_path, run.meta["remediation_proposal"])
+            if row["status"] in (remediation.EXECUTED, remediation.FAILED):
+                break
+            await asyncio.sleep(0.01)
+        stamped = service.record_refire(run, event_id=52)
+        return service, run, stamped
+
+    service, run, stamped = asyncio.run(scenario())
+    assert len(stamped) == 1 and stamped[0]["held"] is False and stamped[0]["held_by"] == "refire"
+    row = remediation.load(tmp_path, stamped[0]["id"])
+    verdict, why = remediation.outcome(row)
+    assert verdict == remediation.DID_NOT_HOLD and "fired again" in why
+    (item,) = work.resolve([run], proposals=[row])
+    assert not item.verified and not item.awaiting_evidence
+    assert any("did_not_hold" in a["name"] and "approved by ou_1" in a["name"] for a in item.artifacts)
+    # The first answer stands: a recovery after the re-fire does not launder it.
+    service.record_recovery("alerts", "t")
+    assert remediation.load(tmp_path, row["id"])["held"] is False
+    audit = "".join(f.read_text() for f in (tmp_path / "audit").glob("*.jsonl"))
+    assert '"tool": "Outcome"' in audit and "did_not_hold" in audit
+
+
+def test_a_window_that_closes_quietly_holds_weakly_and_says_so(tmp_path):
+    """Absence of a re-fire is evidence, and thinner than a target re-read;
+    the words the outcome carries must not claim more than that."""
+    now = 1_800_000_000.0
+    row = {
+        "id": "abcdef0123",
+        "session_key": "probe:alerts:9",
+        "status": remediation.EXECUTED,
+        "steps": [{"command": "echo x"}],
+        "results": [{"exit": 0}],
+        "executed_at": now - 100,
+        "verifying_until": now + 500,
+    }
+    verdict, why = remediation.outcome(row, now)
+    assert verdict == remediation.VERIFYING and "500s" in why
+    verdict, why = remediation.outcome(row, now + 600)
+    assert verdict == remediation.HELD and "no re-fire" in why and "thinner" in why
+    # A re-fire AFTER the window is a new incident: it stamps nothing.
+    workdir = tmp_path
+    (workdir / remediation.DIRNAME).mkdir()
+    remediation.save(workdir, row)
+    assert remediation.evidence(workdir, "probe:alerts:9", held=False, by="refire", now=now + 600) == []
+    assert remediation.load(workdir, row["id"]).get("held") is None
+    # A recovery after the window still holds it: the condition ending is
+    # evidence at any hour.
+    assert len(remediation.evidence(workdir, "probe:alerts:9", held=True, by="recovery", now=now + 600)) == 1
+    # Rows from before the contract carry no window and are not accused.
+    old = {**row, "id": "0123456789"}
+    old.pop("verifying_until")
+    assert remediation.outcome(old, now)[0] == remediation.HELD
+    # And a run's own recovery stamp postdating the execution is honoured for them.
+    assert remediation.outcome(old, now, recovered_at=now - 50)[1].startswith("the condition ended")
+    assert remediation.outcome({**old, "status": remediation.FAILED}, now) == ("", "")
 
 
 # ── one pending proposal per procedure ───────────────────────────────────────

@@ -1,11 +1,11 @@
 ---
 title: Execution success is not recovery — a verification contract for remediation
-status: proposed
+status: implemented
 date: 2026-08-31
 scope: hookprobe
 ---
 
-## Decision proposed
+## Decision
 
 When a remediation proposal is approved and its steps run, the loop must not
 close on exit codes. Borrowed from CISRE (William-Lu-stack/Flawless), whose
@@ -18,6 +18,28 @@ Our remediation path today ends one step earlier: propose → approve →
 allowlist → execute sequentially, stop-on-failure, each step audited — and
 then nothing asks whether the CONDITION cleared. A remediation that ran
 cleanly and fixed nothing looks identical to one that worked.
+
+**Landed 2026-09-28, sized as below with three differences the loop taught in
+the meantime.** `remediation.outcome` is the one function that says what the
+world said about an executed procedure — `held`, `did_not_hold`, `verifying` —
+and `work.py` verifies only on `held`. The stamp is written by
+`remediation.evidence` from two doors: the recovery door holds a procedure
+whenever the condition ends (inside the window or after — evidence is
+evidence), and the event door's re-fire path marks one `did_not_hold` when the
+same alert fires again inside `HOOKPROBE_REMEDIATION_VERIFY_SECONDS` (default
+3600, 0 off). The first answer stands. A window that closes quietly reads
+"no re-fire within the window — thinner than a target re-read, and said so",
+which is the wording proposed below kept to the letter. The audit gets a
+`tool: Outcome` line beside the `Exec` lines; the console and the board show
+the outcome beside the approval and beside who approved it (`approved_by`,
+landed the same day). Rows executed before the window existed carry none and
+are not accused; a recovery stamped on their run still holds them.
+
+The trigger written below — the first real proposal — fired on 2026-09-07 with
+five proposals for one condition, none approvable
+([[pilot-zero-read-back-and-the-order-of-the-next-ninety-days]]); the contract
+lands now, before the first real execution, because the quickstart's rehearsal
+executes a procedure on every `demo.sh` and the smoke asserts the outcome.
 
 ## The shape (deliberately sized to this stack)
 

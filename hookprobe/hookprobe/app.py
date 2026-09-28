@@ -944,15 +944,28 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                 if row.get("status") == "proposed"
                 else ""
             )
+            # And for a row that ran: what the condition said about it since.
+            # Computed here, where the board and the smoke read it, from the
+            # same function the work board verifies with.
+            row["outcome"], row["outcome_reason"] = remediation.outcome(row, now)
         return {"proposals": rows}
 
     @app.post("/v1/remediations/{proposal_id}/approve", dependencies=[Depends(require_token)])
     async def remediation_approve(proposal_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """The one click that makes anything run. Refused whole unless EVERY
         step passes the allowlist — a procedure that half-executes is worse
-        than one that never starts."""
+        than one that never starts.
+
+        `{by: ...}` names the person, the way the ruling door's does; absent, the
+        row says "console", which is honest about a click behind a shared
+        bearer and is at least not blank. The card door fills the same field
+        with the IM user id, so a reader of the row can tell the two apart.
+        """
+        body = payload or {}
         try:
-            row = service.approve_remediation(proposal_id, note=str((payload or {}).get("note") or ""))
+            row = service.approve_remediation(
+                proposal_id, note=str(body.get("note") or ""), actor=str(body.get("by") or "console")[:120]
+            )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

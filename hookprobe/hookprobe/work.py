@@ -37,6 +37,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hookprobe.remediation import EXECUTED as PROCEDURE_EXECUTED
+from hookprobe.remediation import HELD as PROCEDURE_HELD
+from hookprobe.remediation import VERIFYING as PROCEDURE_VERIFYING
+from hookprobe.remediation import outcome as procedure_outcome
 from hookprobe.remediation import stale as proposal_stale
 from hookprobe.runs import COMPLETED, FAILED, INFERRED_BY_PREFIX, RUNNING, Run, turn_cost
 
@@ -97,10 +100,16 @@ class WorkItem:
     # Whether anybody says it worked, and what said so.
     # Whether anybody or anything says this ended well, and what said so:
     # `ruling` (a person — never a patrol's inference, see below),
-    # `remediation` (its own procedure ran clean), `recovery` (the condition
-    # cleared), in that order of strength.
+    # `remediation` (its own procedure ran clean AND the condition answered:
+    # ended, or did not fire again inside the window — exit 0 alone is not a
+    # witness, see remediation.outcome), `recovery` (the condition cleared on
+    # its own), in that order of strength.
     verified: bool = False
     verified_by: str = ""
+    # A procedure ran clean and the condition has not answered yet: the window
+    # is open, and the item waits in `verifying` for whatever the pipe says
+    # next. Neither verified nor unverified — the honest middle.
+    awaiting_evidence: bool = False
     # Whether the condition this work was about has ENDED, whichever witness
     # verified the work. Kept apart from `verified_by` because the two answer
     # different questions: a procedure that exited clean verifies the work
@@ -145,6 +154,7 @@ class WorkItem:
             "verified": self.verified,
             "verified_by": self.verified_by,
             "recovered": self.recovered,
+            "awaiting_evidence": self.awaiting_evidence,
             "hands_on": self.hands_on,
             "asked_by": self.asked_by,
             "thread_root": self.thread_root,
@@ -195,10 +205,10 @@ def _artifacts(run: Run) -> list[dict[str, Any]]:
 def _applied_cleanly(row: dict[str, Any]) -> bool:
     """A procedure that ran and whose every step came back 0.
 
-    The one verification this loop can make without a person: the commands the
-    report proposed were approved, ran, and none of them failed. A partial run
-    (`interrupted`) is not a pass — that is the case this check exists to keep
-    out of the completed column.
+    The precondition for asking what the condition said next — not a
+    verification by itself, since 2026-09-28 (remediation.outcome). A partial
+    run (`interrupted`) is not even that: it is the case this check exists to
+    keep out of the completed column.
 
     The status comes FROM the writer (`remediation.EXECUTED`) rather than being
     typed here, because it was typed here: this read `"applied"`, a status
@@ -313,9 +323,16 @@ def resolve(
         for row in by_session_proposals.get(run.session_key, []):
             status = str(row.get("status") or "")
             steps = row.get("steps") or []
-            item.artifacts.append(
-                {"kind": "procedure", "ref": str(row.get("id") or ""), "name": f"{len(steps)} step(s) · {status}"}
-            )
+            # What the condition said about a procedure that ran, and who let it
+            # run — the two halves of "who approved what, and did it work".
+            verdict, _why = procedure_outcome(row, now, recovered_at=meta.get("recovered_at"))
+            approved_by = str(row.get("approved_by") or "")
+            name = f"{len(steps)} step(s) · {status}"
+            if verdict:
+                name += f" · {verdict}"
+            if approved_by:
+                name += f" · approved by {approved_by}"
+            item.artifacts.append({"kind": "procedure", "ref": str(row.get("id") or ""), "name": name})
             # A proposal at all means a person had to decide, whichever way they
             # decided — that is what `hands_on` measures.
             item.hands_on = True
@@ -335,8 +352,14 @@ def resolve(
                         "session": run.session_key,
                     }
                 )
-            if _applied_cleanly(row) and not item.verified:
-                item.verified, item.verified_by = True, "remediation"
+            # A clean run is not a witness; the condition is. `held` verifies,
+            # `verifying` holds the item open, `did_not_hold` verifies nothing
+            # and says so in the artifact's name above.
+            if _applied_cleanly(row):
+                if verdict == PROCEDURE_HELD and not item.verified:
+                    item.verified, item.verified_by = True, "remediation"
+                elif verdict == PROCEDURE_VERIFYING:
+                    item.awaiting_evidence = True
             item.updated_at = max(item.updated_at, float(row.get("created_at") or 0.0))
 
         # The weakest of the three, and the only one that needs nobody: the
@@ -380,14 +403,14 @@ def _state(item: WorkItem, runs: list[Run], now: float) -> str:
     if last is not None and last.status == FAILED:
         when = last.finished_at or last.created_at
         return ABANDONED if (now - when) > _ABANDONED_AFTER_SECONDS else NEEDS_HUMAN
-    if item.verified_by == "remediation" and not item.recovered and any(o["kind"] == "ruling" for o in item.open):
-        # A procedure ran and every step came back 0, but nobody has said the
-        # condition actually cleared. On an unattended deployment items can sit
-        # here, and that is the true reading: the loop closed its own half.
-        # The condition ENDING is the other half — the recovery door recorded
-        # it on the run — and until 2026-09-28 this branch did not look, so an
+    if item.awaiting_evidence:
+        # A procedure ran and every step came back 0, and the condition has not
+        # answered yet: no recovery, no re-fire, the window still open. The
+        # loop closed its own half; the other half is the pipe's next word
+        # about this alert, and until it comes the honest column is this one.
+        # Until 2026-09-28 the branch keyed on an open RULING instead, so an
         # item whose procedure ran and whose alert then resolved waited here
-        # for a ruling forever, which is the one sequence the loop is for.
+        # for a person forever — the one sequence the loop is for.
         return VERIFYING
     return DONE
 

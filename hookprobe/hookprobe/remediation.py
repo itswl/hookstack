@@ -43,6 +43,15 @@ left alone for a window, so a fix and its rollback cannot both be pressed
 inside a minute. It adds no state — the refused row stays `proposed` and
 becomes approvable again when the window passes.
 
+And nothing here closes on exit codes. A procedure that ran clean is
+`executed`, which says the commands returned 0 and nothing else; whether the
+CONDITION did what the procedure promised is answered by the next thing the
+pipe says about it — a recovery holds the procedure, a re-fire inside the
+verification window says it did not hold, and a window that closes quietly
+holds it weakly and says so in words (`outcome`). The board counts only a held
+procedure as verification. Decided 2026-08-31 and landed 2026-09-28:
+`.agents/notes/implemented/2026-08-31-execution-success-is-not-recovery.md`.
+
 The proposals directory is on the input guard's protected list: the agent
 proposes THROUGH its report, so a direct write could only mean forging a
 proposal's provenance. (A bash write around that guard still produces only a
@@ -79,6 +88,17 @@ DIRNAME = "remediation"
 # is a bug with no symptom.
 EXECUTED = "executed"
 FAILED = "failed"
+# What the world said about an executed procedure, or has not said yet. One
+# home for the words: `work.py` reads them, the console shows them, the smoke
+# asserts them.
+HELD, DID_NOT_HOLD, VERIFYING = "held", "did_not_hold", "verifying"
+# How long an executed procedure waits for the condition to answer. A recovery
+# holds it (inside the window or after — evidence is evidence); a re-fire
+# inside the window says it did not hold; the window closing quietly holds it
+# WEAKLY, and the outcome says so, because the absence of a re-fire is thinner
+# evidence than a target re-read. The number lives here and settings reads it
+# from here, for the reason the cooldown's does. 0 turns the contract off.
+VERIFY_SECONDS = 3600
 
 # The closing fence must open its own line. A unified diff that ADDS a fenced
 # code block — a README documenting an endpoint, which is most of them — carries
@@ -623,6 +643,7 @@ def approve(
     allowlist: Path | None,
     high_risk_allowlist: Path | None = None,
     note: str = "",
+    actor: str = "",
     at: dict[str, Any] | None = None,
     cooldown: int = COOLDOWN_SECONDS,
 ) -> dict[str, Any]:
@@ -644,6 +665,12 @@ def approve(
     are different in kind: a command no allowlist permits can never run as
     written, and answering "wait 9 minutes" to it would be a lie of omission.
     Order the permanent refusal first.
+
+    `actor` is WHO pressed, as a field of its own: the card door sends the IM
+    user id and the console sends the name it was given or "console". It used
+    to travel only inside `note`, a free-text line, which is why the one
+    question an approval record exists to answer — who approved what — could
+    not be asked of the row (pilot zero, 2026-09-28).
     """
     row = load(workdir, proposal_id)
     if row is None:
@@ -693,8 +720,9 @@ def approve(
     row["status"] = "running"
     row["approved_at"] = round(time.time(), 3)
     row["approved_note"] = note[:300]
+    row["approved_by"] = actor[:120]
     save(workdir, row)
-    automation.record(workdir, "remediation", proposal_id, "approved")
+    automation.record(workdir, "remediation", proposal_id, "approved", actor=actor[:120])
     return row
 
 
@@ -770,6 +798,7 @@ async def execute(
     bash_timeout_ms: int,
     allowlist: Path | None = None,
     high_risk_allowlist: Path | None = None,
+    verify_seconds: int = VERIFY_SECONDS,
 ) -> None:
     """Approved commands run EXACTLY as written: sequentially, stop on the
     first failure, output captured, every command on the audit log. No
@@ -846,6 +875,9 @@ async def execute(
             break
     row["status"] = FAILED if failed else EXECUTED
     row["executed_at"] = round(time.time(), 3)
+    if not failed and verify_seconds > 0:
+        # Exit 0 is where the commands' story ends and the condition's begins.
+        row["verifying_until"] = round(row["executed_at"] + verify_seconds, 3)
     try:
         save(workdir, row)
     except OSError:
@@ -857,7 +889,89 @@ async def execute(
     logger.info("remediation %s id=%s", row["status"], row["id"])
 
 
-def _audit(workdir: Path, proposal_id: str, command: str, error: bool) -> None:
+def outcome(row: dict[str, Any], now: float | None = None, *, recovered_at: Any = None) -> tuple[str, str]:
+    """What the world said about an executed procedure: (outcome, in words).
+
+    Empty for a row that never ran clean — there is nothing to hold. `held`
+    and `did_not_hold` are the pipe's evidence, stamped by `evidence()`;
+    `verifying` is the window still open with nothing said; a window that
+    closed with nothing said is `held`, in the weakest words this vocabulary
+    has, because "no re-fire within the window" is what is actually known.
+
+    `recovered_at` is the run's own recovery stamp, honoured when it postdates
+    the execution: rows executed before this contract existed carry no window
+    and no stamp, and the recovery the door recorded on their run is still the
+    evidence it always was.
+    """
+    if str(row.get("status") or "") != EXECUTED or row.get("interrupted"):
+        return "", ""
+    held = row.get("held")
+    if held is True:
+        return HELD, str(row.get("held_reason") or "the condition ended after the procedure ran")
+    if held is False:
+        return DID_NOT_HOLD, str(row.get("held_reason") or "the condition fired again after the procedure ran")
+    executed_at = float(row.get("executed_at") or 0.0)
+    if recovered_at and float(recovered_at) >= executed_at:
+        return HELD, "the condition ended after the procedure ran"
+    until = row.get("verifying_until")
+    if until is None:
+        return HELD, "executed before the verification window existed; nothing contradicted it"
+    now = time.time() if now is None else now
+    if now < float(until):
+        return VERIFYING, f"waiting for the condition to answer, {int(float(until) - now)}s left in the window"
+    return HELD, "no re-fire within the window — thinner than a target re-read, and said so"
+
+
+def evidence(
+    workdir: Path,
+    session_key: str,
+    *,
+    held: bool,
+    by: str,
+    event_id: Any = None,
+    now: float | None = None,
+) -> list[dict[str, Any]]:
+    """Stamp a session's executed procedures with what the condition did next.
+
+    The first answer stands: a row already stamped is left alone, so a recovery
+    arriving after a re-fire does not turn a `did_not_hold` into a `held`. A
+    re-fire after the window has closed stamps nothing — that is a new incident,
+    not this procedure's failure — where a recovery holds a procedure whenever
+    it arrives, because the condition ending is evidence at any hour.
+    """
+    now = time.time() if now is None else now
+    stamped: list[dict[str, Any]] = []
+    for row in list_all(workdir, limit=200):
+        if str(row.get("session_key") or "") != session_key:
+            continue
+        if str(row.get("status") or "") != EXECUTED or row.get("interrupted") or row.get("held") is not None:
+            continue
+        until = float(row.get("verifying_until") or 0.0)
+        if not held and until and now >= until:
+            continue
+        row["held"] = held
+        row["held_by"] = by[:40]
+        row["held_at"] = round(now, 3)
+        if event_id is not None:
+            row["held_event"] = event_id
+        row["held_reason"] = (
+            "the condition ended after the procedure ran"
+            if held
+            else "the condition fired again after the procedure ran"
+        )
+        try:
+            save(workdir, row)
+        except OSError:
+            logger.warning("could not record the outcome of remediation %s", row.get("id"), exc_info=True)
+            continue
+        _audit(
+            workdir, str(row["id"]), f"{HELD if held else DID_NOT_HOLD}: {row['held_reason']}", not held, tool="Outcome"
+        )
+        stamped.append(row)
+    return stamped
+
+
+def _audit(workdir: Path, proposal_id: str, command: str, error: bool, *, tool: str = "Exec") -> None:
     """Same flight recorder the agent's tools write to — one account."""
     try:
         audit_dir = workdir / "audit"
@@ -865,7 +979,7 @@ def _audit(workdir: Path, proposal_id: str, command: str, error: bool) -> None:
         line = {
             "ts": round(time.time(), 3),
             "session": f"remediation:{proposal_id}",
-            "tool": "Exec",
+            "tool": tool,
             "detail": command[:300],
             "error": error,
         }
