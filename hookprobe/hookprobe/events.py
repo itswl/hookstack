@@ -433,30 +433,38 @@ async def _signed_object(request: Request, secret: str, max_bytes: int) -> dict[
 def _resolve_run(service: RunService, correlation_id: str, event_id: Any) -> Run | None:
     """Which investigation a card button belongs to.
 
-    hookprobe never sees the pipe's correlation id. What both sides do agree on
-    is the alert's event id: the door below names a session `probe:{source}:{id}`
-    from the delivery it was handed, and the report that returns echoes the
-    source and the id back in `meta` — which is what the card was cut from. So
-    the id comes home on the press and this walks the recent runs for the
-    session whose meta holds it.
+    Three handles, tried in order, none of them content. A correlation id that
+    happens to BE a session key is honoured first: one lookup, and it leaves
+    the pipe a way to be explicit. Then the pipe's own `hr-<id>`, which the
+    door above keeps as `meta.correlation_id` and which the report echoes — so
+    a button cut from the REPORT card (whose own event id is not the alert's)
+    still finds the run; before that echo existed, every follow-up pressed on
+    an investigation card answered "no run", because the press carried the
+    report's id and nothing here had ever seen it. Last, the alert's event id
+    the envelope names, which is what a button on the verdict card carries.
 
-    Newest first, because an event id is only unique per source and the freshest
-    match is the one the card carried. A correlation id that happens to BE a
-    session key is honoured before any of that: it costs one lookup, and it
-    leaves the pipe a way to be explicit if it ever wants one.
+    Newest first, because an event id is only unique per source and the
+    freshest match is the one the card carried.
     """
     if correlation_id:
         direct = service.get(correlation_id)
         if direct is not None:
             return direct
-    if event_id is None or event_id == "":
-        return None
+    quoted = correlation_id[3:] if correlation_id.startswith("hr-") and correlation_id[3:].isdigit() else ""
     # Compared as text: an id the pipe carried as 123 and a channel handed back
     # as "123" are the same alert, and the session key was built from the string
     # either way.
-    wanted = str(event_id)[:_EVENT_ID_MAX]
+    wanted = str(event_id)[:_EVENT_ID_MAX] if event_id is not None and event_id != "" else ""
+    if not quoted and not wanted:
+        return None
     for run in service.list_runs(limit=500):
-        if str((run.meta or {}).get("event_id")) == wanted:
+        meta = run.meta or {}
+        if correlation_id and str(meta.get("correlation_id") or "") == correlation_id:
+            return run
+        if quoted and str(meta.get("event_id")) == quoted:
+            return run
+    for run in service.list_runs(limit=500):
+        if wanted and str((run.meta or {}).get("event_id")) == wanted:
             return run
     return None
 
@@ -725,6 +733,15 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
             "kind": kind or "alert",
             "work_id": _work_id(fields, request, session_key),
         }
+        # The pipe's own handle for this hop's chain, kept apart from the work
+        # id (which a handoff may have stated) and echoed on the report
+        # (notify.py), so the buttons the pipe cuts from that report carry the
+        # ALERT's correlation and not the report's own — a press on the
+        # investigation card then lands in the alert's chain, and a verdict
+        # ruling forwarded to the judge names a judgement the judge has.
+        correlation = str(request.headers.get("x-hook-correlation-id") or "").strip()[:_WORK_ID_MAX]
+        if correlation:
+            meta["correlation_id"] = correlation
         # The sending platform's own id for this alert, when the pipe carried
         # one. Echoed on the report (notify.py) so the platform's alert page can
         # find the investigation the pipe started on its own.

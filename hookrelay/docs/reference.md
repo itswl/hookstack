@@ -54,5 +54,5 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/status` | The board's data: recent events, deliveries, breaker and silence state as JSON |
 | GET | `/timeline` | What happened — one stream, chains gathered, with what each one spent |
 | GET | `/topology` | The whole shape, from config alone — the read that belongs BEFORE a route change rather than after one |
-| GET | `/trace/{event_id}` | One alert's whole journey: the original, where it fanned out to, and what each processing system sent back |
+| GET | `/trace/{ref}` | One alert's whole journey, from any handle it left behind: the original, where it fanned out to, what each processing system sent back, what a person pressed, and what the conditio… |
 | GET | `/unseen` | Which cards this pipe sent that nobody has opened |

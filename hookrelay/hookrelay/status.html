@@ -214,6 +214,7 @@
   <div class="tabs">
     <button class="tab active" data-tab="events">events</button>
     <button class="tab" data-tab="timeline">timeline</button>
+    <button class="tab" data-tab="journey">journey</button>
     <button class="tab" data-tab="config">config</button>
     <button class="tab" data-tab="help">help</button>
   </div>
@@ -253,6 +254,16 @@
     <div id="incidents"></div>
     <div id="chains"><div class="empty">…</div></div>
   </div><!-- /panel-timeline -->
+
+  <div id="panel-journey" style="display:none">
+    <h2>One alert's journey · everything this ledger holds about it, in order</h2>
+    <div class="hint" style="margin:-6px 0 8px">Any handle the journey left behind: an event id, its <code>hr-</code> correlation, a session key, a work id, or the platform id of a card this pipe sent. The pipe resolves it from its own ledger and reads nothing inside a node — what happened there is one link away.</div>
+    <div class="row">
+      <input id="jRef" placeholder="event id · hr-123 · probe:inbound:123 · work id · om_… (a card)" style="flex:1">
+      <button class="btn primary" id="jGo">show</button>
+    </div>
+    <div id="journey"><div class="empty">enter a handle, or press “journey” on a chain in the timeline or on an event</div></div>
+  </div><!-- /panel-journey -->
 
   <div id="panel-config" style="display:none">
     <div class="row">
@@ -311,6 +322,7 @@
       <tr><td>The three cards</td><td>Queued = waiting to be delivered. Dead letters &gt; 0 deserves a human — with <code>HOOKRELAY_ALARM_URL</code> set it alarms on its own</td></tr>
       <tr><td>An event row</td><td>Open it for the full decision chain: which routes were considered, why each matched or was skipped, where it was delivered. The round-trip button pulls <code>/trace</code>: the payload as received, the exact body sent per channel, and what each brain sent back</td></tr>
       <tr><td>The refresh control</td><td>This page keeps no clock. It holds one streaming connection to <code>/live</code> and refetches what you are currently looking at when the service says something changed — so an alert storm is one refetch, not a tick per event. ↻ refetches on demand, the badge beside it reads <b>live</b> or <b>offline</b> (a dropped stream reconnects on its own, backing off), and the stamp top-right says when the data is from</td></tr>
+      <tr><td>The journey tab</td><td>One alert from any handle it left behind — its id, the <code>hr-</code> correlation a brain quoted, a session key, a work id, or the platform id of a card — read top to bottom: received, judged, delivered (with what each card asked), pressed, reported, and what the condition did afterwards. Resolved from this ledger alone; every hop that a node owns links to that node's console (<code>HOOKRELAY_UI_LINKS</code>)</td></tr>
       <tr><td>The config tab</td><td>An editor for config.yaml (the file is the source of truth): it only writes when validation passes, and applies hot — no restart. Needs the admin token</td></tr>
     </table>
 
@@ -319,7 +331,7 @@
     <table>
       <tr><th>Endpoint</th><th>Purpose</th></tr>
       <tr><td><code>POST /hook/{source}</code></td><td>The front door. Each source is declared in config.yaml with its signature, templates and level map</td></tr>
-      <tr><td><code>GET /status</code> · <code>GET /trace/{id}</code></td><td>What this board reads / one alert's whole round trip, including the bytes of both directions</td></tr>
+      <tr><td><code>GET /status</code> · <code>GET /trace/{id}</code></td><td>What this board reads / one alert's whole journey, including the bytes of both directions — <code>{id}</code> is an event id, <code>hr-…</code>, a session key, a work id or a card's platform id</td></tr>
       <tr><td><code>POST /explain/{source}</code></td><td>Dry run: what this payload WOULD do — nothing recorded, nothing delivered, no brain called (admin)</td></tr>
       <tr><td><code>GET/PUT /config</code> · <code>POST /config/reload</code></td><td>Read, replace and hot-reload the config (admin)</td></tr>
       <tr><td><code>POST /silences</code> · <code>DELETE /silences/{id}</code></td><td>The silence valve (admin)</td></tr>
@@ -386,6 +398,7 @@
     });
   }
   var lastEventsSig = "", lastTimelineSig = "";
+  var journeyRef = "", lastJourneySig = "";   // the journey tab's state; see journeyLoad
 
   var uiLinks = {};   // door → the board that owns its sessions (HOOKRELAY_UI_LINKS)
   function render(data) {
@@ -397,6 +410,7 @@
       uiLinks = links;
       lastTimelineSig = "";
       if (document.querySelector('.tab[data-tab="timeline"]').classList.contains("active")) loadTimeline();
+      journeyRefresh();
     }
     document.getElementById("cQueued").textContent = data.queue.queued;
     document.getElementById("cSent").textContent = data.queue.sent;
@@ -467,7 +481,8 @@
           '<span class="kind ' + esc(kind) + '">' + esc(kind) + "</span>" +
           '<span class="etime">' + esc(fmtTime(e.received_at)) + "</span></div>" +
         '<div class="s">' + summaryLine(e) + "</div>" +
-        '<div class="m">#' + esc(e.id) + (e.level ? " · " + esc(e.level) : "") + (e.correlation_id ? " · ↩ " + esc(e.correlation_id) : "") + "</div>" +
+        '<div class="m">#' + esc(e.id) + (e.level ? " · " + esc(e.level) : "") + (e.correlation_id ? " · ↩ " + esc(e.correlation_id) : "") +
+          ' <button class="btn tiny" data-journey="' + esc(e.id) + '">journey</button></div>' +
       "</summary>" +
       '<div class="body">' +
         "<h4>decision</h4>" + stepsList(e.steps || []) +
@@ -616,6 +631,7 @@
       var which = tab.getAttribute("data-tab");
       document.getElementById("panel-events").style.display = which === "events" ? "" : "none";
       document.getElementById("panel-timeline").style.display = which === "timeline" ? "" : "none";
+      document.getElementById("panel-journey").style.display = which === "journey" ? "" : "none";
       document.getElementById("panel-config").style.display = which === "config" ? "" : "none";
       document.getElementById("panel-help").style.display = which === "help" ? "" : "none";
       if (which === "config") loadConfig();
@@ -631,6 +647,13 @@
   var wantedHop = (location.hash.match(/^#chain=(\d+)$/) || [])[1] || "";
   if (location.hash === "#timeline" || wantedHop) {
     document.querySelector('.tab[data-tab="timeline"]').click();
+  }
+  // `#journey=<handle>`: one alert's whole journey, from a link somebody sent
+  // or a card's console link. Any handle /trace resolves.
+  var wantedJourney = (location.hash.match(/^#journey=(.+)$/) || [])[1] || "";
+  if (wantedJourney) {
+    document.querySelector('.tab[data-tab="journey"]').click();
+    journeyLoad(decodeURIComponent(wantedJourney));
   }
 
   // ── timeline: /timeline rendered as chains, one per operation ──
@@ -706,7 +729,8 @@
           (c.cost_usd ? '<span class="badge routed">' + esc(money(c.cost_usd)) + "</span>" : "") +
           '<span class="etime">' + esc(fmtTime(c.started_at)) + "</span></div>" +
         '<div class="mini">' + mini + "</div>" + bars +
-        '<div class="m">chain ' + esc(c.chain) + " · " + hops.length + (hops.length === 1 ? " hop" : " hops") + "</div>" +
+        '<div class="m">chain ' + esc(c.chain) + " · " + hops.length + (hops.length === 1 ? " hop" : " hops") +
+          ' <button class="btn tiny" data-journey="' + esc(c.chain) + '">journey</button></div>' +
       "</summary>" +
       '<div class="chips" style="padding-top:8px"><button class="btn tiny" data-tl-audit="' + esc(c.chain) + '">audit record</button>' +
       '<a class="btn tiny" href="/audit/' + esc(c.chain) + '" target="_blank" rel="noopener">json</a></div>' +
@@ -744,6 +768,13 @@
       : "";
   }
   document.addEventListener("click", function (e) {
+    var j = e.target.closest("[data-journey]");
+    if (j) {
+      e.preventDefault();
+      document.querySelector('.tab[data-tab="journey"]').click();
+      journeyLoad(j.getAttribute("data-journey"));
+      return;
+    }
     var a = e.target.closest("[data-tl-audit]");
     if (a) {
       e.preventDefault();
@@ -770,6 +801,109 @@
       });
   });
   // ── end timeline ──
+
+  // ── journey: one alert from any handle it left behind, read top to bottom ──
+  // /trace/{ref} is resolved by the ledger (an id, its hr- correlation, a
+  // session key, a work id, a card's platform id) and drawn as one column:
+  // received, judged, delivered, pressed, reported, and what the condition did
+  // afterwards. Everything on it is the pipe's own account; a hop a node owns
+  // links to that node's console and the rest of the story is read there.
+  // (journeyRef / lastJourneySig are declared with the page's other state at
+  // the top: the deep link below calls journeyLoad before this block runs, and
+  // an initialiser here would reset the ref it had just set.)
+  function buttonsOn(sentBody) {
+    try { return ((JSON.parse(sentBody || "{}").card || {}).actions || []).map(function (a) { return String(a.text || ""); }); }
+    catch (_e) { return []; }
+  }
+  function journeyLoad(ref, quiet) {
+    ref = String(ref || "").trim();
+    if (!ref) return;
+    var box = document.getElementById("journey");
+    journeyRef = ref;
+    document.getElementById("jRef").value = ref;
+    if (location.hash !== "#journey=" + encodeURIComponent(ref)) history.replaceState(null, "", "#journey=" + encodeURIComponent(ref));
+    if (!quiet) { lastJourneySig = ""; box.innerHTML = '<div class="empty">loading…</div>'; }
+    fetch("/trace/" + encodeURIComponent(ref), { headers: readHeaders() })
+      .then(function (res) { return res.ok ? res.json() : { _status: res.status }; })
+      .then(function (trip) {
+        if (journeyRef !== ref) return;   // the reader asked for another one meanwhile
+        if (!trip || trip._status) {
+          lastJourneySig = "";
+          box.innerHTML = '<div class="empty">' + (trip && trip._status === 404 ? "nothing in this ledger answers to " + esc(ref) : "journey unavailable — read token required") + "</div>";
+          return;
+        }
+        var sig = JSON.stringify(trip) + "|" + JSON.stringify(uiLinks);
+        if (sig === lastJourneySig) return;   // nothing moved: leave the reader's page alone
+        lastJourneySig = sig;
+        box.innerHTML = journeyView(trip);
+      })
+      .catch(function () { if (!quiet) box.innerHTML = '<div class="empty">journey unavailable</div>'; });
+  }
+  function journeyRefresh() { if (journeyRef) journeyLoad(journeyRef, true); }
+
+  function journeyView(trip) {
+    var origin = trip.origin || {}, t0 = Number(origin.received_at || 0);
+    var rows = [], cost = 0, sessions = {}, works = {}, cards = [];
+    function decision(ev) {
+      if (ev.outcome === "routed") return "routed → " + esc((ev.channels || []).join(", ") || "nowhere");
+      return ev.outcome ? "skipped · " + esc(ev.skip_code || "?") : "no decision recorded";
+    }
+    function deliveries(ev) {
+      return (ev.deliveries || []).map(function (d) {
+        var asks = buttonsOn(d.sent_body);
+        if (d.platform_message_id) cards.push(d.platform_message_id);
+        return esc(d.channel) + " · " + esc(d.status) + (d.platform_message_id ? " · " + esc(d.platform_message_id) : "") +
+          (asks.length ? ' · <span class="hit">asked: ' + esc(asks.join(", ")) + "</span>" : "");
+      }).join("<br>");
+    }
+    function entry(at, who, what, details) {
+      var detail = details.filter(Boolean).join("<br>");
+      rows.push({ at: Number(at || t0), html: '<li><span class="g">' + esc(rel(t0, at)) + '</span><span><b>' + esc(who) + "</b> " + what +
+        (detail ? '<div class="r">' + detail + "</div>" : "") + "</span></li>" });
+    }
+    entry(t0, origin.source, "received <b>" + esc(origin.title || "(untitled)") + "</b>" + (origin.level ? ' <span class="badge">' + esc(origin.level) + "</span>" : ""),
+      [decision(origin), deliveries(origin)]);
+    (trip.returns || []).forEach(function (r) {
+      // A press is an event too (the forward rides the outbox), but it is told
+      // once, below, as what the person did — its forwarding is on that row.
+      if (r.source === "card-action") return;
+      var f = r.fields || {}, who = f.brain || r.source, sess = f.session || f.session_key || "";
+      if (f.cost_usd) cost += Number(f.cost_usd) || 0;
+      if (sess) sessions[sess] = r.source;
+      if (f.work_id) works[f.work_id] = 1;
+      var chips = ["wake", "verdict", "importance", "status", "probe_status", "kind"].filter(function (k) { return f[k] != null && f[k] !== ""; })
+        .map(function (k) { return esc(k) + "=" + esc(f[k]); });
+      if (f.cost_usd) chips.push(esc(money(f.cost_usd)));
+      var board = sess && uiLinks[r.source];
+      var open = board ? ' <a class="btn tiny" href="' + esc(board) + "#session=" + encodeURIComponent(sess) + '" target="_blank" rel="noopener">open ' + esc(sess) + "</a>" : "";
+      entry(r.received_at, who, esc(r.title || "(untitled)") + open,
+        [r.body ? esc(String(r.body).slice(0, 400)) : "", chips.join(" · "), decision(r), deliveries(r)]);
+    });
+    (trip.human_actions || []).forEach(function (h) {
+      entry(h.pressed_at, "a person", "pressed <b>" + esc(h.kind) + "</b>" + (h.actor ? " · " + esc(h.actor) : ""), [esc(h.outcome || "")]);
+    });
+    (trip.recoveries || []).forEach(function (e) { entry(e.received_at, origin.source, "the condition ended · recovery #" + esc(e.id), [decision(e)]); });
+    (trip.refires || []).forEach(function (e) {
+      entry(e.received_at, origin.source, "fired again · #" + esc(e.id) + (e.level ? ' <span class="badge">' + esc(e.level) + "</span>" : ""), [decision(e)]);
+    });
+    rows.sort(function (a, b) { return a.at - b.at; });
+    var last = rows.length ? rows[rows.length - 1].at : t0;
+    var ids = ["#" + origin.id, "hr-" + origin.id].concat(Object.keys(sessions), Object.keys(works), cards);
+    var consoles = Object.keys(sessions).map(function (s) {
+      var b = uiLinks[sessions[s]];
+      return b ? '<a class="btn tiny" href="' + esc(b) + "#session=" + encodeURIComponent(s) + '" target="_blank" rel="noopener">' + esc(s) + "</a>" : "";
+    }).filter(Boolean).join(" ");
+    return '<div class="card" style="margin-bottom:12px"><div style="font-weight:600;font-size:14px;overflow-wrap:anywhere">' + esc(origin.title || "(untitled)") + "</div>" +
+      '<div class="hint">' + esc(origin.source) + " · " + esc(fmtTime(t0)) + " · " + rows.length + (rows.length === 1 ? " entry" : " entries") + " · " + esc(rel(t0, last)) + " end to end" + (cost ? " · " + esc(money(cost)) : "") + "</div>" +
+      '<div class="eid" style="margin-top:6px;overflow-wrap:anywhere">' + ids.map(esc).join(" · ") + "</div></div>" +
+      '<ul class="steps">' + rows.map(function (r) { return r.html; }).join("") + "</ul>" +
+      '<div class="hint" style="margin-top:10px">What happened inside a node — the run, its proposals, whether the fix held — is that node\'s own account: ' +
+      (consoles || "no console is linked for these doors (HOOKRELAY_UI_LINKS)") +
+      ' · <a class="btn tiny" href="/audit/' + esc(origin.id) + '" target="_blank" rel="noopener">audit record</a></div>';
+  }
+  document.getElementById("jGo").addEventListener("click", function () { journeyLoad(document.getElementById("jRef").value); });
+  document.getElementById("jRef").addEventListener("keydown", function (e) { if (e.key === "Enter") journeyLoad(e.target.value); });
+  // ── end journey ──
 
   function readHeaders() {
     var headers = {};
@@ -1022,6 +1156,7 @@
     refresh();
     if (document.querySelector('.tab[data-tab="config"]').classList.contains("active")) loadConfig();
     if (document.querySelector('.tab[data-tab="timeline"]').classList.contains("active")) loadTimeline();
+    if (document.querySelector('.tab[data-tab="journey"]').classList.contains("active")) journeyRefresh();
   });
 })();
 </script>

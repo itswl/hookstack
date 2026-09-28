@@ -123,8 +123,9 @@ sources:
       #
       # `meta.correlation_id` and NOT `meta.event_id`, which is what the two
       # brains differ on and what makes this worth a line each. hookjudge echoes
-      # back the `hr-<id>` the pipe stamped on egress; hookprobe deliberately
-      # never sees that and returns the bare id it was handed. Guessing one form
+      # back the `hr-<id>` the pipe stamped on egress; hookprobe returns the bare
+      # id it was handed (and, since 2026-09-28, the hr- form as
+      # meta.correlation_id beside it). Guessing one form
       # for both shipped a template that resolved to empty and was dropped —
       # visible only as a card whose chain never formed.
       correlation_id: "{meta.correlation_id}"
@@ -167,7 +168,7 @@ sources:
       # What closes the round trip: the pipeline adopts `fields.correlation_id`
       # as this event's correlation, so the report lands in the chain of the
       # alert that caused it instead of standing alone. `meta.event_id` because
-      # hookprobe deliberately never sees the pipe's correlation id and echoes
+      # hookprobe keeps the pipe's correlation id apart (meta.correlation_id) and echoes
       # back the id it was handed — see _resolve_run in hookprobe/events.py.
       # Which piece of work this report belongs to, as the node stated it
       # (hookprobe/work.py). Copied, never computed: it is what lets a plan on

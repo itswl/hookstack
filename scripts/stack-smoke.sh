@@ -336,6 +336,29 @@ print("procedure held: the condition ended after it ran, approved by the actor o
 PY
 
 # ---------------------------------------------------------------------------
+# One page for the whole journey. The checks above read three services to
+# follow one alert; the pipe's /trace answers to the investigator's session
+# key — a handle the pipe never minted — and already holds the report, the
+# press and the recovery. And the ledger's copy of every card is asked for the
+# one thing it must not keep: a live button token.
+# ---------------------------------------------------------------------------
+step "the journey answers to the session key and ends with the recovery"
+JOURNEY="$(curl -sf --max-time 10 "$RELAY/trace/$session")" DISK_ID="$disk_id" SESSION="$session" python3 - <<'PY' || fail "the pipe cannot tell one alert's journey from its session key"
+import json, os, re
+trip = json.loads(os.environ["JOURNEY"])
+assert trip["origin"]["id"] == int(os.environ["DISK_ID"]), (trip["origin"]["id"], os.environ["DISK_ID"])
+sessions = {str((r.get("fields") or {}).get("session") or "") for r in trip["returns"]}
+assert os.environ["SESSION"] in sessions, sessions
+assert any(a["kind"] == "approve" for a in trip["human_actions"]), trip["human_actions"]
+assert trip["recoveries"], "the recovery the checks above relied on is not on the journey"
+bodies = "\n".join(str(d.get("sent_body") or "") for r in [trip["origin"], *trip["returns"]] for d in r.get("deliveries") or [])
+assert "hookrelay_action" in bodies, "no card on this journey carried a button at all"
+assert not re.search(r"[A-Za-z0-9_-]{32,}\.[0-9a-f]{64}", bodies), "a live action token on the ledger"
+print(f"journey: origin #{trip['origin']['id']}, {len(trip['returns'])} return(s), {len(trip['human_actions'])} press(es), "
+      f"{len(trip['recoveries'])} recovery, buttons on file with their tokens redacted")
+PY
+
+# ---------------------------------------------------------------------------
 # A person's ruling on a VERDICT, read back from the judge's ledger. On the
 # retired production deployment seven such presses were recorded by the pipe
 # as forwarded and never reached a judgement row; the pipe's "forwarded" is

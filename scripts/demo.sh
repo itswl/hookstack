@@ -203,6 +203,7 @@ for hop in rec.get("hops") or []:
 for a in rec.get("human_actions") or []:
     print(f"  press: {a.get('kind')} by {a.get('actor') or '?'} → {a.get('outcome')}")
 print(f"the page: {os.environ['RELAY_URL']}/audit/{rec.get('operation')}")
+print(f"the journey, top to bottom: {os.environ['RELAY_URL']}/#journey={rec.get('operation')}")
 PY
 
 printf '\nThis was a rehearsal: no model was called, and nothing ran except the two observations a person approved.\n'
