@@ -83,9 +83,9 @@ MIT 协议。带截图的叙述性总览：[OVERVIEW.md](https://github.com/itsw
   （签名的门）            └──► hookprobe :8088 （它说要查才查）
 ```
 
-![hookrelay 的账本](../img/hookrelay-ledger.png)
+![hookrelay 的账本：每个事件的决策链、投递和回流](../img/hookrelay-ledger.png)
 
-![hookrelay 的时间线：每条告警一条链 —— 信号、判定、报告 —— 带成本，一个事件归组，一份审计记录打开](../img/hookrelay-timeline.png)
+![hookrelay 的看板：每条告警一张卡，固定七个阶段 —— 收到、判定、通知、调查、人、条件、修复 —— 一个修复已生效，一张卡在等你按，一条已裁定](../img/hookrelay-timeline.png)
 
 ![hookjudge 的状态页](../img/hookjudge-status.png)
 

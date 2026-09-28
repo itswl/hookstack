@@ -6,8 +6,9 @@
 <title>hookrelay</title>
 <style>
   /* One file, no build, no CDN. Dark-first; colour is EARNED by state —
-     a healthy board reads quiet. */
-  /* ── hookstack design tokens · keep this block identical in all three pages ── */
+     a healthy board reads quiet. Rebuilt 2026-09-28 around the one thing an
+     operator opens it for: what became of each alert, and what needs them. */
+/* ── hookstack design tokens · keep this block identical in all three pages ── */
   :root {
     --bg: #0b0e14; --surface: #11151d; --border: #1f2530; --border-soft: #171c26;
     --text: #d7dde6; --muted: #8b94a3; --accent: #4c8dff;
@@ -27,7 +28,7 @@
   .rc .live.on { color: var(--ok); border-color: var(--ok); }
   .rc .live.off { color: var(--warn); border-color: var(--warn); }
   /* ── end design tokens ────────────────────────────────────────────────────── */
-  /* ── hookstack tab shell · keep this block identical in all three pages ── */
+/* ── hookstack tab shell · keep this block identical in all three pages ── */
   .tabs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
   .tab { background: none; border: 0; color: var(--muted); padding: 8px 12px; cursor: pointer; font: inherit;
          font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
@@ -40,110 +41,140 @@
   /* ── end tab shell ──────────────────────────────────────────────────────── */
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: var(--ui); }
-  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 60px; }
-  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .02em; }
   header .sub { color: var(--muted); font-size: 12px; }
   header .stamp { margin-left: auto; color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  .wrap .tabs { margin-bottom: 18px; }
+  h2 { font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin: 26px 0 10px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+  .btn { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; text-decoration: none; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.tiny { padding: 1px 8px; font-size: 11px; border-radius: 6px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+  .row input, .row select, .bar input, .bar select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 7px 10px; font: inherit; }
+  .row input { font-family: var(--mono); }
+  .msg { font-size: 12.5px; font-family: var(--mono); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+         display: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.show { display: block; }
+  .msg.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .msg.err { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
-  .card .label { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
-  .card .value { font-size: 26px; font-weight: 650; font-family: var(--mono); }
-  .card.dead-alarm { border-left: 3px solid var(--bad); }
-  .card.dead-alarm .value { color: var(--bad); }
+  /* ── the numbers that decide whether to read further ── */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .stat .label { color: var(--muted); font-size: 12px; }
+  .stat .value { font-size: 28px; font-weight: 650; font-family: var(--mono); margin-top: 2px; line-height: 1.2; }
+  .stat .sub { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+  .stat.warn { border-color: color-mix(in srgb, var(--warn) 55%, transparent); } .stat.warn .value { color: var(--warn); }
+  .stat.bad { border-color: color-mix(in srgb, var(--bad) 55%, transparent); } .stat.bad .value { color: var(--bad); }
+  .stat.info .value { color: var(--accent); }
+  .stat.ok .value { color: var(--ok); }
 
-  h2 { font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .06em;
-       text-transform: uppercase; margin: 26px 0 10px; }
-  .silence { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--warn);
-             border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 13px; }
-  .silence .note { color: var(--muted); }
+  /* ── filters: a row of chips and a search, nothing else ── */
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 14px; }
+  .bar input { flex: 1 1 200px; }
+  .chip-btn { background: var(--surface); border: 1px solid var(--border); color: var(--muted); border-radius: 999px;
+              padding: 4px 12px; cursor: pointer; font: inherit; font-size: 12.5px; }
+  .chip-btn:hover { color: var(--text); }
+  .chip-btn.on { color: var(--text); border-color: var(--accent); }
+  .chip-btn .n { font-family: var(--mono); font-size: 11px; margin-left: 4px; color: var(--muted); }
 
-  .event { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-           margin-bottom: 10px; overflow: hidden; }
-  .event summary { list-style: none; cursor: pointer; padding: 10px 14px;
-                   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  /* ── an operation: one alert's whole story as one card ── */
+  .op { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; overflow: hidden; }
+  .op summary { list-style: none; cursor: pointer; padding: 14px 18px 12px; }
+  .op summary::-webkit-details-marker { display: none; }
+  .op[open] summary { border-bottom: 1px solid var(--border-soft); }
+  .op .head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .op .title { font-size: 15px; font-weight: 600; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .op .when { color: var(--muted); font-size: 12px; font-family: var(--mono); white-space: nowrap; }
+  .pill { font-size: 11.5px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted);
+          white-space: nowrap; flex: 0 0 auto; }
+  .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+  .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, transparent); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+  .pill.info { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .op .now { margin-top: 10px; font-size: 13.5px; overflow-wrap: anywhere; }
+  .op .now .m { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+  .incident { font-size: 12px; color: var(--warn); margin-top: 6px; }
+
+  /* ── the stage strip: seven fixed stages, a dot and a word each, the wait on the line between ── */
+  .stages { display: flex; align-items: flex-start; margin: 14px 0 0; overflow-x: auto; padding-top: 10px; }
+  .stage { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; width: 96px; }
+  .stage .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); background: var(--bg); }
+  .stage.done .dot { background: var(--accent); border-color: var(--accent); }
+  .stage.ok .dot { background: var(--ok); border-color: var(--ok); }
+  .stage.warn .dot { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 25%, transparent); }
+  .stage.bad .dot { background: var(--bad); border-color: var(--bad); }
+  .stage .name { font-size: 10.5px; color: var(--muted); margin-top: 7px; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+  .stage.done .name, .stage.ok .name, .stage.warn .name, .stage.bad .name { color: var(--text); }
+  .stage .brief { font-size: 11.5px; color: var(--muted); margin-top: 2px; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+  .stage.ok .brief { color: var(--ok); } .stage.warn .brief { color: var(--warn); } .stage.bad .brief { color: var(--bad); }
+  .link { flex: 1 1 20px; min-width: 14px; height: 2px; background: var(--border); margin-top: 5px; position: relative; }
+  .link.done { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .link .wait { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); font-family: var(--mono); font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+  /* ── the stepper: the same seven stages, top to bottom, with everything each one said ── */
+  .jhead { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; margin-bottom: 12px; }
+  .jhead .title { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .jhead .ids { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 8px; overflow-wrap: anywhere; }
+  .jhead .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .stepper { padding: 8px 18px 14px; }
+  .step { display: grid; grid-template-columns: 24px 1fr; gap: 0 14px; }
+  .step .rail { display: flex; flex-direction: column; align-items: center; }
+  .step .rail .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); background: var(--bg); margin-top: 15px; flex: 0 0 auto; }
+  .step .rail .line { flex: 1 1 auto; width: 2px; background: var(--border-soft); margin-top: 4px; }
+  .step:last-child .rail .line { display: none; }
+  .step.done .rail .dot { background: var(--accent); border-color: var(--accent); }
+  .step.ok .rail .dot { background: var(--ok); border-color: var(--ok); }
+  .step.warn .rail .dot { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 25%, transparent); }
+  .step.bad .rail .dot { background: var(--bad); border-color: var(--bad); }
+  .step .body { padding: 10px 0 16px; min-width: 0; }
+  .step .top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .step .sname { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); width: 112px; flex: 0 0 auto; }
+  .step.done .sname, .step.ok .sname, .step.warn .sname, .step.bad .sname { color: var(--text); font-weight: 600; }
+  .step .swhen { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .step .said { font-size: 13.5px; margin-top: 4px; overflow-wrap: anywhere; }
+  .step .said.dim { color: var(--muted); }
+  .step.ok .said b { color: var(--ok); } .step.bad .said b { color: var(--bad); } .step.warn .said b { color: var(--warn); }
+  .step .fine { margin-top: 6px; font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+  .step .fine b { color: var(--text); font-weight: 500; }
+  .step .fine a.btn { margin-left: 4px; }
+
+  /* ── quiet rows: folded, compact ── */
+  .fold summary { cursor: pointer; color: var(--muted); font-size: 12.5px; padding: 8px 0; list-style: none; }
+  .fold summary::-webkit-details-marker { display: none; }
+  .qrow { display: grid; grid-template-columns: 112px 110px 1fr auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--border-soft); font-size: 12.5px; color: var(--muted); }
+  .qrow .t { font-family: var(--mono); font-size: 11.5px; }
+  .qrow .title { color: var(--text); overflow-wrap: anywhere; }
+
+  /* ── the ledger: every event, its decision chain and its deliveries (the forensic view) ── */
+  .event { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+  .event summary { list-style: none; cursor: pointer; padding: 10px 14px; }
   .event summary::-webkit-details-marker { display: none; }
+  .event[open] summary { border-bottom: 1px solid var(--border-soft); }
   .wire summary { cursor: pointer; color: #8b95a7; font-size: 12px; margin-top: 6px; }
   .wire[open] summary { color: #aeb7c4; }
-  .event[open] summary { border-bottom: 1px solid var(--border-soft); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
   .dot.high, .dot.critical { background: var(--bad); }
   .dot.warning, .dot.medium { background: var(--warn); }
   .dot.info, .dot.low { background: var(--accent); }
+  .dot.none { visibility: hidden; }
   .eid { font-family: var(--mono); color: var(--muted); font-size: 12px; }
   .etitle { font-weight: 600; overflow-wrap: anywhere; }
-  .esrc { color: var(--muted); font-size: 12px; }
-  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
-           color: var(--muted); font-family: var(--mono); }
-  .badge.routed { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-  .badge.skipped { color: var(--muted); }
   .etime { margin-left: auto; color: var(--muted); font-size: 12px; font-family: var(--mono); }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 14px 10px; }
-  .hops { padding: 0 14px 10px; }
-  .hop { display: grid; grid-template-columns: 112px 48px 112px 1fr 64px auto; gap: 10px; align-items: center;
-         padding: 6px 0; border-top: 1px solid var(--border-soft); font-size: 13px; }
-  .hop .hopto { overflow-wrap: anywhere; color: var(--muted); }
-  .hop .hopacts { display: flex; gap: 4px; justify-content: flex-end; white-space: nowrap; }
-  .chip { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 6px;
-          border: 1px solid var(--border); color: var(--muted); }
-  .chip.sent { color: var(--ok); }
-  .chip.dead { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-  .chip.queued { color: var(--warn); }
-  .compare { padding: 10px 14px 14px; border-top: 1px solid var(--border-soft); }
-  .compare h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600;
-                letter-spacing: .05em; text-transform: uppercase; }
-  .brains { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
-  .brain { background: #0a0d13; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
-  .brain .who { font-weight: 650; margin-bottom: 4px; }
-  .brain .lat { float: right; color: var(--muted); font-family: var(--mono); font-size: 11px; }
-  .brain .verdict { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-  .brain .kv { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
-  .trace { margin: 0; padding: 12px 14px; background: #0a0d13; color: #aeb7c4;
-           font-family: var(--mono); font-size: 12px; overflow-x: auto; }
-  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
-
-  .wrap .tabs { margin-bottom: 18px; }
-  .hp { max-width: 880px; font-size: 13.5px; line-height: 1.65; }
-  .hp h2 { margin-top: 22px; }
-  .hp table { border-collapse: collapse; width: 100%; margin: 8px 0; }
-  .hp th, .hp td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 12.5px; vertical-align: top; }
-  .hp th { color: var(--muted); background: var(--panel); font-weight: 600; }
-  .hp code { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; }
-  .hp pre { background: #0a0d13; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
-  .hp .muted { color: var(--muted); }
-  .btn { background: var(--surface); border: 1px solid var(--border); color: var(--text);
-         border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn.tiny { padding: 1px 8px; font-size: 11px; border-radius: 6px; }
-  .editor { width: 100%; min-height: 380px; background: #0a0d13; color: #d7dde6;
-            border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
-            font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
-  .row input { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-               color: var(--text); padding: 7px 10px; font-family: var(--mono); }
-  .msg { font-size: 12.5px; font-family: var(--mono); padding: 8px 12px; border-radius: 8px;
-         border: 1px solid var(--border); display: none; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .msg.show { display: block; }
-  .msg.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-  .msg.err { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-  .hint { color: var(--muted); font-size: 12px; }
-
-  /* ── rows: headline, one line of prose, one line of machine text ── */
   .ev summary { padding: 11px 14px; display: block; }
   .ev .h { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .ev .h .etitle { flex: 1 1 auto; font-size: 14px; }
-  .ev .h .etime { margin-left: 8px; }
   .ev .s { color: var(--muted); font-size: 12.5px; margin-top: 3px; padding-left: 16px; overflow-wrap: anywhere; }
   .ev .s b { color: var(--text); font-weight: 500; }
   .ev .m { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-top: 3px; padding-left: 16px; }
   .ev.quiet { background: transparent; border-color: var(--border-soft); }
   .ev.quiet .etitle { color: var(--muted); font-weight: 500; }
-  .ev.quiet summary { padding: 7px 14px; }
-  .ev .dot { width: 8px; height: 8px; }
-  .ev .dot.none { visibility: hidden; }
-  .kind { font-size: 10.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border);
-          color: var(--muted); font-family: var(--mono); letter-spacing: .02em; flex: 0 0 auto; }
+  .kind { font-size: 10.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); font-family: var(--mono); letter-spacing: .02em; flex: 0 0 auto; }
   .kind.task, .kind.investigation, .kind.plan, .kind.work { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   .kind.absence, .kind.alarm { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
   .body { padding: 10px 14px 12px; border-top: 1px solid var(--border-soft); }
@@ -155,25 +186,34 @@
   .steps .g { font-family: var(--mono); color: var(--muted); font-size: 11px; width: 64px; flex: 0 0 auto; }
   .steps .ok { color: var(--ok); } .steps .no { color: var(--muted); } .steps .hit { color: var(--text); }
   .steps .r { color: var(--muted); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 14px 10px; }
+  .chip { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted); }
+  .chip.sent { color: var(--ok); }
+  .chip.dead { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .chip.queued { color: var(--warn); }
+  .compare { padding: 10px 14px 14px; border-top: 1px solid var(--border-soft); }
   .rt { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
-  .rt .card { padding: 10px 12px; }
+  .rt .card { background: #0a0d13; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
   .rt .who { font-weight: 600; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
   .rt .who .eid { margin-left: auto; }
   .rt .v { color: var(--muted); font-size: 12.5px; margin-top: 4px; overflow-wrap: anywhere; }
   .raw summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 8px; }
-  /* ── timeline: an operation is a headline and a line of hops ── */
-  .mini { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; padding-left: 16px; margin-top: 4px; font-size: 12px; }
-  /* the chain's hops as a bar: each segment is the wait before that hop, sized to the chain */
-  .tl-bars { display: flex; height: 4px; margin: 5px 0 0 16px; border-radius: 2px; overflow: hidden; background: rgba(255,255,255,.05); }
-  .tl-seg { height: 100%; background: var(--accent); opacity: .7; }
-  .tl-seg:nth-child(even) { background: var(--warn); }
-  .mini .seg { font-family: var(--mono); color: var(--muted); }
-  .mini .seg b { color: var(--text); font-weight: 500; }
-  .mini .arrow { color: var(--muted); opacity: .7; }
-  .mini .cost { color: var(--ok); font-family: var(--mono); }
-  .ops-bar { display: flex; align-items: center; gap: 14px; margin: -6px 0 12px; }
-  .ops-bar label { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
-  .hop .rel { font-family: var(--mono); color: var(--muted); font-size: 11px; }
+  .trace { margin: 0; padding: 12px 14px; background: #0a0d13; color: #aeb7c4; font-family: var(--mono); font-size: 12px; overflow-x: auto; }
+  .editor { width: 100%; min-height: 380px; background: #0a0d13; color: #d7dde6; border: 1px solid var(--border); border-radius: 10px;
+            padding: 12px 14px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; }
+  .silence { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 8px;
+             padding: 8px 12px; margin-bottom: 8px; font-size: 13px; }
+  .silence .note { color: var(--muted); }
+
+  /* ── help ── */
+  .hp { max-width: 880px; font-size: 13.5px; line-height: 1.65; }
+  .hp h2 { margin-top: 22px; }
+  .hp table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  .hp th, .hp td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 12.5px; vertical-align: top; }
+  .hp th { color: var(--muted); background: var(--surface); font-weight: 600; }
+  .hp code { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; }
+  .hp pre { background: #0a0d13; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+  .hp .muted { color: var(--muted); }
 
   /* ── hookstack token bar · keep this block identical in all three pages ── */
   /* One field per credential the BROWSER sends. Service-to-service secrets
@@ -186,11 +226,12 @@
   .tokenbar button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
                      padding: 8px 16px; cursor: pointer; }
   /* ── end token bar ──────────────────────────────────────────────────────── */
-  /* Minimal responsive pass (page-specific, additive; desktop untouched). */
   @media (max-width: 640px) {
     body { font-size: 14px; }
     header { flex-wrap: wrap; row-gap: 8px; }
     pre { overflow-x: auto; }
+    .stage { width: 78px; }
+    .qrow { grid-template-columns: 90px 1fr auto; } .qrow .src { display: none; }
   }
 </style>
 </head>
@@ -200,7 +241,7 @@
     <h1>hookrelay</h1>
     <span class="sub">every message accounted for, every delivery with an outcome</span>
     <span class="stamp" id="stamp">loading…</span>
-  <span class="rc">
+<span class="rc">
     <button id="rNow" title="refresh now">&#8635;</button>
     <span id="rLive" class="live" title="live connection">live</span>
   </span>
@@ -212,48 +253,29 @@
   </div>
 
   <div class="tabs">
-    <button class="tab active" data-tab="events">events</button>
-    <button class="tab" data-tab="timeline">timeline</button>
+    <button class="tab active" data-tab="now">now</button>
     <button class="tab" data-tab="journey">journey</button>
+    <button class="tab" data-tab="ledger">ledger</button>
     <button class="tab" data-tab="config">config</button>
     <button class="tab" data-tab="help">help</button>
   </div>
 
-  <div id="panel-events">
-  <div class="cards">
-    <div class="card"><div class="label">queued</div><div class="value" id="cQueued">–</div></div>
-    <div class="card"><div class="label">delivered</div><div class="value" id="cSent">–</div></div>
-    <div class="card" id="deadCard"><div class="label">dead letters</div><div class="value" id="cDead">–</div></div>
-  </div>
-
-  <div id="silences"></div>
-
-  <h2>Recent events · open one for its decision chain</h2>
-  <div class="row">
-    <input id="fSearch" placeholder="search title / body" style="flex:1">
-    <input id="fSource" placeholder="source" style="width:130px">
-    <select id="fOutcome" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;">
-      <option value="">any outcome</option>
-      <option value="routed">routed</option>
-      <option value="skipped">skipped</option>
-    </select>
-    <button class="btn" id="fApply">search</button>
-    <button class="btn" id="fClear">clear</button>
-  </div>
-  <div id="events"><div class="empty">…</div></div>
-  <div class="row"><button class="btn" id="loadMore" style="display:none">load earlier</button></div>
-  </div><!-- /panel-events -->
-
-  <div id="panel-timeline" style="display:none">
-    <h2>Operations · one chain per operation, every hop it paid for</h2>
-    <div class="hint" style="margin:-6px 0 8px">A chain is everything that quoted one origin's id: the signal, the verdict or plan that came back, the click, the work, the result.</div>
-    <div class="ops-bar">
-      <label><input type="checkbox" id="opsOnly" checked> operations only — chains with more than one hop, a cost, or a human action</label>
-      <span class="hint" id="opsCount"></span>
-    </div>
+  <div id="panel-now">
+    <div class="stats" id="stats"></div>
+    <div id="silences"></div>
     <div id="incidents"></div>
-    <div id="chains"><div class="empty">…</div></div>
-  </div><!-- /panel-timeline -->
+    <div class="bar" id="nowBar">
+      <button class="chip-btn on" data-filter="all">all <span class="n" id="nAll"></span></button>
+      <button class="chip-btn" data-filter="warn">needs you <span class="n" id="nWarn"></span></button>
+      <button class="chip-btn" data-filter="info">in flight <span class="n" id="nInfo"></span></button>
+      <button class="chip-btn" data-filter="ok">ended well <span class="n" id="nOk"></span></button>
+      <button class="chip-btn" data-filter="bad">went wrong <span class="n" id="nBad"></span></button>
+      <input id="nowSearch" placeholder="search titles">
+      <select id="nowSource"><option value="">every door</option></select>
+    </div>
+    <div id="ops"><div class="empty">…</div></div>
+    <div id="quiet"></div>
+  </div><!-- /panel-now -->
 
   <div id="panel-journey" style="display:none">
     <h2>One alert's journey · everything this ledger holds about it, in order</h2>
@@ -262,8 +284,25 @@
       <input id="jRef" placeholder="event id · hr-123 · probe:inbound:123 · work id · om_… (a card)" style="flex:1">
       <button class="btn primary" id="jGo">show</button>
     </div>
-    <div id="journey"><div class="empty">enter a handle, or press “journey” on a chain in the timeline or on an event</div></div>
+    <div id="journey"><div class="empty">enter a handle, or open any card on the now tab</div></div>
   </div><!-- /panel-journey -->
+
+  <div id="panel-ledger" style="display:none">
+    <h2>Every event · its decision chain and its deliveries</h2>
+    <div class="row">
+      <input id="fSearch" placeholder="search title / body" style="flex:1">
+      <input id="fSource" placeholder="source" style="width:130px">
+      <select id="fOutcome">
+        <option value="">any outcome</option>
+        <option value="routed">routed</option>
+        <option value="skipped">skipped</option>
+      </select>
+      <button class="btn" id="fApply">search</button>
+      <button class="btn" id="fClear">clear</button>
+    </div>
+    <div id="events"><div class="empty">…</div></div>
+    <div class="row"><button class="btn" id="loadMore" style="display:none">load earlier</button></div>
+  </div><!-- /panel-ledger -->
 
   <div id="panel-config" style="display:none">
     <div class="row">
@@ -319,10 +358,11 @@
     <h2>Reading this board</h2>
     <table>
       <tr><th>Area</th><th>How to read it</th></tr>
-      <tr><td>The three cards</td><td>Queued = waiting to be delivered. Dead letters &gt; 0 deserves a human — with <code>HOOKRELAY_ALARM_URL</code> set it alarms on its own</td></tr>
-      <tr><td>An event row</td><td>Open it for the full decision chain: which routes were considered, why each matched or was skipped, where it was delivered. The round-trip button pulls <code>/trace</code>: the payload as received, the exact body sent per channel, and what each brain sent back</td></tr>
+      <tr><td>The now tab</td><td>One card per operation — an alert and everything that quoted it — newest first, each drawn as the same seven stages: <b>received · judged · notified · investigated · a person · condition · fix</b>. A filled dot is a stage that happened, the wait between two stages sits on the line, and the colour is earned: amber is a card that asked somebody something and got no press, green is a condition that ended or a fix that held, red is a fix that did not hold or a dead letter. The pill and the line under the dots say what the alert needs now. Open a card for the whole story</td></tr>
+      <tr><td>The four numbers</td><td><b>waiting on you</b> counts cards with a button nobody pressed; <b>in flight</b> counts alerts handed to a node with nothing back yet; <b>dead letters</b> deserve a human (with <code>HOOKRELAY_ALARM_URL</code> set they alarm on their own); <b>ended well</b> is the last day's conditions that ended or fixes that held</td></tr>
+      <tr><td>The journey tab</td><td>The same seven stages for one alert, from any handle it left behind — its id, the <code>hr-</code> correlation a brain quoted, a session key, a work id, or the platform id of a card — with everything each stage said. Resolved from this ledger alone; a hop a node owns links to that node's console (<code>HOOKRELAY_UI_LINKS</code>)</td></tr>
+      <tr><td>The ledger tab</td><td>Every event as the pipe recorded it: the decision chain gate by gate, where it was delivered, and on opening a row the round trip — the payload as received, the exact body sent per channel, what each brain sent back. The forensic view; the now tab is the reading view</td></tr>
       <tr><td>The refresh control</td><td>This page keeps no clock. It holds one streaming connection to <code>/live</code> and refetches what you are currently looking at when the service says something changed — so an alert storm is one refetch, not a tick per event. ↻ refetches on demand, the badge beside it reads <b>live</b> or <b>offline</b> (a dropped stream reconnects on its own, backing off), and the stamp top-right says when the data is from</td></tr>
-      <tr><td>The journey tab</td><td>One alert from any handle it left behind — its id, the <code>hr-</code> correlation a brain quoted, a session key, a work id, or the platform id of a card — read top to bottom: received, judged, delivered (with what each card asked), pressed, reported, and what the condition did afterwards. Resolved from this ledger alone; every hop that a node owns links to that node's console (<code>HOOKRELAY_UI_LINKS</code>)</td></tr>
       <tr><td>The config tab</td><td>An editor for config.yaml (the file is the source of truth): it only writes when validation passes, and applies hot — no restart. Needs the admin token</td></tr>
     </table>
 
@@ -331,12 +371,13 @@
     <table>
       <tr><th>Endpoint</th><th>Purpose</th></tr>
       <tr><td><code>POST /hook/{source}</code></td><td>The front door. Each source is declared in config.yaml with its signature, templates and level map</td></tr>
-      <tr><td><code>GET /status</code> · <code>GET /trace/{id}</code></td><td>What this board reads / one alert's whole journey, including the bytes of both directions — <code>{id}</code> is an event id, <code>hr-…</code>, a session key, a work id or a card's platform id</td></tr>
+      <tr><td><code>GET /status</code> · <code>GET /timeline</code></td><td>What the ledger and now tabs read: recent events with their decisions and deliveries; the same events gathered into chains</td></tr>
+      <tr><td><code>GET /trace/{id}</code> · <code>GET /audit/{id}</code></td><td>One alert's whole journey, bytes included — <code>{id}</code> is an event id, <code>hr-…</code>, a session key, a work id or a card's platform id; and the same operation as an accountability record with digests instead of bytes</td></tr>
       <tr><td><code>POST /explain/{source}</code></td><td>Dry run: what this payload WOULD do — nothing recorded, nothing delivered, no brain called (admin)</td></tr>
       <tr><td><code>GET/PUT /config</code> · <code>POST /config/reload</code></td><td>Read, replace and hot-reload the config (admin)</td></tr>
       <tr><td><code>POST /silences</code> · <code>DELETE /silences/{id}</code></td><td>The silence valve (admin)</td></tr>
       <tr><td><code>POST /deliveries/{id}/retry</code></td><td>A dead letter's second chance (admin)</td></tr>
-      <tr><td><code>GET /metrics</code></td><td>Prometheus text: events, deliveries, outbox depth, fuse state (read token)</td></tr>
+      <tr><td><code>GET /unseen</code> · <code>GET /metrics</code></td><td>Cards nobody has opened, asked of the bridge on demand; Prometheus text: events, deliveries, outbox depth, fuse state (read token)</td></tr>
     </table>
 
     <h2>The config that matters (config.yaml)</h2>
@@ -362,92 +403,101 @@
 (function () {
   "use strict";
   var TOKEN_KEY = "hookrelay-read-token";
+  var ADMIN_KEY = "hookrelay-admin-token";
 
+  // ── small helpers ──
   function esc(v) {
     return String(v == null ? "" : v)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
+  function p2(n) { return n < 10 ? "0" + n : String(n); }
   function fmtTime(ts) {
     var d = new Date(ts * 1000);
-    function p(n) { return n < 10 ? "0" + n : String(n); }
-    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+    return p2(d.getMonth() + 1) + "-" + p2(d.getDate()) + " " + p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" + p2(d.getSeconds());
+  }
+  function clock(ts) {
+    var d = new Date(ts * 1000), now = new Date();
+    var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    return sameDay ? fmtTime(ts).slice(6, 11) : fmtTime(ts).slice(0, 11);
+  }
+  function rel(t0, t) {
+    var d = Math.round(Number(t) - Number(t0));
+    if (d < 60) return "+" + d + "s";
+    if (d < 3600) return "+" + Math.floor(d / 60) + "m" + (d % 60 ? (d % 60) + "s" : "");
+    return "+" + Math.floor(d / 3600) + "h" + (Math.round((d % 3600) / 60) ? Math.round((d % 3600) / 60) + "m" : "");
+  }
+  function ago(ts) {
+    var d = Math.max(0, Math.round(Date.now() / 1000 - Number(ts)));
+    if (d < 60) return d + "s ago";
+    if (d < 3600) return Math.floor(d / 60) + "m ago";
+    if (d < 86400) return Math.floor(d / 3600) + "h ago";
+    return Math.floor(d / 86400) + "d ago";
+  }
+  function money(v) { return v == null ? "" : "$" + Number(v).toFixed(v >= 1 ? 2 : 4).replace(/\.?0+$/, ""); }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+  function readHeaders() {
+    var headers = {};
+    var token = localStorage.getItem(TOKEN_KEY);
+    if (token) headers["X-Read-Token"] = token;
+    return headers;
+  }
+  function adminHeaders() {
+    var token = localStorage.getItem(ADMIN_KEY) || "";
+    return token ? { "X-Admin-Token": token } : {};
+  }
+  function showMsg(id, ok, text) {
+    var el = document.getElementById(id);
+    el.className = "msg show " + (ok ? "ok" : "err");
+    el.textContent = text;
+  }
+  function stamp(text) { document.getElementById("stamp").textContent = text; }
+  // One reader for every read endpoint: a 401 reveals the token bar once,
+  // instead of each panel inventing its own way of saying "token required".
+  function readJSON(url) {
+    return fetch(url, { headers: readHeaders() }).then(function (res) {
+      if (res.status === 401) { tokenReveal(true); stamp("read token required"); return null; }
+      if (!res.ok) return null;
+      tokenReveal(false);
+      return res.json();
+    }).catch(function () { stamp("connection failed, retrying…"); return null; });
+  }
+  function prettyBody(s) {
+    try { return JSON.stringify(JSON.parse(s), null, 2); } catch (_e) { return s; }
+  }
+  function buttonsOn(sentBody) {
+    try { return ((JSON.parse(sentBody || "{}").card || {}).actions || []).map(function (a) { return String(a.text || ""); }); }
+    catch (_e) { return []; }
   }
 
-  // A repaint must not close what the reader opened. Both lists are rebuilt
-  // from scratch on every change (simple, and correct for the data), which
-  // used to throw away every open <details> and every expanded round trip —
-  // so the board looked like it "kept refreshing" whenever anything moved.
-  // Remember by key, repaint, restore; and skip the repaint entirely when the
-  // data is byte-identical, which is most visibility/reconnect refreshes.
+  // A repaint must not close what the reader opened: remember open rows by
+  // key, repaint, restore — and skip the repaint when nothing moved.
   function rememberOpen(container) {
-    var open = {}, traces = {};
+    var open = {}, loaded = {};
     container.querySelectorAll("details[data-key][open]").forEach(function (d) { open[d.getAttribute("data-key")] = true; });
-    container.querySelectorAll(".compare").forEach(function (b) {
-      if (b.style.display !== "none" && b.innerHTML) traces[b.id] = b.innerHTML;
-    });
-    return { open: open, traces: traces };
+    container.querySelectorAll("[data-loaded]").forEach(function (b) { loaded[b.id] = b.innerHTML; });
+    return { open: open, loaded: loaded };
   }
   function restoreOpen(container, saved) {
     container.querySelectorAll("details[data-key]").forEach(function (d) {
       if (saved.open[d.getAttribute("data-key")]) d.open = true;
     });
-    Object.keys(saved.traces).forEach(function (id) {
+    Object.keys(saved.loaded).forEach(function (id) {
       var b = document.getElementById(id);
-      if (b) { b.style.display = "block"; b.innerHTML = saved.traces[id]; }
+      if (b) { b.setAttribute("data-loaded", "1"); b.innerHTML = saved.loaded[id]; }
     });
   }
-  var lastEventsSig = "", lastTimelineSig = "";
-  var journeyRef = "", lastJourneySig = "";   // the journey tab's state; see journeyLoad
 
-  var uiLinks = {};   // door → the board that owns its sessions (HOOKRELAY_UI_LINKS)
-  function render(data) {
-    // The timeline may have rendered before /status answered (two fetches, no
-    // order); when the addresses arrive or change, draw the chains again so a
-    // hop's link to its investigation is there on a direct #timeline load.
-    var links = data.ui_links || {};
-    if (JSON.stringify(links) !== JSON.stringify(uiLinks)) {
-      uiLinks = links;
-      lastTimelineSig = "";
-      if (document.querySelector('.tab[data-tab="timeline"]').classList.contains("active")) loadTimeline();
-      journeyRefresh();
-    }
-    document.getElementById("cQueued").textContent = data.queue.queued;
-    document.getElementById("cSent").textContent = data.queue.sent;
-    document.getElementById("cDead").textContent = data.queue.dead;
-    // Alarm colour is earned: dead=0 stays quiet.
-    document.getElementById("deadCard").className = "card" + (data.queue.dead > 0 ? " dead-alarm" : "");
+  // ── state ──
+  var uiLinks = {};            // door → the console that owns its sessions (HOOKRELAY_UI_LINKS)
+  var rowsById = {};           // the ledger's recent rows, by event id (the now tab joins chains to them)
+  var statusData = null, timelineData = null;
+  var lastNowSig = "", lastLedgerSig = "";
+  var journeyRef = "", lastJourneySig = "";
+  var nowFilter = { kind: "all", q: "", source: "" };
+  var ledgerFilters = { q: "", source: "", outcome: "", limit: 50 };
+  var QUIET_KINDS = { tick: 1, note: 1, brief: 1 };
 
-    var silences = data.silences || [];
-    document.getElementById("silences").innerHTML = silences.length
-      ? "<h2>Active silences</h2>" + silences.map(function (s) {
-          return '<div class="silence">#' + esc(s.id) + " · " + esc(s.source) +
-            ' · until ' + esc(fmtTime(s.until_ts)) +
-            (s.note ? ' · <span class="note">' + esc(s.note) + "</span>" : "") +
-            ' <button class="btn tiny" data-lift-silence="' + esc(s.id) + '">lift</button></div>';
-        }).join("")
-      : "";
-
-    var events = data.recent || [];
-    if (!events.length) {
-      document.getElementById("events").innerHTML = '<div class="empty">no events yet — send one with examples/try.sh</div>';
-      return;
-    }
-    document.getElementById("loadMore").style.display = events.length >= filters.limit ? "" : "none";
-    var evBox = document.getElementById("events");
-    var evSig = JSON.stringify(events);
-    if (evSig === lastEventsSig) return;
-    lastEventsSig = evSig;
-    var evSaved = rememberOpen(evBox);
-    evBox.innerHTML = events.map(eventRow).join("");
-    restoreOpen(evBox, evSaved);
-    wireOpen(evBox);
-  }
-
-  // What kind of thing this event is, from what the pipe already knows: the
-  // door it came through and the `kind` a source may set. Not judgement — a
-  // label the reader can scan by, so a timer tick and an investigation stop
-  // looking like the same row.
   function kindOf(e) {
     var f = e.fields || {};
     if (e.source === "absence" || f.door) return "absence";
@@ -456,8 +506,424 @@
     if (f.kind) return String(f.kind);
     return "alert";
   }
-  var QUIET_KINDS = { tick: 1, note: 1, brief: 1 };
 
+  // ── the seven stages of one alert ──
+  // Fixed, in this order, on every card and in every journey, so the eye
+  // learns one shape: what came in, what the judge said, who was told, what
+  // the investigator found, what a person did, what the condition did, and
+  // what became of the fix. A stage that did not happen is drawn hollow.
+  var STAGES = ["received", "judged", "notified", "investigated", "person", "condition", "fix"];
+  var STAGE_NAME = { received: "received", judged: "judged", notified: "notified", investigated: "investigated", person: "a person", condition: "condition", fix: "fix" };
+  var QUIET_WORDS = { duplicate: "a repeat inside the dedup window", folded: "folded into an earlier card for this condition", silenced: "silenced", no_route: "no route matched", storm: "held by the storm fuse" };
+
+  function isFixTitle(t) { return /· fix (held|did not hold)$/.test(String(t || "")); }
+  function heldTitle(t) { return /· fix held$/.test(String(t || "")); }
+  function isJudgeHop(h) { var r = rowsById[h.id] || {}; return ((r.fields || {}).brain === "hookjudge") || /judge/.test(h.door || ""); }
+  // A delivery is a CARD — something a person sees — when it asked something,
+  // when the platform gave it an id, or when it carries a return (a verdict, a
+  // report, a verdict on a fix) to any channel that is not a handover to a node.
+  function isCard(d, isReturn) {
+    return !!((d.asked && d.asked.length) || d.platform_message_id || (isReturn && !/^to-/.test(d.channel || "")));
+  }
+  function cardsOnRow(r, isReturn) {
+    return (r && r.deliveries || []).filter(function (d) { return isCard(d, isReturn); });
+  }
+  function isPersonHop(h) {
+    var f = (rowsById[h.id] || {}).fields || {};
+    return h.door === "card-action" || f.kind === "follow_up" || !!h.sender;
+  }
+  function firingFor(row) {
+    var best = null;
+    Object.keys(rowsById).forEach(function (id) {
+      var e = rowsById[id];
+      if (e.is_recovery || e.source !== row.source || e.title !== row.title || Number(e.received_at) >= Number(row.received_at)) return;
+      if (!best || Number(e.received_at) > Number(best.received_at)) best = e;
+    });
+    return best;
+  }
+  var PRESS_WORDS = { useful: "ruled useful", useless: "ruled useless", followup: "asked why", remember: "remembered", approve: "approved", silence: "silenced" };
+  function recoveryFor(originAt, row) {
+    var best = null;
+    Object.keys(rowsById).forEach(function (id) {
+      var e = rowsById[id];
+      if (!e.is_recovery || e.source !== row.source || e.title !== row.title) return;
+      if (Number(e.received_at) <= originAt || Number(e.received_at) > originAt + 86400) return;
+      if (!best || Number(e.received_at) < Number(best.received_at)) best = e;
+    });
+    return best;
+  }
+
+  // Everything the now tab says about a chain, from /timeline joined to /status.
+  function analyse(c) {
+    var hops = c.hops || [], origin = hops[0] || {}, row = rowsById[origin.id] || {};
+    var t0 = Number(origin.at || c.started_at || 0);
+    var judged = hops.filter(function (h, i) { return i > 0 && isJudgeHop(h); });
+    var fixes = hops.filter(function (h) { return isFixTitle(h.title); });
+    var presses = hops.filter(function (h, i) { return i > 0 && isPersonHop(h); });
+    var runs = hops.filter(function (h, i) { return i > 0 && h.session && !isFixTitle(h.title) && !isPersonHop(h); });
+    var cards = []; hops.forEach(function (h, i) {
+      var isReturn = i > 0 && (isJudgeHop(h) || runs.indexOf(h) >= 0 || isFixTitle(h.title));
+      cardsOnRow(rowsById[h.id], isReturn).forEach(function (d) { cards.push({ hop: h, d: d }); });
+    });
+    var asked = []; var askedAt = null, askedOn = [];
+    hops.forEach(function (h) {
+      (h.asked || []).forEach(function (l) { if (asked.indexOf(l) < 0) asked.push(l); });
+      if ((h.asked || []).length && askedAt == null) askedAt = Number(h.at);
+    });
+    cards.forEach(function (c2) { if (askedOn.indexOf(c2.d.channel) < 0) askedOn.push(c2.d.channel); });
+    var recovery = recoveryFor(t0, row);
+    var cost = Number(c.cost_usd || 0);
+    var kind = kindOf(row);
+    var age = Date.now() / 1000 - t0;
+    var fix = fixes[fixes.length - 1];
+    var approver = "";
+    presses.forEach(function (h) { var f = (rowsById[h.id] || {}).fields || {}; if (f.kind === "approve") approver = f.actor || approver; });
+    var approved = presses.some(function (h) { return ((rowsById[h.id] || {}).fields || {}).kind === "approve"; });
+
+    var lastPress = presses.length ? ((rowsById[presses[presses.length - 1].id] || {}).fields || {}) : null;
+    var lastPressKind = lastPress ? (lastPress.kind || (presses[presses.length - 1].sender ? "replied" : "pressed")) : "";
+    var runAfterPress = approved && runs.some(function (r) { return presses.some(function (pr) { return ((rowsById[pr.id] || {}).fields || {}).kind === "approve" && Number(r.at) > Number(pr.at); }); });
+    var dead = []; hops.forEach(function (h) { ((rowsById[h.id] || {}).deliveries || []).forEach(function (d) { if (d.status === "dead") dead.push(d); }); });
+    var state, line;
+    if (row.is_recovery) {
+      var firing = firingFor(row);
+      state = { cls: "ok", text: "recovery" };
+      line = "The condition ended" + (firing ? " · resolves #" + esc(firing.id) + ", which fired " + esc(rel(firing.received_at, t0)) + " earlier" : "");
+    } else if (fix && heldTitle(fix.title)) {
+      state = { cls: "ok", text: "fix held" };
+      line = "The approved procedure held" + (approver ? " · approved by " + esc(approver) : "") + (recovery ? " · the condition ended " + esc(rel(t0, recovery.received_at)) + " after the alert" : "");
+    } else if (fix) {
+      state = { cls: "bad", text: "fix did not hold" };
+      line = "The approved procedure did not hold — the condition came back inside the verification window" + (approver ? " · approved by " + esc(approver) : "");
+    } else if (dead.length) {
+      state = { cls: "bad", text: "dead letter" };
+      line = esc(plural(dead.length, "delivery", "deliveries")) + " gave up: <b>" + esc(dead.map(function (d) { return d.channel; }).join(", ")) + "</b> · " + esc(String(dead[0].last_error || "").slice(0, 120)) + " · retry it on the ledger tab";
+    } else if (recovery) {
+      state = { cls: "ok", text: "resolved" };
+      line = "Ended " + esc(rel(t0, recovery.received_at)) + " after it fired" + (runs.length ? " · investigated" + (cost ? " for " + esc(money(cost)) : "") : "") + (presses.length ? " · " + esc(plural(presses.length, "press", "presses")) : "");
+    } else if (origin.outcome !== "routed") {
+      state = { cls: "", text: "quiet · " + (origin.skip_code || "?") };
+      line = esc(QUIET_WORDS[origin.skip_code] || origin.skip_code || "skipped") + " — nothing was sent";
+    } else if (asked.length && !presses.length) {
+      state = { cls: "warn", text: "waiting on you" };
+      line = "Asked " + esc(ago(askedAt || t0)) + (askedOn.length ? " on " + esc(askedOn.join(", ")) : "") + ": <b>" + esc(asked.join(" · ")) + "</b>";
+    } else if (approved && !runAfterPress) {
+      state = { cls: "info", text: "approved · waiting for the outcome" };
+      line = "Approved" + (approver ? " by " + esc(approver) : "") + " · nothing has answered yet";
+    } else if (presses.length) {
+      state = { cls: "", text: PRESS_WORDS[lastPressKind] || lastPressKind };
+      line = "<b>" + esc(lastPress.actor || presses[presses.length - 1].sender || "somebody") + "</b> " + esc(PRESS_WORDS[lastPressKind] || lastPressKind) + " " + esc(rel(t0, presses[presses.length - 1].at)) +
+        (runs.length ? " · " + esc(plural(runs.length, "answer", "answers")) + (cost ? " for " + esc(money(cost)) : "") : "");
+    } else if (hops.length === 1 && age < 7200 && !QUIET_KINDS[kind]) {
+      state = { cls: "info", text: "in flight" };
+      line = "Handed to " + esc((origin.to || []).join(", ") || "nobody") + " " + esc(ago(t0)) + " · nothing back yet";
+    } else {
+      state = { cls: "", text: hops.length > 1 ? "answered" : "delivered" };
+      line = "Delivered to " + esc((origin.to || []).join(", ") || "nobody") +
+        (judged.length ? " · verdict back " + esc(rel(t0, judged[0].at)) : "") +
+        (runs.length ? " · report back " + esc(rel(t0, runs[0].at)) + (cost ? " for " + esc(money(cost)) : "") : "") +
+        (presses.length ? " · " + esc(plural(presses.length, "press", "presses")) : "");
+    }
+
+    var st = {};
+    var f0 = row.fields || {};
+    st.received = { cls: origin.outcome === "routed" ? "done" : "", at: t0, brief: origin.outcome === "routed" ? (origin.level || "routed") : "quiet" };
+    var jf = judged.length ? ((rowsById[judged[0].id] || {}).fields || {}) : null;
+    st.judged = judged.length ? { cls: "done", at: Number(judged[0].at), brief: jf.wake ? "wake " + jf.wake : (jf.importance || "verdict") } : { cls: "", at: null, brief: "—" };
+    st.notified = cards.length ? { cls: "done", at: Number(cards[0].hop.at), brief: plural(cards.length, "card", "cards") } : { cls: "", at: null, brief: origin.outcome === "routed" ? "no card" : "—" };
+    st.investigated = runs.length ? { cls: "done", at: Number(runs[0].at), brief: cost ? money(cost) : (((rowsById[runs[0].id] || {}).fields || {}).probe_status || "report") } : { cls: "", at: null, brief: "—" };
+    st.person = presses.length ? { cls: "done", at: Number(presses[presses.length - 1].at), brief: lastPressKind }
+      : asked.length ? { cls: "warn", at: null, brief: "asked" } : { cls: "", at: null, brief: "—" };
+    if (runs.length > 1) st.investigated.brief = plural(runs.length, "answer", "answers") + (cost ? " · " + money(cost) : "");
+    st.condition = recovery ? { cls: "ok", at: Number(recovery.received_at), brief: "ended" } : { cls: "", at: null, brief: origin.outcome === "routed" ? "open" : "—" };
+    st.fix = fix ? { cls: heldTitle(fix.title) ? "ok" : "bad", at: Number(fix.at), brief: heldTitle(fix.title) ? "held" : "not held" }
+      : approved ? { cls: "warn", at: null, brief: "waiting" } : { cls: "", at: null, brief: "—" };
+    var timed = STAGES.map(function (k) { return st[k].at; }).filter(function (t) { return t != null; });
+    var last = timed.length ? Math.max.apply(null, timed) : t0;
+    var quiet = origin.outcome !== "routed" || (hops.length === 1 && !!QUIET_KINDS[kind]) || !!row.is_recovery;
+    return { chain: c.chain, hops: hops, origin: origin, row: row, t0: t0, last: last, cost: cost, state: state, line: line, stages: st, quiet: quiet, title: origin.title || row.title || "(untitled)", source: origin.door || row.source || "" };
+  }
+
+  var shownStages = STAGES;   // "judged" is dropped while no chain in the window has a verdict (a deployment without a judge)
+  function stageStrip(a) {
+    var out = "", prevAt = null;
+    shownStages.forEach(function (k, i) {
+      var s = a.stages[k];
+      if (i) {
+        var wait = s.at != null && prevAt != null ? '<span class="wait">' + esc(rel(prevAt, s.at)) + "</span>" : "";
+        out += '<span class="link' + (s.at != null && prevAt != null ? " done" : "") + '">' + wait + "</span>";
+      }
+      out += '<span class="stage ' + esc(s.cls) + '"><span class="dot"></span><span class="name">' + esc(STAGE_NAME[k]) + '</span><span class="brief" title="' + esc(s.brief) + '">' + esc(s.brief) + "</span></span>";
+      if (s.at != null) prevAt = s.at;
+    });
+    return '<div class="stages">' + out + "</div>";
+  }
+
+  function opCard(a) {
+    var when = esc(clock(a.t0)) + (a.last > a.t0 ? " · " + esc(rel(a.t0, a.last)) : "") + (a.cost ? " · " + esc(money(a.cost)) : "");
+    return '<details class="op" data-key="op-' + esc(a.chain) + '" data-chain="' + esc(a.chain) + '">' +
+      "<summary>" +
+        '<div class="head"><span class="pill ' + esc(a.state.cls) + '">' + esc(a.state.text) + '</span>' +
+          '<span class="title">' + esc(a.title) + '</span><span class="when">' + when + "</span></div>" +
+        stageStrip(a) +
+        '<div class="now">' + a.line + ' <span class="m">· ' + esc(a.source) + " · #" + esc(a.chain) + " · " + esc(plural(a.hops.length, "hop", "hops")) + "</span></div>" +
+      "</summary>" +
+      '<div class="stepper" id="op-' + esc(a.chain) + '"><div class="empty">…</div></div>' +
+    "</details>";
+  }
+
+  function quietRow(a) {
+    return '<div class="qrow"><span class="t">' + esc(clock(a.t0)) + '</span><span class="src">' + esc(a.source) + '</span>' +
+      '<span class="title">' + esc(a.title) + '</span><span class="pill ' + esc(a.state.cls) + '">' + esc(a.state.text) + "</span></div>";
+  }
+
+  function renderStats(all) {
+    var warn = all.filter(function (a) { return a.state.cls === "warn"; }).length;
+    var info = all.filter(function (a) { return a.state.cls === "info"; }).length;
+    var day = Date.now() / 1000 - 86400;
+    var good = all.filter(function (a) { return a.state.cls === "ok" && a.last >= day; }).length;
+    var dead = statusData && statusData.queue ? statusData.queue.dead : 0;
+    var queued = statusData && statusData.queue ? statusData.queue.queued : 0;
+    document.getElementById("stats").innerHTML =
+      '<div class="stat' + (warn ? " warn" : "") + '"><div class="label">waiting on you</div><div class="value">' + warn + '</div><div class="sub">cards with a button nobody pressed</div></div>' +
+      '<div class="stat' + (info ? " info" : "") + '"><div class="label">in flight</div><div class="value">' + info + '</div><div class="sub">handed to a node, nothing back yet</div></div>' +
+      '<div class="stat' + (dead ? " bad" : "") + '"><div class="label">dead letters</div><div class="value">' + esc(dead) + '</div><div class="sub">' + (queued ? esc(queued) + " still queued" : "deliveries that gave up") + "</div></div>" +
+      '<div class="stat' + (good ? " ok" : "") + '"><div class="label">ended well · 24h</div><div class="value">' + good + '</div><div class="sub">conditions that ended, fixes that held</div></div>';
+  }
+
+  function renderNow() {
+    if (!timelineData) return;
+    var all = (timelineData.chains || []).map(analyse);
+    var anyJudge = all.some(function (a) { return a.stages.judged.at != null; });
+    shownStages = anyJudge ? STAGES : STAGES.filter(function (k) { return k !== "judged"; });
+    renderStats(all);
+    renderSilences(statusData ? statusData.silences || [] : []);
+    renderIncidents(timelineData.incidents || []);
+    var counts = { all: all.length, warn: 0, info: 0, ok: 0, bad: 0 };
+    all.forEach(function (a) { if (counts[a.state.cls] != null) counts[a.state.cls] += 1; });
+    ["All", "Warn", "Info", "Ok", "Bad"].forEach(function (k) { document.getElementById("n" + k).textContent = counts[k.toLowerCase()] || ""; });
+    var sources = {}; all.forEach(function (a) { sources[a.source] = 1; });
+    var sel = document.getElementById("nowSource"), have = sel.value;
+    sel.innerHTML = '<option value="">every door</option>' + Object.keys(sources).sort().map(function (s) { return '<option value="' + esc(s) + '"' + (s === have ? " selected" : "") + ">" + esc(s) + "</option>"; }).join("");
+    var q = nowFilter.q.toLowerCase();
+    var shown = all.filter(function (a) {
+      if (nowFilter.kind !== "all" && a.state.cls !== nowFilter.kind) return false;
+      if (nowFilter.source && a.source !== nowFilter.source) return false;
+      if (q && a.title.toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+    var loud = shown.filter(function (a) { return !a.quiet || nowFilter.kind !== "all"; });
+    var quiet = nowFilter.kind === "all" ? shown.filter(function (a) { return a.quiet; }) : [];
+    var box = document.getElementById("ops");
+    var saved = rememberOpen(box);
+    box.innerHTML = loud.length ? loud.map(opCard).join("") : '<div class="empty">' + (all.length ? "nothing matches" : "no alerts yet — send one with examples/try.sh") + "</div>";
+    restoreOpen(box, saved);
+    wireOps(box);
+    var qbox = document.getElementById("quiet");
+    var qsaved = rememberOpen(qbox);
+    qbox.innerHTML = quiet.length
+      ? '<details class="fold" data-key="quiet-fold"><summary>' + esc(plural(quiet.length, "quiet event", "quiet events")) + " — ticks, repeats, silences and single hops nothing answered · open to list them</summary>" + quiet.map(quietRow).join("") + "</details>"
+      : "";
+    restoreOpen(qbox, qsaved);
+  }
+
+  function renderSilences(silences) {
+    document.getElementById("silences").innerHTML = silences.length
+      ? silences.map(function (s) {
+          return '<div class="silence">silence #' + esc(s.id) + " · " + esc(s.source) + ' · until ' + esc(fmtTime(s.until_ts)) +
+            (s.note ? ' · <span class="note">' + esc(s.note) + "</span>" : "") +
+            ' <button class="btn tiny" data-lift-silence="' + esc(s.id) + '">lift</button></div>';
+        }).join("")
+      : "";
+  }
+  function renderIncidents(incidents) {
+    var multi = incidents.filter(function (i) { return i.interruptions > 1; });
+    document.getElementById("incidents").innerHTML = multi.length
+      ? multi.map(function (i) {
+          return '<div class="silence" style="border-left-color:var(--warn)">one incident, <b>' + esc(i.interruptions) + " interruptions</b> · " +
+            esc(i.chains.length) + " chains · " + esc(money(i.cost_usd) || "$0") +
+            (i.example ? ' · <span class="note">' + esc(i.example) + "</span>" : "") + "</div>";
+        }).join("")
+      : "";
+  }
+
+  // Opening a card loads its journey the first time — the whole story, from /trace.
+  function wireOps(container) {
+    container.querySelectorAll("details.op").forEach(function (d) {
+      if (d.__wired) return; d.__wired = true;
+      d.addEventListener("toggle", function () {
+        if (!d.open) return;
+        var chain = d.getAttribute("data-chain"), box = document.getElementById("op-" + chain);
+        if (!box || box.getAttribute("data-loaded")) return;
+        box.setAttribute("data-loaded", "1");
+        readJSON("/trace/" + encodeURIComponent(chain)).then(function (trip) {
+          box.innerHTML = trip ? stepper(trip) + journeyFoot(trip) : '<div class="empty">the journey is unavailable</div>';
+        });
+      });
+    });
+  }
+
+  function loadNow() {
+    return Promise.all([readJSON("/status?limit=400"), readJSON("/timeline?limit=100")]).then(function (both) {
+      var st = both[0], tl = both[1];
+      if (!st || !tl) return;
+      statusData = st; timelineData = tl;
+      rowsById = {};
+      (st.recent || []).forEach(function (e) { rowsById[e.id] = e; });
+      var links = st.ui_links || {};
+      if (JSON.stringify(links) !== JSON.stringify(uiLinks)) { uiLinks = links; lastJourneySig = ""; journeyRefresh(); }
+      stamp("refreshed " + new Date().toTimeString().slice(0, 8));
+      var sig = JSON.stringify(tl) + "|" + JSON.stringify(st.recent) + "|" + JSON.stringify(st.queue) + "|" + JSON.stringify(st.silences) + "|" + JSON.stringify(nowFilter);
+      if (sig === lastNowSig) return;   // nothing moved: leave the reader's page alone
+      lastNowSig = sig;
+      renderNow();
+      if (wantedHop) {
+        var hopChain = null;
+        (tl.chains || []).forEach(function (c) { (c.hops || []).forEach(function (h) { if (String(h.id) === wantedHop) hopChain = c.chain; }); });
+        var card = hopChain != null && document.querySelector('details.op[data-chain="' + hopChain + '"]');
+        if (card) { wantedHop = ""; card.open = true; card.scrollIntoView({ block: "start" }); }
+      }
+    });
+  }
+  document.getElementById("nowBar").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-filter]");
+    if (!b) return;
+    nowFilter.kind = b.getAttribute("data-filter");
+    document.querySelectorAll("#nowBar [data-filter]").forEach(function (x) { x.classList.toggle("on", x === b); });
+    lastNowSig = ""; renderNow();
+  });
+  document.getElementById("nowSearch").addEventListener("input", function (e) { nowFilter.q = e.target.value.trim(); lastNowSig = ""; renderNow(); });
+  document.getElementById("nowSource").addEventListener("change", function (e) { nowFilter.source = e.target.value; lastNowSig = ""; renderNow(); });
+
+  // ── the stepper: one alert's seven stages with everything each said, from /trace ──
+  function decision(ev) {
+    if (ev.outcome === "routed") return "routed to " + esc((ev.channels || []).join(", ") || "nowhere");
+    return ev.outcome ? "quiet · " + esc(QUIET_WORDS[ev.skip_code] || ev.skip_code || "skipped") : "no decision recorded";
+  }
+  function deliveryLines(ev) {
+    return (ev.deliveries || []).map(function (d) {
+      var asks = buttonsOn(d.sent_body);
+      return "<b>" + esc(d.channel) + "</b> · " + esc(d.status) + (d.platform_message_id ? " · " + esc(d.platform_message_id) : "") +
+        (asks.length ? " · asked: " + esc(asks.join(" · ")) : "") + (d.last_error && d.status !== "sent" ? " · " + esc(String(d.last_error).slice(0, 120)) : "");
+    }).join("<br>");
+  }
+  function consoleLink(door, session, text) {
+    var board = session && uiLinks[door];
+    return board ? ' <a class="btn tiny" href="' + esc(board) + "#session=" + encodeURIComponent(session) + '" target="_blank" rel="noopener">' + esc(text || "open in the console") + "</a>" : "";
+  }
+  function stepper(trip) {
+    var origin = trip.origin || {}, t0 = Number(origin.received_at || 0);
+    var returns = (trip.returns || []).filter(function (r) { return r.source !== "card-action"; });
+    var judged = returns.filter(function (r) { var f = r.fields || {}; return f.brain === "hookjudge" || /judge/.test(r.source || ""); });
+    var fixes = returns.filter(function (r) { return isFixTitle(r.title); });
+    var runs = returns.filter(function (r) { var f = r.fields || {}; return (f.session || f.session_key) && fixes.indexOf(r) < 0 && judged.indexOf(r) < 0; });
+    var cards = [];
+    [origin].concat(returns).forEach(function (ev) {
+      var isReturn = ev !== origin && (judged.indexOf(ev) >= 0 || runs.indexOf(ev) >= 0 || fixes.indexOf(ev) >= 0);
+      (ev.deliveries || []).forEach(function (d) {
+        var asks = buttonsOn(d.sent_body);
+        if (asks.length || d.platform_message_id || (isReturn && !/^to-/.test(d.channel || ""))) cards.push({ ev: ev, d: d, asks: asks });
+      });
+    });
+    var asked = []; cards.forEach(function (c) { c.asks.forEach(function (l) { if (asked.indexOf(l) < 0) asked.push(l); }); });
+    var presses = trip.human_actions || [], recoveries = trip.recoveries || [], refires = trip.refires || [];
+    var approved = presses.filter(function (p) { return p.kind === "approve"; });
+    var steps = [];
+    function step(key, cls, at, said, fine) { steps.push({ key: key, cls: cls, at: at, said: said, fine: fine || "" }); }
+
+    step("received", origin.outcome === "routed" ? "done" : "", t0,
+      "<b>" + esc(origin.source) + "</b> · " + esc(origin.level || "?") + " · " + decision(origin), deliveryLines(origin));
+    if (judged.length) {
+      var j = judged[0], jf = j.fields || {};
+      var chips = ["wake", "importance", "verdict"].filter(function (k) { return jf[k] != null && jf[k] !== ""; }).map(function (k) { return esc(k) + " " + esc(jf[k]); });
+      step("judged", "done", j.received_at, esc(j.body || j.title || ""), (chips.length ? chips.join(" · ") + "<br>" : "") + deliveryLines(j));
+    } else if (shownStages.indexOf("judged") >= 0) step("judged", "", null, '<span class="dim">no verdict came back</span>');
+    if (cards.length) {
+      var chans = []; cards.forEach(function (c) { if (chans.indexOf(c.d.channel) < 0) chans.push(c.d.channel); });
+      step("notified", "done", Math.min.apply(null, cards.map(function (c) { return Number(c.d.sent_at || c.ev.received_at); })),
+        esc(plural(cards.length, "card", "cards")) + " on <b>" + esc(chans.join(", ")) + "</b>" + (asked.length ? " · asked: " + esc(asked.join(" · ")) : ""),
+        cards.map(function (c) { return "<b>" + esc(c.d.channel) + "</b> · " + esc(c.d.status) + (c.d.platform_message_id ? " · " + esc(c.d.platform_message_id) : "") + (c.asks.length ? " · " + esc(c.asks.join(" · ")) : "") + ' <span class="swhen">' + esc(rel(t0, c.d.sent_at || c.ev.received_at)) + "</span>"; }).join("<br>"));
+    } else step("notified", "", null, '<span class="dim">no card went to a person</span>');
+    if (runs.length) {
+      var first = runs[0], ff = first.fields || {};
+      step("investigated", "done", first.received_at, esc(String(first.body || first.title || "").slice(0, 500)),
+        runs.map(function (r) { var f = r.fields || {}, sess = f.session || f.session_key || ""; return "<b>" + esc(r.source) + "</b> · " + esc(f.probe_status || f.status || "returned") + (f.cost_usd ? " · " + esc(money(f.cost_usd)) : "") + (sess ? " · " + esc(sess) : "") + consoleLink(r.source, sess) + ' <span class="swhen">' + esc(rel(t0, r.received_at)) + "</span>"; }).join("<br>"));
+    } else step("investigated", "", null, '<span class="dim">nobody investigated' + (origin.outcome === "routed" ? " — or nothing has come back yet" : "") + "</span>");
+    if (presses.length) {
+      step("person", "done", presses[presses.length - 1].pressed_at,
+        presses.map(function (p) { return "<b>" + esc(p.actor || "somebody") + "</b> pressed <b>" + esc(p.kind) + "</b>"; }).join(" · "),
+        presses.map(function (p) { return esc(p.kind) + " · " + esc(p.outcome || "") + ' <span class="swhen">' + esc(rel(t0, p.pressed_at)) + "</span>"; }).join("<br>"));
+    } else if (asked.length) step("person", "warn", null, "<b>nobody has answered yet</b> — the card asked: " + esc(asked.join(" · ")));
+    else step("person", "", null, '<span class="dim">nothing to press</span>');
+    if (recoveries.length) {
+      var rc = recoveries[0];
+      step("condition", "ok", rc.received_at, "<b>ended</b> · recovery #" + esc(rc.id) + " · " + decision(rc),
+        refires.length ? "and fired again " + refires.map(function (e) { return esc(rel(t0, e.received_at)); }).join(", ") : "");
+    } else if (refires.length) step("condition", "bad", refires[0].received_at, "<b>fired again</b> " + refires.map(function (e) { return esc(rel(t0, e.received_at)) + " (#" + esc(e.id) + " · " + decision(e) + ")"; }).join(", "));
+    else step("condition", "", null, '<span class="dim">' + (origin.outcome === "routed" ? "no recovery stated yet" : "—") + "</span>");
+    if (fixes.length) {
+      var fx = fixes[fixes.length - 1], fxf = fx.fields || {}, sess = fxf.session || fxf.session_key || "";
+      step("fix", heldTitle(fx.title) ? "ok" : "bad", fx.received_at, "<b>" + (heldTitle(fx.title) ? "held" : "did not hold") + "</b> · " + esc(String(fx.body || "").slice(0, 400)),
+        "<b>" + esc(fx.source) + "</b>" + (sess ? " · " + esc(sess) : "") + consoleLink(fx.source, sess, "open the row") + ' <span class="swhen">' + esc(rel(t0, fx.received_at)) + "</span>");
+    } else if (approved.length) step("fix", "warn", null, "<b>approved</b> by " + esc(approved[0].actor || "somebody") + " — the procedure ran, and the condition has not answered yet");
+    else step("fix", "", null, '<span class="dim">no procedure was approved</span>');
+
+    return '<div class="stepper">' + steps.map(function (s) {
+      return '<div class="step ' + esc(s.cls) + '"><div class="rail"><span class="dot"></span><span class="line"></span></div><div class="body">' +
+        '<div class="top"><span class="sname">' + esc(STAGE_NAME[s.key]) + "</span>" + (s.at != null ? '<span class="swhen">' + esc(rel(t0, s.at)) + " · " + esc(clock(s.at)) + "</span>" : "") + "</div>" +
+        '<div class="said' + (s.cls ? "" : " dim") + '">' + s.said + "</div>" + (s.fine ? '<div class="fine">' + s.fine + "</div>" : "") +
+      "</div></div>";
+    }).join("") + "</div>";
+  }
+  function journeyFoot(trip) {
+    var origin = trip.origin || {};
+    var ids = ["#" + origin.id, "hr-" + origin.id];
+    (trip.returns || []).forEach(function (r) { var f = r.fields || {}; [f.session, f.session_key, f.work_id].forEach(function (v) { if (v && ids.indexOf(v) < 0) ids.push(v); }); });
+    [origin].concat(trip.returns || []).forEach(function (ev) { (ev.deliveries || []).forEach(function (d) { if (d.platform_message_id && ids.indexOf(d.platform_message_id) < 0) ids.push(d.platform_message_id); }); });
+    return '<div class="jhead" style="margin:0 18px 16px"><div class="ids">' + ids.map(esc).join(" · ") + '</div><div class="acts">' +
+      '<a class="btn tiny" href="#journey=' + encodeURIComponent(String(origin.id)) + '" data-journey="' + esc(origin.id) + '">open as a page</a>' +
+      '<a class="btn tiny" href="/audit/' + esc(origin.id) + '" target="_blank" rel="noopener">audit record</a>' +
+      '<a class="btn tiny" href="/trace/' + esc(origin.id) + '" target="_blank" rel="noopener">json</a></div></div>';
+  }
+  function journeyHead(trip) {
+    var origin = trip.origin || {}, t0 = Number(origin.received_at || 0);
+    var cost = 0; (trip.returns || []).forEach(function (r) { var f = r.fields || {}; if (f.cost_usd) cost += Number(f.cost_usd) || 0; });
+    var times = [t0].concat((trip.returns || []).map(function (r) { return Number(r.received_at); }), (trip.human_actions || []).map(function (a) { return Number(a.pressed_at); }), (trip.recoveries || []).map(function (e) { return Number(e.received_at); }));
+    var last = Math.max.apply(null, times);
+    return '<div class="jhead"><div class="title">' + esc(origin.title || "(untitled)") + '</div><div class="hint">' + esc(origin.source) + " · " + esc(fmtTime(t0)) + " · " + esc(rel(t0, last)) + " end to end" + (cost ? " · " + esc(money(cost)) : "") + "</div></div>";
+  }
+
+  // ── the journey tab: any handle → the stepper ──
+  function journeyLoad(ref, quiet) {
+    ref = String(ref || "").trim();
+    if (!ref) return;
+    var box = document.getElementById("journey");
+    journeyRef = ref;
+    document.getElementById("jRef").value = ref;
+    if (location.hash !== "#journey=" + encodeURIComponent(ref)) history.replaceState(null, "", "#journey=" + encodeURIComponent(ref));
+    if (!quiet) { lastJourneySig = ""; box.innerHTML = '<div class="empty">loading…</div>'; }
+    fetch("/trace/" + encodeURIComponent(ref), { headers: readHeaders() })
+      .then(function (res) { return res.ok ? res.json() : { _status: res.status }; })
+      .then(function (trip) {
+        if (journeyRef !== ref) return;   // the reader asked for another one meanwhile
+        if (!trip || trip._status) {
+          lastJourneySig = "";
+          box.innerHTML = '<div class="empty">' + (trip && trip._status === 404 ? "nothing in this ledger answers to " + esc(ref) : "journey unavailable — read token required") + "</div>";
+          return;
+        }
+        stamp("refreshed " + new Date().toTimeString().slice(0, 8));
+        var sig = JSON.stringify(trip) + "|" + JSON.stringify(uiLinks);
+        if (sig === lastJourneySig) return;
+        lastJourneySig = sig;
+        box.innerHTML = journeyHead(trip) + '<div class="op" style="padding-top:6px">' + stepper(trip) + journeyFoot(trip) + "</div>";
+      })
+      .catch(function () { if (!quiet) box.innerHTML = '<div class="empty">journey unavailable</div>'; });
+  }
+  function journeyRefresh() { if (journeyRef) journeyLoad(journeyRef, true); }
+  document.getElementById("jGo").addEventListener("click", function () { journeyLoad(document.getElementById("jRef").value); });
+  document.getElementById("jRef").addEventListener("keydown", function (e) { if (e.key === "Enter") journeyLoad(e.target.value); });
+
+  // ── the ledger: every event as recorded (the forensic view) ──
   function summaryLine(e) {
     if (e.outcome === "routed") {
       var to = (e.channels || []).map(function (c) { return "<b>" + esc(c) + "</b>"; }).join(", ");
@@ -468,7 +934,6 @@
     }
     return "<b>" + esc(e.source) + "</b> · skipped · " + esc(e.skip_code || "?");
   }
-
   function eventRow(e) {
     var kind = kindOf(e);
     var quiet = QUIET_KINDS[kind] || e.outcome !== "routed";
@@ -492,17 +957,14 @@
       "</div>" +
     "</details>";
   }
-
   function deliveryChips(dl) {
     return '<div class="chips" style="padding:0">' + dl.map(function (d) {
       var extra = d.status === "dead" || d.last_error ? ' title="' + esc(d.last_error || "") + '"' : "";
       var retryBtn = d.status === "dead" ? ' <button class="btn tiny" data-retry-delivery="' + esc(d.id) + '">retry</button>' : "";
       return '<span class="chip ' + esc(d.status) + '"' + extra + ">" + esc(d.channel) + " · " + esc(d.status) +
-        (d.attempts ? " ×" + esc(d.attempts) : "") + "</span>" + retryBtn;
+        (d.attempts ? " ×" + esc(d.attempts) : "") + ((d.asked || []).length ? " · asked: " + esc(d.asked.join(", ")) : "") + "</span>" + retryBtn;
     }).join("") + "</div>";
   }
-
-  // The decision chain as a person reads it: gate by gate, what each said.
   function stepsList(steps) {
     if (!steps.length) return '<div class="hint">no steps recorded</div>';
     return '<ul class="steps">' + steps.map(function (st) {
@@ -521,26 +983,6 @@
       return '<li><span class="g">' + g + "</span><span>" + body + "</span></li>";
     }).join("") + "</ul>";
   }
-
-  // Load an event's round trip the first time it is opened — the reader asked
-  // for the whole story by opening the row; a second button was one click too
-  // many, and the answer they wanted most (what came back, what it cost) was
-  // behind it.
-  function wireOpen(container) {
-    container.querySelectorAll("details.ev").forEach(function (d) {
-      if (d.__wired) return; d.__wired = true;
-      d.addEventListener("toggle", function () {
-        if (!d.open) return;
-        var id = d.getAttribute("data-id"), box = document.getElementById("cmp-" + id);
-        if (!box || box.getAttribute("data-loaded")) return;
-        box.setAttribute("data-loaded", "1");
-        fetch("/trace/" + id, { headers: readHeaders() })
-          .then(function (res) { return res.ok ? res.json() : null; })
-          .then(function (trip) { box.innerHTML = trip ? roundTripInline(trip) : '<span class="hint">round trip unavailable</span>'; });
-      });
-    });
-  }
-
   function roundTripInline(trip) {
     var origin = trip.origin || {}, returns = trip.returns || [], human = trip.human_actions || [];
     var out = "";
@@ -566,40 +1008,65 @@
     if (!returns.length && !human.length) out += '<div class="hint" style="margin-top:8px">nothing has come back for this one</div>';
     return out + wire;
   }
-
-  var filters = { q: "", source: "", outcome: "", limit: 50 };
-
-  function statusQuery() {
-    var pairs = ["limit=" + filters.limit];
-    if (filters.q) pairs.push("q=" + encodeURIComponent(filters.q));
-    if (filters.source) pairs.push("source=" + encodeURIComponent(filters.source));
-    if (filters.outcome) pairs.push("outcome=" + encodeURIComponent(filters.outcome));
-    return "/status?" + pairs.join("&");
-  }
-
-  function refresh() {
-    if (document.hidden) return;
-    var headers = {};
-    var token = localStorage.getItem(TOKEN_KEY);
-    if (token) headers["X-Read-Token"] = token;
-    fetch(statusQuery(), { headers: headers }).then(function (res) {
-      if (res.status === 401) {
-        tokenReveal(true);
-        document.getElementById("stamp").textContent = "read token required";
-        return null;
-      }
-      tokenReveal(false);
-      return res.json();
-    }).then(function (data) {
-      if (!data) return;
-      render(data);
-      document.getElementById("stamp").textContent = "refreshed " + new Date().toTimeString().slice(0, 8);
-    }).catch(function () {
-      document.getElementById("stamp").textContent = "connection failed, retrying…";
+  function wireLedger(container) {
+    container.querySelectorAll("details.ev").forEach(function (d) {
+      if (d.__wired) return; d.__wired = true;
+      d.addEventListener("toggle", function () {
+        if (!d.open) return;
+        var id = d.getAttribute("data-id"), box = document.getElementById("cmp-" + id);
+        if (!box || box.getAttribute("data-loaded")) return;
+        box.setAttribute("data-loaded", "1");
+        readJSON("/trace/" + id).then(function (trip) { box.innerHTML = trip ? roundTripInline(trip) : '<span class="hint">round trip unavailable</span>'; });
+      });
     });
   }
+  function ledgerQuery() {
+    var pairs = ["limit=" + ledgerFilters.limit];
+    if (ledgerFilters.q) pairs.push("q=" + encodeURIComponent(ledgerFilters.q));
+    if (ledgerFilters.source) pairs.push("source=" + encodeURIComponent(ledgerFilters.source));
+    if (ledgerFilters.outcome) pairs.push("outcome=" + encodeURIComponent(ledgerFilters.outcome));
+    return "/status?" + pairs.join("&");
+  }
+  function loadLedger() {
+    return readJSON(ledgerQuery()).then(function (data) {
+      if (!data) return;
+      stamp("refreshed " + new Date().toTimeString().slice(0, 8));
+      var events = data.recent || [];
+      document.getElementById("loadMore").style.display = events.length >= ledgerFilters.limit ? "" : "none";
+      var evBox = document.getElementById("events");
+      if (!events.length) { evBox.innerHTML = '<div class="empty">no events yet — send one with examples/try.sh</div>'; return; }
+      var evSig = JSON.stringify(events);
+      if (evSig === lastLedgerSig) return;
+      lastLedgerSig = evSig;
+      var evSaved = rememberOpen(evBox);
+      evBox.innerHTML = events.map(eventRow).join("");
+      restoreOpen(evBox, evSaved);
+      wireLedger(evBox);
+    });
+  }
+  document.getElementById("fApply").addEventListener("click", function () {
+    ledgerFilters.q = document.getElementById("fSearch").value.trim();
+    ledgerFilters.source = document.getElementById("fSource").value.trim();
+    ledgerFilters.outcome = document.getElementById("fOutcome").value;
+    ledgerFilters.limit = 50;
+    loadLedger();
+  });
+  document.getElementById("fClear").addEventListener("click", function () {
+    document.getElementById("fSearch").value = "";
+    document.getElementById("fSource").value = "";
+    document.getElementById("fOutcome").value = "";
+    ledgerFilters = { q: "", source: "", outcome: "", limit: 50 };
+    loadLedger();
+  });
+  document.getElementById("loadMore").addEventListener("click", function () {
+    ledgerFilters.limit = Math.min(500, ledgerFilters.limit + 50);
+    loadLedger();
+  });
+  document.getElementById("fSearch").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") document.getElementById("fApply").click();
+  });
 
-  /* ── hookstack token wiring · keep this block identical in all three pages ── */
+/* ── hookstack token wiring · keep this block identical in all three pages ── */
   /* Three services had three ways to type the same kind of secret: an input box
      here, a window.prompt there, and a third key-naming convention. The visual
      unification pass caught the palette and missed the interaction, so this is
@@ -621,152 +1088,42 @@
     if (bar) bar.classList[needed ? "add" : "remove"]("show");
   }
   /* ── end token wiring ───────────────────────────────────────────────────── */
-  tokenWire("tokenInput", "tokenSave", TOKEN_KEY, refresh);
+  tokenWire("tokenInput", "tokenSave", TOKEN_KEY, function () { lastNowSig = ""; lastLedgerSig = ""; refreshActive(); });
 
-  // ── tabs ──
-  var ADMIN_KEY = "hookrelay-admin-token";
+  // ── tabs and deep links ──
+  var PANELS = ["now", "journey", "ledger", "config", "help"];
+  function activeTab() { var t = document.querySelector(".tab.active"); return t ? t.getAttribute("data-tab") : "now"; }
+  function refreshActive() {
+    var which = activeTab();
+    if (which === "now") loadNow();
+    if (which === "ledger") loadLedger();
+    if (which === "config") loadConfig();
+    if (which === "journey") journeyRefresh();
+  }
   document.querySelectorAll(".tab").forEach(function (tab) {
     tab.addEventListener("click", function () {
       document.querySelectorAll(".tab").forEach(function (t) { t.classList.toggle("active", t === tab); });
       var which = tab.getAttribute("data-tab");
-      document.getElementById("panel-events").style.display = which === "events" ? "" : "none";
-      document.getElementById("panel-timeline").style.display = which === "timeline" ? "" : "none";
-      document.getElementById("panel-journey").style.display = which === "journey" ? "" : "none";
-      document.getElementById("panel-config").style.display = which === "config" ? "" : "none";
-      document.getElementById("panel-help").style.display = which === "help" ? "" : "none";
-      if (which === "config") loadConfig();
-      if (which === "timeline") loadTimeline();
+      PANELS.forEach(function (p) { document.getElementById("panel-" + p).style.display = p === which ? "" : "none"; });
+      if (which !== "journey" && /^#journey=/.test(location.hash)) history.replaceState(null, "", "#" + which);
+      refreshActive();
     });
   });
-
-  if (location.hash === "#help") {
-    document.querySelector('.tab[data-tab="help"]').click();
-  }
-  // `#chain=<hop id>`: the investigator's page links back to the chain one of
-  // its hops belongs to. Resolved by hop, since the chain's key is the ROOT id.
+  // `#chain=<hop id>`: a node's console links back to the operation one of its
+  // hops belongs to — resolved by hop, since the chain's key is the ROOT id.
   var wantedHop = (location.hash.match(/^#chain=(\d+)$/) || [])[1] || "";
-  if (location.hash === "#timeline" || wantedHop) {
-    document.querySelector('.tab[data-tab="timeline"]').click();
-  }
-  // `#journey=<handle>`: one alert's whole journey, from a link somebody sent
-  // or a card's console link. Any handle /trace resolves.
   var wantedJourney = (location.hash.match(/^#journey=(.+)$/) || [])[1] || "";
+  var wantedTab = (location.hash.match(/^#(ledger|config|help|events|timeline)$/) || [])[1] || "";
+  if (wantedTab === "events") wantedTab = "ledger";
+  if (wantedTab === "timeline") wantedTab = "now";
   if (wantedJourney) {
     document.querySelector('.tab[data-tab="journey"]').click();
     journeyLoad(decodeURIComponent(wantedJourney));
+  } else if (wantedTab && wantedTab !== "now") {
+    document.querySelector('.tab[data-tab="' + wantedTab + '"]').click();
   }
 
-  // ── timeline: /timeline rendered as chains, one per operation ──
-  function money(v) { return v == null ? "" : "$" + Number(v).toFixed(v >= 1 ? 2 : 4).replace(/\.?0+$/, ""); }
-  function loadTimeline() {
-    var box = document.getElementById("chains");
-    fetch("/timeline?limit=100", { headers: readHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (tl) {
-        if (!tl) { box.innerHTML = '<div class="empty">timeline unavailable — read token required</div>'; return; }
-        var opsOnly = document.getElementById("opsOnly").checked;
-        var sig = JSON.stringify(tl) + (opsOnly ? "|ops" : "|all");
-        if (sig === lastTimelineSig) return;   // nothing moved: leave the reader's page alone
-        lastTimelineSig = sig;
-        renderIncidents(tl.incidents || []);
-        var all = tl.chains || [];
-        var isOp = function (c) { return (c.hops || []).length > 1 || c.cost_usd > 0; };
-        var chains = opsOnly ? all.filter(isOp) : all;
-        document.getElementById("opsCount").textContent = opsOnly
-          ? chains.length + " of " + all.length + " chains are operations"
-          : all.length + " chains";
-        if (!chains.length) { box.innerHTML = '<div class="empty">' + (opsOnly ? "no operations yet — every chain so far is a single hop" : "no chains yet") + "</div>"; return; }
-        var saved = rememberOpen(box);
-        box.innerHTML = chains.map(chainRow).join("");
-        restoreOpen(box, saved);
-        var hop = wantedHop && box.querySelector('[data-tl-trace="' + wantedHop + '"]');
-        if (hop) { wantedHop = ""; hop.closest("details").open = true; hop.closest("details").scrollIntoView({ block: "start" }); }
-      })
-      .catch(function () { box.innerHTML = '<div class="empty">timeline unavailable</div>'; });
-  }
-  document.getElementById("opsOnly").addEventListener("change", function () { lastTimelineSig = ""; loadTimeline(); });
-
-  function rel(t0, t) {
-    var d = Math.round(t - t0);
-    if (d < 60) return "+" + d + "s";
-    if (d < 3600) return "+" + Math.floor(d / 60) + "m" + (d % 60 ? (d % 60) + "s" : "");
-    return "+" + Math.floor(d / 3600) + "h" + (Math.round((d % 3600) / 60) ? Math.round((d % 3600) / 60) + "m" : "");
-  }
-
-  function chainRow(c) {
-    var hops = c.hops || [], first = hops[0] || {}, t0 = first.at || c.started_at;
-    var lvl = String(first.level || "").toLowerCase();
-    var op = hops.length > 1 || c.cost_usd > 0;
-    var dot = (lvl === "high" || lvl === "critical") && op ? lvl : "none";
-    var mini = hops.map(function (h, i) {
-      return (i ? '<span class="arrow">→</span>' : "") + '<span class="seg"><b>' + esc(h.door) + "</b> " + (i ? esc(rel(t0, h.at)) : esc(fmtTime(h.at).slice(6))) +
-        (h.cost_usd ? ' <span class="cost">' + esc(money(h.cost_usd)) + "</span>" : "") + "</span>";
-    }).join("");
-    // The same hops as a bar, so a long wait for the report reads at a glance.
-    // `at` is epoch seconds, like everything else on this page (see rel()).
-    var span = hops.length > 1 ? (Number(hops[hops.length - 1].at) - Number(t0)) : 0;
-    var bars = span > 0 ? '<div class="tl-bars" title="' + esc(rel(t0, hops[hops.length - 1].at)) + ' end to end">' + hops.slice(1).map(function (h, i) {
-      var w = Math.max(1, Math.round(100 * (Number(h.at) - Number(hops[i].at)) / span));
-      return '<span class="tl-seg" style="width:' + w + '%" title="' + esc(h.door) + ' ' + esc(rel(t0, h.at)) + '"></span>';
-    }).join("") + "</div>" : "";
-    var rows = hops.map(function (h) {
-      var to = h.outcome === "routed" ? "→ " + esc((h.to || []).join(", ")) : '<span class="badge skipped">skipped · ' + esc(h.skip_code || "?") + "</span>";
-      if (h.sender) to += ' <span class="rel">from ' + esc(h.sender) + "</span>";
-      var board = h.session && uiLinks[h.door];
-      return '<div class="hop">' +
-        '<span class="etime" style="margin-left:0">' + esc(fmtTime(h.at)) + '</span><span class="rel">' + esc(rel(t0, h.at)) + "</span>" +
-        '<span class="esrc">' + esc(h.door) + "</span>" +
-        '<span class="hopto">' + to + "</span>" +
-        '<span class="eid">' + esc(h.cost_usd ? money(h.cost_usd) : "") + "</span>" +
-        '<span class="hopacts">' + (board ? '<a class="btn tiny" href="' + esc(board) + "#session=" + encodeURIComponent(h.session) + '" target="_blank" rel="noopener">investigation</a>' : "") +
-        '<button class="btn tiny" data-tl-trace="' + esc(h.id) + '">trace</button></span>' +
-        '</div><div class="compare" id="tl-cmp-' + esc(h.id) + '" style="display:none"></div>';
-    }).join("");
-    return '<details class="event ev' + (op ? "" : " quiet") + '" data-key="chain-' + esc(c.chain) + '">' +
-      "<summary>" +
-        '<div class="h"><span class="dot ' + dot + '"></span>' +
-          '<span class="etitle">' + esc(first.title || "(untitled)") + "</span>" +
-          (c.cost_usd ? '<span class="badge routed">' + esc(money(c.cost_usd)) + "</span>" : "") +
-          '<span class="etime">' + esc(fmtTime(c.started_at)) + "</span></div>" +
-        '<div class="mini">' + mini + "</div>" + bars +
-        '<div class="m">chain ' + esc(c.chain) + " · " + hops.length + (hops.length === 1 ? " hop" : " hops") +
-          ' <button class="btn tiny" data-journey="' + esc(c.chain) + '">journey</button></div>' +
-      "</summary>" +
-      '<div class="chips" style="padding-top:8px"><button class="btn tiny" data-tl-audit="' + esc(c.chain) + '">audit record</button>' +
-      '<a class="btn tiny" href="/audit/' + esc(c.chain) + '" target="_blank" rel="noopener">json</a></div>' +
-      '<div class="compare" id="tl-audit-' + esc(c.chain) + '" style="display:none"></div>' +
-      '<div class="hops" style="padding-top:6px">' + rows + "</div>" +
-    "</details>";
-  }
-  function renderAudit(rec) {
-    var t = rec.totals || {};
-    var head = "<h4>operation #" + esc(rec.operation) + " · " + esc(t.hops) + " hops · " + esc(money(t.cost_usd) || "$0") +
-      " · " + esc(t.human_actions) + " human action" + (t.human_actions === 1 ? "" : "s") + " · " + esc(Math.round(t.span_seconds || 0)) + "s end to end</h4>";
-    var t0 = (rec.hops[0] || {}).received_at || 0;
-    var rows = (rec.hops || []).map(function (h) {
-      var dl = (h.deliveries || []).map(function (d) { return esc(d.channel) + " " + esc(d.status) + (d.sent ? " · " + esc(d.sent.bytes) + " B · " + esc(String(d.sent.sha256).slice(0, 12)) : ""); }).join("<br>");
-      var f = h.fields || {};
-      return '<li><span class="g">' + esc(rel(t0, h.received_at)) + "</span><span><b>" + esc(h.source) + "</b> #" + esc(h.id) +
-        (h.payload ? ' <span class="r">payload ' + esc(h.payload.bytes) + " B · " + esc(String(h.payload.sha256).slice(0, 12)) + "</span>" : "") +
-        (f.cost_usd ? ' <span class="cost">' + esc(money(f.cost_usd)) + "</span>" : "") + (f.session_key ? ' <span class="r">' + esc(f.session_key) + "</span>" : "") +
-        (dl ? '<div class="r" style="margin-top:2px">' + dl + "</div>" : "") + "</span></li>";
-    }).join("");
-    var human = (rec.human_actions || []).map(function (a) {
-      return '<li><span class="g">' + esc(rel(t0, a.pressed_at)) + '</span><span><b>' + esc(a.kind) + "</b> · " + esc(a.outcome || "") + (a.actor ? ' <span class="r">actor ' + esc(a.actor) + "</span>" : "") + "</span></li>";
-    }).join("");
-    return head + '<ul class="steps">' + rows + "</ul>" + (human ? "<h4>what a person did</h4><ul class=\"steps\">" + human + "</ul>" : "") +
-      '<div class="hint" style="margin-top:8px">bodies are digests here; the bytes are under trace. Markdown: scripts/audit_export.py</div>';
-  }
-  function renderIncidents(incidents) {
-    var multi = incidents.filter(function (i) { return i.interruptions > 1; });
-    document.getElementById("incidents").innerHTML = multi.length
-      ? "<h2>Incidents · one root cause, several cards</h2>" + multi.map(function (i) {
-          return '<div class="silence">' + esc(i.incident) + " · <b>" + esc(i.interruptions) + " interruptions</b> · " +
-            esc(i.chains.length) + " chains · " + esc(money(i.cost_usd) || "$0") +
-            (i.example ? ' · <span class="note">' + esc(i.example) + "</span>" : "") + "</div>";
-        }).join("")
-      : "";
-  }
+  // ── delegated buttons: journey, lift a silence, retry a dead letter ──
   document.addEventListener("click", function (e) {
     var j = e.target.closest("[data-journey]");
     if (j) {
@@ -775,153 +1132,22 @@
       journeyLoad(j.getAttribute("data-journey"));
       return;
     }
-    var a = e.target.closest("[data-tl-audit]");
-    if (a) {
+    var lift = e.target.closest("[data-lift-silence]");
+    if (lift) {
       e.preventDefault();
-      var aid = a.getAttribute("data-tl-audit"), abox = document.getElementById("tl-audit-" + aid);
-      if (abox.style.display !== "none") { abox.style.display = "none"; return; }
-      abox.style.display = "block"; abox.innerHTML = '<span class="hint">loading…</span>';
-      fetch("/audit/" + aid, { headers: readHeaders() })
-        .then(function (res) { return res.ok ? res.json() : null; })
-        .then(function (rec) { abox.innerHTML = rec ? renderAudit(rec) : '<span class="hint">audit record unavailable</span>'; });
+      fetch("/silences/" + lift.getAttribute("data-lift-silence"), { method: "DELETE", headers: adminHeaders() })
+        .then(function (res) { if (!res.ok) alert("lift failed: admin token required (set it on the config tab)"); lastNowSig = ""; refreshActive(); });
       return;
     }
-    var t = e.target.closest("[data-tl-trace]");
-    if (!t) return;
-    e.preventDefault();
-    var id = t.getAttribute("data-tl-trace");
-    var box = document.getElementById("tl-cmp-" + id);
-    if (box.style.display !== "none") { box.style.display = "none"; return; }
-    box.style.display = "block";
-    box.innerHTML = '<span class="hint">loading…</span>';
-    fetch("/trace/" + id, { headers: readHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (trip) {
-        box.innerHTML = trip ? roundTripInline(trip) : '<span class="hint">round trip unavailable</span>';
-      });
+    var retry = e.target.closest("[data-retry-delivery]");
+    if (retry) {
+      e.preventDefault();
+      fetch("/deliveries/" + retry.getAttribute("data-retry-delivery") + "/retry", { method: "POST", headers: adminHeaders() })
+        .then(function (res) { if (!res.ok) alert("retry failed: admin token required (set it on the config tab)"); lastLedgerSig = ""; refreshActive(); });
+    }
   });
-  // ── end timeline ──
 
-  // ── journey: one alert from any handle it left behind, read top to bottom ──
-  // /trace/{ref} is resolved by the ledger (an id, its hr- correlation, a
-  // session key, a work id, a card's platform id) and drawn as one column:
-  // received, judged, delivered, pressed, reported, and what the condition did
-  // afterwards. Everything on it is the pipe's own account; a hop a node owns
-  // links to that node's console and the rest of the story is read there.
-  // (journeyRef / lastJourneySig are declared with the page's other state at
-  // the top: the deep link below calls journeyLoad before this block runs, and
-  // an initialiser here would reset the ref it had just set.)
-  function buttonsOn(sentBody) {
-    try { return ((JSON.parse(sentBody || "{}").card || {}).actions || []).map(function (a) { return String(a.text || ""); }); }
-    catch (_e) { return []; }
-  }
-  function journeyLoad(ref, quiet) {
-    ref = String(ref || "").trim();
-    if (!ref) return;
-    var box = document.getElementById("journey");
-    journeyRef = ref;
-    document.getElementById("jRef").value = ref;
-    if (location.hash !== "#journey=" + encodeURIComponent(ref)) history.replaceState(null, "", "#journey=" + encodeURIComponent(ref));
-    if (!quiet) { lastJourneySig = ""; box.innerHTML = '<div class="empty">loading…</div>'; }
-    fetch("/trace/" + encodeURIComponent(ref), { headers: readHeaders() })
-      .then(function (res) { return res.ok ? res.json() : { _status: res.status }; })
-      .then(function (trip) {
-        if (journeyRef !== ref) return;   // the reader asked for another one meanwhile
-        if (!trip || trip._status) {
-          lastJourneySig = "";
-          box.innerHTML = '<div class="empty">' + (trip && trip._status === 404 ? "nothing in this ledger answers to " + esc(ref) : "journey unavailable — read token required") + "</div>";
-          return;
-        }
-        var sig = JSON.stringify(trip) + "|" + JSON.stringify(uiLinks);
-        if (sig === lastJourneySig) return;   // nothing moved: leave the reader's page alone
-        lastJourneySig = sig;
-        box.innerHTML = journeyView(trip);
-      })
-      .catch(function () { if (!quiet) box.innerHTML = '<div class="empty">journey unavailable</div>'; });
-  }
-  function journeyRefresh() { if (journeyRef) journeyLoad(journeyRef, true); }
-
-  function journeyView(trip) {
-    var origin = trip.origin || {}, t0 = Number(origin.received_at || 0);
-    var rows = [], cost = 0, sessions = {}, works = {}, cards = [];
-    function decision(ev) {
-      if (ev.outcome === "routed") return "routed → " + esc((ev.channels || []).join(", ") || "nowhere");
-      return ev.outcome ? "skipped · " + esc(ev.skip_code || "?") : "no decision recorded";
-    }
-    function deliveries(ev) {
-      return (ev.deliveries || []).map(function (d) {
-        var asks = buttonsOn(d.sent_body);
-        if (d.platform_message_id) cards.push(d.platform_message_id);
-        return esc(d.channel) + " · " + esc(d.status) + (d.platform_message_id ? " · " + esc(d.platform_message_id) : "") +
-          (asks.length ? ' · <span class="hit">asked: ' + esc(asks.join(", ")) + "</span>" : "");
-      }).join("<br>");
-    }
-    function entry(at, who, what, details) {
-      var detail = details.filter(Boolean).join("<br>");
-      rows.push({ at: Number(at || t0), html: '<li><span class="g">' + esc(rel(t0, at)) + '</span><span><b>' + esc(who) + "</b> " + what +
-        (detail ? '<div class="r">' + detail + "</div>" : "") + "</span></li>" });
-    }
-    entry(t0, origin.source, "received <b>" + esc(origin.title || "(untitled)") + "</b>" + (origin.level ? ' <span class="badge">' + esc(origin.level) + "</span>" : ""),
-      [decision(origin), deliveries(origin)]);
-    (trip.returns || []).forEach(function (r) {
-      // A press is an event too (the forward rides the outbox), but it is told
-      // once, below, as what the person did — its forwarding is on that row.
-      if (r.source === "card-action") return;
-      var f = r.fields || {}, who = f.brain || r.source, sess = f.session || f.session_key || "";
-      if (f.cost_usd) cost += Number(f.cost_usd) || 0;
-      if (sess) sessions[sess] = r.source;
-      if (f.work_id) works[f.work_id] = 1;
-      var chips = ["wake", "verdict", "importance", "status", "probe_status", "kind"].filter(function (k) { return f[k] != null && f[k] !== ""; })
-        .map(function (k) { return esc(k) + "=" + esc(f[k]); });
-      if (f.cost_usd) chips.push(esc(money(f.cost_usd)));
-      var board = sess && uiLinks[r.source];
-      var open = board ? ' <a class="btn tiny" href="' + esc(board) + "#session=" + encodeURIComponent(sess) + '" target="_blank" rel="noopener">open ' + esc(sess) + "</a>" : "";
-      entry(r.received_at, who, esc(r.title || "(untitled)") + open,
-        [r.body ? esc(String(r.body).slice(0, 400)) : "", chips.join(" · "), decision(r), deliveries(r)]);
-    });
-    (trip.human_actions || []).forEach(function (h) {
-      entry(h.pressed_at, "a person", "pressed <b>" + esc(h.kind) + "</b>" + (h.actor ? " · " + esc(h.actor) : ""), [esc(h.outcome || "")]);
-    });
-    (trip.recoveries || []).forEach(function (e) { entry(e.received_at, origin.source, "the condition ended · recovery #" + esc(e.id), [decision(e)]); });
-    (trip.refires || []).forEach(function (e) {
-      entry(e.received_at, origin.source, "fired again · #" + esc(e.id) + (e.level ? ' <span class="badge">' + esc(e.level) + "</span>" : ""), [decision(e)]);
-    });
-    rows.sort(function (a, b) { return a.at - b.at; });
-    var last = rows.length ? rows[rows.length - 1].at : t0;
-    var ids = ["#" + origin.id, "hr-" + origin.id].concat(Object.keys(sessions), Object.keys(works), cards);
-    var consoles = Object.keys(sessions).map(function (s) {
-      var b = uiLinks[sessions[s]];
-      return b ? '<a class="btn tiny" href="' + esc(b) + "#session=" + encodeURIComponent(s) + '" target="_blank" rel="noopener">' + esc(s) + "</a>" : "";
-    }).filter(Boolean).join(" ");
-    return '<div class="card" style="margin-bottom:12px"><div style="font-weight:600;font-size:14px;overflow-wrap:anywhere">' + esc(origin.title || "(untitled)") + "</div>" +
-      '<div class="hint">' + esc(origin.source) + " · " + esc(fmtTime(t0)) + " · " + rows.length + (rows.length === 1 ? " entry" : " entries") + " · " + esc(rel(t0, last)) + " end to end" + (cost ? " · " + esc(money(cost)) : "") + "</div>" +
-      '<div class="eid" style="margin-top:6px;overflow-wrap:anywhere">' + ids.map(esc).join(" · ") + "</div></div>" +
-      '<ul class="steps">' + rows.map(function (r) { return r.html; }).join("") + "</ul>" +
-      '<div class="hint" style="margin-top:10px">What happened inside a node — the run, its proposals, whether the fix held — is that node\'s own account: ' +
-      (consoles || "no console is linked for these doors (HOOKRELAY_UI_LINKS)") +
-      ' · <a class="btn tiny" href="/audit/' + esc(origin.id) + '" target="_blank" rel="noopener">audit record</a></div>';
-  }
-  document.getElementById("jGo").addEventListener("click", function () { journeyLoad(document.getElementById("jRef").value); });
-  document.getElementById("jRef").addEventListener("keydown", function (e) { if (e.key === "Enter") journeyLoad(e.target.value); });
-  // ── end journey ──
-
-  function readHeaders() {
-    var headers = {};
-    var token = localStorage.getItem(TOKEN_KEY);
-    if (token) headers["X-Read-Token"] = token;
-    return headers;
-  }
-
-  function adminHeaders() {
-    var token = localStorage.getItem(ADMIN_KEY) || "";
-    return token ? { "X-Admin-Token": token } : {};
-  }
-  function showMsg(id, ok, text) {
-    var el = document.getElementById(id);
-    el.className = "msg show " + (ok ? "ok" : "err");
-    el.textContent = text;
-  }
-
+  // ── config editor: GET → edit → PUT (validate-or-nothing) ──
   var adminInput = document.getElementById("adminToken");
   adminInput.value = localStorage.getItem(ADMIN_KEY) || "";
   document.getElementById("adminSave").addEventListener("click", function () {
@@ -929,8 +1155,6 @@
     showMsg("cfgMsg", true, "token saved in this browser");
     loadConfig();
   });
-
-  // ── config editor: GET → edit → PUT (validate-or-nothing) ──
   function loadConfig() {
     fetch("/config", { headers: adminHeaders() }).then(function (res) {
       if (res.status === 403) { showMsg("cfgMsg", false, "admin token required (HOOKRELAY_ADMIN_TOKEN in .env)"); return null; }
@@ -947,7 +1171,6 @@
         if (r.ok) {
           showMsg("cfgMsg", true, "saved and applied\nsources: " + r.d.sources.join(", ") +
             "\npipeline: " + r.d.pipeline.join(" → ") + "\nroutes: " + r.d.routes.join(", "));
-          refresh();
         } else { showMsg("cfgMsg", false, "validation failed, nothing changed:\n" + r.d.detail); }
       });
   });
@@ -955,12 +1178,10 @@
     fetch("/config/reload", { method: "POST", headers: adminHeaders() })
       .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
       .then(function (r) {
-        if (r.ok) { showMsg("cfgMsg", true, "reloaded from file"); loadConfig(); refresh(); }
+        if (r.ok) { showMsg("cfgMsg", true, "reloaded from file"); loadConfig(); }
         else { showMsg("cfgMsg", false, r.d.detail || "reload failed"); }
       });
   });
-
-  // ── silences: create here, lift from the list ──
   document.getElementById("silCreate").addEventListener("click", function () {
     fetch("/silences", {
       method: "POST",
@@ -973,107 +1194,9 @@
     }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
       .then(function (r) {
         showMsg("silMsg", r.ok, r.ok ? ("silenced #" + r.d.id + " · " + r.d.source) : (r.d.detail || "failed"));
-        refresh();
+        lastNowSig = "";
       });
   });
-
-  function prettyBody(s) {
-    try { return JSON.stringify(JSON.parse(s), null, 2); } catch (_e) { return s; }
-  }
-
-  function renderRoundTrip(box, trip) {
-    var origin = trip.origin || {};
-    var returns = trip.returns || [];
-    var fan = (origin.deliveries || []).map(function (d) {
-      return '<span class="chip ' + esc(d.status) + '">' + esc(d.channel) + " · " + esc(d.status) + "</span>";
-    }).join(" ");
-    // The forensic record, both directions: the payload exactly as received,
-    // and per channel the exact body that left the socket. Collapsed — the
-    // chips answer "did it go"; these answer "what exactly went".
-    var received = origin.payload == null ? "" :
-      '<details class="wire"><summary>payload as received</summary>' +
-      '<pre class="trace">' + esc(JSON.stringify(origin.payload, null, 2)) + "</pre></details>";
-    var sentBodies = (origin.deliveries || []).filter(function (d) { return d.sent_body; })
-      .map(function (d) {
-        return '<details class="wire"><summary>' + esc(d.channel) + " · body sent</summary>" +
-          '<pre class="trace">' + esc(prettyBody(d.sent_body)) + "</pre></details>";
-      }).join("");
-    var brains = returns.length
-      ? returns.map(function (r) {
-          var who = (r.fields && (r.fields.brain || r.source)) || r.source;
-          var extras = Object.keys(r.fields || {})
-            .filter(function (k) { return k !== "brain" && k !== "correlation_id"; })
-            .map(function (k) { return esc(k) + "=" + esc(r.fields[k]); }).join(" · ");
-          return '<div class="brain">' +
-            '<span class="lat">' + esc(r.latency_seconds) + "s</span>" +
-            '<div class="who"><span class="dot ' + esc(r.level) + '"></span> ' + esc(who) + "</div>" +
-            '<div class="verdict">' + esc(r.title || "(untitled)") + "</div>" +
-            '<div class="verdict">' + esc(r.body || "") + "</div>" +
-            (extras ? '<div class="kv">' + extras + "</div>" : "") +
-            '<div class="kv">level=' + esc(r.level) + " · #" + esc(r.id) + "</div></div>";
-        }).join("")
-      : '<div class="hint">no processing system has returned yet — they must quote the correlation id to group here</div>';
-    box.innerHTML = '<h4>Original event #' + esc(origin.id) + " · fanned out to</h4>" + (fan || '<span class="hint">not delivered</span>') +
-      received + sentBodies +
-      "<h4 style=\"margin-top:12px\">what each system made of it (" + returns.length + ")</h4>" +
-      '<div class="brains">' + brains + "</div>";
-  }
-
-  // Delegated actions on the events panel (lift silence / retry dead).
-  document.addEventListener("click", function (e) {
-    var lift = e.target.closest("[data-lift-silence]");
-    if (lift) {
-      fetch("/silences/" + lift.getAttribute("data-lift-silence"), { method: "DELETE", headers: adminHeaders() })
-        .then(function (res) { if (!res.ok) alert("lift failed: admin token required (set it on the config tab)"); refresh(); });
-    }
-    var cmp = e.target.closest("[data-compare]");
-    if (cmp) {
-      e.preventDefault();
-      var id = cmp.getAttribute("data-compare");
-      var box = document.getElementById("cmp-" + id);
-      if (box.style.display !== "none") { box.style.display = "none"; return; }
-      box.style.display = "block";
-      box.innerHTML = '<span class="hint">loading…</span>';
-      var headers = {};
-      var token = localStorage.getItem(TOKEN_KEY);
-      if (token) headers["X-Read-Token"] = token;
-      fetch("/trace/" + id, { headers: headers })
-        .then(function (res) { return res.ok ? res.json() : null; })
-        .then(function (trip) {
-          if (!trip) { box.innerHTML = '<span class="hint">round trip unavailable</span>'; return; }
-          renderRoundTrip(box, trip);
-        });
-      return;
-    }
-    var retry = e.target.closest("[data-retry-delivery]");
-    if (retry) {
-      fetch("/deliveries/" + retry.getAttribute("data-retry-delivery") + "/retry", { method: "POST", headers: adminHeaders() })
-        .then(function (res) { if (!res.ok) alert("retry failed: admin token required (set it on the config tab)"); refresh(); });
-    }
-  });
-
-  document.getElementById("fApply").addEventListener("click", function () {
-    filters.q = document.getElementById("fSearch").value.trim();
-    filters.source = document.getElementById("fSource").value.trim();
-    filters.outcome = document.getElementById("fOutcome").value;
-    filters.limit = 50;
-    refresh();
-  });
-  document.getElementById("fClear").addEventListener("click", function () {
-    document.getElementById("fSearch").value = "";
-    document.getElementById("fSource").value = "";
-    document.getElementById("fOutcome").value = "";
-    filters = { q: "", source: "", outcome: "", limit: 50 };
-    refresh();
-  });
-  document.getElementById("loadMore").addEventListener("click", function () {
-    filters.limit = Math.min(500, filters.limit + 50);
-    refresh();
-  });
-  document.getElementById("fSearch").addEventListener("keydown", function (e) {
-    if (e.key === "Enter") document.getElementById("fApply").click();
-  });
-
   document.getElementById("exRun").addEventListener("click", function () {
     var box = document.getElementById("exResult");
     fetch("/explain/" + encodeURIComponent(document.getElementById("exSource").value.trim()), {
@@ -1087,8 +1210,7 @@
       });
   });
 
-  refresh();
-  // ── live control · keep this block identical in all three pages ────────────
+// ── live control · keep this block identical in all three pages ────────────
   // A board is watched while something is happening, and what it shows changes
   // when the service writes — not when a clock in the browser says so. So there
   // is no clock: the page holds one streaming connection and refetches what it
@@ -1152,12 +1274,7 @@
     liveConnect(url, headers, onChange);
   }
   // ── end live control ──────────────────────────────────────────────────────
-  wireLiveControl("/live", readHeaders, function () {
-    refresh();
-    if (document.querySelector('.tab[data-tab="config"]').classList.contains("active")) loadConfig();
-    if (document.querySelector('.tab[data-tab="timeline"]').classList.contains("active")) loadTimeline();
-    if (document.querySelector('.tab[data-tab="journey"]').classList.contains("active")) journeyRefresh();
-  });
+  wireLiveControl("/live", readHeaders, refreshActive);
 })();
 </script>
 </body>

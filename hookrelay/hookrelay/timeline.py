@@ -124,6 +124,10 @@ def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
                 # still — two field NAMES the doors agreed on, never their text.
                 "session": str((row.get("fields") or {}).get("session") or "")[:120] or None,
                 "sender": str((row.get("fields") or {}).get("sender") or "")[:80] or None,
+                # What this hop's cards asked a person, if anything — the pipe's
+                # own button labels, so the board can say "waiting on you"
+                # without reading a word of the alert.
+                "asked": sorted({label for d in row.get("deliveries") or [] for label in d.get("asked") or []}),
             }
         )
         burst = str((row.get("fields") or {}).get("burst_id") or "")

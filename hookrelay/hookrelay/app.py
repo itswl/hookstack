@@ -36,7 +36,7 @@ from hookrelay.live import Live
 from hookrelay.pipeline import handle_hook, record_storm_suppressed
 from hookrelay.security import token_ok, verify_signature
 from hookrelay.settings import Settings
-from hookrelay.store import Store, now_ts
+from hookrelay.store import Store, button_labels, now_ts
 from hookrelay.timeline import render as render_timeline
 from hookrelay.topology import render as render_topology
 
@@ -761,21 +761,6 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         rows = await app.state.store.recent_events(min(limit * 4, 400))
         return render_timeline(rows, limit=limit)
 
-    def _buttons_on(sent_body: Any) -> list[str]:
-        """The button labels this pipe put on a card, or none.
-
-        From the stored body rather than a new column: `sent_body` is already
-        the exact octets that left the socket, kept for exactly this kind of
-        question. A card with no buttons told somebody something; a card with
-        buttons asked them for something, and only the second kind going unseen
-        is a problem anybody has to fix.
-        """
-        try:
-            actions = (json.loads(sent_body or "{}").get("card") or {}).get("actions") or []
-        except (ValueError, AttributeError):
-            return []
-        return [str(a.get("text") or "")[:80] for a in actions if isinstance(a, dict)]
-
     @app.get("/unseen", dependencies=[Depends(_read_guard)])
     async def unseen(
         hours: int = 24,
@@ -842,7 +827,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 # on it is somebody waiting on an answer that was never asked
                 # for. Reading `card.actions` is not reading the alert — the
                 # pipe wrote that block, and the button LABELS are its own text.
-                asks = _buttons_on(card.get("sent_body"))
+                asks = button_labels(card.get("sent_body"))
                 if asks:
                     counts["unseen_asking"] += 1
                 unseen_rows.append(

@@ -83,9 +83,9 @@ a source that already judged its own signal takes a terminal route instead:
   (signed door)               └──► hookprobe :8088         (only if it says so)
 ```
 
-![hookrelay's ledger: every message accounted for, every delivery with an outcome](img/hookrelay-ledger.png)
+![hookrelay's ledger: every event with its decision chain, its deliveries, and what came back](img/hookrelay-ledger.png)
 
-![hookrelay's timeline: one chain per alert — signal, verdict, report — with costs, one incident grouped, and an audit record opened](img/hookrelay-timeline.png)
+![hookrelay's board: one card per alert drawn as seven stages — received, judged, notified, investigated, a person, condition, fix — a fix that held, a card waiting on you, a ruling](img/hookrelay-timeline.png)
 
 ![hookjudge's status page: eight verdicts, every free route exercised, half paid](img/hookjudge-status.png)
 

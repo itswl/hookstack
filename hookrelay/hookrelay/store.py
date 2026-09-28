@@ -125,6 +125,22 @@ CREATE INDEX IF NOT EXISTS ix_card_actions_correlation ON card_actions (correlat
 """
 
 
+def button_labels(sent_body: Any) -> list[str]:
+    """The button labels this pipe put on a card, or none.
+
+    From the stored body rather than a new column: `sent_body` is already the
+    exact octets that left the socket, kept for exactly this kind of question.
+    A card with no buttons told somebody something; a card with buttons asked
+    them for something, and only the second kind going unanswered is a problem
+    anybody has to fix. The labels are the pipe's own text, never the alert's.
+    """
+    try:
+        actions = (json.loads(sent_body or "{}").get("card") or {}).get("actions") or []
+    except (ValueError, AttributeError):
+        return []
+    return [str(a.get("text") or "")[:80] for a in actions if isinstance(a, dict)]
+
+
 class Transaction:
     """The write side of one atomic unit — statements only, never a commit.
 
@@ -1167,7 +1183,7 @@ class Store:
         # /trace/{id}, one event at a time. These two are small per-event
         # metadata that /trace already serves behind this same read token.
         cursor = await self.read.execute(
-            "SELECT e.id, e.source, e.received_at, e.title, e.level,"  # nosec B608
+            "SELECT e.id, e.source, e.received_at, e.title, e.level, e.is_recovery,"  # nosec B608
             "       e.fields_json, e.correlation_id,"
             "       d.outcome, d.skip_code, d.channels_json, d.steps_json"
             " FROM events e LEFT JOIN decisions d ON d.event_id = e.id"
@@ -1183,10 +1199,16 @@ class Store:
             event["channels"] = json.loads(event.pop("channels_json") or "[]")
             event["steps"] = json.loads(event.pop("steps_json") or "[]")
             cursor = await self.read.execute(
-                "SELECT id, channel, status, attempts, last_error FROM deliveries WHERE event_id = ? ORDER BY id",
+                "SELECT id, channel, status, attempts, last_error, platform_message_id, sent_body"
+                " FROM deliveries WHERE event_id = ? ORDER BY id",
                 (event["id"],),
             )
-            event["deliveries"] = [dict(row) for row in await cursor.fetchall()]
+            # The labels a card asked with, never its body: the board reads "did
+            # somebody answer what this card asked", and the bytes stay on /trace.
+            event["deliveries"] = [
+                {**dict(row), "sent_body": None, "asked": button_labels(row["sent_body"])}
+                for row in await cursor.fetchall()
+            ]
         return events
 
 
