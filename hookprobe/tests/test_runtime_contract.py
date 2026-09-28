@@ -107,7 +107,10 @@ def test_every_adapter_is_covered_by_this_suite() -> None:
     assertion that cannot be satisfied by writing a new adapter and forgetting
     this file.
     """
-    assert set(ADAPTERS) == {"claude", "codex", "pi"}
+    # `replay` is the rehearsal, not a runtime — and it is in the registry so it
+    # is judged here rather than waved through as "just a demo". Its own
+    # obligations are asserted in tests/test_engine_replay.py.
+    assert set(ADAPTERS) == {"claude", "codex", "pi", "replay"}
 
 
 def test_the_contract_names_every_adapter_it_is_the_authority_for() -> None:

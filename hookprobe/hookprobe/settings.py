@@ -557,10 +557,13 @@ class Settings:
     model_endpoint: str = "api.anthropic.com"
 
     # WHICH runtime runs a turn. "claude" is the SDK adapter this service grew
-    # up on; "codex" drives the Codex CLI. The Runtime Contract on
-    # service.Engine says what a value here has to supply, and two of its five
-    # obligations are invisible in the type — a runtime that cannot gate a tool
-    # before it runs cannot be run under `readonly` whatever it is called.
+    # up on; "codex" drives the Codex CLI; "pi" the pi CLI. The Runtime Contract
+    # on service.Engine says what a value here has to supply, and two of its
+    # five obligations are invisible in the type — a runtime that cannot gate a
+    # tool before it runs cannot be run under `readonly` whatever it is called.
+    # "replay" is not a runtime: it is the rehearsal, a recorded investigation
+    # played back with no model behind it — the quickstart's default, and
+    # never a node that holds a credential worth investigating with.
     runtime: str = "claude"
     # Codex only. The binary; the interpreter its hooks are spawned with, which
     # must be able to import hookprobe because the gate IS hookprobe; and the

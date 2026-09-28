@@ -32,9 +32,22 @@ def _pi(settings: Settings) -> Any:
     return PiEngine(settings)
 
 
+def _replay(settings: Settings) -> Any:
+    from hookprobe.engine_replay import ReplayEngine
+
+    return ReplayEngine(settings)
+
+
 # Imported lazily inside the factories: the Claude adapter drags the SDK in with
 # it, and a deployment running codex should not need it installed to boot.
-ADAPTERS: dict[str, Callable[[Settings], Any]] = {"claude": _claude, "codex": _codex, "pi": _pi}
+#
+# Four names, three runtimes. `replay` is the rehearsal (engine_replay.py): a
+# recorded investigation played back through the same gate and recorder, with
+# no model behind it. It is in this registry rather than special-cased in
+# `__main__` for the reason the registry exists — the conformance suite reads
+# this dict, so the one adapter that could most easily be waved through as
+# "just a demo" is judged by the same suite as the rest.
+ADAPTERS: dict[str, Callable[[Settings], Any]] = {"claude": _claude, "codex": _codex, "pi": _pi, "replay": _replay}
 
 
 def build_engine(settings: Settings) -> Any:

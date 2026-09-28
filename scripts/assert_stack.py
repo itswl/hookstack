@@ -127,22 +127,31 @@ def main() -> int:
         check("Resolved" in sink, "the recovery card says so in its headline")
         check("msgtype" in sink, "a second dialect was rendered from the same judgement")
 
-        # Four judgements dressed for two channels (8), plus each front-door
-        # event copied once to the investigator's stand-in (4). More than
-        # twelve means a delivery was retried, and a retry that the downstream
-        # already received is a duplicate alert to whoever is on call. The
-        # stand-in caused exactly this by being single-threaded while the pipe
-        # delivers to channels in parallel.
-        deliveries = sink.count("delivery on")
+        # Four judgements dressed for two channels: exactly eight judge cards.
+        # More means a delivery was retried, and a retry that the downstream
+        # already received is a duplicate alert to whoever is on call — the old
+        # single-threaded stand-in caused exactly this while the pipe delivered
+        # to channels in parallel. The investigator's report cards are counted
+        # apart: their title ends "· investigation", and how many there are
+        # depends on whether the restatement arrived after the first run had
+        # finished (a re-fire then continues the run and re-delivers), so they
+        # get a floor and a parity rather than a total.
+        blocks = sink.split("── delivery on")[1:]
+        reports = sum(1 for block in blocks if "· investigation" in block)
+        judged = len(blocks) - reports
         check(
-            deliveries == 12,
+            judged == 8,
             "no downstream received the same alert twice",
-            f"expected 12 deliveries, saw {deliveries}",
+            f"expected 8 judge cards, saw {judged} (plus {reports} investigation cards)",
         )
+        # Since 0.4.0 every front-door event reaches the investigator's own
+        # door — nothing lands on the old /probe-standin — and both investigated
+        # alerts (the gateway, the disk) report back through the pipe to BOTH
+        # dialects, so the count is even and at least four.
         check(
-            sink.count("delivery on /probe-standin") == 4,
-            "every front-door event was copied to the investigator's stand-in",
-            f"saw {sink.count('delivery on /probe-standin')}",
+            reports >= 4 and reports % 2 == 0 and "delivery on /probe-standin" not in sink,
+            "both investigations reported back through the pipe to every dialect",
+            f"saw {reports} investigation cards, {sink.count('delivery on /probe-standin')} stand-in deliveries",
         )
 
     print()

@@ -21,7 +21,7 @@ packages = ["hookprobe"]
 # The console, and the pi gate extension. The extension is not decoration: a
 # node running on pi with no extension has no posture, so it refuses to start —
 # which is the right failure and a poor way to discover a packaging list.
-hookprobe = ["*.html", "*.ts"]
+hookprobe = ["*.html", "*.ts", "replays/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

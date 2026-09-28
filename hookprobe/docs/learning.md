@@ -144,10 +144,10 @@ on a page: let the graph decide it after real traffic, not an argument before. T
 content-blind; the judge is untouched; failure still completes the loop (a
 stopped, crashed, budget-refused — or restart-orphaned — investigation
 reports itself: runs are checkpointed at spawn, and the next boot sweeps
-whatever a dead process left mid-flight into failure reports). The plain demo compose
-points the escalation at the sink's `/probe-standin` so the shape is visible
-without a model key; `--profile probe` (plus `HOOKPROBE_EVENT_URL` in `.env`)
-swaps in the real investigator.
+whatever a dead process left mid-flight into failure reports). The demo compose
+runs this service on the `replay` rehearsal so the whole loop is visible without
+a model key; `HOOKPROBE_RUNTIME=claude`, `HOOKPROBE_MODEL` and a key in `.env`
+swap in a real investigator (docs/runtimes.md).
 
 ### The card is not a dead end
 

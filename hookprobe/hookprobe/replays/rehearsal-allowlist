@@ -1,0 +1,9 @@
+# The allowlist the quickstart arms the rehearsal's procedure with
+# (HOOKPROBE_REMEDIATION_ALLOWLIST points here in docker-compose.quickstart.yml
+# and docker-compose.yml). One regex per line, full-match, deny by default —
+# the same file format an operator writes for a real node, and this one admits
+# exactly the two observations the disk-fills script proposes. A real
+# deployment writes its own file and never points at this one: a list that
+# ships with the code is a list the operator did not decide.
+^df -h /data$
+^du -sh /data/results$

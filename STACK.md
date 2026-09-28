@@ -8,7 +8,7 @@ Docker before this page was last rewritten.
 
 ```bash
 docker compose down -v --remove-orphans   # start from nothing (deletes ledgers)
-docker compose up -d --build              # relay :8100 · judge :8200 · sink · stub
+docker compose up -d --build              # relay :8100 · judge :8200 · probe :8088 · sink · stub
 ```
 
 ```
@@ -19,15 +19,18 @@ you ──► hookrelay :8100 ──► hookjudge :8200 ──► hookrelay ─�
              └──► hookprobe :8088 (investigates) ──► /hook/probe-notify ──► sink
                   · every front-door event is copied here; the probe itself
                     decides by level (critical/high) what is worth paying for
-                  · plain `up` delivers to the sink's /probe-standin instead,
-                    so the escalation shape is visible without a model key
+                  · plain `up` runs it on the `replay` rehearsal: a recorded
+                    investigation played back through the real read-only gate
+                    and audit, priced at nothing — so the report, the approve
+                    press and the execution record are all visible with no key
 ```
 
-The investigator joins with a real model key:
+The investigator is up from the start, on the rehearsal. To make it real, hand
+it a model (all three, so a rehearsal's name never sits on a real run):
 
 ```bash
-printf 'ANTHROPIC_API_KEY=sk-ant-...\nHOOKPROBE_EVENT_URL=http://hookprobe:8088/hooks/event\n' >> .env
-docker compose --profile probe up -d --build
+printf 'HOOKPROBE_RUNTIME=claude\nHOOKPROBE_MODEL=claude-opus-5\nANTHROPIC_API_KEY=sk-ant-...\n' >> .env
+docker compose up -d --build
 ```
 
 | where | what |
@@ -88,14 +91,15 @@ routes {'ai': 2, 'reuse': 1, 'recovery': 1}
 #4 RECOVERY  recovery  high      $0         k8s node disk usage 93%        <- inherits #3's high
 ```
 
-And the pipe's own ledger closes the books: **16 delivered, 0 queued, 0 dead**
+And the pipe's own ledger closes the books: **23 delivered, 0 queued, 0 dead**
 — per front-door event one copy to `to-judge` and one to `to-probe` (4 + 4),
-per judgement one Feishu card and one DingTalk message (4 + 4) — the card
-rendered by `lark-bridge` in webhook mode from the pipe's card model, the
+per judgement one Feishu card and one DingTalk message (4 + 4), per
+investigation report the same pair (the gateway, its re-fire's follow-up, the
+disk: 3 × 2), and one press forwarded to the investigator's action door — the
+cards rendered by `lark-bridge` in webhook mode from the pipe's card model, the
 markdown by the shipped DingTalk plugin. One judgement reaches every downstream
-in its own dialect without the pipe knowing either — the sink logs show the same
-verdict rendered both ways, plus the four normalized events that landed on
-`/probe-standin`.
+in its own dialect without the pipe knowing either; the sink logs show the same
+verdict rendered both ways, and the investigator's reports beside them.
 
 ## Checking it
 
@@ -138,7 +142,7 @@ Neither ships. `hookrelay/deploy/docker-compose.prod.yml` has no trace of them.
 
 | | replaces | lives with |
 | --- | --- | --- |
-| `sink` | the chat bots' incoming webhooks (the bridge posts its rendered Feishu card here, the DingTalk plugin posts straight in) — and, on `/probe-standin`, the investigator | `hookrelay/examples/sink.py` — it stands in for the pipe's downstreams |
+| `sink` | the chat bots' incoming webhooks (the bridge posts its rendered Feishu card here, the DingTalk plugin posts straight in) — and, when `HOOKPROBE_EVENT_URL` is pointed at its `/probe-standin`, the investigator's door too | `hookrelay/examples/sink.py` — it stands in for the pipe's downstreams |
 | `stub-ai` | the model provider | `hookjudge/examples/stub_ai.py` — it stands in for the brain's model |
 
 `lark-bridge` is not a stand-in: the compose runs the real sidecar in webhook

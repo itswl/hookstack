@@ -43,11 +43,15 @@ hookstack **不是**：通用的工作管理平台、多租户 SaaS、告警平�
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
-docker compose -f docker-compose.quickstart.yml up -d   # 管道 + 判官 + 桩模型 + 可读的接收端
+docker compose -f docker-compose.quickstart.yml up -d   # 管道 + 判官 + 桩模型 + 跑排练的调查员 + 可读的接收端
 bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
 ```
 
-不用 checkout、不用构建：全部来自已发布的镜像，桩模型和接收端都在镜像里。想改代码就 clone 后 `docker compose up -d --build` —— 那份文件从源码构建，也是 gate 测的那份。`.env` 里放真实凭证后，桩模型自动让位；`--profile probe` 加上调查员。
+不用 checkout、不用构建：全部来自已发布的镜像，桩模型、排练脚本和接收端都在镜像里。想改代码就 clone 后 `docker compose up -d --build` —— 那份文件从源码构建，也是 gate 测的那份。
+
+演示的终点是一条闭环，而不是几个健康的容器：磁盘告警被调查（一次录好的调查，经真实的只读门回放，其中一条调用被拒，拒绝记录在审计里），报告回到卡片，卡片上的批准按钮跑两条在允许列表里的观察命令，告警恢复，管道的审计页展示整条链和那一次按下。排练报告里的数字都是事先写好的，报告最后一节自己会说明。
+
+`.env` 里放真实凭证后，桩模型自动让位；设置 `HOOKPROBE_RUNTIME=claude`、`HOOKPROBE_MODEL` 和模型 key，调查员就换成真的。
 
 那个 [agent runner](#hookprobe) 本身就有用，无论你关不关心告警。
 

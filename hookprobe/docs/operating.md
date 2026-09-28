@@ -6,7 +6,8 @@ The sixty-second version is in the [README](../README.md); this is the rest.
 ## Run it
 
 Four composes, four shapes: the repo-root stack compose runs the demo
-stack and includes this service behind `--profile probe`; the repo-root
+stack and includes this service on the `replay` rehearsal (a recorded
+investigation, no model — [runtimes.md](runtimes.md)); the repo-root
 `deploy/docker-compose.yml` runs the real stack (pipe + brain +
 investigator, no demo containers); `deploy/docker-compose.yml` here runs
 the investigator standalone; `deploy/docker-compose.prod.yml` is the
