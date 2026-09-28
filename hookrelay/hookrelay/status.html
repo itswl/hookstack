@@ -496,7 +496,7 @@
   var journeyRef = "", lastJourneySig = "";
   var nowFilter = { kind: "all", q: "", source: "" };
   var ledgerFilters = { q: "", source: "", outcome: "", limit: 50 };
-  var QUIET_KINDS = { tick: 1, note: 1, brief: 1 };
+  var QUIET_KINDS = { tick: 1, note: 1, brief: 1, report: 1 };   // a tick, a note, a brief, a report about the stack itself
 
   function kindOf(e) {
     var f = e.fields || {};
