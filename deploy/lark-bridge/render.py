@@ -33,6 +33,12 @@ TONE_COLOR = {
 }
 # A tone the vocabulary does not name: readable, and visibly not an alarm.
 FALLBACK_COLOR = "turquoise"
+# The full text behind a card, posted under it in pieces (`detail_cards`). One
+# piece is a card's worth of markdown a phone shows without a scroll of its
+# own; eight pieces is twenty thousand characters, past which the report is
+# read on the console and the last piece says so.
+DETAIL_CHUNK_CHARS = 2500
+DETAIL_MAX_CHUNKS = 8
 
 _OPENERS = ("\\", "<", "[", "]")
 _CLICKABLE_SCHEMES = ("http://", "https://")
@@ -107,6 +113,62 @@ def _action_links(actions: list[dict[str, Any]], link_base: str) -> str:
                 )
             )
     return " · ".join(r for r in rendered if r)
+
+
+def _pieces(text: str, size: int) -> list[str]:
+    """The text cut on paragraph boundaries, never inside a word where it can be
+    helped; a single paragraph longer than a piece is cut where it must be."""
+    out: list[str] = []
+    buffer = ""
+    for paragraph in text.split("\n\n"):
+        candidate = paragraph if not buffer else f"{buffer}\n\n{paragraph}"
+        if len(candidate) <= size:
+            buffer = candidate
+            continue
+        if buffer:
+            out.append(buffer)
+        while len(paragraph) > size:
+            out.append(paragraph[:size])
+            paragraph = paragraph[size:]
+        buffer = paragraph
+    if buffer:
+        out.append(buffer)
+    return out
+
+
+def detail_cards(
+    detail: Any, *, chunk_chars: int = DETAIL_CHUNK_CHARS, max_chunks: int = DETAIL_MAX_CHUNKS
+) -> list[dict[str, Any]]:
+    """The full text behind a card as the cards that follow it into its thread.
+
+    The card quotes a summary; this is what the summary was written from, and
+    on a phone it is the only way to read it — pilot zero's cards carried a
+    summary and no reachable console, so a person ruling on one was ruling on
+    a paragraph. Escaped like every other payload slot that renders `lark_md`;
+    headerless, because the card above it is the header.
+    """
+    text = str(detail or "").strip()
+    if not text:
+        return []
+    pieces = _pieces(text, chunk_chars)
+    truncated = len(pieces) > max_chunks
+    pieces = pieces[:max_chunks]
+    total = len(pieces)
+    cards: list[dict[str, Any]] = []
+    for index, piece in enumerate(pieces, start=1):
+        note = f"report · part {index} of {total}"
+        if truncated and index == total:
+            note += " · the rest is on the console"
+        cards.append(
+            {
+                "config": {"wide_screen_mode": True},
+                "elements": [
+                    _md(escape_markup(piece)),
+                    {"tag": "note", "elements": [{"tag": "plain_text", "content": note}]},
+                ],
+            }
+        )
+    return cards
 
 
 def feishu_card(model: dict[str, Any], *, actions: str = "buttons", link_base: str = "") -> dict[str, Any]:

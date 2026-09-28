@@ -20,7 +20,8 @@ and `meta.alert_name` in practice):
 
 and the pipe turns it into ONE thing: the card model (`card_model`,
 docs/bridge-protocol.md) — headline, state, lead, summary, identity crumb,
-impact, links, actions, footer, as plain facts. Who renders that into a
+impact, links, actions, footer, and the full text behind the summary as
+`detail` when the brain sent one, as plain facts. Who renders that into a
 platform's dialect is not this module's business: a bridge sidecar for a chat
 that calls back, a plugin (examples/plugins/chat_markdown_channels.py) for a
 markdown webhook. `actions` are carried as the brain signed them: the value is
@@ -149,6 +150,10 @@ class Processed:
             "tone": "recovery" if self.is_recovery else self.importance,
             "lead": self.level_tag,
             "summary": self.summary,
+            # The whole text behind the summary, when the brain sent one. A
+            # bridge that can reply in a thread posts it under the card; a
+            # webhook dialect has no thread and leaves it out.
+            "detail": str(self.analysis.get("detail") or ""),
             "crumb": self.breadcrumb(),
             "impact": str(self.analysis.get("impact_scope") or ""),
             "links": [{"text": str(x.get("text") or ""), "url": str(x.get("url") or "")} for x in self.links],

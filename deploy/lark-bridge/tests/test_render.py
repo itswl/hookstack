@@ -99,3 +99,27 @@ def test_actions_become_links_for_a_delivery_that_cannot_call_back() -> None:
 def test_a_link_label_cannot_hijack_the_link() -> None:
     out = render.markdown_link("Runbook](https://evil.example) click", "https://kb.example/ok")
     assert out.endswith("](https://kb.example/ok)") and "Runbook\\](https://evil.example) click" in out
+
+
+def test_detail_becomes_headerless_cards_cut_on_paragraphs_and_capped() -> None:
+    from render import DETAIL_CHUNK_CHARS, DETAIL_MAX_CHUNKS, detail_cards
+
+    assert detail_cards("") == [] and detail_cards(None) == []
+    one = detail_cards("a short report")
+    assert len(one) == 1 and "header" not in one[0]
+    assert one[0]["elements"][0]["text"]["content"] == "a short report"
+    assert one[0]["elements"][-1]["elements"][0]["content"] == "report · part 1 of 1"
+    paragraphs = [f"p{i} " + "y" * 900 for i in range(6)]
+    cards = detail_cards("\n\n".join(paragraphs))
+    assert len(cards) == 3, "two ~900-char paragraphs fit a piece; a third does not"
+    assert all(len(c["elements"][0]["text"]["content"]) <= DETAIL_CHUNK_CHARS for c in cards)
+    assert cards[0]["elements"][0]["text"]["content"].startswith("p0 ")
+    assert cards[-1]["elements"][-1]["elements"][0]["content"] == "report · part 3 of 3"
+    # One paragraph longer than a piece is cut where it must be.
+    assert len(detail_cards("z" * (DETAIL_CHUNK_CHARS * 2 + 10))) == 3
+    # Past the cap the rest stays on the console, and the last piece says so.
+    many = detail_cards("\n\n".join(f"q{i} " + "w" * 2400 for i in range(DETAIL_MAX_CHUNKS + 4)))
+    assert len(many) == DETAIL_MAX_CHUNKS
+    assert many[-1]["elements"][-1]["elements"][0]["content"].endswith("· the rest is on the console")
+    # Escaped where lark_md renders it, like every other payload slot.
+    assert detail_cards("see [the log] <here>")[0]["elements"][0]["text"]["content"] == "see \\[the log\\] \\<here>"
