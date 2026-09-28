@@ -42,7 +42,7 @@ from typing import Any
 
 from hookprobe import remediation, suggestions
 from hookprobe.files import atomic_write
-from hookprobe.runs import Run
+from hookprobe.runs import RUNNING, Run
 
 logger = logging.getLogger("hookprobe.actions")
 
@@ -51,7 +51,7 @@ DIRNAME = "actions"
 # The whole vocabulary. `kind` is what the door dispatches on and what the pipe
 # filters by; everything else on a declared action rides along as an opaque
 # param, so adding a question needs no new kind.
-KINDS = ("followup", "approve", "useful", "useless", "remember")
+KINDS = ("followup", "approve", "useful", "useless", "remember", "handoff")
 # The two that are a human's ruling on the report rather than a request of it.
 RULINGS = ("useful", "useless")
 
@@ -88,7 +88,9 @@ def followup_prompt(run: Run) -> str:
     return _RESUME_PROMPT if run.error else _WHY_PROMPT
 
 
-def declare(run: Run, workdir: Path, *, cooldown: int = remediation.COOLDOWN_SECONDS) -> list[dict[str, Any]]:
+def declare(
+    run: Run, workdir: Path, *, cooldown: int = remediation.COOLDOWN_SECONDS, hands_off: bool = False
+) -> list[dict[str, Any]]:
     """Which actions this report deserves — the judgement, not the buttons.
 
     Three groups, and the reasoning differs for each:
@@ -113,6 +115,19 @@ def declare(run: Run, workdir: Path, *, cooldown: int = remediation.COOLDOWN_SEC
     # per alert pays off, and this one cost nothing and investigated nothing.
     if (run.meta or {}).get("notice"):
         return declared
+    # The work shape's approval, first because it is the one press the card is
+    # for. A planner wired to a handoff door (`hands_off`) offers to act on a
+    # finished plan exactly as its console does — once: a plan already handed
+    # off is not offered again on a later re-delivery, and a run still moving
+    # or one that produced nothing has nothing to hand over (an empty handoff
+    # is a paid run started on nothing, and the node behind that door writes).
+    if (
+        hands_off
+        and run.status != RUNNING
+        and str(run.text or "").strip()
+        and not (run.meta or {}).get("handed_off_at")
+    ):
+        declared.append({"kind": "handoff", "text": "Act on this plan", "ref": run.session_key})
     if run.engine_session_id:
         declared.append(
             {

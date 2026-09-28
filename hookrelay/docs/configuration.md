@@ -478,13 +478,22 @@ card_actions:
     forward_to: judge-feedback
   remember:
     forward_to: probe-action        # adopt one queued memory line, in one tap
+  handoff:
+    forward_to: plan-action         # "act on this plan": the planner hands its report to the runner
 ```
 
-Six kinds exist: `silence`, `followup`, `approve`, `useful`, `useless`,
-`remember`. Unknown
+Seven kinds exist: `silence`, `followup`, `approve`, `useful`, `useless`,
+`remember`, `handoff`. Unknown
 kinds, a `forward_to` naming no channel, and any non-`silence` kind without a
 `forward_to` all fail **at boot** — a button that 404s when an operator finally
 presses it is worse than no button.
+
+`handoff` is the work shape's approval: a planner that is wired to a handoff
+door (`HOOKPROBE_HANDOFF_URL`) declares it on every finished plan, and the
+press does exactly what the console's *Hand off* button does — posts the plan,
+signed, to the door the runner listens on — with the presser recorded on the
+plan's run. Until this kind existed that step needed the console, which the
+phone cannot reach.
 
 ### Buttons where a platform calls back, links where it cannot
 
