@@ -112,6 +112,20 @@ def test_a_ruling_verifies_and_closes_it() -> None:
     assert not item.hands_on, "a closing ruling is not an intervention"
 
 
+def test_a_patrols_ruling_settles_the_debt_but_verifies_nothing() -> None:
+    """The run-rulings patrol files `useful` under a `patrol:` prefix. On the
+    production deployment all 98 rulings ever filed on a run were its, and this
+    board counted each one as a person's verification — the north star graded
+    by the model it was grading."""
+    run = _run("probe:ww:1")
+    run.ruling, run.ruled_at, run.ruled_by = "useful", time.time(), "patrol:run-rulings:2"
+    (item,) = work.resolve([run])
+    assert item.state == work.DONE and not item.verified and item.verified_by == ""
+    assert not any(o["kind"] == "ruling" for o in item.open), "the patrol answered; nobody is asked twice"
+    header = work.counts([item])
+    assert header["verified"] == 0 and header["closed_unattended"] == 0
+
+
 def test_a_failure_outranks_a_stale_success() -> None:
     ok = _run("probe:ww:1", meta={"work_id": "hr-1"})
     later = _run("probe:ww:2", status=FAILED, meta={"work_id": "hr-1"}, created_at=time.time() - 10)

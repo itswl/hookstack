@@ -38,7 +38,7 @@ from typing import Any
 
 from hookprobe.remediation import EXECUTED as PROCEDURE_EXECUTED
 from hookprobe.remediation import stale as proposal_stale
-from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, turn_cost
+from hookprobe.runs import COMPLETED, FAILED, INFERRED_BY_PREFIX, RUNNING, Run, turn_cost
 
 # The states a work item can be in. `received` is not among them on purpose:
 # the PRD's state list has one, but in this loop a run is executing the moment
@@ -96,8 +96,9 @@ class WorkItem:
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     # Whether anybody says it worked, and what said so.
     # Whether anybody or anything says this ended well, and what said so:
-    # `ruling` (a person), `remediation` (its own procedure ran clean),
-    # `recovery` (the condition cleared), in that order of strength.
+    # `ruling` (a person — never a patrol's inference, see below),
+    # `remediation` (its own procedure ran clean), `recovery` (the condition
+    # cleared), in that order of strength.
     verified: bool = False
     verified_by: str = ""
     # Whether the work needed a person to proceed — an approval to press, or a
@@ -281,7 +282,19 @@ def resolve(
         item.cost_usd += sum(costs) if costs else (run.cost_usd or 0.0)
         item.artifacts.extend(_artifacts(run))
 
-        if run.ruling == "useful":
+        # A PERSON's ruling verifies the work; a patrol's does not, and telling
+        # them apart is the whole reason `ruled_by` carries a prefix. Read back
+        # from the production archive on 2026-09-28: every one of the 98 rulings
+        # ever filed on a run there was the run-rulings patrol's — the "Found the
+        # cause" button was on 86 delivered cards and pressed on none — and this
+        # line counted each as a person's, so the weekly page's "Verified 75%"
+        # and its "closed with nobody stepping in" were the model grading its own
+        # report. The rulings line on the same page had said "inferred, not a
+        # person's" since 09-14; the two boards disagreed for two weeks. An
+        # inferred ruling still settles the debt below (the patrol answered, and
+        # asking a person who never answers is noise); it just says nothing
+        # about whether the work was any good.
+        if run.ruling == "useful" and not run.ruled_by.startswith(INFERRED_BY_PREFIX):
             item.verified, item.verified_by = True, "ruling"
         if not run.ruling and run.finished:
             item.open.append(
