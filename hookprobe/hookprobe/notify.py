@@ -160,6 +160,7 @@ class ReturnDelivery:
                     run,
                     self._settings.workdir,
                     cooldown=self._settings.remediation_cooldown_seconds,
+                    hands_off=bool(self._settings.handoff_url),
                 ),
             },
             ensure_ascii=False,

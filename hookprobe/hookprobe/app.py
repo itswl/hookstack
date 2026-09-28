@@ -762,7 +762,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="session not found")
         try:
-            sent = await asyncio.to_thread(handoff.send, settings.handoff_url, settings.handoff_secret, run, run.text)
+            sent = await asyncio.to_thread(service.hand_off, run, actor="console")
         except handoff.NotConfigured as exc:
             raise HTTPException(status_code=501, detail=str(exc)) from exc
         except handoff.NotFinished as exc:

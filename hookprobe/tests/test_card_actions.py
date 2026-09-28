@@ -234,6 +234,83 @@ def test_an_unknown_kind_is_refused_before_anything_is_claimed(tmp_path: Path) -
         assert not (tmp_path / actions.DIRNAME).exists(), "a kind we do not speak claims nothing"
 
 
+# -- the work shape's approval, on the card ----------------------------------
+
+
+def test_a_planner_wired_to_a_door_offers_to_act_on_its_plan(tmp_path: Path) -> None:
+    """The one human step in the work chain used to need the console. A planner
+    that hands off declares the press on every finished plan — first, because it
+    is what the card is for — and never twice, never on nothing."""
+    run = Run(session_key="probe:watch:7", run_id="r1", status=COMPLETED, text="the plan", engine_session_id="sdk-1")
+    assert [a["kind"] for a in actions.declare(run, tmp_path)] == ["followup", "useful", "useless"], (
+        "off until a door is named"
+    )
+    offered = actions.declare(run, tmp_path, hands_off=True)
+    assert [a["kind"] for a in offered] == ["handoff", "followup", "useful", "useless"]
+    assert offered[0]["text"] == "Act on this plan" and offered[0]["ref"] == "probe:watch:7"
+
+    run.meta = {"handed_off_at": 1.0, "handed_off_by": "ou_x"}
+    assert "handoff" not in [a["kind"] for a in actions.declare(run, tmp_path, hands_off=True)], "told once"
+    empty = Run(session_key="probe:watch:8", run_id="r2", status=COMPLETED, text="  ")
+    assert "handoff" not in [a["kind"] for a in actions.declare(empty, tmp_path, hands_off=True)], (
+        "nothing to hand over"
+    )
+
+
+def test_a_press_on_the_plan_card_hands_it_off_and_names_the_presser(tmp_path: Path, monkeypatch) -> None:
+    """The card's press and the console's click share one path: same bytes to
+    the same door, same record on the run. A redelivered press hands off nothing
+    more, and the pipe's own dedup is what a second click would meet."""
+    from hookprobe import handoff
+
+    posted: list[tuple[str, str, str]] = []
+
+    def fake_send(url: str, secret: str, run: Any, report: str, timeout: float = 15.0) -> dict[str, Any]:
+        posted.append((url, run.session_key, report))
+        return {"status": 200, "pipe": {"event_id": 42, "outcome": "routed"}}
+
+    monkeypatch.setattr(handoff, "send", fake_send)
+    client, _ = _investigated(
+        tmp_path, text="the plan", handoff_url="http://pipe/hook/plan-approved", handoff_secret="s"
+    )
+    with client:
+        response = _press(client, "handoff", params={"ref": "probe:inbound:5"}, correlation_id="hr-5", event_id=77)
+        assert response.status_code == 202, response.text
+        answer = response.json()
+        assert answer["status"] == "handed_off" and answer["sessionKey"] == "probe:inbound:5"
+        assert answer["door"]["pipe"]["event_id"] == 42, "the pipe's own answer travels back whole"
+        assert posted == [("http://pipe/hook/plan-approved", "probe:inbound:5", "the plan")]
+        run = client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()
+        assert run["meta"]["handed_off_by"] == "ou_operator" and run["meta"]["handed_off_at"] > 0
+        assert "handoff" not in [a["kind"] for a in actions.declare(_as_run(run), tmp_path, hands_off=True)]
+
+        again = _press(client, "handoff", params={"ref": "probe:inbound:5"}, correlation_id="hr-5", event_id=77)
+        assert again.status_code == 202 and again.json().get("duplicate") is True
+        assert len(posted) == 1, "a redelivery is answered from the claim, not by posting again"
+
+        # The console's button is the same path, and says so on the record.
+        console = client.post("/v1/runs/probe:inbound:5/handoff", headers=AUTH)
+        assert console.status_code == 200 and console.json()["handed_off"] is True
+        assert client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()["meta"]["handed_off_by"] == "console"
+        assert len(posted) == 2
+
+    audit_lines = "".join(p.read_text() for p in (tmp_path / "audit").glob("*.jsonl"))
+    assert "handed off by ou_operator" in audit_lines and "handed off by console" in audit_lines
+
+
+def test_a_handoff_pressed_at_a_runner_that_hands_nothing_off_is_the_operators_to_fix(tmp_path: Path) -> None:
+    """No door named: the press cannot be honoured and no card should have
+    carried it. Non-2xx, so the pipe records a failed delivery and alarms —
+    the line between the world moving on (202) and a misconfiguration."""
+    client, _ = _investigated(tmp_path, text="the plan")
+    with client:
+        response = _press(client, "handoff", params={"ref": "probe:inbound:5"}, correlation_id="hr-5", event_id=77)
+        assert response.status_code == 501
+        assert "HOOKPROBE_HANDOFF_URL" in response.json()["detail"]
+        gone = _press(client, "handoff", params={"ref": "probe:nowhere:1"}, correlation_id="hr-999", event_id=999, at=1)
+        assert gone.status_code == 202 and gone.json()["status"] == "no_such_investigation"
+
+
 def test_a_press_on_the_report_card_finds_the_run_by_the_pipes_correlation(tmp_path: Path) -> None:
     """A button cut from the REPORT card carries the report's own event id, not
     the alert's — so the id the door keyed the session on never comes home on

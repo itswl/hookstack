@@ -333,6 +333,17 @@ channels:
   #
   # If probe-watch stops answering, the pipe says so without a return door: this
   # channel's deliveries retry, dead-letter, and the dead letter self-alarms.
+  # The planner's ACTION door: where a press on one of its cards lands. Signed
+  # with the same secret as its event door — one node, one secret. Today it
+  # carries one kind, `handoff` ("act on this plan"), which is the console's
+  # Hand off button on the phone: the planner posts the plan to plan-approved,
+  # exactly as the console does, and records who pressed.
+  - name: to-plan-action
+    type: generic
+    url: http://probe-plan:8088/hooks/action
+    secret: ${PLAN_EVENT_SECRET}
+    options: {payload: raw}
+
   - name: to-watcher
     type: generic
     url: http://probe-watch:8088/hooks/event
@@ -498,3 +509,14 @@ pipeline:
 
 # No card_actions: no bridge, so no callback can reach this pipe, and an
 # unsigned button URL in a group chat is one anybody can press on your behalf.
+
+# Buttons on the planner's cards. Only with HOOKRELAY_ACTION_SECRET set
+# (WORK_ACTION_SECRET in .env): empty means no card carries a button, because
+# an unsigned button is a URL anyone in the chat can press on your behalf.
+# `handoff` is the work shape's approval — the one human step in a chain that is
+# otherwise automatic — and until 2026-09-28 it needed the console, which the
+# phone cannot reach. The press rides the outbox to the planner's action door
+# and does what the console's Hand off does, with the presser on the record.
+card_actions:
+  handoff:
+    forward_to: to-plan-action

@@ -313,3 +313,23 @@ async def test_the_link_only_asks_and_the_post_acts(action_client):
 async def test_a_link_with_no_token_explains_itself(action_client):
     response = await action_client.get("/card-action")
     assert response.status_code == 200 and "missing its action" in response.text
+
+
+def test_the_work_shapes_approval_is_a_kind_a_deployment_can_offer():
+    """`handoff` — "act on this plan" — is declared by a planner wired to a
+    handoff door and forwarded like every other press. The set is pinned in
+    hookrelay/docs/configuration.md by scripts/assert_docs.py, so adding one
+    here without the doc line is a red gate, on purpose."""
+    from hookrelay import actions
+    from hookrelay.config import Config
+
+    assert "handoff" in actions.KINDS
+    cfg = Config.from_dict(
+        {
+            "sources": [{"name": "watch", "secret": "", "title": "{title}"}],
+            "channels": [{"name": "to-plan-action", "type": "generic", "url": "https://plan.example/hooks/action"}],
+            "routes": [{"name": "r", "source": "watch", "send_to": ["to-plan-action"]}],
+            "card_actions": {"handoff": {"forward_to": "to-plan-action"}},
+        }
+    )
+    assert cfg.card_actions["handoff"].forward_to == "to-plan-action"

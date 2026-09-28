@@ -34,14 +34,16 @@ are hookprobe.actions'.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import urllib.error
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from hookprobe import actions, decline, remediation
+from hookprobe import actions, decline, handoff, remediation
 from hookprobe.runs import Run
 from hookprobe.service import NotResumableError, RunBusyError, RunService
 from hookprobe.settings import Settings
@@ -618,6 +620,35 @@ def _dispatch(
     return _rule(service, run, kind, actor=actor)
 
 
+async def _handoff(
+    service: RunService, params: dict[str, Any], *, correlation_id: str, event_id: Any, actor: str
+) -> dict[str, Any]:
+    """ "Act on this plan", from a card: the console's Hand off, minus the console.
+
+    The one human step in the work chain, and until this door took it the step
+    needed the sessions page — which the phone the plan was read on cannot
+    reach. `params.ref` names the plan's session (the planner declared it);
+    the chain's handles are the fallback. The answers follow the door's rule:
+    a plan that is gone or empty is the world having moved on (202 with a
+    reason); a runner that hands nothing off is the operator's to fix (501,
+    which the pipe records as a failed delivery and alarms); a pipe that would
+    not take it is worth a retry (502).
+    """
+    ref = str(params.get("ref") or "").strip()[:_REF_MAX]
+    run = (service.get(ref) if ref else None) or _resolve_run(service, correlation_id, event_id)
+    if run is None:
+        return {"status": "no_such_investigation", "kind": "handoff", "correlation_id": correlation_id}
+    try:
+        sent = await asyncio.to_thread(service.hand_off, run, actor=actor)
+    except handoff.NotConfigured as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except handoff.NotFinished:
+        return {"status": "nothing_to_hand_off", "kind": "handoff", "sessionKey": run.session_key}
+    except (OSError, urllib.error.URLError) as exc:
+        raise HTTPException(status_code=502, detail=f"the pipe refused or was unreachable: {exc}") from exc
+    return {"status": "handed_off", "kind": "handoff", "sessionKey": run.session_key, "door": sent}
+
+
 def _remember(service: RunService, params: dict[str, Any], *, actor: str) -> dict[str, Any]:
     """Accept one queued memory line, from a card, with one tap.
 
@@ -881,14 +912,20 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
             return JSONResponse(status_code=202, content={"status": "in_flight", "kind": kind, "duplicate": True})
 
         try:
-            answer = _dispatch(
-                service,
-                kind,
-                params,
-                correlation_id=correlation_id,
-                event_id=body.get("event_id"),
-                actor=actor,
-            )
+            if kind == "handoff":
+                # Network I/O to the pipe: off the loop, unlike the others.
+                answer = await _handoff(
+                    service, params, correlation_id=correlation_id, event_id=body.get("event_id"), actor=actor
+                )
+            else:
+                answer = _dispatch(
+                    service,
+                    kind,
+                    params,
+                    correlation_id=correlation_id,
+                    event_id=body.get("event_id"),
+                    actor=actor,
+                )
         except Exception:
             # Nothing happened — an unknown session, an unknown proposal, or a
             # crash — so the key goes back. Holding it would answer the

@@ -34,10 +34,12 @@ from typing import Any, Protocol
 
 from hookprobe import (
     actions,
+    audit,
     automation,
     blockers,
     distill,
     distill_loop,
+    handoff,
     patches,
     remediation,
     rulings,
@@ -1798,6 +1800,37 @@ class RunService:
             error or "good news",
         )
         return notice
+
+    def hand_off(self, run: Run, *, actor: str = "") -> dict[str, Any]:
+        """Hand this run's report to the pipe door the runner is wired to, and
+        record who did it.
+
+        The one human step in a chain that is otherwise automatic (the console
+        route says why). This is the half the console and a card SHARE, so a
+        press on the phone and a click on the sessions page post the same
+        bytes to the same door and leave the same record: `handed_off_at` and
+        `handed_off_by` on the plan's run, and one audit line. Dedup stays the
+        pipe's — a second press arrives as the same event. Raises what
+        `handoff.send` raises; the callers map it to their own answer.
+        """
+        sent = handoff.send(self._settings.handoff_url, self._settings.handoff_secret, run, run.text)
+        by = (actor or "console")[:120]
+        run.meta["handed_off_at"] = round(time.time(), 3)
+        run.meta["handed_off_by"] = by
+        self._store.annotate(run)
+        audit.append(
+            self._settings.workdir / "audit",
+            {
+                "ts": round(time.time(), 3),
+                "session": run.session_key,
+                "tool": "Handoff",
+                "detail": f"handed off by {by} to {self._settings.handoff_url}"[:300],
+                "error": False,
+            },
+        )
+        self._board_changed()
+        logger.info("plan handed off session=%s by=%s", run.session_key, by)
+        return sent
 
     def report_outcome(self, row: dict[str, Any], outcome: str, reason: str) -> Run | None:
         """Say where the report went what became of the procedure it proposed.
