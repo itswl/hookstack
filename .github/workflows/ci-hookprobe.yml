@@ -2,11 +2,13 @@ name: ci-hookprobe
 
 on:
   workflow_dispatch:
+  # Its own docs are checked by ci-stack's docs job; a change to them alone
+  # does not rebuild and boot the image.
   pull_request:
-    paths: ["hookprobe/**", ".github/workflows/ci-hookprobe.yml"]
+    paths: ["hookprobe/**", "!hookprobe/docs/**", "!hookprobe/**/*.md", ".github/workflows/ci-hookprobe.yml"]
   push:
     branches: [main]
-    paths: ["hookprobe/**", ".github/workflows/ci-hookprobe.yml"]
+    paths: ["hookprobe/**", "!hookprobe/docs/**", "!hookprobe/**/*.md", ".github/workflows/ci-hookprobe.yml"]
 
 permissions:
   contents: read

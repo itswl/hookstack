@@ -3,10 +3,10 @@ name: ci-hookjudge
 on:
   workflow_dispatch:
   pull_request:
-    paths: ["hookjudge/**", ".github/workflows/ci-hookjudge.yml"]
+    paths: ["hookjudge/**", "!hookjudge/docs/**", "!hookjudge/**/*.md", ".github/workflows/ci-hookjudge.yml"]
   push:
     branches: [main]
-    paths: ["hookjudge/**", ".github/workflows/ci-hookjudge.yml"]
+    paths: ["hookjudge/**", "!hookjudge/docs/**", "!hookjudge/**/*.md", ".github/workflows/ci-hookjudge.yml"]
 
 permissions:
   contents: read

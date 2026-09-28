@@ -8,12 +8,16 @@ on:
   pull_request:
     paths:
       - "hookrelay/**"
+      - "!hookrelay/docs/**"
+      - "!hookrelay/**/*.md"
       - ".github/workflows/ci.yml"
   push:
     branches:
       - main
     paths:
       - "hookrelay/**"
+      - "!hookrelay/docs/**"
+      - "!hookrelay/**/*.md"
       - ".github/workflows/ci.yml"
 
 permissions:

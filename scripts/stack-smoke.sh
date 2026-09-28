@@ -137,7 +137,15 @@ if [ "${FORCE:-0}" != "1" ] && [ -n "$PROBE_VOLUMES" ]; then
   exit 1
 fi
 docker compose down -v >/dev/null 2>&1 || true
-docker compose up -d --build >/dev/null
+# STACK_PREBUILT=1 says the four images were built just before this ran (CI
+# bakes them with a layer cache, which `compose up --build` cannot use); the
+# stack then comes up on those exact images. Anyone running this by hand keeps
+# the build, so what a developer runs and what CI runs stay the same script.
+if [ "${STACK_PREBUILT:-0}" = "1" ]; then
+  docker compose up -d >/dev/null
+else
+  docker compose up -d --build >/dev/null
+fi
 
 step "wait for health"
 for _ in $(seq 1 90); do

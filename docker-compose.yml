@@ -17,6 +17,10 @@ name: hookstack
 services:
   hookrelay:
     build: ./hookrelay
+    # Named, so an image built ahead of `up` (CI bakes the four with a layer
+    # cache) is the one compose looks for. The default name would be the same;
+    # bake needs it written down.
+    image: hookstack-hookrelay
     container_name: hs-hookrelay
     environment:
       HOOKRELAY_HOST: 0.0.0.0
@@ -66,6 +70,7 @@ services:
 
   hookjudge:
     build: ./hookjudge
+    image: hookstack-hookjudge
     container_name: hs-hookjudge
     environment:
       HOOKJUDGE_HOST: 0.0.0.0
@@ -108,6 +113,7 @@ services:
   # replies in threads.
   lark-bridge:
     build: ./deploy/lark-bridge
+    image: hookstack-lark-bridge
     container_name: hs-lark-bridge
     environment:
       LARK_WEBHOOK_URL: ${LARK_WEBHOOK_URL:-http://sink:9000/feishu}
@@ -152,6 +158,7 @@ services:
   # in .env to investigate for real; see hookprobe/docs/runtimes.md.
   hookprobe:
     build: ./hookprobe
+    image: hookstack-hookprobe
     container_name: hs-hookprobe
     environment:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-}
