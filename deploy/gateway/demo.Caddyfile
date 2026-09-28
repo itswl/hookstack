@@ -1,7 +1,9 @@
 # One address for the demo stack: http://127.0.0.1:8000
 # Same shape as work.Caddyfile — the pipe at the root, each brain under a
 # prefix with its path stripped — so the first-run experience is one site.
-:80 {
+# :8000, not :80 — the container drops every capability, and binding a port
+# under 1024 needs one it no longer has; the compose maps 127.0.0.1:8000 to it.
+:8000 {
 	encode zstd gzip
 
 	handle_path /judge/* {
