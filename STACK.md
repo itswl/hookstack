@@ -91,13 +91,14 @@ routes {'ai': 2, 'reuse': 1, 'recovery': 1}
 #4 RECOVERY  recovery  high      $0         k8s node disk usage 93%        <- inherits #3's high
 ```
 
-And the pipe's own ledger closes the books: **23 delivered, 0 queued, 0 dead**
+And the pipe's own ledger closes the books: **24 delivered, 0 queued, 0 dead**
 — per front-door event one copy to `to-judge` and one to `to-probe` (4 + 4),
 per judgement one Feishu card and one DingTalk message (4 + 4), per
 investigation report the same pair (the gateway, its re-fire's follow-up, the
-disk: 3 × 2), and one press forwarded to the investigator's action door — the
-cards rendered by `lark-bridge` in webhook mode from the pipe's card model, the
-markdown by the shipped DingTalk plugin. One judgement reaches every downstream
+disk: 3 × 2), one approve press forwarded to the investigator's action door and
+one ruling press forwarded to the judge's feedback door — the cards rendered by
+`lark-bridge` in webhook mode from the pipe's card model, the markdown by the
+shipped DingTalk plugin. One judgement reaches every downstream
 in its own dialect without the pipe knowing either; the sink logs show the same
 verdict rendered both ways, and the investigator's reports beside them.
 
