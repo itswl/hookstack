@@ -342,8 +342,17 @@ PY
 # press and the recovery. And the ledger's copy of every card is asked for the
 # one thing it must not keep: a live button token.
 # ---------------------------------------------------------------------------
-step "the journey answers to the session key and ends with the recovery"
-JOURNEY="$(curl -sf --max-time 10 "$RELAY/trace/$session")" DISK_ID="$disk_id" SESSION="$session" python3 - <<'PY' || fail "the pipe cannot tell one alert's journey from its session key"
+step "the journey answers to the session key and ends with the recovery and the verdict"
+# The verdict is the one hop that arrives AFTER the recovery: the investigator
+# tells it through its return door once the recovery has stamped the row, so
+# the journey is asked until that return is on it (or fifteen seconds pass).
+journey_json=""
+for _ in $(seq 1 30); do
+  journey_json="$(curl -sf --max-time 10 "$RELAY/trace/$session" || true)"
+  printf '%s' "$journey_json" | grep -q '· fix held' && break
+  sleep 0.5
+done
+JOURNEY="$journey_json" DISK_ID="$disk_id" SESSION="$session" python3 - <<'PY' || fail "the pipe cannot tell one alert's journey from its session key"
 import json, os, re
 trip = json.loads(os.environ["JOURNEY"])
 assert trip["origin"]["id"] == int(os.environ["DISK_ID"]), (trip["origin"]["id"], os.environ["DISK_ID"])
@@ -351,11 +360,14 @@ sessions = {str((r.get("fields") or {}).get("session") or "") for r in trip["ret
 assert os.environ["SESSION"] in sessions, sessions
 assert any(a["kind"] == "approve" for a in trip["human_actions"]), trip["human_actions"]
 assert trip["recoveries"], "the recovery the checks above relied on is not on the journey"
+verdicts = [r for r in trip["returns"] if "· fix held" in str(r.get("title") or "")]
+assert len(verdicts) == 1, f"the procedure's verdict is not on the journey: {[r.get('title') for r in trip['returns']]}"
+assert verdicts[0]["received_at"] > trip["recoveries"][0]["received_at"], "the verdict must follow the recovery it rests on"
 bodies = "\n".join(str(d.get("sent_body") or "") for r in [trip["origin"], *trip["returns"]] for d in r.get("deliveries") or [])
 assert "hookrelay_action" in bodies, "no card on this journey carried a button at all"
 assert not re.search(r"[A-Za-z0-9_-]{32,}\.[0-9a-f]{64}", bodies), "a live action token on the ledger"
-print(f"journey: origin #{trip['origin']['id']}, {len(trip['returns'])} return(s), {len(trip['human_actions'])} press(es), "
-      f"{len(trip['recoveries'])} recovery, buttons on file with their tokens redacted")
+print(f"journey: origin #{trip['origin']['id']}, {len(trip['returns'])} return(s) ending with the verdict, "
+      f"{len(trip['human_actions'])} press(es), {len(trip['recoveries'])} recovery, buttons on file with their tokens redacted")
 PY
 
 # ---------------------------------------------------------------------------

@@ -380,6 +380,65 @@ def cooling_report(reason: str, steps: list[dict[str, Any]]) -> str:
     )
 
 
+def outcome_report(outcome: str, reason: str, row: dict[str, Any]) -> str:
+    """The last hop of the remediation contract, report-shaped so it rides the
+    same return door and dresses as the same card as the report that proposed
+    the procedure.
+
+    Two outcomes and one weak form. `held` by a recovery is the strongest thing
+    this node can say without a person: the condition ended after the steps
+    ran. `held` by the window closing is thinner and says so in the row's own
+    words — the absence of a re-fire is not a target re-read. `did_not_hold` is
+    a re-fire inside the window, and the recommendation is a fresh look, not a
+    second press: the steps as written did not end the condition.
+    """
+    steps = list(row.get("steps") or [])
+    commands = [str(step.get("command") or "") for step in steps[:3] if step.get("command")]
+    who = str(row.get("approved_by") or "").strip() or "an operator"
+    by = str(row.get("held_by") or "window")
+    ran = f"{len(steps)} step" + ("" if len(steps) == 1 else "s")
+    if outcome == "held":
+        summary = (
+            f"The approved procedure HELD: {reason}. {ran} approved by {who} ran, and nothing is pending "
+            "on this work."
+            + ("" if by == "recovery" else " Thin evidence — a re-fire would have said otherwise, and none came.")
+        )
+        status, severity = "held", "none"
+        recommendation = {
+            "priority": "P3",
+            "action": "Nothing. Read the row if you want to see what ran and when the condition answered.",
+            "reason": "The condition ended after the procedure; the work is verified by its own actions.",
+        }
+    else:
+        summary = (
+            f"The approved procedure did NOT hold: {reason}. {ran} approved by {who} ran clean, and the "
+            "condition came back inside the verification window."
+        )
+        status, severity = "did_not_hold", "medium"
+        recommendation = {
+            "priority": "P1",
+            "action": "Ask for a fresh look rather than pressing approve again — the steps as written did not end it.",
+            "reason": "A re-fire after the procedure is the one piece of evidence this contract treats as decisive.",
+        }
+    return json.dumps(
+        {
+            "summary": summary,
+            "root_cause": {"status": status, "description": f"Procedure {row.get('id')}: {reason}."},
+            "evidence": [{"what": "the steps that ran", "detail": command} for command in commands],
+            "impact": {"scope": "remediation", "severity": severity, "description": summary},
+            "timeline": [],
+            "recommendations": [recommendation],
+            "unknowns": []
+            if by == "recovery" or outcome != "held"
+            else ["Whether the condition ended, or only stopped firing."],
+            "assumptions": [],
+            "next_checks": [],
+            "confidence": 0.0,
+        },
+        ensure_ascii=False,
+    )
+
+
 def budget_report(spent: float, budget: float, window_hours: float) -> str:
     """A report-shaped refusal, so the family loop completes without an engine run."""
     summary = (

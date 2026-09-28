@@ -308,6 +308,20 @@ name within a day, which works because the judge strips the "it ended"
 decoration before sending, so a firing and its recovery arrive under one name.
 A recovery for a condition this node never investigated is a named skip.
 
+**The verdict is told where the report went.** When an executed procedure's
+window closes — or a recovery or a re-fire decides it sooner — the node posts
+one notice through the same return door as the report: session
+`probe:outcome:<proposal id>`, titled `<alert> · fix held` or `<alert> · fix did
+not hold`, into the same thread, filed under the same work, and on the pipe's
+journey of the alert as its last hop. Held by a recovery takes the recovery's
+colour, because the condition did end; held by the window closing says so in
+the row's own thin words, because the absence of a re-fire is not a target
+re-read. Told once per procedure. A verdict decided while the node was down, or
+by a window that closed in the quiet, is told at the next boot and otherwise
+within a minute (`sweep_outcomes`). A verdict card carries no buttons: there
+is nothing to approve and nothing to rule on — the ruling belongs to the
+investigation, one card up.
+
 Since 2026-09-15 an event may also carry `reference`: the sending platform's own
 id for the alert, which the pipe extracts from its source template beside the
 fields (never in them — an id per event would split a firing from its recovery
