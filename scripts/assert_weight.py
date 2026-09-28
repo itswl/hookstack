@@ -266,7 +266,16 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # page that reads it (status.html, not in this number) calls nothing but
     # this service; what a node did inside is a link to that node's console,
     # which is where the 2026-09-08 note drew the line and where it stays.
-    "hookrelay": (5900, Path("hookrelay/README.md")),
+    # 5900 -> 6000 on 2026-09-28, later the same day, for the board that is
+    # worth opening. Split: +11 source, **+5 code** — bookkeeping by the rule,
+    # and the five are named anyway: `button_labels` moved out of app.py into
+    # store.py so the ledger's feed can say what each card ASKED (labels the
+    # pipe wrote, never the alert's text), `is_recovery` rides the same feed,
+    # and a timeline hop carries `asked`. All so the page can say "waiting on
+    # you" / "resolved" from the pipe's own books. The board itself
+    # (status.html) is outside this number and was rebuilt around seven fixed
+    # stages of one alert's journey; nothing in it calls any other service.
+    "hookrelay": (6000, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

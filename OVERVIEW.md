@@ -99,19 +99,24 @@ ledger rather than re-deriving what was probably sent. And when the pipe
 itself is what broke, the dead-letter self-alarm posts straight to an operator
 bot, around the stack that just failed.
 
-![hookrelay ledger: every message accounted for, every delivery with an outcome](docs/img/hookrelay-ledger.png)
+![hookrelay ledger: every event with its decision chain, its deliveries, and what came back](docs/img/hookrelay-ledger.png)
 
-The timeline tab reads the same ledger as operations. A chain is everything
-that quoted one origin's id — here the alert, the verdict that came back a
-second later, and the report that came back a minute or two after that — with
-what each hop cost; chains that share a judge burst are grouped into one
-incident (five interruptions, one root cause, $2.9); and every chain opens
-into an audit record: payload digests per hop, what was sent where and how
-many bytes, the human actions, and the end-to-end time. Bodies are digests
-here and bytes under trace, because the record is for arguing about
+The board's front page reads the same ledger as operations. A chain is
+everything that quoted one origin's id, and every chain is drawn as the same
+seven stages — received, judged, notified, investigated, a person, condition,
+fix — with the wait between stages on the line and the colour earned by state.
+Here, from the rehearsal: the disk alert's fix **held** (green to the end: the
+condition ended seven seconds after the alert, and the approved procedure was
+told so), one card is **waiting on you** (its buttons were asked three minutes
+ago and nobody pressed), and the gateway alert was **ruled useful** by a press.
+Above the cards, four numbers that decide whether to read further; below them,
+the ticks and repeats folded into one line. Every card opens into the same
+seven stages top to bottom with everything each one said, and from there into
+the audit record — payload digests per hop, bytes and channels, the human
+actions, the end-to-end time — because the record is for arguing about
 afterwards, not for reading alerts.
 
-![hookrelay timeline: one chain per alert, three hops each, one incident grouped, one audit record opened](docs/img/hookrelay-timeline.png)
+![hookrelay's board: one card per alert drawn as seven stages — a fix that held, a card waiting on you, a ruling — and the four numbers above them](docs/img/hookrelay-timeline.png)
 
 ## hookjudge: the judge
 
@@ -375,13 +380,14 @@ the header's strict number reads `0 closed without anyone stepping in`, because
 a person approved the procedure — a request is not an intervention, but an
 approval is, and the board says so rather than flattering itself.
 
-![the pipe's timeline: the alert's chain, four hops, one human action, the press named with its actor](docs/img/hookrelay-audit-press.png)
+![the pipe's journey of the disk alert: seven stages top to bottom — the verdict, the report, the approve press named with its actor, the condition ending, the fix held](docs/img/hookrelay-audit-press.png)
 
-The same operation from the pipe's side: the alert, the verdict, the report,
-the press — four hops, every delivery with an outcome, and under **what a
-person did** the approve with the actor who made it. This is the record pilot
-zero never had: on the retired production deployment no card ever carried the
-button, so this line was never written.
+The same operation from the pipe's side, as one journey: received, judged,
+notified (two cards, and what each asked), investigated, **a person** — the
+approve with the actor who made it — then the condition ending and, last, the
+fix **held**, told by the investigator through the same door its report took.
+This is the record pilot zero never had: on the retired production deployment
+no card ever carried the button, so this line was never written.
 
 ## Running it locally
 

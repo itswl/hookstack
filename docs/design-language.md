@@ -50,7 +50,7 @@ set, so its existing rules keep working without a sweeping rewrite.
 ## Getting around
 
 One tab strip on every page, pinned by `assert_design.py` like the tokens: the
-pipe's board (events · timeline · config · help), the judge (board · review ·
+pipe's board (now · journey · ledger · config · help), the judge (board · review ·
 help, the review tab carrying its count so a disagreement queue is visible
 without being on screen), the investigator (sessions · **knowledge** skills,
 agents, memory, prompt · **runtime** system, actions, audit · help). Before this

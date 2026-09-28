@@ -40,9 +40,9 @@ Seven steps, and each one names the thing that does it — so the positioning ab
 - **Agents you can contain.** Read-only by default and measured at startup, a closed tool allowlist, budget ceilings that refuse out loud, and twenty-eight structural boundaries each documented with what it does **not** stop ([containment](docs/containment.md)).
 - **Your model, your chat.** The investigator takes any Anthropic-dialect endpoint, the judge any OpenAI-compatible base including local models. Cards reach the chat through one small protocol between the pipe and a per-platform bridge ([docs/bridge-protocol.md](docs/bridge-protocol.md)) — Feishu/Lark today, DingTalk and WeCom as a shipped plugin, another platform is another bridge — or go as signed JSON to any webhook; OpenTelemetry is on by default and received by the investigator itself — every run's waterfall is on its own page with no collector deployed, and forwarded untouched when you name one.
 
-![hookrelay's ledger: every message accounted for, every delivery with an outcome](docs/img/hookrelay-ledger.png)
+![hookrelay's ledger: every event with its decision chain, its deliveries, and what came back](docs/img/hookrelay-ledger.png)
 
-![hookrelay's timeline: one chain per alert — signal, verdict, report — with costs, one incident grouped, and an audit record opened](docs/img/hookrelay-timeline.png)
+![hookrelay's board: one card per alert drawn as seven stages — received, judged, notified, investigated, a person, condition, fix — a fix that held, a card waiting on you, a ruling](docs/img/hookrelay-timeline.png)
 
 ![hookjudge's status page: verdicts with their routes and what each cost](docs/img/hookjudge-status.png)
 

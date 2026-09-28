@@ -8,12 +8,12 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 5,900 source lines, five dependencies) that takes JSON
+A pluggable router (under 6,000 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
 to a chat bridge / generic HTTP (DingTalk and WeCom as shipped plugins) — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 5,900 source lines is the
+Both numbers are **budgets, not descriptions**. 6,000 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
@@ -287,7 +287,7 @@ alert goes.
 
 | surface | what it answers |
 |---|---|
-| `GET /` | the board: queue, breakers, fuse, silences, searchable events with full traces |
+| `GET /` | the board: one card per alert drawn as seven stages (received · judged · notified · investigated · a person · condition · fix) with what each needs now; the journey of any alert from any handle; the ledger of every event with its decision chain and full traces; the config editor |
 | `GET /status?q=&source=&outcome=&before_id=&limit=` | the same as JSON (read token) |
 | `GET /live` | the board's wake-up line — NDJSON, one `changed` per burst of ledger writes, so the page needs no clock (read token) |
 | `GET /timeline` | what happened, as one stream — chains gathered by correlation, newest first, with what each chain spent. `/status` answers "recently" and `/trace` answers "this one"; this is the one that answers "what happened", after a review took five endpoints across two machines joined by eye. A projection of the ledger, not a second one: nothing new is asked of any node, because a node here may be somebody else's and a store it had to write to would take the replaceable node with it. Cost appears per hop where a return door extracts `meta.cost_usd` into a field; `unpriced_hops` counts the rest, since a free hop and an unpriced one are different facts. It also groups chains that share a judge-sent `burst_id` into **incidents** — the operator's unit, so five cards for one root cause count as one interruption rather than five chains. The pipe reads that grouping, never computes it: which alerts are one incident is a judgement about content, and the pipe stays content-blind (read token) |
