@@ -28,7 +28,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKRELAY_CARD_CALLBACK_SECRET` | *(empty)* | Optional second layer on /card-action: when set, the callback must ALSO carry the family's timestamped signature |
 | `HOOKRELAY_WORKER_INTERVAL` | `1.0` | Delivery-loop tick, in seconds |
 | `HOOKRELAY_PUBLIC_URL` | *(empty)* | Where a card's action LINK should point |
-| `HOOKRELAY_UI_LINKS` | *(empty)* | door=url pairs: where the board that owns a door's sessions lives, as a BROWSER reaches it, so a chain's hop can link to the investigation it names |
+| `HOOKRELAY_UI_LINKS` | *(empty)* | door=url pairs: where the board that owns a door's sessions lives, as a BROWSER reaches it, so a chain's hop can link to the investigation it names — a full URL, or a site path suc… |
 | `HOOKRELAY_HOST` | `127.0.0.1` | Address the server binds to |
 | `HOOKRELAY_PORT` | `8100` | Port the server listens on |
 

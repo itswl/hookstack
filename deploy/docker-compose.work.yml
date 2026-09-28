@@ -113,7 +113,9 @@ services:
       # so the admin surface simply does not work until it is set.
       HOOKRELAY_READ_TOKEN: ${WORK_READ_TOKEN:-}
       # Browser-facing console addresses (the ports published below); a hop links to its investigation.
-      HOOKRELAY_UI_LINKS: ${HOOKRELAY_UI_LINKS:-plan-notify=http://127.0.0.1:8088/ui,work-notify=http://127.0.0.1:8090/ui}
+      # Site paths, not ports: the board is read through the gateway (8000), and
+      # a link that stays inside the one address keeps the reader there.
+      HOOKRELAY_UI_LINKS: ${HOOKRELAY_UI_LINKS:-plan-notify=/plan/ui,work-notify=/work/ui,watch-due=/watch/ui}
       HOOKRELAY_ADMIN_TOKEN: ${WORK_ADMIN_TOKEN:-}
     volumes:
       # The DIRECTORY, not the file: a single-file bind mount binds an inode,
@@ -200,7 +202,7 @@ services:
       # Who may continue this node's sessions by replying in the chat thread
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
-      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8000}
       # Where this node is reachable from OUTSIDE, if anywhere. Empty on every
       # deployment here — the nodes bind to loopback behind the host firewall —
       # and the Agent Description then carries paths with `reachable: false`
@@ -387,7 +389,7 @@ services:
       # Who may continue this node's sessions by replying in the chat thread
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
-      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8000}
       # Where this node is reachable from OUTSIDE, if anywhere. Empty on every
       # deployment here — the nodes bind to loopback behind the host firewall —
       # and the Agent Description then carries paths with `reachable: false`
@@ -580,7 +582,7 @@ services:
       # Who may continue this node's sessions by replying in the chat thread
       # (sender ids, or `*`); empty = nobody.
       HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
-      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8000}
       # Where this node is reachable from OUTSIDE, if anywhere. Empty on every
       # deployment here — the nodes bind to loopback behind the host firewall —
       # and the Agent Description then carries paths with `reachable: false`
@@ -714,6 +716,28 @@ services:
   # second), sends the two channels' cards as that app into their chats, and
   # forwards a person's reply under a card to the pipe's lark-thread door.
   # Off unless `--profile bridge` and the app credentials are in .env.
+  # One address for every board: http://127.0.0.1:8000 — the pipe's board at
+  # the root, the three consoles under /plan/, /watch/ and /work/. A plain
+  # proxy (deploy/gateway/work.Caddyfile): it holds no token and injects none.
+  # The direct ports above stay published for the scripts that use them.
+  gateway:
+    image: caddy:2-alpine
+    container_name: work-gateway
+    restart: unless-stopped
+    mem_limit: 64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:8000:80"
+    volumes:
+      - ./gateway/work.Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - hookrelay
+      - probe-plan
+      - probe-watch
+      - probe-work
+
   lark-bridge:
     profiles: [bridge]
     build: ./lark-bridge

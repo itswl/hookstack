@@ -71,7 +71,9 @@ class Settings:
     public_url: str = ""
     # `door=url` pairs: where the board that owns a door's sessions lives, as a
     # BROWSER reaches it, so a chain's hop can link to the investigation it
-    # names. The pipe never follows these; it hands them to the page.
+    # names — a full URL, or a site path such as `/plan/ui` when a gateway serves
+    # the family under one address. The pipe never follows these; it hands them
+    # to the page.
     ui_links: dict[str, str] = field(default_factory=dict)
 
     @classmethod

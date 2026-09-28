@@ -377,11 +377,16 @@ function readHeaders() {
   return token ? { Authorization: "Bearer " + token } : {};
 }
 
+// Where this console is mounted: "" when served at the root, "/plan" behind a
+// gateway that serves several boards under one address. Every request the page
+// makes is relative to it, so the same file works on its own port and inside
+// the family's one site.
+const BASE = location.pathname.replace(/\/ui\/?$/, "").replace(/\/$/, "");
 async function api(path, opts = {}) {
   const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
   const t = tokenEl.value.trim();
   if (t) headers["Authorization"] = "Bearer " + t;
-  const r = await fetch(path, Object.assign({}, opts, { headers }));
+  const r = await fetch(BASE + path, Object.assign({}, opts, { headers }));
   if (r.status === 401) {
     tokenEl.classList.add("bad");
     throw new Error("unauthorized — paste the bearer token (top right)");
@@ -972,7 +977,7 @@ async function renderDetail(startPolling) {
         ? `<b>DIFFERS from the clone's commit(s) ${esc(shas)}</b> — review the clone, not this diff`
         : `<b>no commit carrying this run's key was found in the clone</b> — this diff is unbacked`;
     $("#prov").innerHTML +=
-      `<div style="margin-top:6px"><a href="/v1/runs/${encodeURIComponent(run.session_key)}/patch" ` +
+      `<div style="margin-top:6px"><a href="${BASE}/v1/runs/${encodeURIComponent(run.session_key)}/patch" ` +
       `target="_blank">review the patch</a> · +${pt.adds}/−${pt.dels} in ${pt.files} file(s) · ${backed}</div>`;
   }
   // What this run's tool output appeared to contain. Loud, and above the
@@ -1730,7 +1735,7 @@ async function openSystem() {
     const [config, mcp, health, agents] = await Promise.all([
       (await api("/v1/config")).json(),
       (await api("/v1/mcp")).json(),
-      (await fetch("/healthz")).json(),
+      (await fetch(BASE + "/healthz")).json(),
       (await api("/v1/agents")).json(),
     ]);
     $("#meta").textContent = "system · runtime configuration (secrets shown as set/unset, never values)";
@@ -2177,7 +2182,7 @@ async function tick() {
   $("#stamp").textContent = "refreshed " + now;
 }
 
-wireLiveControl("/v1/live", readHeaders, tick);
+wireLiveControl(BASE + "/v1/live", readHeaders, tick);
 </script>
 </body>
 </html>

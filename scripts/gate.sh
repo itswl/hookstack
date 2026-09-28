@@ -29,6 +29,7 @@ done
 printf '\033[1m════ stack ════\033[0m\n'
 python3 scripts/check-docs.py
 python3 scripts/assert_design.py
+python3 scripts/assert_mount_aware.py
 python3 scripts/assert_agent_notes.py
 # The deployed configs' GRAPH, not their schema — assert_shadow_config.py already
 # answers "does it boot". hookrelay's /topology computes the three defects a

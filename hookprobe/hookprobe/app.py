@@ -1008,7 +1008,9 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
         """Redirects to the board."""
-        return RedirectResponse("/ui")
+        # Relative on purpose: behind a gateway that mounts this console under a
+        # prefix, an absolute "/ui" would leave the console for the pipe.
+        return RedirectResponse("ui")
 
     @app.get("/ui", include_in_schema=False)
     async def ui() -> HTMLResponse:

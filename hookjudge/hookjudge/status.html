@@ -250,6 +250,9 @@
   if (want === "help" || want === "review") document.querySelector('.tab[data-tab="' + want + '"]').click();
 
   var KEY = "hookjudge-read-token";
+  // Where this board is mounted: "" on its own port, "/judge" behind the gateway
+  // that serves the family under one address. Every request is relative to it.
+  var BASE = location.pathname.replace(/\/$/, "");
   // "42 of 52" as a number with its denominator under it: the big figure is
   // what changed, the small line is what it is out of.
   function ofHtml(denominator) { return '<span class="of">of ' + esc(denominator) + "</span>"; }
@@ -302,7 +305,7 @@
     if (document.hidden) return;
     var headers = {}, token = localStorage.getItem(KEY);
     if (token) headers["X-Read-Token"] = token;
-    fetch("/status?limit=50", { headers: headers }).then(function (r) {
+    fetch(BASE + "/status?limit=50", { headers: headers }).then(function (r) {
       if (r.status === 401) {
         tokenReveal(true);
         document.getElementById("stamp").textContent = "read token required";
@@ -331,7 +334,7 @@
       renderAttention(at.noisiest || []);
       renderRoutes(s.routes || {});
       var rows = d.recent || [];
-      fetch("/disagreements?limit=20", { headers: readHeaders() })
+      fetch(BASE + "/disagreements?limit=20", { headers: readHeaders() })
         .then(function (r) { return r.ok ? r.json() : { queue: [] }; })
         .then(renderReview).catch(function () {});
       document.getElementById("rows").innerHTML = rows.length ? rows.map(function (r) {
@@ -430,7 +433,7 @@
     Array.prototype.forEach.call(document.getElementById("rvRows").querySelectorAll(".rv"), function (row) {
       var id = row.getAttribute("data-id");
       function send(importance, src) {
-        fetch("/judgements/" + id + "/label", {
+        fetch(BASE + "/judgements/" + id + "/label", {
           method: "POST",
           headers: Object.assign({ "content-type": "application/json" }, readHeaders()),
           body: JSON.stringify({ importance: importance, source: src }),
@@ -445,7 +448,7 @@
     });
   }
   document.getElementById("rvExport").addEventListener("click", function () {
-    fetch("/labels/export", { headers: readHeaders() }).then(function (r) { return r.text(); }).then(function (text) {
+    fetch(BASE + "/labels/export", { headers: readHeaders() }).then(function (r) { return r.text(); }).then(function (text) {
       var a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([text], { type: "application/x-ndjson" }));
       a.download = "ledger-labels.jsonl";
@@ -519,7 +522,7 @@
     liveConnect(url, headers, onChange);
   }
   // ── end live control ──────────────────────────────────────────────────────
-  wireLiveControl("/live", readHeaders, refresh);
+  wireLiveControl(BASE + "/live", readHeaders, refresh);
 })();
 </script>
 </body>
