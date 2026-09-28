@@ -289,11 +289,14 @@ pipe dresses it as a card for the same channels as the verdict. The pipe stays
 content-blind, the judge was not touched at all, and a failed investigation
 completes the loop the same way a successful one does.
 
-The default demo compose points the escalation delivery at the sink wearing a
-`/probe-standin` path — the shape of escalation is visible without a model
-key, and the smoke check verifies every front-door event was copied to the
-stand-in. `docker compose --profile probe up` swaps in the real investigator.
-The run these screenshots come from was the complete loop: all four front-door
+Since 0.4.0 the demo compose brings the investigator up from the first `up`,
+on the `replay` rehearsal — a recorded investigation played back through the
+real read-only gate and the real audit, priced at nothing — so the loop below
+is visible with no model key, and the smoke check drives it end to end
+([the pictures](#the-loop-rehearsed-from-report-to-audit-record)). Setting
+`HOOKPROBE_RUNTIME=claude`, `HOOKPROBE_MODEL` and a key makes it real. The run
+the screenshots in the sections above come from was the complete loop with a
+real model: all four front-door
 events were copied to the investigator, the recovery was held back by the
 level gate, and the other three each funded an investigation; the judge's
 verdicts reached the channels within seconds, and the three reports followed
@@ -340,6 +343,45 @@ proposal names which of three real options it means and never describes a
 fourth that does not exist. Why these are patrols and not a reporting layer in
 the smallest brain is on file in
 [`.agents/notes/implemented/`](.agents/notes/implemented/2026-08-20-a-trend-report-is-a-patrol-not-a-feature.md).
+
+## The loop, rehearsed: from report to audit record
+
+Four pictures from one `demo.sh` run on 2026-09-28 against the source compose,
+no model key. Every number in the report was written in advance and its last
+section says so; everything else in the pictures happened: the gate refused a
+recorded call, a press went through the pipe's door with a person's name on
+it, two commands ran as argv, the alert resolved, and the ledger kept it all.
+
+![the investigator's session page: a rehearsal run, one call refused by the read-only gate, the report ending in a two-step procedure](docs/img/hookprobe-rehearsal-run.png)
+
+The report the card was written from, on the investigator's own page. The
+row says `refused 1`: the recorded `kubectl exec` into the database pod met
+the real read-only guard, and the refusal is in this run's audit. The run cost
+nothing — `in 0 · out 0 · $0.0000` — and the procedure at the end proposes two
+observations rather than the fix, so approving it in a demo can damage nothing.
+
+![the actions page: the procedure executed, both steps exit 0 with their output, held because the condition ended, approved by a named actor](docs/img/hookprobe-actions-held.png)
+
+What the approve press did. Both steps ran as argv with their exit code and
+output beside them, and the line under them is the part that did not exist
+before 0.4.0: **held — the condition ended after the procedure ran**, and
+**approved by** the actor the press carried. Exit 0 alone verifies nothing
+here; the recovery that arrived afterwards is the witness.
+
+![the work board: two pieces of work done, one verified by its procedure, none closed without a person](docs/img/hookprobe-work-board.png)
+
+One row per piece of work. The disk investigation is `verified · remediation`;
+the header's strict number reads `0 closed without anyone stepping in`, because
+a person approved the procedure — a request is not an intervention, but an
+approval is, and the board says so rather than flattering itself.
+
+![the pipe's timeline: the alert's chain, four hops, one human action, the press named with its actor](docs/img/hookrelay-audit-press.png)
+
+The same operation from the pipe's side: the alert, the verdict, the report,
+the press — four hops, every delivery with an outcome, and under **what a
+person did** the approve with the actor who made it. This is the record pilot
+zero never had: on the retired production deployment no card ever carried the
+button, so this line was never written.
 
 ## Running it locally
 

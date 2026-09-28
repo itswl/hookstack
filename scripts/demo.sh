@@ -17,6 +17,12 @@
 # received (`docker compose logs -f sink`). Boards: http://127.0.0.1:8100 (pipe),
 # :8200 (judge), :8088/ui (investigator).
 #
+# Once per stack: a second run inside thirty minutes re-fires the same alerts,
+# which the investigator folds into the earlier investigation (a re-fire is a
+# follow-up turn, not a new run) and the cooldown withholds the approve button
+# from a target another procedure just acted on. `docker compose down -v`
+# between runs, or read the earlier run's pages instead.
+#
 # Four alerts, chosen so every judgement route fires at least once, and then the
 # loop the fourth one starts: a report, a card, an approve press through the
 # pipe's own door, two allowlisted observations executed, the condition ending,
