@@ -58,6 +58,10 @@ class TemplateSelector:
         return not (self.any_of and all(resolve_path(payload, path) is None for path in self.any_of))
 
 
+_RECOVERED = ("true", "1", "yes", "resolved", "recovery", "recovered")
+_NOT_RECOVERED = ("false", "0", "no", "firing", "alerting")
+
+
 @dataclass(frozen=True, slots=True)
 class ExtractTemplate:
     name: str
@@ -86,8 +90,15 @@ class ExtractTemplate:
             "_template": self.name,
         }
         if self.recovery:
+            # Stated only when the source said one way or the other. A value
+            # this cannot read ("ok", or nothing at all) is no statement, and
+            # stating False for it outranked the brain's own reading of a
+            # "[RESOLVED]" title: the demo's recovery was judged a repeat.
             flag = render(self.recovery, payload).strip().lower()
-            event["is_recovery"] = flag in ("true", "1", "yes", "resolved", "recovery", "recovered")
+            if flag in _RECOVERED:
+                event["is_recovery"] = True
+            elif flag in _NOT_RECOVERED:
+                event["is_recovery"] = False
         return event
 
 
