@@ -4,6 +4,8 @@
 [![ci-hookjudge](https://github.com/itswl/hookstack/actions/workflows/ci-hookjudge.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookjudge.yml)
 [![ci-hookprobe](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml/badge.svg)](https://github.com/itswl/hookstack/actions/workflows/ci-hookprobe.yml)
 
+**English** · [中文](README.zh-CN.md)
+
 **Put agents on your production signals without handing them the keys.**
 
 hookstack lets an SRE or platform team put an agent on call. A signal arrives — an alert, a chat mention, a ticket, a timer, a person asking — and a pipe signs, routes and prices it; an agent investigates it **read-only, and is measured read-only at startup**; what comes back reaches a person as an audited, priced report with buttons a person can rule with. Nothing touches production without a signed press, and the one loop that could — remediation — is rehearsed end to end but not yet live against a write credential.
@@ -42,11 +44,11 @@ Seven steps, and each one names the thing that does it — so the positioning ab
 
 ![hookrelay's ledger: every event with its decision chain, its deliveries, and what came back](docs/img/hookrelay-ledger.png)
 
-![hookrelay's board: one sentence on whether anything waits on you, a day of alerts by where they stand, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a ruling, a recovery — each with its seven stages](docs/img/hookrelay-timeline.png)
+![hookrelay's board: one sentence on whether anything waits on you, a day of alerts by where they stand, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a recovery — each with its seven stages](docs/img/hookrelay-timeline.png)
 
 ![hookjudge's board: verdicts with their routes and what each cost](docs/img/hookjudge-status.png)
 
-Screenshots are from one local Docker run started from nothing, not mockups — [OVERVIEW.md](OVERVIEW.md) has the rest of them.
+Screenshots are from local Docker runs started from nothing, not mockups — [OVERVIEW.md](OVERVIEW.md) has the rest of them. All three boards read in Chinese or English and follow the system's light or dark.
 
 ## Ten minutes, no keys, no bill
 
@@ -62,7 +64,7 @@ The demo ends on the loop, not on healthy containers: the disk alert is investig
 
 Real credentials in `.env` make the stub step aside; `HOOKPROBE_RUNTIME=claude`, `HOOKPROBE_MODEL` and a key make the investigator real.
 
-The published images are `0.4.0`, and they run the current design: the investigator is up from the first `up`, the pipe offers the approve and follow-up buttons on its cards, and `lark-bridge`, in webhook mode against the sink, renders the pipe's neutral card model — no Lark account needed. Up to `0.2.0` the quickstart's pipe rendered the Feishu card itself, which is the one thing the published demo used to do differently from the source compose.
+The published images are `0.4.0`, and they run the loop above: the investigator is up from the first `up`, the pipe offers the approve and follow-up buttons on its cards, and `lark-bridge`, in webhook mode against the sink, renders the pipe's neutral card model — no Lark account needed. The boards in the pictures here are newer than that release: until the next one, a clone and `docker compose up -d --build` show them. Up to `0.2.0` the quickstart's pipe rendered the Feishu card itself, which is the one thing the published demo used to do differently from the source compose.
 
 ## The Three Services
 
@@ -72,7 +74,8 @@ One shape, wired by configuration rather than code: **something produces signals
 upstreams ──► hookrelay ──► hookjudge ──► hookrelay ──► chat bridge / webhook
               (adapts)  │   (judges)     (models)
                         └─► hookprobe ──► hookrelay ──► the same channels
-                            (investigates critical/high; opt-in, see STACK.md)
+                            (investigates critical/high; a rehearsal until
+                             it has a model, see STACK.md)
 ```
 
 | Service | What it does | Deliberately does NOT |
@@ -134,6 +137,6 @@ Where this is headed is a wider frame than the front page claims: the same pipe,
 *   [`STACK.md`](STACK.md) — Local runbook to drive the whole cost-saving pipeline step-by-step.
 *   [`CONTRIBUTING.md`](CONTRIBUTING.md) — Per-service gates, AST copy validations, and general SDLC workflows.
 
-The pipe caps itself at 5,500 source lines and the judge at 3,350; the investigator is uncapped by design. `scripts/assert_weight.py` enforces both ceilings, and the rest of `gate.sh` is AST- and graph-based: pinned copies stay identical, routing configs have no dead ends or feedback loops, and the docs state the same counts the code defines.
+The pipe caps itself at 6,000 source lines and the judge at 3,400; the investigator is uncapped by design. `scripts/assert_weight.py` enforces both ceilings, and the rest of `gate.sh` is AST- and graph-based: pinned copies stay identical, routing configs have no dead ends or feedback loops, and the docs state the same counts the code defines.
 
 Each service has its own gate, Dockerfile and CI workflow. For a change that touches more than one, `bash scripts/gate.sh` runs all of them plus the stack checks. Always read its verdict; never chain it.

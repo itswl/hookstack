@@ -83,11 +83,11 @@ MIT 协议。带截图的叙述性总览：[OVERVIEW.md](https://github.com/itsw
   （签名的门）            └──► hookprobe :8088 （它说要查才查）
 ```
 
-![hookrelay 的账本：每个事件的决策链、投递和回流](../img/hookrelay-ledger.png)
+![hookrelay 的账本：每个事件的决策链、投递和回流](../img/zh/hookrelay-ledger.png)
 
-![hookrelay 的看板：顶部一句话说有没有事等你处理，旁边是按状态叠起来的一天，下面四个数字和每条告警一行 —— 处理中、投递失败、等你按的卡、已裁定、已恢复 —— 各带七个阶段](../img/hookrelay-timeline.png)
+![hookrelay 的看板：顶部一句话说有没有事等你处理，旁边是按状态叠起来的一天，下面四个数字和每条告警一行 —— 处理中、投递失败、等你按的卡、已恢复 —— 各带七个阶段](../img/zh/hookrelay-timeline.png)
 
-![hookjudge 的看板：九条裁决，每条免费路线都走过，四条付费，四处分歧等你复核](../img/hookjudge-status.png)
+![hookjudge 的看板：九条裁决，每条免费路线都走过，四条付费，四处分歧等你复核](../img/zh/hookjudge-status.png)
 
 上面每一张截图都取自从零开始的本地 Docker 运行 —— 不是效果图。
 
@@ -119,11 +119,11 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 
 **跑完的运行会留下 runbook。** 一次完成的调查会把自己的记录蒸馏成 `SKILL.md` —— 由服务写入，永远不经过 agent 的工具。同一个条件的第二次调查是**追加一个 case** 而不是替换原有内容，而且每一次写入（无论来自运行还是来自人）都会先把被覆盖的版本快照存档。
 
-![会话控制台](../img/hookprobe-sessions.png)
+![会话控制台](../img/zh/hookprobe-sessions.png)
 
-![每一次运行的每一个工具调用，在审计页上](../img/hookprobe-audit.png)
+![每一次运行的每一个工具调用，在审计页上](../img/zh/hookprobe-audit.png)
 
-![一次运行为自己蒸馏出的诊断 runbook](../img/hookprobe-skills.png)
+![一次运行为自己蒸馏出的诊断 runbook](../img/zh/hookprobe-skills.png)
 
 ---
 
