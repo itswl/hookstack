@@ -320,7 +320,16 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # their own — raise one rate-limited alarm, and the transient ones still just
     # degrade. It belongs in the judge because the judge is the component that
     # makes the model call and owns what to do when it fails.
-    "hookjudge": (3350, Path("hookjudge/README.md")),
+    # 3350 -> 3400 on 2026-09-30, for three reads the rebuilt board leans on:
+    # one verdict by id (GET /judgements/{id}), the return filter inside the
+    # /status query, and each review row naming the platform's level in the
+    # judge's four words. Split: about +25 code, the rest docstrings. The
+    # doctrine question has an easy answer here: these are views of the judge's
+    # own ledger, and nothing else holds it. Without them a copied link died
+    # after two hundred newer verdicts, "Show them" answered "no verdict
+    # matches" to the reader it sent to look at three dead returns, and "the
+    # platform is right" on a `warning` row was refused by the label door.
+    "hookjudge": (3400, Path("hookjudge/README.md")),
 }
 UNCAPPED = ("hookprobe",)
 

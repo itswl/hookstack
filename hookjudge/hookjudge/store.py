@@ -380,6 +380,13 @@ class Store:
         )
         return [dict(row) for row in await cursor.fetchall()]
 
+    async def judgement(self, judgement_id: int) -> dict[str, Any] | None:
+        """One verdict by id, however old: a link to it must outlive the page of
+        the newest rows it was copied from."""
+        cursor = await self.db.execute("SELECT * FROM judgements WHERE id = ?", (judgement_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
     async def set_label(self, judgement_id: int, importance: str, source: str, now: float) -> bool:
         cursor = await self.db.execute(
             "UPDATE judgements SET label_importance = ?, label_source = ?, labeled_at = ? WHERE id = ?",
@@ -509,12 +516,23 @@ class Store:
         await self.db.commit()
         self._announce()
 
-    async def recent(self, limit: int = 50, *, route: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
+    RETURN_STATUSES = ("sent", "queued", "dead", "skipped")
+
+    async def recent(
+        self, limit: int = 50, *, route: str | None = None, q: str | None = None, ret: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Newest first. `ret` filters on the return's outcome IN the query: the
+        board counts dead returns over the whole window, and a filter applied
+        to the newest page in the browser answered "no verdict matches" to the
+        reader it had just sent to look at three of them."""
         clauses: list[str] = []
         params: list[Any] = []
         if route:
             clauses.append("route = ?")
             params.append(route)
+        if ret in self.RETURN_STATUSES:
+            clauses.append("return_status = ?")
+            params.append(ret)
         if q:
             clauses.append("(title LIKE ? OR summary LIKE ?)")
             params += [f"%{q}%", f"%{q}%"]

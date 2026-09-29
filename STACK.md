@@ -35,9 +35,13 @@ docker compose up -d --build
 
 | where | what |
 | --- | --- |
-| http://127.0.0.1:8100/ | the pipe's board (alerts · ledger · deliveries · silences · routing · help, in Chinese or English, light or dark) |
-| http://127.0.0.1:8200/ | the brain's ledger page (judged / paid ratio / cost / return failures) |
+| http://127.0.0.1:8100/ | the pipe's board (alerts · ledger · deliveries · silences · routing · help) |
+| http://127.0.0.1:8200/ | the brain's board (board · verdicts · review · help: what it judged, by which route, what it cost, what failed to come back) |
+| http://127.0.0.1:8088/ui | the investigator's console (work · sessions · approvals · knowledge · runtime · help) |
 | `docker compose logs -f sink` | what an operator would actually have received |
+
+All three read in Chinese or English and follow the system's light or dark; the gear
+top right switches either.
 
 The pipe's config is `hookrelay/examples/stack.yaml`, mounted read-only, so `up` needs no
 setup step. Point `HOOKRELAY_CONFIG_FILE` at your own file to replace it.

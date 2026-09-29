@@ -14,7 +14,7 @@ in `scripts/stack-smoke.sh`. A red design check is the contract talking.
 
 ## The shared blocks
 
-Seven delimited regions, identical in all three files:
+Ten delimited regions, identical in all three files:
 
 | Block | Delimiters | What it holds |
 | --- | --- | --- |
@@ -25,6 +25,9 @@ Seven delimited regions, identical in all three files:
 | Tab shell | `── hookstack tab shell …` / `── end tab shell ──` | The tab strip every page is navigated by |
 | Theme first paint | `── hookstack theme …` / `── end theme ──` | The snippet in `<head>` that picks light or dark before anything is drawn |
 | Theme wiring | `── theme wiring …` / `── end theme wiring ──` | The button, the reader's pick, and a system that changes its mind |
+| Components | `── hookstack components …` / `── end components ──` | Everything a board is built from: the top bar, buttons and fields, the status pill, the headline and its numbers, the list row, the drawer, the dialog, the toast |
+| Dialogs markup | `── hookstack dialogs …` / `── end dialogs ──` | The one dialog and the toast stack every page asks with |
+| Kit script | `── hookstack kit …` / `── end kit ──` | The helpers the components are drawn by: the words in two languages, dates and durations, icons, the dialog, the toast, the clipboard |
 
 Copy a block wholesale when changing it, in all three files, in one commit.
 
@@ -79,14 +82,39 @@ investigator's console and fifteen on the pipe's board.
 
 ## Getting around
 
-One tab strip on every page, pinned by `assert_design.py` like the tokens: the
-pipe's board (alerts · ledger · deliveries · silences · routing · help), the judge (board · review ·
-help, the review tab carrying its count so a disagreement queue is visible
-without being on screen), the investigator (sessions · **knowledge** skills,
-agents, memory, prompt · **runtime** system, actions, audit · help). Before this
-the same palette sat under three idioms — tabs, a help link that unfolded a
-section, a row of eight buttons — and the pages felt like three tools that
-happened to share a colour.
+All three boards are laid out the same way, because they are read the same way.
+A sticky top bar carries the name, one search, the language, the settings and
+the header controls (light or dark, refresh, live). Under it, one tab strip,
+pinned like the tokens. Every overview opens with **one sentence that says
+whether anything needs a person**, the few numbers under it, and banners for
+what is broken; then lists of one row per item with a status in a word on the
+left, grouped by day wherever a list runs past one. On the pipe's board and the
+judge's a row opens the whole of its item in a drawer from the right, with its
+own address, closed by Back or Esc. Settings — language, appearance, the
+token — live in a drawer behind the gear. Running a procedure, handing a plan
+over, deleting a runbook or a role, silencing every source, throwing away
+unsaved routing and forgetting the tokens each ask first, in the same dialog on
+every page; a one-click ruling, label or retry is the click itself, not a
+question about it. Every change says it happened in the same toast. Every word
+a page writes itself is there in Chinese and English, the live control's
+included, the saved choice first and the browser's language otherwise.
+
+The tabs: the pipe's board (alerts · ledger · deliveries · silences · routing ·
+help); the judge's (board · verdicts · review · help, the review tab carrying
+its count so a disagreement queue is visible without being on screen); the
+investigator's console (work · sessions · approvals · **knowledge** skills,
+agents, memory, prompt · **runtime** system, actions, audit · help). The
+console opens what it holds in the tab itself instead of a drawer — a runbook,
+a role, a session — because those are worked in, not glanced at: a crumb leads
+back, and the sessions keep their list beside the open conversation, which on
+a phone becomes one pane at a time, like a mail app. Its only drawer is the
+settings.
+
+Before this the same palette sat under three idioms — tabs, a help link that
+unfolded a section, a row of eight buttons — and then, once the palette and the
+tabs were shared, under three sets of parts: three kinds of button, two kinds
+of row, a window.confirm on one page and a modal on another. The components and
+the kit are pinned now for the reason the palette was.
 
 The pages also point at each other, because an operation crosses all three. A
 hop in the pipe's timeline links to the investigation it names when the

@@ -44,7 +44,7 @@ Seven steps, and each one names the thing that does it — so the positioning ab
 
 ![hookrelay's board: one sentence on whether anything waits on you, a day of alerts by where they stand, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a ruling, a recovery — each with its seven stages](docs/img/hookrelay-timeline.png)
 
-![hookjudge's status page: verdicts with their routes and what each cost](docs/img/hookjudge-status.png)
+![hookjudge's board: verdicts with their routes and what each cost](docs/img/hookjudge-status.png)
 
 Screenshots are from one local Docker run started from nothing, not mockups — [OVERVIEW.md](OVERVIEW.md) has the rest of them.
 

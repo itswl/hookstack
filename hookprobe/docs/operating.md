@@ -95,26 +95,44 @@ Three more surfaces shape a run, all optional:
 ## Web UI — operate sessions from a browser
 
 `http://<host>:8088/ui` is a single self-contained page (no build step, no
-external assets): sessions on the left, the conversation on the right, a
-composer at the bottom. Paste the bearer token once (kept in localStorage).
-From there you can read any investigation turn by turn (JSON reports
-pretty-print, Markdown answers render, long alert payloads collapse), watch a
-running turn's live process feed (tool calls, narration, the plan checklist),
-**Stop** a runaway turn, send follow-ups into a finished session, or hit
-**+ new session** for a free-form investigation. The sidebar filters by
-key/title and flags relay-born sessions with their return outcome.
+external assets), laid out like the pipe's and the judge's boards: a top bar
+with search, the language button and the gear, the tabs under it, a sentence
+first on every tab. It reads in Chinese or English and follows the system's
+light or dark; both switch under the gear. The first request that comes back
+401 opens a card asking for the bearer token: paste it once (kept in
+localStorage; the gear changes or clears it).
 
-Six more views cover the rest of the surface: **skills** browses and edits
-the runbooks (layer-tagged, copy-on-write); **agents** does the same for
-subagent roles (config-pinned ones shown read-only); **memory** edits the
-environment memory (CLAUDE.md); **prompt** edits the system-prompt append —
-both hot-read by the next run; **system** shows the runtime knobs (secrets
-as set/unset, never values), the MCP servers the next run would load, and
-the health counters; **audit** follows the flight recorder, filterable by
-session. A **help** view carries the whole manual — what this is,
-the three-step start, every view, the API contract with curl templates,
-the file map and the safety model — written for a new operator or an AI
-driving the API, reachable at `#help`.
+**Sessions** is two panes: the list on the left, filtered by key or title,
+with relay-born sessions flagged by their return outcome; the conversation on
+the right, a composer at the bottom. From there you can read any
+investigation turn by turn (JSON reports pretty-print, Markdown answers
+render, long alert payloads collapse), watch a running turn's live process
+feed (tool calls, narration, the plan checklist), **Stop** a runaway turn,
+send follow-ups into a finished session, or press **New session** for a
+free-form investigation. On a phone the two panes take turns, with a back
+button between them.
+
+The other tabs cover the rest of the surface. **Work** is one card per piece
+of work, however many runs it took, by stage: waiting on you, needing a
+human, in flight, verifying, done, abandoned. **Approvals** gathers
+everything that waits on a person: procedures to approve, memory lines
+investigations proposed, reports nobody ruled on. Under *knowledge*,
+**skills** browses and edits the runbooks (layer-tagged, copy-on-write);
+**agents** does the same for subagent roles (config-pinned ones shown
+read-only); **memory** edits the environment memory (CLAUDE.md); **prompt**
+edits the system-prompt append — both hot-read by the next run. Under
+*runtime*, **system** shows the runtime knobs (secrets as set/unset, never
+values), the MCP servers the next run would load, the health counters and the
+posture check from startup; **actions** holds the remediation proposals and
+what each approved one did; **audit** follows the flight recorder, filterable
+by session. A **help** tab carries the whole manual — what this is, the
+three-step start, every view, the API contract with curl templates, the file
+map and the safety model — written for a new operator or an AI driving the
+API, reachable at `#help`.
+
+Every view has an address (`#/sessions?open=<key>`, `#/skills/<name>`,
+`#/audit?session=<key>`), so a link lands where it points; the older
+`#session=<key>` links the pipe sends still open the session.
 
 ## Follow-up exploration — reuse the session
 

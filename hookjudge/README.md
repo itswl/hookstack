@@ -21,7 +21,7 @@ hookjudge has exactly one outbound address: the pipe. Fan-out is not its
 business, so it cannot grow a second downstream by accident.
 
 It is the smallest service in the stack, and that is a **budget, not an
-observation**: 3,350 source lines is the ceiling, four runtime dependencies is
+observation**: 3,400 source lines is the ceiling, four runtime dependencies is
 the count, and `scripts/assert_weight.py` holds the first to what this file says.
 Raised from 2,900 on 2026-08-21, and the reason is the point of the budget rather
 than an exception to it: `importance` came back `high` for 210 of 216 alerts on
@@ -29,7 +29,10 @@ production — a classifier agreeing with itself, because 74% of that traffic is
 payments and the prompt says payments default to high. The hundred lines buy
 `wake_someone`, which asks whether a person has to act, and buy it in a form that
 can be argued with: if that axis also answers `yes` almost always, it and the
-paid route it justifies both come out, and this number goes back down.
+paid route it justifies both come out, and this number goes back down. The
+last fifty, on 2026-09-30, are three reads of the judge's own ledger that its
+rebuilt board needs: one verdict by id, the return filter inside the query,
+and the platform's level in the judge's words on each review row.
 
 The same reasoning as the dependency comment at the top of `requirements.txt`
 ("chosen to stay four"): a brain that judges and does nothing else has a natural
@@ -241,15 +244,16 @@ a judge that answered `wake=no` on an alert a person then called useful.
 | ------ | ---------- | ------------------------------------------------ |
 | POST   | `/events`  | the pipe's event. Answers **202** immediately.    |
 | POST   | `/feedback`| a human pressed a button. Answers **202**.        |
-| GET    | `/status`  | ledger JSON: routes, cost, attention, returns, recent, `eval_gate` (the last recorded golden-gate verdict, or null) |
+| GET    | `/status`  | ledger JSON: routes, cost, attention, returns, recent, `eval_gate` (the last recorded golden-gate verdict, or null); `route`, `q` and `ret` (sent, queued, dead, skipped) narrow the recent rows |
+| GET    | `/judgements/{id}` | one verdict by id, however old — what a copied link to it reads |
 | GET    | `/live`    | the board's wake-up line: NDJSON, `changed` per burst of writes, `ping` through the quiet |
 | GET    | `/metrics` | Prometheus text                                   |
-| GET    | `/disagreements` | the review queue: platform vs judge, unlabeled     |
+| GET    | `/disagreements` | the review queue: platform vs judge, unlabeled, each row with `platform_importance` (the platform's level in the judge's four words) |
 | POST   | `/rulings/ai` | a model's retrospective ruling on a CONDITION, from hookprobe. Its OWN secret (`HOOKJUDGE_RULING_SECRET`), because the ingest one also opens `/events` and anything able to sign for that can forge judgements. Fails **closed** when unset, unlike every other door here |
 | POST   | `/judgements/{id}/label` | the operator's ruling. **Disabled** without a read token |
 | GET    | `/labels/export` | every ruling as eval-harness JSONL — a queue label as `ledger-<id>` on `importance`, a card button as `interrupt-<id>` on `wake`, never merged. **Disabled** without a read token |
 | GET    | `/healthz` | liveness                                          |
-| GET    | `/`        | a dark one-page view of the ledger                |
+| GET    | `/`        | the operator board: board · verdicts · review · help |
 
 **Why 202 and not the verdict.** Judging takes tens of seconds. Holding the
 sender's connection open for that makes it time out and retry, so the same

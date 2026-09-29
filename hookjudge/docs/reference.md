@@ -39,7 +39,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKJUDGE_AI_MODEL` | *(empty)* | Model name sent to that base |
 | `HOOKJUDGE_AI_STRUCTURED_OUTPUT` | *(empty)* | schema \| tools \| object to pin one, anything else (default "auto") to negotiate downwards from the strongest the provider will accept |
 
-## Routes (11)
+## Routes (12)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -48,6 +48,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/events` | The front door: one signed alert in, one verdict recorded — 202 means judged, not queued |
 | POST | `/feedback` | A human pressed a button on a card, and the pipe brought the press here |
 | GET | `/healthz` | Liveness only — no dependencies consulted, so a broken ledger cannot hide a live process |
+| GET | `/judgements/{judgement_id}` | One verdict, for a link to it that outlived the board's newest rows |
 | POST | `/judgements/{judgement_id}/label` | Record the operator's ruling |
 | GET | `/labels/export` | Every ruling as eval-harness JSONL (see eval/README.md) — pipe it straight into eval/data |
 | GET | `/live` | The board's wake-up line: one changed per write, a ping through the quiet |

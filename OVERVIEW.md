@@ -84,14 +84,19 @@ never sent off to be processed again. Every message is accounted for: queued,
 delivered and dead-lettered are visible at a glance on the ledger page, and
 any event opens into its full decision chain.
 
-The screenshot below is the ledger after the eight demo alerts — the whole
-hookstack loop on one page. Each front-door event is routed, in one decision, to
-both `to-judge` and `to-probe` (#1–#16: eight alerts and the eight verdicts
-that came back within a second each); minutes later the five investigators'
-reports return through `probe-notify`, become card models, and are delivered
-to `ops-feishu` (the bridge renders the Feishu card) and `ops-dingtalk` (the
-plugin's markdown) (#17–#21) — 42 deliveries, all sent, nothing queued,
-nothing dead. The ledger also keeps **the bytes of both directions**:
+The screenshot below is the ledger, the forensic view under the board: every
+event as the pipe recorded it, the whole hookstack loop in rows. One front-door
+alert is open. Its decision reads gate by gate — the template that parsed it,
+the silence check it passed, the routing rules it matched, `escalate-inbound`
+to the investigator and `to-brain` to the judge — then both deliveries, sent, and
+what came back: the judge's verdict a second later and the investigator's report
+three seconds after that. Above it, that verdict and that report are rows of
+their own, delivered on to `ops-feishu` (the bridge renders the Feishu card) and
+`ops-dingtalk` (the plugin's markdown); their red squares are deliveries that
+failed while the chat was down, and the amber ones on the newest alert are
+handovers still queued. Below it, an Alertmanager event the pipe ignored,
+because a silence covered it. The ledger also keeps **the bytes of both
+directions**:
 the payload as received has always been stored, and now the exact body of each
 delivery is kept too (body only — never the headers, which carry signatures
 and tokens), so `/trace/{id}` answers a receiver's dispute by reading the
@@ -135,22 +140,24 @@ same condition restated re-serves the last AI verdict, free) → **ai** (a real,
 paid model call) → **rule** (the keyword floor). The saving does not come from
 a cheaper model; it comes from most events never reaching `ai` at all.
 
-Below is the verdict ledger for those eight alerts, judged by the stub model
-so the shape reproduces with no key: the payment-gateway alert paid for `ai`
-the first time and took `reuse` for free when the same condition was restated;
-two instances of one Alertmanager rule cost one `ai` call and one `rule-reuse`
-answer, the rule's last AI verdict answering again; both recoveries took
-`recovery` for free, inheriting their firings' verdicts — 8 verdicts, 4 paid,
-zero failed returns, and the five-route bar under the cards is that policy
-drawn. The stub prices its tokens like a real model, so the ledger's $0.001 is
-the shape of the bill rather than the bill; the point is that the saving is
-structural, not a property of one model. The page also shows what the judge
-disagrees with: every gateway alert arrived `high` from the platform and left
-`critical` from the judge, and the review tab puts the four disagreements in
-one place with an export for labelling. If a verdict's
-return dies for good, the self-alarm carries the news.
+Below is the judge's board after `scripts/demo.sh` and four more alerts,
+judged by the stub model so the shape reproduces with no key: the
+payment-gateway alert paid for `ai` the first time and took `reuse` for free
+when the same condition was restated; two instances of one Alertmanager rule
+cost one `ai` call and one `rule-reuse` answer, the rule's last AI verdict
+answering again; all three recoveries took `recovery` for free, inheriting
+their firings' verdicts — 9 verdicts, 4 paid, zero failed returns, and the bar
+beside the headline is that policy drawn, one colour per route. The stub
+prices its tokens like a real model, so the board's $0.001 is the shape of the
+bill rather than the bill; the point is that the saving is structural, not a
+property of one model. The board opens on what the judge disagrees with: every
+gateway alert arrived `high` from the platform and left `critical` from the
+judge, so the headline says four disagreements are waiting, and the review
+tab puts them in one place with an export for labelling. If a verdict's
+return dies for good, the self-alarm carries the news. Like the other two
+boards it reads in Chinese or English and follows the system's light or dark.
 
-![hookjudge status page: eight verdicts, every free route exercised, half paid](docs/img/hookjudge-status.png)
+![hookjudge's board: nine verdicts, every free route exercised, four of them paid, four disagreements waiting for review](docs/img/hookjudge-status.png)
 
 ## hookprobe: the investigator
 
@@ -186,8 +193,10 @@ naming the runner failure, so the caller sees it on the next poll instead of
 waiting out its own timeout window.
 
 The web console at `/ui` is a single self-contained page — no build step, no
-external assets. Sessions on the left (status badge, model, turn count,
-accumulated cost); the conversation on the right, turn by turn: JSON reports
+external assets — laid out like the other two boards, in the same two
+languages. On its sessions tab the list sits on the left (status, turn count,
+accumulated cost, and flags for a report that came back, a call the guard
+refused, a person's ruling); the conversation on the right, turn by turn: JSON reports
 pretty-print, Markdown answers render as headings, lists, tables and code
 blocks, and an oversized alert payload collapses to one line. Under each turn
 is the bill: which models actually ran (including the small auxiliary model
@@ -241,27 +250,29 @@ says so before anyone reads the rows.
 
 Everything the agent accumulates is manageable from the page. The skills view
 lists every runbook (frontmatter description, files, modification time) and
-renders one in full when opened. The runbook in the shot below is a product of
-this very run: after the disk investigation finished, one press of *distil
-into a runbook draft* had the service — never the agent — write down the
-lookups the run actually made, sixteen of them, as a case under the alert's
-name, with provenance and a revision history; the next disk alert opens with
-it loaded. The SKILL.md format is shared across the whole OpenClaw lineage, so
+renders one in full when opened. The runbook in the shot below came from the
+rehearsal's disk investigation: one press of *Distill into a runbook draft* had
+the service — never the agent — write down the lookups the run made, six of
+them, the one the guard refused included, as a case under the alert's name;
+a person's Save put it on the volume with provenance and a revision history,
+and the next disk alert opens with it loaded. The SKILL.md format is shared
+across the whole OpenClaw lineage, so
 a downloaded package installs by unzipping it into `.claude/skills/` and sits
 beside the distilled one — the investigator gets smarter with use, and can
 borrow.
 
-![skills browser: the diagnostic runbook this run distilled](docs/img/hookprobe-skills.png)
+![skills browser: the diagnostic runbook distilled from the disk investigation, its six lookups and what they found](docs/img/hookprobe-skills.png)
 
 The memory view edits the environment memory (CLAUDE.md in the workdir):
 cluster topology, known false alarms and naming conventions written there are
-injected into every investigation. This run's memory said the objects in the
-demo alerts are fictional and unreachable from the container, that reachability
-must be stated honestly, that reasoning must rest on the alert payload and
-in-container evidence, and that a reading must never be invented. Look back at
-the report above: "Undetermined … I will not invent a cause" is that
-instruction arriving intact at the model — the memory is not decoration, it is
-the reason the report is trustworthy. Beside it, the prompt view holds the
+injected into every investigation. The demo's memory, below, says the objects
+in the demo alerts are fictional and unreachable from the container, that a
+check which cannot reach its target must say so, that reasoning must rest on
+the alert payload and in-container evidence and label every inference, and
+that a reading nobody took must never be reported. A model reads it before its
+first tool call: the memory is not decoration, it is where a report that
+states its limits instead of inventing a cause comes from. Beside it, the
+prompt view holds the
 methodology appended to the engine's own system prompt; both are read fresh at
 every run, so an edit applies to the next investigation with no restart.
 
@@ -358,8 +369,10 @@ the smallest brain is on file in
 
 ## The loop, rehearsed: from report to audit record
 
-Four pictures from one `demo.sh` run on 2026-09-28 against the source compose,
-no model key. Every number in the report was written in advance and its last
+Four pictures of one loop, taken on 2026-09-29 against the source compose
+with no model key: three from one `demo.sh` run, the pipe's from the stack
+smoke, which runs the same loop and left the board's other states on screen
+too. Every number in the report was written in advance and its last
 section says so; everything else in the pictures happened: the gate refused a
 recorded call, a press went through the pipe's door with a person's name on
 it, two commands ran as argv, the alert resolved, and the ledger kept it all.
@@ -382,7 +395,7 @@ here; the recovery that arrived afterwards is the witness.
 
 ![the work board: two pieces of work done, one verified by its procedure, none closed without a person](docs/img/hookprobe-work-board.png)
 
-One row per piece of work. The disk investigation is `verified · remediation`;
+One card per piece of work. The disk investigation is `verified · remediation`;
 the header's strict number reads `0 closed without anyone stepping in`, because
 a person approved the procedure — a request is not an intervention, but an
 approval is, and the board says so rather than flattering itself.

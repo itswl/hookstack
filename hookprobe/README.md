@@ -26,7 +26,8 @@ curl -s -H "Authorization: Bearer change-me" localhost:8088/sessions/demo:1/fina
 # 202 while it works · 200 {"isFinal": true, "text": ...} when it is done
 ```
 
-Then `http://127.0.0.1:8088/ui` for the sessions page.
+Then `http://127.0.0.1:8088/ui` for the console: every session turn by turn, the work
+board, the approvals, the skills and memory it reads, and a manual under **help**.
 
 ## Why this one
 

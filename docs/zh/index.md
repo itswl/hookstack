@@ -87,9 +87,9 @@ MIT 协议。带截图的叙述性总览：[OVERVIEW.md](https://github.com/itsw
 
 ![hookrelay 的看板：顶部一句话说有没有事等你处理，旁边是按状态叠起来的一天，下面四个数字和每条告警一行 —— 处理中、投递失败、等你按的卡、已裁定、已恢复 —— 各带七个阶段](../img/hookrelay-timeline.png)
 
-![hookjudge 的状态页](../img/hookjudge-status.png)
+![hookjudge 的看板：九条裁决，每条免费路线都走过，四条付费，四处分歧等你复核](../img/hookjudge-status.png)
 
-上面每一张截图都取自一次从零开始的本地 Docker 运行 —— 不是效果图。
+上面每一张截图都取自从零开始的本地 Docker 运行 —— 不是效果图。
 
 ---
 
