@@ -377,10 +377,9 @@ function readHeaders() {
   return token ? { Authorization: "Bearer " + token } : {};
 }
 
-// Where this console is mounted: "" when served at the root, "/plan" behind a
-// gateway that serves several boards under one address. Every request the page
-// makes is relative to it, so the same file works on its own port and inside
-// the family's one site.
+// Where this console is mounted: "" when served at the root, or a prefix when
+// a reverse proxy serves it under one. Every request the page makes is
+// relative to it, so the same file works on its own port and behind a proxy.
 const BASE = location.pathname.replace(/\/ui\/?$/, "").replace(/\/$/, "");
 async function api(path, opts = {}) {
   const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});

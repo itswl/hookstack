@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Every board addresses its own service relative to where it is mounted.
 
-Since 2026-09-28 a gateway serves the family under one address with each
-console under a prefix, so a page that fetches "/status" instead of
-BASE + "/status" works on its own port and breaks inside the one site — and
-nothing but a browser notices. The judge's board shipped exactly that for an
-hour: its fetches were prefixed with BASE and BASE was never declared, which
+A board may be served under a path prefix by a reverse proxy. The one-address
+gateway of 2026-09-28 did exactly that and was withdrawn the next day at the
+operator's word; the pages stayed mount-aware, so a proxy remains a one-file
+change. A page that fetches "/status" instead of BASE + "/status" works on its
+own port and breaks under a prefix, and nothing but a browser notices: the
+judge's board shipped its fetches prefixed with a BASE it never declared, which
 node --check cannot see. This reads the three pages and fails on either half
 missing: a request or link that starts at the root, or a BASE used but never
 declared.

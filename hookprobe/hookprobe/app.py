@@ -1008,8 +1008,9 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
         """Redirects to the board."""
-        # Relative on purpose: behind a gateway that mounts this console under a
-        # prefix, an absolute "/ui" would leave the console for the pipe.
+        # Relative on purpose: behind a proxy that mounts this console under a
+        # prefix, an absolute "/ui" would leave the console for whatever sits at
+        # the proxy's root.
         return RedirectResponse("ui")
 
     @app.get("/ui", include_in_schema=False)

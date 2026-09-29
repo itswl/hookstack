@@ -49,9 +49,7 @@ services:
       HOOKRELAY_PUBLIC_URL: http://127.0.0.1:8100
       # Where the investigator's console is, as YOUR browser reaches it, so a
       # hop in the timeline links to the investigation it names.
-      # A site path: the board is read through the gateway (8000), and the link
-      # to a run stays inside that one address.
-      HOOKRELAY_UI_LINKS: ${HOOKRELAY_UI_LINKS:-probe-notify=/probe/ui}
+      HOOKRELAY_UI_LINKS: ${HOOKRELAY_UI_LINKS:-probe-notify=http://127.0.0.1:8088/ui}
     volumes:
       # Checked in and mounted read-only, so `up` needs no setup step. Point
       # HOOKRELAY_CONFIG at /data/config.yaml to use your own instead.
@@ -69,22 +67,6 @@ services:
     depends_on:
       - sink
       - lark-bridge
-
-  # One address for the three boards: http://127.0.0.1:8000 — the pipe's board
-  # at the root, the judge under /judge/, the investigator under /probe/. A
-  # plain proxy (deploy/gateway/demo.Caddyfile) that holds no token; the direct
-  # ports stay published for the smoke and the scripts.
-  gateway:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8000:8000"
-    volumes:
-      - ./deploy/gateway/demo.Caddyfile:/etc/caddy/Caddyfile:ro
-    depends_on:
-      - hookrelay
-      - hookjudge
-      - hookprobe
 
   hookjudge:
     build: ./hookjudge
@@ -182,7 +164,7 @@ services:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
       # The pipe's board as your browser reaches it; a run links to its chain there.
-      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8000}
+      HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
       # And this console as your browser reaches it, so a card links to its run.
       HOOKPROBE_PUBLIC_URL: ${HOOKPROBE_PUBLIC_URL:-http://127.0.0.1:8088}
       HOOKPROBE_RUNTIME: ${HOOKPROBE_RUNTIME:-replay}

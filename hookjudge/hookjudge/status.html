@@ -250,8 +250,8 @@
   if (want === "help" || want === "review") document.querySelector('.tab[data-tab="' + want + '"]').click();
 
   var KEY = "hookjudge-read-token";
-  // Where this board is mounted: "" on its own port, "/judge" behind the gateway
-  // that serves the family under one address. Every request is relative to it.
+  // Where this board is mounted: "" on its own port, or a prefix when a reverse
+  // proxy serves it under one. Every request is relative to it.
   var BASE = location.pathname.replace(/\/$/, "");
   // "42 of 52" as a number with its denominator under it: the big figure is
   // what changed, the small line is what it is out of.

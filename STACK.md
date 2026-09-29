@@ -35,8 +35,7 @@ docker compose up -d --build
 
 | where | what |
 | --- | --- |
-| http://127.0.0.1:8000/ | **every board at one address**: the pipe's board at the root, the judge under `/judge/`, the investigator under `/probe/ui` (a plain proxy, deploy/gateway/demo.Caddyfile) |
-| http://127.0.0.1:8100/ | the pipe's board on its own port (now · journey · ledger · config) |
+| http://127.0.0.1:8100/ | the pipe's board (now · journey · ledger · config) |
 | http://127.0.0.1:8200/ | the brain's ledger page (judged / paid ratio / cost / return failures) |
 | `docker compose logs -f sink` | what an operator would actually have received |
 
