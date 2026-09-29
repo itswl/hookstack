@@ -318,7 +318,7 @@ what a verdict on a fix is measured against.
              {"fields": {"brain": "brain-full"}, "level": "high",   "latency_seconds": 47.0}]}
 ```
 
-The status page shows it under each event (the round-trip panel).
+The board's ledger shows it when an event opens, under what came back.
 
 Two standing limits on processors, both deliberate:
 

@@ -573,6 +573,42 @@ async def test_a_disagreement_is_labeled_in_one_click_and_exports_as_an_eval_row
     assert (await app_client.post(f"/judgements/{row_id}/label", json={"importance": "low"})).status_code == 401
 
 
+async def test_a_warning_row_can_be_ruled_for_the_platform_and_read_back_by_id(app_client):
+    """Three things the rebuilt board leans on. The review queue admits `warning`
+    as the `medium` it means, so each row names the platform's word in the
+    judge's vocabulary and the label door accepts the platform's own word; a
+    verdict is readable by id however far it has scrolled; and the dead-return
+    filter runs in the query, not over the newest page."""
+    store = app_client.app.state.store
+    from hookjudge.contract import Incoming, Verdict
+
+    auth = {"X-Read-Token": "read-t"}
+    warned = Incoming.parse({"event": {"title": "disk 81%", "body": "x", "level": "warning"}}, now=time.time())
+    await store.record(warned, Verdict(summary="s", importance="high", route="ai", model="m").normalized(), 10)
+    queue = (await app_client.get("/disagreements", headers=auth)).json()["queue"]
+    assert [(r["level"], r["platform_importance"]) for r in queue] == [("warning", "medium")]
+    row_id = queue[0]["id"]
+    ruled = await app_client.post(
+        f"/judgements/{row_id}/label", json={"importance": "warning", "source": "platform"}, headers=auth
+    )
+    assert ruled.status_code == 200 and ruled.json()["importance"] == "medium"
+
+    one = await app_client.get(f"/judgements/{row_id}", headers=auth)
+    assert one.status_code == 200 and one.json()["title"] == "disk 81%" and one.json()["label_importance"] == "medium"
+    assert (await app_client.get("/judgements/999999", headers=auth)).status_code == 404
+    assert (await app_client.get(f"/judgements/{row_id}")).status_code == 401
+
+    await store.mark_return(row_id, "dead", 3, "gave up", attempted_at=time.time())
+    for n in range(3):
+        later = Incoming.parse({"event": {"title": f"later {n}", "body": "x", "level": "high"}}, now=time.time())
+        await store.record(later, Verdict(summary="s", importance="high", route="ai", model="m").normalized(), 10)
+    newest = (await app_client.get("/status?limit=2", headers=auth)).json()["recent"]
+    assert all(r["id"] != row_id for r in newest), "the dead one is off the newest page"
+    dead = (await app_client.get("/status?limit=2&ret=dead", headers=auth)).json()["recent"]
+    assert [r["id"] for r in dead] == [row_id]
+    assert len((await app_client.get("/status?limit=10&ret=bogus", headers=auth)).json()["recent"]) == 4
+
+
 async def test_a_button_press_exports_as_its_own_unreviewed_wake_row(app_client):
     """The other half of the loop, and the one nothing was reading.
 

@@ -16,8 +16,9 @@ sources:
     level_map: {alerting: high, ok: info, resolved: info}
     # A stated recovery reaches the investigator as a fact about work it has
     # already done (it verifies the run and spends nothing); a keyword in the
-    # title is a judgement and stays the brain's. `state: resolved` says it;
-    # `state: ok` only lowers the level.
+    # title is a judgement and stays the brain's. `state: resolved` says it,
+    # `state: alerting` says the opposite; `state: ok` only lowers the level
+    # and states nothing, so an "[OK]" or "[RESOLVED]" title is the brain's to read.
     recovery: "{state}"
     fields:
       env: "{env}"

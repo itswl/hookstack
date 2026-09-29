@@ -448,3 +448,19 @@ def test_recovery_template_sets_a_top_level_flag_not_a_field():
     # Unconfigured template: no key at all — downstream falls back to sniffing.
     bare = ExtractTemplate(name="t", title="{meta.alert_name}").extract({"meta": {"alert_name": "cpu"}}, door="ww")
     assert "is_recovery" not in bare
+
+
+def test_a_value_the_flag_cannot_read_states_nothing():
+    """The demo door's `state` is alerting, ok or resolved. Only two of those
+    say anything about recovery; `ok` stating False outranked the brain's
+    reading of "[RESOLVED] Payment gateway 5xx rate 8.1%" downstream, and the
+    demo's recovery was judged a repeat of its firing."""
+    from hookrelay.templates import ExtractTemplate
+
+    door = ExtractTemplate(name="inbound", title="{title}", recovery="{state}")
+    states = ("resolved", "alerting", "ok")
+    said = {state: door.extract({"title": "t", "state": state}, door="inbound") for state in states}
+    assert said["resolved"]["is_recovery"] is True
+    assert said["alerting"]["is_recovery"] is False
+    assert "is_recovery" not in said["ok"]
+    assert "is_recovery" not in door.extract({"title": "t"}, door="inbound")

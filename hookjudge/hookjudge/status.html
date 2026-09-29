@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hookjudge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2311151d'/%3E%3Cpath d='M12 5v14M7 19h10M6 8h12M6 8l-2.5 5.5a2.5 2.5 0 0 0 5 0zM18 8l-2.5 5.5a2.5 2.5 0 0 0 5 0z' stroke='%234c8dff' stroke-width='1.8' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E">
 <script id="theme">
   /* ── hookstack theme · keep this block identical in all three pages ── */
   // Before the first paint, so a light system never sees a dark flash: the
@@ -18,11 +19,24 @@
   /* ── end theme ───────────────────────────────────────────────────────── */
 </script>
 <style>
+  /* hookjudge's board: one file, no build, no CDN, dark or light as the system
+     asks. Rebuilt 2026-09-29 on the pipe's layout, so the three boards read as
+     one product: a sentence that says whether anything needs a person, the
+     numbers under it, the verdicts as a list by day, and one click for the
+     whole of any verdict. The pinned blocks are byte-identical to the other two
+     boards (scripts/assert_design.py); everything after them is this page's own. */
   /* ── hookstack design tokens · keep this block identical in all three pages ── */
   :root {
     --bg: #0b0e14; --surface: #11151d; --border: #1f2530; --border-soft: #171c26;
     --text: #d7dde6; --muted: #8b94a3; --accent: #4c8dff;
     --ok: #3dd68c; --warn: #f5a524; --bad: #e5484d;
+    /* The surfaces between those, and the depth under a drawer or a dialog. */
+    --surface-2: #161b25; --hover: #19202c; --code: #080b10; --radius: 12px;
+    --border-strong: #2c3544; --ring: #3a4352; --well: #0e1219; --code-text: #c3cad6;
+    --topbar: rgba(11, 14, 20, .9); --scrim: rgba(3, 5, 9, .55); --scrim-strong: rgba(3, 5, 9, .62);
+    --sheen: rgba(255, 255, 255, .04);
+    --shadow-drawer: -24px 0 60px rgba(0, 0, 0, .45); --shadow-card: 0 20px 60px rgba(0, 0, 0, .5);
+    --shadow-toast: 0 10px 30px rgba(0, 0, 0, .4);
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     /* "PingFang SC" stays in the stack: alert titles arrive in whatever language
        the monitoring system speaks, and they are rendered here verbatim. */
@@ -37,6 +51,12 @@
     --bg: #f4f6f9; --surface: #ffffff; --border: #dde2ea; --border-soft: #eaedf2;
     --text: #1b2230; --muted: #5b6677; --accent: #2160d6;
     --ok: #137a3e; --warn: #9a5800; --bad: #c9262c;
+    --surface-2: #f1f4f8; --hover: #f4f7fb; --code: #f6f8fa;
+    --border-strong: #c5cdd9; --ring: #c2cad6; --well: #f7f9fc; --code-text: #243042;
+    --topbar: rgba(255, 255, 255, .88); --scrim: rgba(15, 23, 42, .28); --scrim-strong: rgba(15, 23, 42, .36);
+    --sheen: rgba(15, 23, 42, .05);
+    --shadow-drawer: -18px 0 48px rgba(15, 23, 42, .14); --shadow-card: 0 18px 50px rgba(15, 23, 42, .18);
+    --shadow-toast: 0 8px 24px rgba(15, 23, 42, .14);
     color-scheme: light;
   }
   .rc { display: flex; gap: 6px; align-items: center; }
@@ -61,71 +81,285 @@
   .tab .count { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 4px; }
   .tab.active .count { color: var(--accent); }
   /* ── end tab shell ──────────────────────────────────────────────────────── */
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font: var(--ui); }
-  .wrap { max-width:1060px; margin:0 auto; padding:28px 20px 60px; }
-  header { display:flex; align-items:baseline; gap:12px; margin-bottom:20px; }
-  header h1 { font-size:18px; margin:0; }
-  header .sub, header .stamp { color:var(--muted); font-size:12px; }
-  header .stamp { margin-left:auto; font-family:var(--mono); }
-  .hp { max-width: 860px; font-size: 13.5px; line-height: 1.65; margin-bottom: 26px; }
-  .hp h2 { font-size: 14px; margin: 18px 0 6px; }
-  .hp table { border-collapse: collapse; width: 100%; margin: 8px 0; }
-  .hp th, .hp td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 12.5px; vertical-align: top; }
-  .hp th { color: var(--muted); font-weight: 600; }
-  .hp code { border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; }
-  .hp .muted-p { color: var(--muted); font-size: 12.5px; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); gap:12px; margin-bottom:22px; }
-  .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
-  .card .label { color:var(--muted); font-size:12px; margin-bottom:4px; }
-  .card .value { font-size:24px; font-weight:650; font-family:var(--mono); }
-  .card .value .of { display:block; font:var(--ui); font-size:12px; color:var(--muted); margin-top:2px; }
-  h2 { font-size:13px; color:var(--muted); font-weight:600; letter-spacing:.06em;
-       text-transform:uppercase; margin:26px 0 10px; }
-  .row { background:var(--surface); border:1px solid var(--border); border-radius:10px;
-         padding:10px 14px; margin-bottom:8px; }
-  .head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); }
-  .dot.critical,.dot.high { background:var(--bad); }
-  .dot.medium { background:var(--warn); }
-  .dot.low { background:var(--accent); }
-  /* Ended, whatever it was worth while it was burning. The dot is the loudest
-     signal in the row, and a red one on a closed alert says "act now" about
-     something already over — the same reason the pipe renders a recovery card
-     green regardless of importance. */
-  .dot.ended { background:var(--ok); }
-  .title { font-weight:600; overflow-wrap:anywhere; }
-  .badge { font-size:11px; font-family:var(--mono); padding:2px 8px; border-radius:999px;
-           border:1px solid var(--border); color:var(--muted); }
-  .badge.ai { color:var(--accent); } .badge.reuse,.badge.recovery { color:var(--ok); }
-  .badge.rule { color:var(--warn); }
-  .badge.dead { color:var(--bad); border-color:var(--bad); }
-  .when { margin-left:auto; color:var(--muted); font-size:12px; font-family:var(--mono); }
-  .summary { color:var(--text); margin-top:6px; }
-  .meta { color:var(--muted); font-size:12px; font-family:var(--mono); margin-top:6px; }
-  .empty { color:var(--muted); text-align:center; padding:30px 0; }
+  /* ── hookstack components · keep this block identical in all three pages ── */
+  /* What every board is built from: the top bar, buttons and fields, the
+     status pill, the headline and its numbers, the list and its rows, the
+     drawer, the dialog and the toast. Pinned like the palette, because the
+     three boards drifted in exactly these before: three kinds of button, two
+     kinds of row, a window.confirm on one page and a modal on another. */
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: var(--ui); -webkit-font-smoothing: antialiased; }
+  [hidden] { display: none !important; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .ok-t { color: var(--ok); } .warn-t { color: var(--warn); } .bad-t { color: var(--bad); }
+  svg.i { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
 
-.review{border:1px solid var(--warn);border-radius:8px;margin:10px 0;padding:8px 10px}
-  .wrap .tabs { margin-bottom: 18px; }
-  .routes { display:flex; height:10px; border-radius:5px; overflow:hidden; background:var(--surface); border:1px solid var(--border); margin:-8px 0 6px; }
-  .routes span { display:block; min-width:2px; }
-  .routes .ai { background:var(--accent); } .routes .reuse, .routes .recovery { background:var(--ok); }
-  .routes .rule, .routes .rule-reuse { background:var(--warn); } .routes .reuse { opacity:.55; } .routes .rule-reuse { opacity:.55; }
-  .routes-legend { font-family:var(--mono); font-size:12px; color:var(--muted); margin-bottom:20px; }
-  .routes-legend b { color:var(--text); font-weight:500; }
-.review h3{margin:0 0 6px;font-size:12px;color:var(--warn);text-transform:uppercase;letter-spacing:.4px}
-.rv{display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap;font-size:12.5px}
-.rv .t{flex:1 1 240px}
-.rv button{font:inherit;font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer}
-.rv button:hover{border-color:var(--accent)}
-.rv select{font:inherit;font-size:11px;background:transparent;color:var(--text);border:1px solid var(--line);border-radius:6px}
-.badge.burst{color:var(--warn);border-color:var(--warn)}
-.att{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);
-     border:1px solid var(--border);border-radius:10px;padding:8px 14px;margin-bottom:6px;font-size:12.5px}
-.att .t{flex:1 1 260px;font-weight:600;overflow-wrap:anywhere}
-.att .n{color:var(--muted);font-family:var(--mono);font-size:11.5px;white-space:nowrap}
-/* The count that says "go turn this off": nobody ruled it worth the interruption. */
-.att .n.cold{color:var(--warn)}
+  /* ── top bar: who this is, one search, the switches ── */
+  .top { position: sticky; top: 0; z-index: 20; background: var(--topbar); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  .top-in { max-width: 1280px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; gap: 18px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); white-space: nowrap; }
+  .brand:hover { text-decoration: none; }
+  .brand b { font-size: 16px; letter-spacing: .01em; }
+  .brand-sub { color: var(--muted); font-size: 12px; }
+  .logo { width: 24px; height: 24px; flex: 0 0 auto; }
+  .search { flex: 1 1 auto; max-width: 560px; margin: 0 auto; position: relative; display: flex; align-items: center; }
+  .search svg.i { position: absolute; left: 11px; color: var(--muted); pointer-events: none; }
+  .search input { width: 100%; height: 36px; padding: 0 44px 0 34px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font: inherit; font-size: 13.5px; }
+  .search input:focus { border-color: var(--accent); outline: none; }
+  .search input::-webkit-search-cancel-button { display: none; }
+  .search kbd { position: absolute; right: 9px; }
+  kbd { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; color: var(--muted); background: var(--bg); }
+  .top-right { display: flex; align-items: center; gap: 8px; }
+  .stamp { color: var(--muted); font-size: 12px; font-family: var(--mono); white-space: nowrap; }
+
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 18px 24px 80px; }
+  .wrap > .tabs { margin: 0 0 20px; }
+  .tabs .tab { display: inline-flex; align-items: center; gap: 7px; }
+  .tab .count.warn { color: var(--warn); }
+  .tab .count.bad { color: var(--bad); }
+  .view-head { margin: 0 0 16px; }
+  .view-head h2 { margin: 0 0 4px; font-size: 18px; font-weight: 650; }
+  .view-head p { margin: 0; color: var(--muted); font-size: 13px; }
+
+  /* ── controls ── */
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; white-space: nowrap; text-decoration: none; }
+  .btn:hover { border-color: var(--border-strong); background: var(--surface-2); text-decoration: none; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
+  .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+  .btn.ghost:hover { background: var(--surface); color: var(--text); }
+  .btn.sm { height: 28px; padding: 0 10px; font-size: 12.5px; border-radius: 7px; }
+  .btn.xs { height: 24px; padding: 0 8px; font-size: 12px; border-radius: 6px; }
+  .btn[disabled] { opacity: .45; cursor: default; }
+  .inp, .sel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 6px 10px; font: inherit; font-size: 13px; height: 34px; }
+  .inp:focus, .sel:focus { border-color: var(--accent); outline: none; }
+  textarea.inp { height: auto; }
+  .check { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; cursor: pointer; user-select: none; }
+  .spacer { flex: 1 1 auto; }
+  .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+  .seg button { border: 0; background: transparent; color: var(--muted); padding: 5px 11px; border-radius: 7px; cursor: pointer; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
+  .seg button:hover { color: var(--text); }
+  .seg button.on { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+  .seg .n { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .seg .n.warn { color: var(--warn); } .seg .n.bad { color: var(--bad); } .seg .n.info { color: var(--accent); } .seg .n.ok { color: var(--ok); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text); font-size: 12.5px; cursor: pointer; }
+
+  /* ── status: a word, earned colour ── */
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; border: 1px solid var(--border); color: var(--muted); }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+  .pill.info { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 9%, transparent); }
+  .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+  .src { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); white-space: nowrap; }
+  .kind { font-size: 10.5px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); font-family: var(--mono); }
+  /* A chip that means something keeps its colour: .kind comes after the text
+     colours above, so without these the muted grey won at equal specificity. */
+  .kind.ok-t { color: var(--ok); } .kind.warn-t { color: var(--warn); } .kind.bad-t { color: var(--bad); }
+
+  /* ── the answer first: one sentence, a chart, a few numbers ── */
+  .hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; margin-bottom: 14px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; min-height: 124px; }
+  .headline { display: flex; align-items: center; gap: 12px; font-size: 21px; font-weight: 650; letter-spacing: .01em; }
+  .headline .badge { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: 0 0 auto; }
+  .headline .badge svg.i { width: 20px; height: 20px; }
+  .headline.ok .badge { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+  .headline.warn .badge { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .headline.bad .badge { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+  .headline.info .badge { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .headline-sub { color: var(--muted); margin: 10px 0 0 50px; font-size: 13px; }
+  .hero-actions { margin: 12px 0 0 50px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .chart-head { display: flex; justify-content: space-between; align-items: baseline; color: var(--muted); font-size: 12px; }
+  .chart-head b { color: var(--text); font-weight: 600; font-size: 13px; }
+  .bars { display: flex; align-items: stretch; gap: 3px; height: 70px; margin-top: 12px; }
+  .bar { flex: 1 1 0; display: flex; flex-direction: column-reverse; gap: 1px; min-width: 0; border-radius: 2px; }
+  .bar i { display: block; border-radius: 2px; flex: 0 0 auto; }
+  .bar i.bad { background: var(--bad); } .bar i.warn { background: var(--warn); }
+  .bar i.rest { background: var(--accent); opacity: .8; }
+  .bar i.quiet { background: var(--muted); opacity: .25; }
+  .bar i.z { background: var(--border); height: 2px; }
+  .bar:hover i { opacity: 1; }
+  .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; font-family: var(--mono); margin-top: 6px; }
+  .legend { display: flex; gap: 14px; color: var(--muted); font-size: 11.5px; margin-top: 8px; flex-wrap: wrap; }
+  .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+  .legend .lb::before { background: var(--bad); } .legend .lw::before { background: var(--warn); }
+  .legend .la::before { background: var(--accent); } .legend .lq::before { background: var(--muted); opacity: .4; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .tile { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 16px; cursor: pointer; }
+  .tile:hover { border-color: var(--border-strong); background: var(--surface-2); }
+  .tile .lbl { color: var(--muted); font-size: 12.5px; }
+  .tile .val { font-size: 28px; font-weight: 650; font-family: var(--mono); line-height: 1.2; margin-top: 4px; }
+  .tile .hint { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .tile.warn.on { border-color: color-mix(in srgb, var(--warn) 55%, transparent); } .tile.warn.on .val { color: var(--warn); }
+  .tile.info.on .val { color: var(--accent); }
+  .tile.bad.on { border-color: color-mix(in srgb, var(--bad) 55%, transparent); } .tile.bad.on .val { color: var(--bad); }
+  .tile.ok.on .val { color: var(--ok); }
+  .tile.active { box-shadow: inset 0 0 0 1px var(--accent); }
+  .banners { display: grid; gap: 8px; margin-bottom: 14px; }
+  .banners:empty { display: none; }
+  .banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); font-size: 13px; }
+  .banner .grow { flex: 1 1 auto; min-width: 0; }
+  .banner.warn { border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 7%, var(--surface)); } .banner.warn svg.i { color: var(--warn); }
+  .banner.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: color-mix(in srgb, var(--bad) 8%, var(--surface)); } .banner.bad svg.i { color: var(--bad); }
+  .banner.info svg.i { color: var(--accent); }
+
+  /* ── lists: one row per item, two lines, grouped by day ── */
+  .filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+  .list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .day { padding: 7px 16px; font-size: 12px; color: var(--muted); background: var(--well); border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; }
+  .row { display: grid; grid-template-columns: 136px minmax(0, 1fr) auto; grid-template-areas: "st ttl m1" "st sub m2"; gap: 3px 14px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--border-soft); cursor: pointer; position: relative; }
+  .row:last-child { border-bottom: 0; }
+  .row:hover { background: var(--hover); }
+  .row.cur { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+  .row.cur::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
+  .row .st { grid-area: st; align-self: start; padding-top: 1px; }
+  .row .ttl { grid-area: ttl; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .sub { grid-area: sub; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .sub b { color: var(--text); font-weight: 500; }
+  .row .m1 { grid-area: m1; display: flex; gap: 10px; align-items: center; justify-content: flex-end; color: var(--muted); font-size: 12px; }
+  .row .m2 { grid-area: m2; display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+  .row .when { font-family: var(--mono); font-size: 12px; }
+  .row .cost { color: var(--ok); font-family: var(--mono); font-size: 12px; }
+  .row.quiet .ttl { color: var(--muted); font-weight: 500; }
+  .note { color: var(--muted); font-size: 12px; text-align: center; margin: 12px 0 0; }
+  .empty { text-align: center; color: var(--muted); padding: 44px 20px; }
+  .empty svg.i { width: 28px; height: 28px; opacity: .7; display: block; margin: 0 auto 10px; }
+  .sk { height: 60px; border-bottom: 1px solid var(--border-soft); background: linear-gradient(90deg, transparent, var(--sheen), transparent); background-size: 200% 100%; animation: sk 1.3s linear infinite; }
+  .sk.big { height: 86px; border: 0; border-radius: 10px; }
+  @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+  /* ── drawers: one item's whole story, and the settings ── */
+  .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 30; }
+  .scrim.on { opacity: 1; pointer-events: auto; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(840px, 100vw); background: var(--bg); border-left: 1px solid var(--border); transform: translateX(104%); transition: transform .22s ease; z-index: 31; display: flex; flex-direction: column; }
+  /* The shadow only while open: parked off-screen, it would still fall across the
+     page's right edge, invisible on dark and a grey band on white. */
+  .drawer.on { transform: none; box-shadow: var(--shadow-drawer); }
+  .drawer.narrow { width: min(440px, 100vw); z-index: 33; }
+  .dr-head { padding: 18px 22px 0; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .dr-top { display: flex; align-items: flex-start; gap: 12px; }
+  .dr-top .pill { margin-top: 3px; }
+  .dr-title { font-size: 17px; font-weight: 650; line-height: 1.45; flex: 1 1 auto; overflow-wrap: anywhere; }
+  .dr-meta { color: var(--muted); font-size: 12.5px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+  .dr-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 12px; }
+  .dr-head .tabs { border-bottom: 0; }
+  .dr-body { flex: 1 1 auto; overflow: auto; padding: 20px 22px 60px; }
+  .settings-body { padding: 18px 22px 40px; overflow: auto; flex: 1 1 auto; }
+  .field { display: grid; gap: 6px; margin-bottom: 18px; }
+  .field > label { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+  .field .inline { display: flex; gap: 8px; }
+  .field .inline .inp { flex: 1 1 auto; min-width: 0; }
+  .field .hint { color: var(--muted); font-size: 12px; margin: 0; }
+  .keys { display: grid; gap: 6px; font-size: 13px; }
+  .keys div { display: flex; gap: 10px; align-items: center; }
+  .keys kbd { min-width: 44px; text-align: center; }
+
+  /* ── what opens: details, code, raw bytes ── */
+  details.x { margin-top: 8px; }
+  details.x > summary { cursor: pointer; color: var(--accent); font-size: 12.5px; list-style: none; display: inline-flex; gap: 6px; align-items: center; }
+  details.x > summary::-webkit-details-marker { display: none; }
+  details.x > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
+  details.x[open] > summary::before { content: "▾"; }
+  .code { margin: 8px 0 0; padding: 12px 14px; background: var(--code); border: 1px solid var(--border); border-radius: 10px; font-family: var(--mono); font-size: 12px; line-height: 1.55; overflow: auto; max-height: 480px; white-space: pre; color: var(--code-text); }
+  .code.prose { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--ui); font-size: 13px; line-height: 1.7; }
+  .code .add { color: var(--ok); } .code .del { color: var(--bad); } .code .hunk { color: var(--accent); } .code .meta { color: var(--muted); }
+  .codebox { position: relative; }
+  .codebox .btn { position: absolute; top: 8px; right: 8px; }
+
+  /* ── tables ── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 16px; }
+  .card > h3 { margin: 0 0 4px; font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card > .desc { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .tbl td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top; overflow-wrap: anywhere; }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl td.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+  .tbl .nw { white-space: nowrap; }
+  .tbl th.num { text-align: right; }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 16px; }
+  .stat .lbl { color: var(--muted); font-size: 12.5px; }
+  .stat .val { font-size: 26px; font-weight: 650; font-family: var(--mono); margin-top: 2px; }
+  .stat.bad.on .val { color: var(--bad); } .stat.warn.on .val { color: var(--warn); } .stat.ok .val { color: var(--ok); }
+
+  /* ── editors and forms ── */
+  .editor { width: 100%; min-height: 440px; background: var(--code); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; tab-size: 2; }
+  .editor:focus { outline: none; border-color: var(--accent); }
+  .bar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .msg { font-size: 12.5px; font-family: var(--mono); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 10px; }
+  .msg.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .msg.err { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .form-row .field { margin-bottom: 0; }
+
+  /* ── help ── */
+  .hp { max-width: 880px; font-size: 14px; line-height: 1.75; }
+  .hp h2 { font-size: 17px; margin: 30px 0 8px; } .hp h2:first-child { margin-top: 0; }
+  .hp h3 { font-size: 14.5px; margin: 18px 0 6px; }
+  .hp p { margin: 6px 0 10px; }
+  .hp table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; }
+  .hp th, .hp td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; font-size: 13px; vertical-align: top; }
+  .hp th { color: var(--muted); background: var(--surface); font-weight: 600; }
+  .hp code { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; }
+  .hp pre { background: var(--code); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+  .hp .legend-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  body.zh [data-only="en"], body:not(.zh) [data-only="zh"] { display: none !important; }
+
+  /* ── dialogs and toasts ── */
+  .modal { position: fixed; inset: 0; display: none; place-items: center; z-index: 40; background: var(--scrim-strong); }
+  .modal.on { display: grid; }
+  .modal-card { width: min(460px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-card); padding: 20px; }
+  .modal-card h3 { margin: 0 0 8px; font-size: 16px; }
+  .modal-card .body { color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+  .modal-card .body p { margin: 0 0 8px; }
+  .modal-card .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .toasts { position: fixed; right: 20px; bottom: 20px; display: grid; gap: 8px; z-index: 50; }
+  .toast { display: flex; align-items: center; gap: 10px; min-width: 240px; max-width: 440px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); box-shadow: var(--shadow-toast); font-size: 13px; cursor: pointer; animation: toast-life 5s ease forwards; }
+  .toast.ok svg.i { color: var(--ok); } .toast.bad svg.i { color: var(--bad); }
+  @keyframes toast-life { 0% { opacity: 0; transform: translateY(8px); } 6% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; transform: translateY(4px); } }
+
+  /* The prompt the token wiring reveals on a 401, as a card that says what to type. */
+  #tokenbar.show { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(180px, 280px) auto; gap: 12px; align-items: center; padding: 14px 16px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 7%, var(--surface)); }
+  #tokenbar svg.i { color: var(--warn); width: 20px; height: 20px; }
+  #tokenbar .tb-text b { display: block; font-size: 14px; }
+  #tokenbar .tb-text span { color: var(--muted); font-size: 12.5px; }
+  /* ── shared by the judge and the investigator ── */
+  .bar i.ok { background: var(--ok); }
+  .legend .lo::before { background: var(--ok); }
+  .kv { display: grid; grid-template-columns: minmax(120px, 230px) minmax(0, 1fr); gap: 6px 16px; font-size: 13px; }
+  .kv .k { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .kv .v { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+  .card > h3 .count { color: var(--muted); font-family: var(--mono); font-size: 12px; font-weight: 400; }
+  .row .src + .src { margin-left: 0; }
+  @media (max-width: 1000px) {
+    .hero { grid-template-columns: 1fr; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .brand-sub { display: none; }
+  }
+  @media (max-width: 640px) {
+    .top-in, .wrap { padding-left: 12px; padding-right: 12px; }
+    .top-in { flex-wrap: wrap; gap: 10px; }
+    .search { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
+    .top-right { margin-left: auto; }
+    .wrap > .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .wrap > .tabs::-webkit-scrollbar { display: none; }
+    .stamp, .search kbd { display: none; }
+    .row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "st m1" "ttl ttl" "sub sub" "m2 m2"; }
+    .row .m2 { justify-content: flex-start; }
+    .stats { grid-template-columns: 1fr; }
+    .kv { grid-template-columns: 1fr; gap: 2px; }
+    .kv .v { margin-bottom: 8px; }
+    #tokenbar.show { grid-template-columns: 1fr; }
+    .headline-sub, .hero-actions { margin-left: 0; }
+  }
+  /* ── end components ─────────────────────────────────────────────────────── */
   /* ── hookstack token bar · keep this block identical in all three pages ── */
   /* One field per credential the BROWSER sends. Service-to-service secrets
      (the ingest, ruling and action secrets) never appear here: nothing types
@@ -137,168 +371,829 @@
   .tokenbar button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
                      padding: 8px 16px; cursor: pointer; }
   /* ── end token bar ──────────────────────────────────────────────────────── */
-  /* Minimal responsive pass (page-specific, additive; desktop untouched). */
-  @media (max-width: 640px) {
-    body { font-size: 14px; }
-    header { flex-wrap: wrap; row-gap: 8px; }
-    pre { overflow-x: auto; }
-  }
+
+  /* ── this page's own: the cost policy as one bar, six numbers, the review row ── */
+  .split-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--well); border: 1px solid var(--border); margin: 14px 0 12px; }
+  .split-bar span { display: block; min-width: 2px; }
+  .split-bar .ai { background: var(--accent); } .split-bar .rule, .split-bar .rule-reuse { background: var(--warn); }
+  .split-bar .reuse, .split-bar .recovery { background: var(--ok); } .split-bar .rule-reuse, .split-bar .reuse { opacity: .6; }
+  .route-legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+  .route-legend div { display: flex; align-items: center; gap: 7px; }
+  .route-legend i { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; display: block; }
+  .route-legend i.ai { background: var(--accent); } .route-legend i.rule, .route-legend i.rule-reuse { background: var(--warn); }
+  .route-legend i.reuse, .route-legend i.recovery { background: var(--ok); }
+  .route-legend b { color: var(--text); font-family: var(--mono); font-weight: 500; }
+  .tiles.six { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tile .val small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 6px; font-family: var(--ui); }
+  .row .when { color: var(--muted); }
+  .rv-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .rv-acts .sel { height: 28px; font-size: 12.5px; padding: 2px 8px; }
+  .matrix td.num.on { color: var(--ok); font-weight: 600; }
+  @media (max-width: 1000px) { .tiles.six { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>hookjudge</h1>
-    <span class="sub">judgement only: one event, one verdict, one line in the ledger</span>
-    <span class="stamp" id="stamp">loading…</span>
-  <span class="rc">
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="#/board">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="7" fill="#4c8dff" opacity=".14"/><path d="M12 5v14M7.5 19h9M6 8h12M6 8l-2.3 5a2.3 2.3 0 0 0 4.6 0zM18 8l-2.3 5a2.3 2.3 0 0 0 4.6 0z" stroke="#4c8dff" stroke-width="1.7" fill="none" stroke-linejoin="round"/></svg>
+      <b>hookjudge</b><span class="brand-sub" data-t="app.sub"></span>
+    </a>
+    <form class="search" id="searchForm" autocomplete="off" role="search">
+      <span data-icon="search"></span>
+      <input id="search" type="search" data-tp="search.placeholder" spellcheck="false">
+      <kbd>/</kbd>
+    </form>
+    <div class="top-right">
+      <span class="stamp" id="stamp"></span>
+      <button class="btn ghost sm" id="langBtn" type="button"></button>
+      <button class="btn ghost sm" id="settingsBtn" type="button" data-tt="settings.open"><span data-icon="sliders"></span></button>
+      <span class="rc">
     <button id="rTheme" type="button" title="light / dark" aria-label="light / dark">&#9680;</button>
-    <button id="rNow" title="refresh now">&#8635;</button>
-    <span id="rLive" class="live" title="live connection">live</span></span>
-  </span>
-  </header>
-  <div class="tokenbar" id="tokenbar">
-    <input id="tokenInput" type="password" placeholder="X-Read-Token (kept in this browser only)">
-    <button id="tokenSave">enter</button>
-  </div>
-  <div class="tabs">
-    <button class="tab active" data-tab="board">board</button>
-    <button class="tab" data-tab="review">review <span class="count" id="rvCount">0</span></button>
-    <button class="tab" data-tab="help">help</button>
-  </div>
-  <div id="helpSec" class="hp" data-panel="help" style="display:none">
-    <h2>What this is</h2>
-    <p>hookjudge is the <b>judge</b> behind the pipe: one normalized event in, one verdict out
-    (importance, type, a one-sentence summary), returned to the pipe and recorded in the ledger.
-    It renders no cards and knows no channels — that is the pipe's job; it runs no deep
-    investigation — that is the investigator's. The judge answers exactly one question: is this
-    alert worth interrupting a human for.</p>
-    <p>It also declares which <b>buttons</b> that verdict deserves — <code>silence</code> for a window
-    scaled to how bad it just said the condition is, and the <code>useful</code>/<code>useless</code> pair
-    — because what a button means is judgement. A recovery declares none: there is nothing left to silence,
-    and whether resolution notices are wanted at all is a channel setting. Minting the signed token behind
-    a button and catching the press stay the pipe's, so this service still holds no secret.</p>
-    <h2>Four routes = the cost policy (the order IS the policy)</h2>
-    <table>
-      <tr><th>Route</th><th>When it is taken</th><th>Costs?</th></tr>
-      <tr><td><b>recovery</b></td><td>A recovery inherits the verdict its firing was given — the point is agreeing with the alert it belongs to, not merely saving a call</td><td>free</td></tr>
-      <tr><td><b>reuse</b></td><td>The same condition restated inside the window (1h by default) re-serves the previous AI verdict — an alert storm is one situation repeated</td><td>free</td></tr>
-      <tr><td><b>ai</b></td><td>A genuinely new condition: ask the model</td><td>paid</td></tr>
-      <tr><td><b>rule</b></td><td>Keyword floor when the model is unconfigured, slow or unusable; <code>degraded_reason</code> says why it degraded and never pretends to be analysis. Known levels are carried over conservatively</td><td>free</td></tr>
-    </table>
-    <p class="muted-p">The saving does not come from a cheaper model. It comes from most events never reaching ai at all.</p>
-    <h2>Reading this board</h2>
-    <p>Seven cards: verdicts in 24h / paid share (the ai fraction) / spend in 24h / <b>failed returns</b>
-    (&gt;0 means the pipe is not receiving verdicts — with <code>HOOKJUDGE_ALARM_URL</code> set, the news
-    travels around the pipe as a direct self-alarm) / <b>platform agreement</b> — on shadow deployments
-    the pipe delivers each event with the upstream platform's own verdict as <code>level</code>, so the
-    ledger can say how often the judge and the platform agree. Recoveries are excluded (their importance
-    is inherited from the firing by design), and the <code>/status</code> JSON carries the full
-    level×importance matrix plus the latest disagreements — the rows worth reading / <b>repeat
-    interruptions</b> and <b>mattered</b>, below. Each verdict row is badged with its route, next to the
-    latency and what that one verdict cost.</p>
-    <h2>Attention, which is not the same bill as spend</h2>
-    <p>Every verdict goes back to the pipe and becomes a card, so <b>verdicts 24h has always been the
-    number of times somebody was interrupted</b> — it was only ever read as throughput. A condition judged
-    twelve times inside an hour interrupted a human twelve times, and because eleven of those took the free
-    <code>reuse</code> route the spend figure says nothing about it. <b>repeat interruptions</b> is that
-    hidden part: cards that restated a condition this window had already reported. <b>mattered</b> is the
-    other half — when an operator presses a button on a card, <code>useful</code> and <code>useless</code>
-    come back to <code>POST /feedback</code> and are recorded against the judgement that caused the
-    interruption. It is a different question from the review queue below, which asks what importance the
-    alert should have had: a correctly-rated <code>high</code> can still not be worth waking anyone, so
-    both answers live on the row.</p>
-    <p class="muted-p"><b>Noisiest conditions</b> is the view to act on — every condition that interrupted
-    more than once, with how many of those interruptions were paid for and how many anyone ruled worth it.
-    A row with several interruptions and nothing ruled useful is where to go turn something off. Nothing
-    here suppresses anything: the judge still returns every verdict, and who owns noise when a verdict is
-    reused stays an open decision — this only makes the bill legible enough to settle it on evidence.</p>
-    <p class="muted-p">This page keeps no clock. It holds one streaming connection to <code>/live</code> and refetches
-    what it is showing when the service says a verdict landed, so a burst of events is one refetch rather than a tick
-    each. The header's ↻ refetches on demand, the badge beside it reads <b>live</b> or <b>offline</b> (a dropped stream
-    reconnects on its own, backing off), and the stamp says when the data is from.</p>
-    <h2>API and addresses</h2>
-    <p class="muted-p">Inside the family's docker network: <code>http://hookjudge:8200</code>. From the host: the loopback mapping <code>http://127.0.0.1:8200</code>.</p>
-    <table>
-      <tr><th>Endpoint</th><th>Purpose</th></tr>
-      <tr><td><code>POST /events</code></td><td>A normalized event from the pipe (timestamped HMAC optional). Answers 202 at once — the verdict travels back through the return door rather than holding the connection</td></tr>
-      <tr><td><code>POST /feedback</code></td><td>A human pressed a button on a card, forwarded by the pipe with the channel stripped off it (same signature scheme and secret as <code>/events</code>). <code>useful</code>/<code>useless</code> are recorded against the judgement; <code>silence</code> is a request to the pipe, and this service answers it without recording a ruling — "make it stop" is not "it did not matter"</td></tr>
-      <tr><td><code>GET /status</code></td><td>What this page reads (X-Read-Token)</td></tr>
-      <tr><td><code>GET /healthz</code> · <code>GET /metrics</code></td><td>Liveness / Prometheus text</td></tr>
-    </table>
-    <h2>The knobs that matter</h2>
-    <table>
-      <tr><th>env</th><th>Meaning</th></tr>
-      <tr><td><code>HOOKJUDGE_AI_BASE_URL / _API_KEY / _MODEL</code></td><td>Any OpenAI-compatible endpoint. <b>Leave them empty and every event lands on the rule floor</b> — usable but blunt, and reuse can never happen</td></tr>
-      <tr><td><code>HOOKJUDGE_REUSE_WINDOW_SECONDS</code></td><td>The restatement window (3600 by default)</td></tr>
-      <tr><td><code>HOOKJUDGE_RETURN_URL / _RETURN_SECRET</code></td><td>The one way out — the pipe's judge-notify door. Retried with backoff; out of attempts it dead-letters and self-alarms</td></tr>
-      <tr><td><code>HOOKJUDGE_RETENTION_DAYS</code> · <code>HOOKJUDGE_ALARM_URL</code></td><td>Ledger retention (30 days by default) / where a dead-letter self-alarm goes</td></tr>
-    </table>
-  </div>
-  <div data-panel="board">
-  <div class="cards">
-    <div class="card"><div class="label">verdicts 24h</div><div class="value" id="cJudged">–</div></div>
-    <div class="card"><div class="label">paid share</div><div class="value" id="cPaid">–</div></div>
-    <div class="card"><div class="label">spend 24h</div><div class="value" id="cCost">–</div></div>
-    <div class="card"><div class="label">failed returns</div><div class="value" id="cDead">–</div></div>
-    <div class="card"><div class="label">platform agreement</div><div class="value" id="cAgree">–</div></div>
-    <div class="card" title="cards that restated a condition this window had already reported"><div class="label">repeat interruptions</div><div class="value" id="cRepeat">–</div></div>
-    <div class="card" title="of the interruptions a human actually ruled on"><div class="label">mattered</div><div class="value" id="cMattered">–</div></div>
-  </div>
-  <div class="routes" id="routes"></div>
-  <div class="routes-legend" id="routesLegend">…</div>
-  <h2>Noisiest conditions</h2>
-  <div id="atRows"><div class="empty">…</div></div>
-  <h2>Recent verdicts</h2>
-  <div id="rows"><div class="empty">…</div></div>
-  </div>
-  <div data-panel="review" style="display:none">
-    <div id="reviewSec" class="review">
-      <h3>where the platform and the judge disagreed — one click is one eval label <button id="rvExport" style="float:right">export labels</button></h3>
-      <div id="rvRows"><div class="empty">…</div></div>
+    <button id="rNow" title="refresh now" data-tt="live.refresh">&#8635;</button>
+    <span id="rLive" class="live" title="live connection" data-tt="live.title" data-t="live.on">live</span>
+      </span>
     </div>
   </div>
+</header>
+
+<div class="wrap">
+  <div class="tokenbar" id="tokenbar">
+    <span data-icon="lock"></span>
+    <div class="tb-text"><b data-t="token.title"></b><span data-t="token.body"></span></div>
+    <input id="tokenInput" type="password" data-tp="token.placeholder" autocomplete="off">
+    <button id="tokenSave" type="button" data-t="token.save"></button>
+  </div>
+
+  <nav class="tabs" id="tabs" aria-label="sections">
+    <button class="tab" data-view="board" type="button"><span data-icon="chart"></span><span data-t="tab.board"></span><span class="count"></span></button>
+    <button class="tab" data-view="verdicts" type="button"><span data-icon="scale"></span><span data-t="tab.verdicts"></span><span class="count"></span></button>
+    <button class="tab" data-view="review" type="button"><span data-icon="flag"></span><span data-t="tab.review"></span><span class="count"></span></button>
+    <button class="tab" data-view="help" type="button"><span data-icon="help"></span><span data-t="tab.help"></span><span class="count"></span></button>
+  </nav>
+
+  <section class="view" id="view-board" hidden>
+    <div class="hero"><div class="panel" id="heroMain"></div><div class="panel" id="heroSplit"></div></div>
+    <div class="tiles six" id="tiles"></div>
+    <div class="banners" id="banners"></div>
+    <div class="card" id="noisy"></div>
+    <div class="card" id="latest"></div>
+  </section>
+
+  <section class="view" id="view-verdicts" hidden>
+    <div class="view-head"><h2 data-t="verdicts.title"></h2><p data-t="verdicts.hint"></p></div>
+    <div class="filters" id="vFilters"></div>
+    <div class="list" id="vList"></div>
+    <p class="note" id="vNote"></p>
+  </section>
+
+  <section class="view" id="view-review" hidden>
+    <div class="view-head"><h2 data-t="review.title"></h2><p data-t="review.hint"></p></div>
+    <div class="filters"><span class="spacer"></span><button class="btn sm" id="rvExport" type="button"><span data-icon="download"></span><span data-t="review.export"></span></button></div>
+    <div class="list" id="rvList"></div>
+    <div class="card" id="rvMatrix" style="margin-top:16px"></div>
+  </section>
+
+  <section class="view" id="view-help" hidden>
+    <div class="hp" data-only="zh">
+      <h2>这是什么</h2>
+      <p>hookjudge 是管道背后的<b>判官</b>：进来一条标准化的事件，出去一个判定（重要程度、类型、一句话摘要），送回管道，并记进账本。它不画卡片、不认识任何渠道，那是管道的事；它也不做深入调查，那是调查员的事。判官只回答一个问题：这条告警值不值得打扰一个人。</p>
+      <p>它还会说明这个判定配得上哪些<b>按钮</b>：一个按它刚判的严重程度定时长的「静默」，以及「值得叫醒 / 不值得」这一对。恢复通知不带按钮，因为已经没什么可静默的了。按钮背后的签名令牌由管道铸造，按下后也由管道接住，所以这个服务不持有任何密钥。</p>
+
+      <h2>四条路径就是成本策略，顺序本身就是策略</h2>
+      <table>
+        <tr><th>路径</th><th>什么时候走</th><th>花钱吗</th></tr>
+        <tr><td><b>recovery 恢复</b></td><td>恢复通知直接继承它那次触发得到的判定，关键是和它所属的告警保持一致，而不只是省一次调用</td><td>免费</td></tr>
+        <tr><td><b>reuse 复用</b></td><td>同一个条件在窗口内（默认 1 小时）重复出现，直接沿用上一次 AI 的判定：告警风暴只是一件事重复了很多遍</td><td>免费</td></tr>
+        <tr><td><b>ai</b></td><td>真正新的条件，问模型</td><td>付费</td></tr>
+        <tr><td><b>rule 规则</b></td><td>模型没配、太慢或不可用时的关键词兜底；<code>degraded_reason</code> 写明为什么降级，从不假装是分析。已知的级别会保守地沿用</td><td>免费</td></tr>
+      </table>
+      <p class="muted">省钱不是靠更便宜的模型，而是靠大多数事件根本走不到 ai 这一步。</p>
+
+      <h2>这个页面怎么读</h2>
+      <p><b>概览</b>最上面一句话告诉你有没有事要你处理：判定没能送回管道是最要紧的，其次是等你复核的分歧。旁边那条横条就是成本策略：每条判定走了哪条路径、花了多少。</p>
+      <p>下面六个数字：过去 24 小时的<b>判定数</b>（也就是打扰了人多少次）、<b>花费</b>和付费占比、<b>送回失败</b>（大于 0 说明管道收不到判定；设置了 <code>HOOKJUDGE_ALARM_URL</code> 时，这个消息会绕开管道直接报警）、<b>与平台一致</b>（影子部署里，管道把上游平台自己的判断作为 <code>level</code> 一起送来，账本就能算出判官和平台多常一致；恢复通知不算，因为它们的重要程度按设计是继承的）、<b>重复打扰</b>和<b>有人说有用</b>。</p>
+      <p><b>最吵的条件</b>是要动手的地方：每个打扰了不止一次的条件，打扰了几次、几次付了费、有人按过几次「值得」。打扰很多、从没人说有用的那一行，就是该去关掉点什么的地方。这里不会压制任何东西：判官仍然返回每一个判定，这只是把账算清楚。</p>
+      <p><b>判定</b>页按天列出每一条判定：左边是重要程度，右边是走的路径和时间，点一行从右侧看完整内容。<b>复核</b>页列出平台和判官说法不一的判定，每点一次就是一条评估标签，可以导出。</p>
+
+      <h2>打扰和花费是两本不同的账</h2>
+      <p>每个判定都会回到管道变成一张卡片，所以<b>判定数一直就是打扰人的次数</b>，只是以前被当成吞吐量来读。一小时里同一个条件被判了十二次，就打扰了人十二次；其中十一次走的是免费的复用，所以花费数字对此只字不提。<b>重复打扰</b>就是这隐藏的部分。<b>有人说有用</b>是另一半：当有人按下卡片上的按钮，「值得 / 不值得」会回到 <code>POST /feedback</code>，记在引起那次打扰的判定上。这和复核问的不是一个问题：一个判得完全正确的 <code>high</code>，也可能不值得叫醒谁。</p>
+
+      <h2>接口和地址</h2>
+      <p class="muted">在 docker 网络里用 <code>http://hookjudge:8200</code>；在本机用 <code>http://127.0.0.1:8200</code>。</p>
+      <table>
+        <tr><th>接口</th><th>用途</th></tr>
+        <tr><td><code>POST /events</code></td><td>管道送来的标准化事件（可选时间戳 HMAC 签名）。立刻回 202，判定从回流门送回去，不占着连接</td></tr>
+        <tr><td><code>POST /feedback</code></td><td>有人按了卡片上的按钮，由管道去掉渠道信息后转来（和 <code>/events</code> 同样的签名和密钥）。「值得 / 不值得」记在判定上；「静默」是对管道的请求，这里不记裁定，因为「让它别响」不等于「它不重要」</td></tr>
+        <tr><td><code>GET /status</code> · <code>GET /disagreements</code></td><td>这个页面读的数据（读取口令）</td></tr>
+        <tr><td><code>POST /judgements/{id}/label</code> · <code>GET /labels/export</code></td><td>记一条复核标签；导出全部标签</td></tr>
+        <tr><td><code>GET /live</code></td><td>页面的更新通知：每落一条判定推一次 <code>changed</code>，所以页面不用定时刷新</td></tr>
+        <tr><td><code>GET /healthz</code> · <code>GET /metrics</code></td><td>存活检查；Prometheus 指标</td></tr>
+      </table>
+
+      <h2>要紧的几个设置</h2>
+      <table>
+        <tr><th>环境变量</th><th>含义</th></tr>
+        <tr><td><code>HOOKJUDGE_AI_BASE_URL / _API_KEY / _MODEL</code></td><td>任何兼容 OpenAI 的接口。<b>留空的话每个事件都落在规则兜底上</b>：能用但粗糙，而且永远不会发生复用</td></tr>
+        <tr><td><code>HOOKJUDGE_REUSE_WINDOW_SECONDS</code></td><td>复用窗口，默认 3600</td></tr>
+        <tr><td><code>HOOKJUDGE_RETURN_URL / _RETURN_SECRET</code></td><td>唯一的出口：管道的 judge-notify 门。失败会退避重试，重试用完进死信并自报警</td></tr>
+        <tr><td><code>HOOKJUDGE_RETENTION_DAYS</code> · <code>HOOKJUDGE_ALARM_URL</code></td><td>账本保留天数，默认 30；死信自报警发往哪里</td></tr>
+      </table>
+      <p class="muted">页面不设时钟：它和 <code>/live</code> 保持一条流式连接，服务说有判定落地时才重新读取，所以一阵事件只会触发一次刷新。刷新按钮随时手动刷新，旁边的标记显示连接是否在线，断了会自己退避重连。</p>
+    </div>
+
+    <div class="hp" data-only="en">
+      <h2>What this is</h2>
+      <p>hookjudge is the <b>judge</b> behind the pipe: one normalized event in, one verdict out (importance, type, a one-sentence summary), returned to the pipe and recorded in the ledger. It renders no cards and knows no channels — that is the pipe's job; it runs no deep investigation — that is the investigator's. The judge answers exactly one question: is this alert worth interrupting a human for.</p>
+      <p>It also declares which <b>buttons</b> that verdict deserves — <code>silence</code> for a window scaled to how bad it just said the condition is, and the <code>useful</code>/<code>useless</code> pair — because what a button means is judgement. A recovery declares none: there is nothing left to silence. Minting the signed token behind a button and catching the press stay the pipe's, so this service still holds no secret.</p>
+
+      <h2>Four routes are the cost policy — the order is the policy</h2>
+      <table>
+        <tr><th>Route</th><th>When it is taken</th><th>Costs?</th></tr>
+        <tr><td><b>recovery</b></td><td>A recovery inherits the verdict its firing was given — the point is agreeing with the alert it belongs to, not merely saving a call</td><td>free</td></tr>
+        <tr><td><b>reuse</b></td><td>The same condition restated inside the window (1h by default) re-serves the previous AI verdict — an alert storm is one situation repeated</td><td>free</td></tr>
+        <tr><td><b>ai</b></td><td>A genuinely new condition: ask the model</td><td>paid</td></tr>
+        <tr><td><b>rule</b></td><td>Keyword floor when the model is unconfigured, slow or unusable; <code>degraded_reason</code> says why it degraded and never pretends to be analysis. Known levels are carried over conservatively</td><td>free</td></tr>
+      </table>
+      <p class="muted">The saving does not come from a cheaper model. It comes from most events never reaching ai at all.</p>
+
+      <h2>Reading this board</h2>
+      <p>The sentence at the top of the <b>board</b> says whether anything needs you: verdicts that never reached the pipe first, then disagreements waiting for review. Beside it, the bar is the cost policy: which route every verdict took, and what it cost.</p>
+      <p>Six numbers under it: <b>verdicts</b> in 24h (the number of times somebody was interrupted), <b>spend</b> and the paid share, <b>failed returns</b> (above 0 means the pipe is not receiving verdicts — with <code>HOOKJUDGE_ALARM_URL</code> set the news travels around the pipe as a direct self-alarm), <b>platform agreement</b> (on shadow deployments the pipe delivers each event with the upstream platform's own verdict as <code>level</code>, so the ledger can say how often the two agree; recoveries are excluded, their importance is inherited by design), <b>repeat interruptions</b> and <b>mattered</b>.</p>
+      <p><b>Noisiest conditions</b> is the view to act on — every condition that interrupted more than once, with how many of those interruptions were paid for and how many anyone ruled worth it. A row with several interruptions and nothing ruled useful is where to go turn something off. Nothing here suppresses anything: the judge still returns every verdict.</p>
+      <p><b>Verdicts</b> lists every verdict by day — importance on the left, route and time on the right; click a row for the whole of it. <b>Review</b> lists where the platform and the judge disagreed: one click is one eval label, and the labels export.</p>
+
+      <h2>Attention, which is not the same bill as spend</h2>
+      <p>Every verdict goes back to the pipe and becomes a card, so <b>verdicts has always been the number of times somebody was interrupted</b> — it was only ever read as throughput. A condition judged twelve times inside an hour interrupted a human twelve times, and because eleven of those took the free <code>reuse</code> route the spend figure says nothing about it. <b>Repeat interruptions</b> is that hidden part. <b>Mattered</b> is the other half: when an operator presses a button on a card, <code>useful</code> and <code>useless</code> come back to <code>POST /feedback</code> and are recorded against the judgement that caused the interruption. It is a different question from review: a correctly-rated <code>high</code> can still not be worth waking anyone.</p>
+
+      <h2>API and addresses</h2>
+      <p class="muted">Inside the family's docker network: <code>http://hookjudge:8200</code>. From the host: <code>http://127.0.0.1:8200</code>.</p>
+      <table>
+        <tr><th>Endpoint</th><th>Purpose</th></tr>
+        <tr><td><code>POST /events</code></td><td>A normalized event from the pipe (timestamped HMAC optional). Answers 202 at once — the verdict travels back through the return door rather than holding the connection</td></tr>
+        <tr><td><code>POST /feedback</code></td><td>A human pressed a button on a card, forwarded by the pipe with the channel stripped off it (same signature scheme and secret as <code>/events</code>). <code>useful</code>/<code>useless</code> are recorded against the judgement; <code>silence</code> is a request to the pipe and records no ruling — "make it stop" is not "it did not matter"</td></tr>
+        <tr><td><code>GET /status</code> · <code>GET /disagreements</code></td><td>What this page reads (read token)</td></tr>
+        <tr><td><code>POST /judgements/{id}/label</code> · <code>GET /labels/export</code></td><td>Record one review label; export them all</td></tr>
+        <tr><td><code>GET /live</code></td><td>This page's wake-up line: one <code>changed</code> per verdict landed, so the page keeps no clock</td></tr>
+        <tr><td><code>GET /healthz</code> · <code>GET /metrics</code></td><td>Liveness; Prometheus text</td></tr>
+      </table>
+
+      <h2>The knobs that matter</h2>
+      <table>
+        <tr><th>env</th><th>Meaning</th></tr>
+        <tr><td><code>HOOKJUDGE_AI_BASE_URL / _API_KEY / _MODEL</code></td><td>Any OpenAI-compatible endpoint. <b>Leave them empty and every event lands on the rule floor</b> — usable but blunt, and reuse can never happen</td></tr>
+        <tr><td><code>HOOKJUDGE_REUSE_WINDOW_SECONDS</code></td><td>The restatement window (3600 by default)</td></tr>
+        <tr><td><code>HOOKJUDGE_RETURN_URL / _RETURN_SECRET</code></td><td>The one way out — the pipe's judge-notify door. Retried with backoff; out of attempts it dead-letters and self-alarms</td></tr>
+        <tr><td><code>HOOKJUDGE_RETENTION_DAYS</code> · <code>HOOKJUDGE_ALARM_URL</code></td><td>Ledger retention (30 days by default) / where a dead-letter self-alarm goes</td></tr>
+      </table>
+      <p class="muted">This page keeps no clock. It holds one streaming connection to <code>/live</code> and refetches when the service says a verdict landed, so a burst of events is one refetch. The refresh button refetches on demand; the badge beside it says whether the connection is up, and a dropped stream reconnects on its own, backing off.</p>
+    </div>
+  </section>
 </div>
+
+<div class="scrim" id="scrim"></div>
+
+<aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drTitle">
+  <div class="dr-head">
+    <div class="dr-top">
+      <span id="drStatus"></span>
+      <div class="dr-title" id="drTitle"></div>
+      <button class="btn ghost sm" id="drClose" type="button" data-tt="drawer.close"><span data-icon="x"></span></button>
+    </div>
+    <div class="dr-meta" id="drMeta"></div>
+    <div class="dr-actions" id="drActions"></div>
+  </div>
+  <div class="dr-body" id="drBody"></div>
+</aside>
+
+<aside class="drawer narrow" id="settings" aria-hidden="true">
+  <div class="dr-head">
+    <div class="dr-top"><div class="dr-title" data-t="st.title"></div><button class="btn ghost sm" id="stClose" type="button" data-tt="drawer.close"><span data-icon="x"></span></button></div>
+    <div style="height: 16px"></div>
+  </div>
+  <div class="settings-body">
+    <div class="field"><label data-t="st.lang"></label><div class="seg" id="stLang"><button type="button" data-setlang="zh">中文</button><button type="button" data-setlang="en">English</button></div></div>
+    <div class="field"><label data-t="st.theme"></label><div class="seg" id="stTheme"><button type="button" data-settheme="" data-t="st.theme.system"></button><button type="button" data-settheme="light" data-t="st.theme.light"></button><button type="button" data-settheme="dark" data-t="st.theme.dark"></button></div><p class="hint" data-t="st.theme.hint"></p></div>
+    <div class="field"><label for="stRead" data-t="st.read"></label><div class="inline"><input class="inp mono" id="stRead" type="password" autocomplete="off"><button class="btn" id="stReadSave" type="button" data-t="st.save"></button></div><p class="hint" data-t="st.read.hint"></p></div>
+    <div class="field"><div><button class="btn danger sm" id="stClear" type="button" data-t="st.clear"></button></div></div>
+    <div class="field"><label data-t="st.shortcuts"></label><div id="stKeys"></div></div>
+  </div>
+</aside>
+
+<!-- ── hookstack dialogs · keep this block identical in all three pages ── -->
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal-card"><h3 id="modalTitle"></h3><div class="body" id="modalBody"></div><div class="acts" id="modalActs"></div></div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<!-- ── end dialogs ──────────────────────────────────────────────────────── -->
+
+<script type="application/json" id="strings">
+{
+ "en": {
+  "st.clear_title": "Forget the token?",
+  "st.clear_body": "This browser keeps it only here. Afterwards it asks for it again before it can show anything.",
+  "live.on": "live",
+  "live.off": "offline",
+  "live.refresh": "refresh now",
+  "live.title": "live connection: the board redraws when the service writes",
+  "day.today": "Today",
+  "day.yesterday": "Yesterday",
+  "dur.s": "{n}s",
+  "dur.m": "{n}m",
+  "dur.hm": "{h}h {m}m",
+  "dur.h": "{n}h",
+  "dur.dh": "{d}d {h}h",
+  "dur.d": "{n}d",
+  "ago.now": "just now",
+  "ago": "{d} ago",
+  "common.cancel": "Cancel",
+  "common.confirm": "Confirm",
+  "app.sub": "one event in, one verdict out, one line in the ledger",
+  "search.placeholder": "Search verdicts by title or summary, or paste a verdict id…",
+  "settings.open": "Settings",
+  "lang.other": "中文",
+  "theme.light": "Light · switch to dark",
+  "theme.dark": "Dark · switch to light",
+  "token.title": "This judge needs a read token",
+  "token.body": "It is the HOOKJUDGE_READ_TOKEN the service was started with. Paste it once and this browser remembers it.",
+  "token.placeholder": "read token",
+  "token.save": "Connect",
+  "tab.board": "Board",
+  "tab.verdicts": "Verdicts",
+  "tab.review": "Review",
+  "tab.help": "Help",
+  "common.failed": "Failed: {why}",
+  "common.unreachable": "the judge is not answering",
+  "common.token_required": "read token required",
+  "common.refreshed": "updated {t}",
+  "common.untitled": "(untitled)",
+  "imp.critical": "Critical",
+  "imp.high": "High",
+  "imp.medium": "Medium",
+  "imp.low": "Low",
+  "imp.recovered": "Recovered",
+  "route.ai": "ai · paid",
+  "route.rule": "rule",
+  "route.rule-reuse": "rule reuse",
+  "route.reuse": "reuse",
+  "route.recovery": "recovery",
+  "dur.ms": "{n}ms",
+  "dur.s1": "{n}s",
+  "ret.queued": "return queued",
+  "ret.dead": "return failed",
+  "ret.sent": "returned to the pipe",
+  "ret.skipped": "not sent: this deployment keeps its verdicts in the ledger only",
+  "ruled.useful": "ruled worth it",
+  "ruled.useless": "ruled not worth it",
+  "row.burst": "burst",
+  "hero.dead.one": "1 verdict never reached the pipe",
+  "hero.dead.other": "{n} verdicts never reached the pipe",
+  "hero.review.one": "1 disagreement is waiting for your review",
+  "hero.review.other": "{n} disagreements are waiting for your review",
+  "hero.ok": "All clear",
+  "hero.show_dead": "Show them",
+  "hero.show_review": "Review them",
+  "hero.sub": "Last 24 hours: {n} verdicts · {paid} paid · {cost} spent",
+  "split.title": "Where the verdicts went",
+  "split.window": "last 24 hours, by route",
+  "split.none": "No verdicts in this window.",
+  "tile.judged": "Verdicts · 24h",
+  "tile.judged.hint": "each one interrupted someone · {n} paid",
+  "tile.spend": "Spend · 24h",
+  "tile.spend.hint": "{pct}% of verdicts needed the model",
+  "tile.dead": "Failed returns",
+  "tile.dead.hint": "verdicts the pipe never received",
+  "tile.dead.queued": "{n} still retrying",
+  "tile.agree": "Platform agreement",
+  "tile.agree.hint": "of {n} compared with the platform",
+  "tile.agree.none": "nothing to compare yet",
+  "tile.repeats": "Repeat interruptions",
+  "tile.repeats.hint": "of {n} interruptions",
+  "tile.none": "nothing in this window",
+  "tile.mattered": "Ruled worth it",
+  "tile.mattered.hint": "of {n} a person ruled on",
+  "tile.mattered.none": "nobody has ruled yet",
+  "banner.dead.one": "1 verdict gave up on its way back to the pipe. With HOOKJUDGE_ALARM_URL set, the self-alarm went around the pipe.",
+  "banner.dead.other": "{n} verdicts gave up on their way back to the pipe. With HOOKJUDGE_ALARM_URL set, the self-alarm went around the pipe.",
+  "banner.queued.one": "1 verdict is still retrying its way back to the pipe.",
+  "banner.queued.other": "{n} verdicts are still retrying their way back to the pipe.",
+  "banner.queue.one": "1 verdict disagrees with the platform. One click labels it.",
+  "banner.queue.other": "{n} verdicts disagree with the platform. One click labels each.",
+  "banner.go": "Show",
+  "banner.open": "Review",
+  "banner.gate_green": "The golden gate passed on its last run: {n} firing cases, {when}.",
+  "banner.gate_thin": "The golden gate passed on its last run, {when}, but on only {n} firing cases: under its floor, so read it as thin.",
+  "banner.gate_red": "The golden gate failed on its last run, {when}: {missed} firing cases missed, {quiet} answered “wake nobody” where a person had to act.",
+  "noisy.title": "Noisiest conditions",
+  "noisy.hint": "Every condition that interrupted a person more than once in this window. Many interruptions and nothing ruled worth it is where to turn something off.",
+  "noisy.none": "No condition interrupted twice in this window.",
+  "noisy.interruptions.one": "1 interruption",
+  "noisy.interruptions.other": "{n} interruptions",
+  "noisy.paid.one": "1 paid",
+  "noisy.paid.other": "{n} paid",
+  "noisy.healed": "{n} of {of} healed on their own",
+  "noisy.median": "median {d}",
+  "noisy.ai_yes": "AI: worth it",
+  "noisy.ai_no": "AI: not worth it",
+  "noisy.flapping": "Likely flapping",
+  "noisy.cold": "Not worth it",
+  "noisy.repeat": "Repeats",
+  "noisy.ruled": "{yes} worth it · {no} not",
+  "latest.title": "Latest verdicts",
+  "latest.hint": "The newest six. Open one for the whole of it.",
+  "latest.all": "All verdicts",
+  "verdicts.title": "Every verdict",
+  "verdicts.hint": "Importance on the left, the route it took on the right. Search reaches the whole ledger.",
+  "verdicts.empty": "No verdicts yet.",
+  "verdicts.nomatch": "No verdict matches.",
+  "verdicts.note": "The latest {n} that match. Older ones answer a search.",
+  "filter.all": "All routes",
+  "filter.returns.any": "Any return",
+  "filter.search": "Search: {q}",
+  "review.title": "Where the platform and the judge disagreed",
+  "review.hint": "On a shadow deployment the pipe delivers the platform's own verdict with each event. Every row here is one of them against the judge's; one click is one eval label.",
+  "review.export": "Export labels",
+  "review.pill": "Disagrees",
+  "review.says": "the platform said {platform} · the judge said {judge}",
+  "review.platform": "Platform is right: {v}",
+  "review.judge": "Judge is right: {v}",
+  "review.neither": "Neither…",
+  "review.none": "No disagreements: the platform's level and the judge's importance agree on every row.",
+  "review.labeled": "Labelled {v}",
+  "review.exported": "Labels exported",
+  "matrix.title": "Platform level against the judge's importance",
+  "matrix.hint": "The table behind the agreement figure, over the last 24 hours. Recoveries are left out: their importance is inherited by design.",
+  "matrix.none": "Nothing compared yet.",
+  "matrix.corner": "platform ↓ · judge →",
+  "drawer.close": "Close",
+  "drawer.notfound": "The ledger holds no verdict #{id}",
+  "drawer.copy_link": "Copy link",
+  "drawer.copied": "Link copied",
+  "drawer.verdict": "The verdict",
+  "drawer.trail": "What happened to it",
+  "drawer.fields": "The event's fields",
+  "drawer.body": "The event's text",
+  "kv.importance": "importance",
+  "kv.platform": "platform said",
+  "kv.type": "type",
+  "kv.scope": "impact",
+  "kv.wake": "wake someone",
+  "kv.route": "route",
+  "kv.model": "model",
+  "kv.tokens": "tokens",
+  "kv.tokens_v": "{i} in · {o} out",
+  "kv.cost": "cost",
+  "kv.free": "free",
+  "kv.latency": "took",
+  "kv.returned": "return",
+  "kv.attempts": "{n} attempts",
+  "kv.ruling": "a person ruled",
+  "kv.label": "review label",
+  "kv.burst": "burst",
+  "kv.identity": "identity",
+  "kv.rule": "rule key",
+  "kv.correlation": "correlation",
+  "kv.origin": "origin",
+  "raw.copy": "Copy",
+  "raw.copied": "Copied",
+  "st.title": "Settings",
+  "st.lang": "Language",
+  "st.theme": "Appearance",
+  "st.theme.system": "System",
+  "st.theme.light": "Light",
+  "st.theme.dark": "Dark",
+  "st.theme.hint": "Follows the system's setting unless you pick one. The sun and moon beside refresh switches too.",
+  "st.read": "Read token",
+  "st.save": "Save",
+  "st.read.hint": "Lets this browser read the ledger and label disagreements: the service's HOOKJUDGE_READ_TOKEN.",
+  "st.clear": "Forget the token",
+  "st.cleared": "Token forgotten",
+  "st.saved": "Saved",
+  "st.shortcuts": "Keyboard",
+  "kb.search": "Search",
+  "kb.next": "Next verdict",
+  "kb.prev": "Previous verdict",
+  "kb.open": "Open the selected one",
+  "kb.close": "Close",
+  "kb.help": "Show shortcuts"
+ },
+ "zh": {
+  "st.clear_title": "清除口令？",
+  "st.clear_body": "口令只存在这个浏览器里。清除以后，要重新输入才能查看。",
+  "live.on": "实时",
+  "live.off": "离线",
+  "live.refresh": "立即刷新",
+  "live.title": "实时连接：服务一有写入，看板就重画",
+  "day.today": "今天",
+  "day.yesterday": "昨天",
+  "dur.s": "{n} 秒",
+  "dur.m": "{n} 分钟",
+  "dur.hm": "{h} 小时 {m} 分",
+  "dur.h": "{n} 小时",
+  "dur.dh": "{d} 天 {h} 小时",
+  "dur.d": "{n} 天",
+  "ago.now": "刚刚",
+  "ago": "{d}前",
+  "common.cancel": "取消",
+  "common.confirm": "确定",
+  "app.sub": "一条事件进来，一个判定出去，账本记一行",
+  "search.placeholder": "按标题或摘要搜索判定，或粘贴判定编号…",
+  "settings.open": "设置",
+  "lang.other": "EN",
+  "theme.light": "浅色 · 点一下切到深色",
+  "theme.dark": "深色 · 点一下切到浅色",
+  "token.title": "需要读取口令才能查看",
+  "token.body": "它是判官启动时设置的 HOOKJUDGE_READ_TOKEN。粘贴一次，这个浏览器会记住。",
+  "token.placeholder": "读取口令",
+  "token.save": "连接",
+  "tab.board": "概览",
+  "tab.verdicts": "判定",
+  "tab.review": "复核",
+  "tab.help": "帮助",
+  "common.failed": "失败：{why}",
+  "common.unreachable": "判官没有响应",
+  "common.token_required": "需要读取口令",
+  "common.refreshed": "{t} 更新",
+  "common.untitled": "（无标题）",
+  "imp.critical": "紧急",
+  "imp.high": "高",
+  "imp.medium": "中",
+  "imp.low": "低",
+  "imp.recovered": "已恢复",
+  "route.ai": "ai · 付费",
+  "route.rule": "规则",
+  "route.rule-reuse": "规则复用",
+  "route.reuse": "复用",
+  "route.recovery": "恢复",
+  "dur.ms": "{n} 毫秒",
+  "dur.s1": "{n} 秒",
+  "ret.queued": "回送排队中",
+  "ret.dead": "回送失败",
+  "ret.sent": "已送回管道",
+  "ret.skipped": "未回送：这个部署只把裁决留在账本里",
+  "ruled.useful": "有人说值得",
+  "ruled.useless": "有人说不值得",
+  "row.burst": "同一波",
+  "hero.dead.one": "有 1 条判定没送回管道",
+  "hero.dead.other": "有 {n} 条判定没送回管道",
+  "hero.review.one": "有 1 条分歧等你复核",
+  "hero.review.other": "有 {n} 条分歧等你复核",
+  "hero.ok": "一切正常",
+  "hero.show_dead": "看看是哪些",
+  "hero.show_review": "去复核",
+  "hero.sub": "过去 24 小时：判了 {n} 条 · {paid} 条付费 · 花费 {cost}",
+  "split.title": "判定都走了哪条路",
+  "split.window": "过去 24 小时，按路径",
+  "split.none": "这段时间没有判定。",
+  "tile.judged": "24 小时判定",
+  "tile.judged.hint": "每一条都打扰了人 · {n} 条付费",
+  "tile.spend": "24 小时花费",
+  "tile.spend.hint": "{pct}% 的判定用到了模型",
+  "tile.dead": "送回失败",
+  "tile.dead.hint": "管道没收到的判定",
+  "tile.dead.queued": "另有 {n} 条还在重试",
+  "tile.agree": "与平台一致",
+  "tile.agree.hint": "和平台比较了 {n} 条",
+  "tile.agree.none": "还没有可比较的",
+  "tile.repeats": "重复打扰",
+  "tile.repeats.hint": "共 {n} 次打扰",
+  "tile.none": "这段时间没有",
+  "tile.mattered": "有人说值得",
+  "tile.mattered.hint": "共 {n} 条有人裁定",
+  "tile.mattered.none": "还没人裁定过",
+  "banner.dead.one": "有 1 条判定在送回管道的路上放弃了。设置了 HOOKJUDGE_ALARM_URL 的话，自报警已经绕开管道发出。",
+  "banner.dead.other": "有 {n} 条判定在送回管道的路上放弃了。设置了 HOOKJUDGE_ALARM_URL 的话，自报警已经绕开管道发出。",
+  "banner.queued.one": "有 1 条判定还在重试送回管道。",
+  "banner.queued.other": "有 {n} 条判定还在重试送回管道。",
+  "banner.queue.one": "有 1 条判定和平台说法不一，点一下就能标注。",
+  "banner.queue.other": "有 {n} 条判定和平台说法不一，每条点一下就能标注。",
+  "banner.go": "去看看",
+  "banner.open": "去复核",
+  "banner.gate_green": "上次金标准测试通过：{n} 条告警样本，{when}。",
+  "banner.gate_thin": "上次金标准测试通过（{when}），但只有 {n} 条告警样本，低于下限，结论偏弱。",
+  "banner.gate_red": "上次金标准测试没通过（{when}）：漏判了 {missed} 条告警，另有 {quiet} 条该叫人却答了“不用叫人”。",
+  "noisy.title": "最吵的条件",
+  "noisy.hint": "这段时间里打扰了人不止一次的条件。打扰很多、从没人说值得的那一行，就是该去关掉点什么的地方。",
+  "noisy.none": "这段时间没有条件打扰过两次。",
+  "noisy.interruptions.one": "打扰 1 次",
+  "noisy.interruptions.other": "打扰 {n} 次",
+  "noisy.paid.one": "1 次付费",
+  "noisy.paid.other": "{n} 次付费",
+  "noisy.healed": "{of} 次里 {n} 次自己恢复",
+  "noisy.median": "中位 {d}",
+  "noisy.ai_yes": "AI：值得",
+  "noisy.ai_no": "AI：不值得",
+  "noisy.flapping": "可能在抖动",
+  "noisy.cold": "不值得",
+  "noisy.repeat": "反复出现",
+  "noisy.ruled": "{yes} 次说值得 · {no} 次说不值得",
+  "latest.title": "最新的判定",
+  "latest.hint": "最新的六条，点开看完整内容。",
+  "latest.all": "查看全部判定",
+  "verdicts.title": "全部判定",
+  "verdicts.hint": "左边是重要程度，右边是它走的路径。搜索会查整个账本。",
+  "verdicts.empty": "还没有判定。",
+  "verdicts.nomatch": "没有符合条件的判定。",
+  "verdicts.note": "显示符合条件的最新 {n} 条，更早的可以搜索。",
+  "filter.all": "全部路径",
+  "filter.returns.any": "不限回送",
+  "filter.search": "搜索：{q}",
+  "review.title": "平台和判官说法不一的判定",
+  "review.hint": "影子部署里，管道会把平台自己的判断随事件一起送来。这里每一行都是平台和判官不一致的一条，点一下就是一条评估标签。",
+  "review.export": "导出标签",
+  "review.pill": "有分歧",
+  "review.says": "平台说 {platform} · 判官说 {judge}",
+  "review.platform": "平台对：{v}",
+  "review.judge": "判官对：{v}",
+  "review.neither": "都不对…",
+  "review.none": "没有分歧：每一条的平台级别和判官的重要程度都一致。",
+  "review.labeled": "已标注为 {v}",
+  "review.exported": "标签已导出",
+  "matrix.title": "平台级别对照判官的重要程度",
+  "matrix.hint": "一致率背后的对照表，按过去 24 小时。恢复通知不算，它们的重要程度按设计是继承来的。",
+  "matrix.none": "还没有可比较的。",
+  "matrix.corner": "平台 ↓ · 判官 →",
+  "drawer.close": "关闭",
+  "drawer.notfound": "账本里没有 #{id} 这条裁决",
+  "drawer.copy_link": "复制链接",
+  "drawer.copied": "链接已复制",
+  "drawer.verdict": "判定",
+  "drawer.trail": "它后来怎样了",
+  "drawer.fields": "事件字段",
+  "drawer.body": "事件正文",
+  "kv.importance": "重要程度",
+  "kv.platform": "平台说",
+  "kv.type": "类型",
+  "kv.scope": "影响范围",
+  "kv.wake": "要叫醒人",
+  "kv.route": "路径",
+  "kv.model": "模型",
+  "kv.tokens": "词元",
+  "kv.tokens_v": "输入 {i} · 输出 {o}",
+  "kv.cost": "花费",
+  "kv.free": "免费",
+  "kv.latency": "用时",
+  "kv.returned": "回送",
+  "kv.attempts": "{n} 次尝试",
+  "kv.ruling": "有人裁定",
+  "kv.label": "复核标签",
+  "kv.burst": "同一波",
+  "kv.identity": "身份",
+  "kv.rule": "规则键",
+  "kv.correlation": "关联号",
+  "kv.origin": "来源",
+  "raw.copy": "复制",
+  "raw.copied": "已复制",
+  "st.title": "设置",
+  "st.lang": "语言",
+  "st.theme": "外观",
+  "st.theme.system": "跟随系统",
+  "st.theme.light": "浅色",
+  "st.theme.dark": "深色",
+  "st.theme.hint": "默认跟随系统设置，选了就按你选的来。刷新旁边的太阳、月亮按钮也能切换。",
+  "st.read": "读取口令",
+  "st.save": "保存",
+  "st.read.hint": "让这个浏览器读取账本、标注分歧，对应判官的 HOOKJUDGE_READ_TOKEN。",
+  "st.clear": "清除口令",
+  "st.cleared": "口令已清除",
+  "st.saved": "已保存",
+  "st.shortcuts": "快捷键",
+  "kb.search": "搜索",
+  "kb.next": "下一条判定",
+  "kb.prev": "上一条判定",
+  "kb.open": "打开选中的判定",
+  "kb.close": "关闭",
+  "kb.help": "显示快捷键"
+ }
+}
+</script>
 <script>
 (function () {
   "use strict";
-  // ── tabs: the same strip as the pipe's board and the investigator's console ──
-  document.querySelectorAll(".tab").forEach(function (tab) {
-    tab.addEventListener("click", function () {
-      var which = tab.getAttribute("data-tab");
-      document.querySelectorAll(".tab").forEach(function (t) { t.classList.toggle("active", t === tab); });
-      document.querySelectorAll("[data-panel]").forEach(function (p) {
-        p.style.display = p.getAttribute("data-panel") === which ? "" : "none";
-      });
-    });
-  });
-  var want = (location.hash || "").slice(1);
-  if (want === "help" || want === "review") document.querySelector('.tab[data-tab="' + want + '"]').click();
 
-  var KEY = "hookjudge-read-token";
   // Where this board is mounted: "" on its own port, or a prefix when a reverse
-  // proxy serves it under one. Every request is relative to it.
+  // proxy serves it under one. Every request and link is relative to it
+  // (scripts/assert_mount_aware.py).
   var BASE = location.pathname.replace(/\/$/, "");
-  // "42 of 52" as a number with its denominator under it: the big figure is
-  // what changed, the small line is what it is out of.
-  function ofHtml(denominator) { return '<span class="of">of ' + esc(denominator) + "</span>"; }
+  var TOKEN_KEY = "hookjudge-read-token";
+  var VIEWS = ["board", "verdicts", "review", "help"];
+  // The cost policy in the order it is walked, paid first.
+  var ROUTES = ["ai", "rule", "rule-reuse", "reuse", "recovery"];
+  var IMPORTANCE = ["critical", "high", "medium", "low"];
+  var IMP_CLS = { critical: "bad", high: "bad", medium: "warn", low: "info" };
+
+  // ── hookstack kit · keep this block identical in all three pages ──────────
+  // What every board draws with: the DOM, its words in two languages, time and
+  // money, icons, the dialog and the toast. Pinned like the palette, because
+  // these drifted too: the console printed dates its own way and asked with
+  // window.confirm, the judge had a third way to print a duration.
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function unique(items) { var seen = {}, out = []; items.forEach(function (x) { if (x && !seen[x]) { seen[x] = 1; out.push(x); } }); return out; }
   function esc(v) {
-    return String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
-  function took(ms) {
-    // 60110ms is a number nobody reads as "a minute". Same scale-to-the-unit
-    // rule the rest of the family uses for durations.
-    var n = Number(ms) || 0;
-    if (n < 1000) return n + "ms";
-    if (n < 60000) return (n / 1000).toFixed(1) + "s";
-    var m = Math.floor(n / 60000);
-    return m + "m" + Math.round((n % 60000) / 1000) + "s";
+  function b(s) { return "<b>" + esc(s) + "</b>"; }
+
+  // Words. A page's strings are the JSON block above its script, one set per
+  // language; which set is the browser's language until the reader picks one.
+  var LANG_KEY = "hookstack-lang";
+  var STRINGS = JSON.parse(document.getElementById("strings").textContent);
+  var LANG = pickLang();
+  function pickLang() {
+    var saved = null;
+    // The pipe's board kept its choice under its own name before the three
+    // boards shared one; read that too, so nobody's choice is lost.
+    try { saved = localStorage.getItem(LANG_KEY) || localStorage.getItem("hookrelay-lang"); } catch (err) { saved = null; }
+    if (saved && STRINGS[saved]) return saved;
+    return /^zh/i.test(navigator.language || "") ? "zh" : "en";
   }
-  function when(ts) {
-    var d = new Date(ts * 1000), p = function (n) { return n < 10 ? "0" + n : "" + n; };
-    return p(d.getMonth()+1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  function keepLang(lang) {
+    LANG = lang;
+    try { localStorage.setItem(LANG_KEY, lang); } catch (err) { /* a browser that keeps nothing: this page only */ }
   }
+  function t(key, vars) {
+    var s = (STRINGS[LANG] || {})[key];
+    if (s == null) s = STRINGS.en[key];
+    if (s == null) s = key;
+    return vars ? s.replace(/\{(\w+)\}/g, function (_m, k) { return vars[k] == null ? "" : String(vars[k]); }) : s;
+  }
+  function tn(key, n, vars) { return t(key + (n === 1 ? ".one" : ".other"), Object.assign({ n: n }, vars || {})); }
+  function th(key, vars) {
+    var tpl = esc(t(key));
+    return vars ? tpl.replace(/\{(\w+)\}/g, function (_m, k) { return vars[k] == null ? "" : String(vars[k]); }) : tpl;
+  }
+  function thn(key, n, vars) { return th(key + (n === 1 ? ".one" : ".other"), Object.assign({ n: esc(n) }, vars || {})); }
+  function joinList(items) { return items.join(LANG === "zh" ? "、" : ", "); }
+  function locale() { return LANG === "zh" ? "zh-CN" : "en-US"; }
+  // The words written into the markup: data-t is text, data-tp a placeholder,
+  // data-tt a title and its accessible name.
+  function applyWords() {
+    document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+    document.body.classList.toggle("zh", LANG === "zh");
+    $$("[data-t]").forEach(function (el) { el.textContent = t(el.getAttribute("data-t")); });
+    $$("[data-tp]").forEach(function (el) { el.setAttribute("placeholder", t(el.getAttribute("data-tp"))); });
+    $$("[data-tt]").forEach(function (el) { el.setAttribute("title", t(el.getAttribute("data-tt"))); el.setAttribute("aria-label", t(el.getAttribute("data-tt"))); });
+  }
+
+  // Time and money. Clock times rather than "3 minutes ago" wherever a board
+  // may sit unrefreshed: a relative time goes stale in the one direction that
+  // misleads.
+  // Decoding one part of an address at a time, after it is split: a value with
+  // & or = in it survives, and a stray % leaves the text as typed instead of
+  // throwing before the page has loaded anything.
+  function dec(s) { try { return decodeURIComponent(s); } catch (err) { return s; } }
+  function p2(n) { return n < 10 ? "0" + n : String(n); }
+  // A row without a time prints nothing: new Date(NaN) makes Intl throw, and one
+  // throw inside a list render replaces the whole view with an error.
+  function okTs(ts) { var n = Number(ts); return ts != null && ts !== "" && isFinite(n) && n > 0; }
+  function hm(ts) { if (!okTs(ts)) return ""; var d = new Date(ts * 1000); return p2(d.getHours()) + ":" + p2(d.getMinutes()); }
+  function hms(ts) { if (!okTs(ts)) return ""; var d = new Date(ts * 1000); return hm(ts) + ":" + p2(d.getSeconds()); }
+  function sameDay(a, c) { return a.getFullYear() === c.getFullYear() && a.getMonth() === c.getMonth() && a.getDate() === c.getDate(); }
+  function yesterday() { var y = new Date(); y.setDate(y.getDate() - 1); return y; }
+  function dayLabel(ts) {
+    if (!okTs(ts)) return "";
+    var d = new Date(ts * 1000);
+    var long = new Intl.DateTimeFormat(locale(), { month: "long", day: "numeric", weekday: "short" }).format(d);
+    if (sameDay(d, new Date())) return t("day.today") + " · " + long;
+    if (sameDay(d, yesterday())) return t("day.yesterday") + " · " + long;
+    return long;
+  }
+  function stamp(ts) {
+    if (!okTs(ts)) return "";
+    var d = new Date(ts * 1000);
+    if (sameDay(d, new Date())) return hm(ts);
+    if (sameDay(d, yesterday())) return t("day.yesterday") + " " + hm(ts);
+    return new Intl.DateTimeFormat(locale(), { month: "short", day: "numeric" }).format(d) + " " + hm(ts);
+  }
+  function fullTime(ts) {
+    if (!okTs(ts)) return "";
+    return new Intl.DateTimeFormat(locale(), { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(ts * 1000));
+  }
+  function dur(sec) {
+    sec = Math.max(0, Math.round(Number(sec) || 0));
+    if (sec < 60) return t("dur.s", { n: sec });
+    var m = Math.floor(sec / 60);
+    if (m < 60) return t("dur.m", { n: m });
+    var h = Math.floor(m / 60), mm = m % 60;
+    if (h < 24) return mm ? t("dur.hm", { h: h, m: mm }) : t("dur.h", { n: h });
+    var d = Math.floor(h / 24), hh = h % 24;
+    return hh ? t("dur.dh", { d: d, h: hh }) : t("dur.d", { n: d });
+  }
+  function ago(ts) { if (!okTs(ts)) return ""; var s = Date.now() / 1000 - Number(ts); return s < 45 ? t("ago.now") : t("ago", { d: dur(s) }); }
+  function money(v) {
+    if (v == null || v === "") return "";
+    var n = Number(v);
+    if (!isFinite(n)) return "";
+    return "$" + n.toFixed(n >= 1 ? 2 : 4).replace(/\.?0+$/, "");
+  }
+
+  // Icons: a handful of plain strokes.
+  var ICONS = {
+    search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>',
+    bell: '<path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    list: '<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><circle cx="4.5" cy="6" r=".6"/><circle cx="4.5" cy="12" r=".6"/><circle cx="4.5" cy="18" r=".6"/>',
+    send: '<path d="M21 3L10 14"/><path d="M21 3l-6.5 18-4.5-7-7-4.5z"/>',
+    mute: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5"/><path d="M21 9.5l-5 5"/>',
+    route: '<circle cx="5.5" cy="18.5" r="2"/><circle cx="18.5" cy="5.5" r="2"/><path d="M7.5 18.5H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h7.5"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.6c0 1.7-2.5 2.2-2.5 3.8"/><path d="M12 17h.01"/>',
+    sliders: '<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 12h3"/><path d="M11 12h9"/><circle cx="9" cy="12" r="2"/><path d="M4 17h11"/><path d="M19 17h1"/><circle cx="17" cy="17" r="2"/>',
+    x: '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',
+    lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    check: '<path d="M20 6.5L9.5 17 4 11.5"/>',
+    alert: '<path d="M12 3.5l9 16H3z"/><path d="M12 10v4"/><path d="M12 17.2v.3"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>',
+    zap: '<path d="M13 2.5L5 13.5h6l-1 8 8-11h-6z"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    ext: '<path d="M14 4h6v6"/><path d="M20 4l-8.5 8.5"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+    retry: '<path d="M4.5 12a7.5 7.5 0 0 1 13-5.1L20 9.5"/><path d="M20 4.5v5h-5"/><path d="M19.5 12a7.5 7.5 0 0 1-13 5.1L4 14.5"/><path d="M4 19.5v-5h5"/>',
+    eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+    play: '<path d="M7 5l12 7-12 7z"/>',
+    inbox: '<path d="M3 13.5l3-8.5h12l3 8.5"/><path d="M3 13.5V19h18v-5.5h-5.5a3.5 3.5 0 0 1-7 0z"/>',
+    plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    book: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5"/>',
+    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14a6 6 0 0 1 3.5 6"/>',
+    memory: '<ellipse cx="12" cy="5.5" rx="7.5" ry="2.5"/><path d="M4.5 5.5v13c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5v-13"/><path d="M4.5 12c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5"/>',
+    file: '<path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h6"/>',
+    server: '<rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01"/><path d="M7.5 16.5h.01"/>',
+    shield: '<path d="M12 3l7.5 3v6c0 4.5-3.2 7.9-7.5 9-4.3-1.1-7.5-4.5-7.5-9V6z"/>',
+    columns: '<rect x="3.5" y="4" width="4.5" height="16" rx="1"/><rect x="9.75" y="4" width="4.5" height="11" rx="1"/><rect x="16" y="4" width="4.5" height="7" rx="1"/>',
+    approve: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/>',
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    scale: '<path d="M12 4v16"/><path d="M6 20h12"/><path d="M5 8h14"/><path d="M5 8l-2.5 6a2.5 2.5 0 0 0 5 0z"/><path d="M19 8l-2.5 6a2.5 2.5 0 0 0 5 0z"/>',
+    flag: '<path d="M5 21V4h11l-1.5 4L16 12H5"/>',
+    chart: '<path d="M4 20V11"/><path d="M10 20V5"/><path d="M16 20v-7"/><path d="M2.5 20.5h19"/>',
+    trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6.5 7l1 13h9l1-13"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    download: '<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>',
+    back: '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
+    forward: '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
+  };
+  function icon(name, cls) { return '<svg class="i' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || "") + "</svg>"; }
+  function injectIcons() { $$("[data-icon]").forEach(function (el) { if (!el.firstChild) el.innerHTML = icon(el.getAttribute("data-icon")); }); }
+
+  // The dialog, the toast and the clipboard. A toast leaves when its CSS
+  // animation ends, or on a click: the boards keep no timers.
+  var modalState = null;
+  function openModal(opts) {
+    $("#modalTitle").textContent = opts.title || "";
+    $("#modalBody").innerHTML = opts.html || "";
+    $("#modalActs").innerHTML = (opts.actions || []).map(function (a) { return '<button class="btn' + (a.kind ? " " + a.kind : "") + '" type="button" data-v="' + esc(a.value) + '">' + esc(a.label) + "</button>"; }).join("");
+    $("#modal").classList.add("on");
+    var focus = $("#modalBody input") || $("#modalActs .primary") || $("#modalActs .danger");
+    if (focus) focus.focus();
+    return new Promise(function (resolve) { modalState = { resolve: resolve, onClick: opts.onClick }; });
+  }
+  function closeModal(value) {
+    $("#modal").classList.remove("on");
+    var state = modalState;
+    modalState = null;
+    if (state) state.resolve(value);
+  }
+  function confirmDialog(title, text, okLabel, danger) {
+    return openModal({ title: title, html: "<p>" + esc(text) + "</p>", actions: [{ label: t("common.cancel"), value: "cancel" }, { label: okLabel || t("common.confirm"), value: "ok", kind: danger ? "danger" : "primary" }] })
+      .then(function (v) { return v === "ok"; });
+  }
+  function toast(text, kind) {
+    var el = document.createElement("div");
+    el.className = "toast " + (kind || "ok");
+    el.innerHTML = icon(kind === "bad" ? "alert" : "check") + "<span>" + esc(text) + "</span>";
+    // Gone when its CSS animation ends, or on a click: the board keeps no timers.
+    el.addEventListener("animationend", function () { el.remove(); });
+    el.addEventListener("click", function () { el.remove(); });
+    $("#toasts").appendChild(el);
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
+    var ta = document.createElement("textarea");
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
+    ta.remove();
+    return Promise.resolve(ok);
+  }
+  // A click outside the card dismisses it; Enter in one of its fields presses
+  // its primary button.
+  function dialogsWire() {
+    $("#modal").addEventListener("click", function (e) {
+      if (e.target === $("#modal")) { closeModal(null); return; }
+      if (modalState && modalState.onClick && modalState.onClick(e)) return;
+      var btn = e.target.closest("[data-v]");
+      if (btn) closeModal(btn.getAttribute("data-v"));
+    });
+    // The Enter that commits an input-method composition (Chinese, Japanese) is
+    // the typist's, not the dialog's: submitting on it cut the text mid-word.
+    $("#modal").addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); var primary = $("#modalActs .primary"); if (primary) primary.click(); }
+    });
+  }
+  // ── end kit ───────────────────────────────────────────────────────────────
+
   /* ── hookstack token wiring · keep this block identical in all three pages ── */
   /* Three services had three ways to type the same kind of secret: an input box
      here, a window.prompt there, and a third key-naming convention. The visual
@@ -307,14 +1202,22 @@
      A `prompt` is the one shape deliberately not used: it can only be answered
      when the page decides to ask, so replacing a token means clearing
      localStorage by hand. */
+  // Every field wired to one key shows what was last saved there, so the
+  // second field for a token never offers the old one back.
+  var tokenFields = [];
   function tokenWire(inputId, buttonId, key, onSaved) {
     var input = document.getElementById(inputId);
     var save = document.getElementById(buttonId);
-    if (input) input.value = localStorage.getItem(key) || "";
+    if (input) { input.value = localStorage.getItem(key) || ""; tokenFields.push({ input: input, key: key }); }
     if (save) save.addEventListener("click", function () {
-      localStorage.setItem(key, (input.value || "").trim());
+      var value = (input.value || "").trim();
+      localStorage.setItem(key, value);
+      tokenSync(key);
       onSaved();
     });
+  }
+  function tokenSync(key) {
+    tokenFields.forEach(function (f) { if (f.key === key) f.input.value = localStorage.getItem(key) || ""; });
   }
   function tokenReveal(needed) {
     var bar = document.getElementById("tokenbar");
@@ -376,170 +1279,571 @@
     themeApply();
   }
   // ── end theme wiring ──────────────────────────────────────────────────────
+
+  // ── requests: one read token opens this whole service ──
   function readHeaders() {
-    var headers = {}, token = localStorage.getItem(KEY);
+    var headers = {};
+    var token = localStorage.getItem(TOKEN_KEY);
     if (token) headers["X-Read-Token"] = token;
     return headers;
   }
-  tokenWire("tokenInput", "tokenSave", KEY, function () { refresh(); });
-  themeWire();
-  function refresh() {
-    if (document.hidden) return;
-    var headers = {}, token = localStorage.getItem(KEY);
-    if (token) headers["X-Read-Token"] = token;
-    fetch(BASE + "/status?limit=50", { headers: headers }).then(function (r) {
-      if (r.status === 401) {
-        tokenReveal(true);
-        document.getElementById("stamp").textContent = "read token required";
-        return null;
-      }
-      tokenReveal(false);
-      return r.json();
-    }).then(function (d) {
-      if (!d) return;
-      var s = d.summary;
-      document.getElementById("cJudged").textContent = s.judged;
-      document.getElementById("cPaid").textContent = s.paid_ratio_pct + "%";
-      document.getElementById("cCost").textContent = "$" + s.cost;
-      document.getElementById("cDead").textContent = s.returns.dead || 0;
-      var ag = s.agreement || {};
-      document.getElementById("cAgree").innerHTML =
-        ag.agree_pct == null ? "–" : Math.round(ag.agree_pct) + "%" + ofHtml(ag.compared + " compared");
-      // Attention, not spend. "verdicts 24h" has always BEEN the number of times
-      // somebody was interrupted — these two say how much of it was repetition
-      // and how much of it anyone said was worth it.
-      var at = s.attention || {};
-      document.getElementById("cRepeat").innerHTML =
-        at.interruptions == null ? "–" : at.repeats + ofHtml(at.interruptions + " interruptions");
-      document.getElementById("cMattered").innerHTML =
-        at.ruled ? at.mattered + ofHtml(at.ruled + " ruled on") : "–";
-      renderAttention(at.noisiest || []);
-      renderRoutes(s.routes || {});
-      var rows = d.recent || [];
-      fetch(BASE + "/disagreements?limit=20", { headers: readHeaders() })
-        .then(function (r) { return r.ok ? r.json() : { queue: [] }; })
-        .then(renderReview).catch(function () {});
-      document.getElementById("rows").innerHTML = rows.length ? rows.map(function (r) {
-        var ret = r.return_status === "sent" ? "" :
-          '<span class="badge ' + esc(r.return_status) + '">return ' + esc(r.return_status) + "</span>";
-        var burst = r.burst_id ? '<span class="badge burst" title="' + esc(r.burst_id) + '">burst</span>' : "";
-        return '<div class="row"><div class="head">' +
-          '<span class="dot ' + (r.is_recovery ? "ended" : esc(r.importance)) + '"></span>' +
-          '<span class="title">' + esc(r.title) + "</span>" +
-          '<span class="badge ' + esc(r.route) + '">' + esc(r.route) + "</span>" + burst + ret +
-          '<span class="when">' + esc(when(r.received_at)) + "</span></div>" +
-          '<div class="summary">' + esc(r.summary) + "</div>" +
-          '<div class="meta">' + esc(r.importance) + " · " + esc(r.event_type || "-") +
-          " · " + esc(took(r.latency_ms)) + (r.cost ? " · $" + esc(r.cost) : "") +
-          (r.degraded_reason ? " · " + esc(r.degraded_reason) : "") + "</div></div>";
-      }).join("") : '<div class="empty">no verdicts yet</div>';
-      document.getElementById("stamp").textContent = "refreshed " + new Date().toTimeString().slice(0,8);
-    }).catch(function () { document.getElementById("stamp").textContent = "connection failed"; });
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = Object.assign(opts.json !== undefined ? { "content-type": "application/json" } : {}, readHeaders());
+    return fetch(BASE + path, { method: opts.method || "GET", headers: headers, body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined }).then(function (res) {
+      if (res.status === 401) { S.needToken = true; tokenReveal(true); renderChrome(); return { ok: false, status: 401, data: null }; }
+      S.needToken = false; S.offline = false; tokenReveal(false);
+      if (opts.raw) return res.text().then(function (text) { return { ok: res.ok, status: res.status, data: text }; });
+      return res.json().then(function (data) { return { ok: res.ok, status: res.status, data: data }; },
+        function () { return { ok: false, status: res.status, data: null }; });
+    }, function () { S.offline = true; renderChrome(); return { ok: false, status: 0, data: null }; });
   }
-  // Where to go turn something off. One line per condition that interrupted a
-  // human more than once, with the contrast the cost cards cannot show: twelve
-  // interruptions, one of them paid for, and how many anyone said were worth it.
-  // Two halves of one question, and only one of them needs a human. The ruling
-  // columns stay exactly what they were — a count of what somebody SAID — and
-  // stay empty on an unattended deployment, which is the normal case here. The
-  // self-heal columns are the inference that keeps the row readable anyway.
-  //
-  // `fired` is printed next to `self-healed` on purpose: `interruptions` counts
-  // every card including recoveries, the verdict divides episodes by FIRINGS,
-  // and a row showing only the first two invites the reader to do 30/77 and
-  // conclude the flag is broken when the comparison was 30 of 47.
-  // The five routes as one bar: the cost policy, visible. Paid (ai) first,
-  // then what the rules decided, then what was reused; the legend carries the
-  // counts so the bar never has to be read precisely.
-  var ROUTES = ["ai", "rule", "rule-reuse", "reuse", "recovery"];
-  function renderRoutes(routes) {
-    var total = ROUTES.reduce(function (n, k) { return n + ((routes[k] || {}).count || 0); }, 0);
-    var bar = document.getElementById("routes"), legend = document.getElementById("routesLegend");
-    if (!total) { bar.innerHTML = ""; legend.textContent = "no verdicts in this window"; return; }
-    bar.innerHTML = ROUTES.filter(function (k) { return (routes[k] || {}).count; }).map(function (k) {
-      var n = routes[k].count;
-      return '<span class="' + k + '" style="width:' + (100 * n / total) + '%" title="' + k + " · " + n + '"></span>';
-    }).join("");
-    var paid = (routes.ai || {}).count || 0;
-    legend.innerHTML = ROUTES.map(function (k) { return k + " <b>" + ((routes[k] || {}).count || 0) + "</b>"; }).join(" · ") +
-      " — " + total + " verdicts, <b>" + paid + "</b> paid (" + Math.round(100 * paid / total) + "%)";
-  }
-  function renderAttention(list) {
-    document.getElementById("atRows").innerHTML = list.length ? list.map(function (c) {
-      // Was `c.mattered ? "" : " cold"`, which tints every row on a box where
-      // nobody ever presses anything — the exact miscalibration these columns
-      // exist to remove. Cold now means the evidence says flapping, or a person
-      // said it did not matter; silence alone is not a finding.
-      var cold = (c.likely_flapping || c.did_not_matter) ? " cold" : "";
-      var heal = "";
-      if (c.fired) {
-        heal = '<span class="n' + cold + '">' + esc(c.self_resolved) + " of " + esc(c.fired) +
-          " self-healed" + (c.median_seconds ? " · median " + esc(Math.round(c.median_seconds / 60)) + "m" : "") +
-          "</span>";
-      }
-      return '<div class="att"><span class="t" title="' + esc(c.identity) + '">' + esc(c.title) + "</span>" +
-        '<span class="n' + cold + '">' + esc(c.interruptions) + " interruptions</span>" +
-        '<span class="n">' + esc(c.paid) + " paid</span>" + heal +
-        (c.likely_flapping ? '<span class="badge burst">likely flapping</span>' : "") +
-        // Three states, three places, never merged: what a person said, what the
-        // behaviour shows, what a model concluded from the case files. The row
-        // where they disagree is the interesting one, so the badge carries the
-        // model's reasoning in its title rather than hiding it behind a click.
-        (c.ai_ruling ? '<span class="badge' + (c.ai_ruling === "not_worth_it" ? " burst" : "") +
-          '" title="' + esc(c.ai_why || "") + '">AI: ' +
-          (c.ai_ruling === "not_worth_it" ? "not worth it" : "worth it") + "</span>" : "") +
-        '<span class="n">' + esc(c.mattered) + " useful · " + esc(c.did_not_matter) + " not</span></div>";
-    }).join("") : '<div class="empty">no condition interrupted twice in this window</div>';
-  }
-  // The review queue: every row is a platform-vs-judge disagreement, and one
-  // click is one eval label — the cheapest labelling this dataset will get.
-  // Two named buttons take a side; the picker records a third answer.
-  function renderReview(d) {
-    var queue = (d && d.queue) || [];
-    document.getElementById("rvCount").textContent = queue.length;
-    if (!queue.length) {
-      document.getElementById("rvRows").innerHTML = '<div class="empty">no disagreements in the ledger — the platform\'s level and the judge\'s importance agree on every row</div>';
-      return;
+  function failText(r) { return t("common.failed", { why: (r.data && r.data.detail) || (r.status ? "HTTP " + r.status : t("common.unreachable")) }); }
+  // An answer that is neither a 401 nor silence — a proxy's 502 page, a plain
+  // 500 — is said on the board, not left under skeletons or an old "refreshed".
+  function noteFailure(r) { S.error = r.ok || r.status === 401 || r.status === 0 ? "" : failText(r); }
+
+  // ── state ──
+  var S = {
+    view: "board", params: {}, core: null, coreSig: "", queue: [], verdicts: null, vSig: "",
+    needToken: false, offline: false, error: "", sel: null, drawer: { id: "", row: null, pushed: false, sig: "" }, settingsOpen: false,
+    extra: {}, vSeq: 0,
+  };
+
+  // ── addresses: #/view?k=v, and the two older ones (#help, #review) ──
+  function parseHash() {
+    // Split first, decode each part after: see dec().
+    var raw = location.hash.replace(/^#/, ""), h = dec(raw);
+    if (h === "help" || h === "review") return { view: h, params: {} };
+    if (raw.charAt(0) === "/") {
+      var q = raw.indexOf("?"), view = dec((q < 0 ? raw : raw.slice(0, q)).slice(1)), params = {};
+      if (q >= 0) raw.slice(q + 1).split("&").forEach(function (kv) { var i = kv.indexOf("="); if (i > 0) params[dec(kv.slice(0, i))] = dec(kv.slice(i + 1)); });
+      if (VIEWS.indexOf(view) >= 0) return { view: view, params: params };
     }
-    document.getElementById("rvRows").innerHTML = queue.map(function (r) {
-      var others = ["critical","high","medium","low"].filter(function (x) {
-        return x !== r.level && x !== r.importance;
-      }).map(function (x) { return '<option value="' + x + '">' + x + "</option>"; }).join("");
-      return '<div class="rv" data-id="' + esc(r.id) + '">' +
-        '<span class="t" title="' + esc(r.summary) + '">' + esc(r.title) + "</span>" +
-        '<button data-imp="' + esc(r.level) + '" data-src="platform">platform: ' + esc(r.level) + "</button>" +
-        '<button data-imp="' + esc(r.importance) + '" data-src="judge">judge: ' + esc(r.importance) + "</button>" +
-        '<select data-src="operator"><option value="">neither…</option>' + others + "</select>" +
-        "</div>";
-    }).join("");
-    Array.prototype.forEach.call(document.getElementById("rvRows").querySelectorAll(".rv"), function (row) {
-      var id = row.getAttribute("data-id");
-      function send(importance, src) {
-        fetch(BASE + "/judgements/" + id + "/label", {
-          method: "POST",
-          headers: Object.assign({ "content-type": "application/json" }, readHeaders()),
-          body: JSON.stringify({ importance: importance, source: src }),
-        }).then(function (r) { if (r.ok) refresh(); });
-      }
-      Array.prototype.forEach.call(row.querySelectorAll("button"), function (b) {
-        b.addEventListener("click", function () { send(b.getAttribute("data-imp"), b.getAttribute("data-src")); });
-      });
-      row.querySelector("select").addEventListener("change", function (e) {
-        if (e.target.value) send(e.target.value, "operator");
-      });
+    return { view: "board", params: {} };
+  }
+  function hashFor(view, params) {
+    var qs = Object.keys(params || {}).filter(function (k) { return params[k] !== "" && params[k] != null; })
+      .map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]); }).join("&");
+    return "#/" + view + (qs ? "?" + qs : "");
+  }
+  function go(view, params) {
+    var h = hashFor(view, params || {});
+    if (location.hash === h) { onRoute(); return; }
+    location.hash = h;
+  }
+  function setParams(patch) {
+    var params = Object.assign({}, S.params, patch);
+    Object.keys(params).forEach(function (k) { if (params[k] === "" || params[k] == null) delete params[k]; });
+    S.params = params;
+    history.replaceState(null, "", hashFor(S.view, params));
+  }
+  function onRoute() {
+    var r = parseHash();
+    S.view = r.view;
+    S.params = r.params || {};
+    $$("#tabs .tab").forEach(function (el) { el.classList.toggle("active", el.getAttribute("data-view") === S.view); });
+    VIEWS.forEach(function (v) { $("#view-" + v).hidden = v !== S.view; });
+    if (document.activeElement !== $("#search")) $("#search").value = S.params.q || "";
+    if (S.view === "verdicts") loadVerdicts();
+    renderView();
+    var id = S.params.open || "";
+    if (id) { if (id !== S.drawer.id) openDrawer(id); }
+    else if (S.drawer.id) closeDrawerUI();
+  }
+
+  // ── loading ──
+  function loadCore() {
+    return Promise.all([api("/status?limit=200"), api("/disagreements?limit=200")]).then(function (rs) {
+      noteFailure(rs[0]);
+      if (!rs[0].ok) { renderChrome(); if (!S.core) renderView(); return false; }
+      var queue = rs[1].ok ? (rs[1].data.queue || []) : [];
+      var sig = JSON.stringify([rs[0].data, queue]);
+      S.core = { summary: rs[0].data.summary || {}, recent: rs[0].data.recent || [], gate: rs[0].data.eval_gate || null, at: Date.now() / 1000 };
+      S.queue = queue;
+      if (sig === S.coreSig) { renderChrome(); return false; }
+      S.coreSig = sig;
+      renderChrome();
+      return true;
     });
   }
-  document.getElementById("rvExport").addEventListener("click", function () {
-    fetch(BASE + "/labels/export", { headers: readHeaders() }).then(function (r) { return r.text(); }).then(function (text) {
+  // The verdicts view asks the ledger itself, so a search or a route reaches
+  // past the latest two hundred rather than filtering them.
+  function loadVerdicts() {
+    var qs = ["limit=200"], seq = ++S.vSeq;
+    if (S.params.route) qs.push("route=" + encodeURIComponent(S.params.route));
+    if (S.params.q) qs.push("q=" + encodeURIComponent(S.params.q));
+    if (S.params.ret) qs.push("ret=" + encodeURIComponent(S.params.ret));
+    return api("/status?" + qs.join("&")).then(function (r) {
+      // Only the answer to the newest question is drawn: a slow reply to the
+      // filter before it must not paint that filter's rows under this one.
+      if (seq !== S.vSeq) return;
+      if (!r.ok) { noteFailure(r); if (!S.verdicts) renderVerdicts(); return; }
+      var rows = r.data.recent || [], sig = JSON.stringify(rows) + qs.join("&") + LANG;
+      if (sig === S.vSig) return;
+      S.vSig = sig; S.verdicts = rows;
+      if (S.view === "verdicts") renderVerdicts();
+    });
+  }
+  // A tab nobody is looking at asks nothing: in an alert storm the live
+  // stream wakes several times a second, and every forgotten tab would pull the
+  // newest two hundred rows on each wake. It catches up when it is shown again.
+  function refreshActive() {
+    if (document.hidden) return Promise.resolve();
+    return loadCore().then(function (changed) {
+      if (S.view !== "help" && (changed || !S.core)) renderView();
+      if (S.view === "verdicts") loadVerdicts();
+      if (S.drawer.id) renderDrawer();
+    });
+  }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) refreshActive(); });
+  function renderView() {
+    if (S.view === "board") renderBoard();
+    else if (S.view === "verdicts") renderVerdicts();
+    else if (S.view === "review") renderReview();
+  }
+  function renderChrome() {
+    setBadge("review", S.queue.length, "warn");
+    var dead = S.core ? Number(((S.core.summary || {}).returns || {}).dead || 0) : 0;
+    setBadge("board", dead, "bad");
+    $("#stamp").textContent = S.needToken ? t("common.token_required") : S.offline ? t("common.unreachable") : S.error ? S.error : S.core ? t("common.refreshed", { t: hms(S.core.at) }) : "";
+    document.title = (dead ? "(" + dead + ") " : "") + "hookjudge";
+  }
+  function setBadge(view, n, cls) {
+    var el = $('#tabs [data-view="' + view + '"] .count');
+    if (!el) return;
+    el.textContent = n ? String(n) : "";
+    el.className = "count" + (n && cls ? " " + cls : "");
+  }
+  function emptyHtml(ic, text) { return '<div class="empty">' + icon(ic) + esc(text) + "</div>"; }
+  function waitingHtml() {
+    if (S.needToken) return emptyHtml("lock", t("token.title"));
+    if (S.offline) return emptyHtml("alert", t("common.unreachable"));
+    if (S.error) return emptyHtml("alert", S.error);
+    return '<div class="sk"></div><div class="sk"></div><div class="sk"></div>';
+  }
+
+  // ── what a verdict says ──
+  function impPill(r) {
+    if (r.is_recovery) return '<span class="pill ok">' + esc(t("imp.recovered")) + "</span>";
+    var imp = String(r.importance || "");
+    return '<span class="pill ' + (IMP_CLS[imp] || "") + '">' + esc(IMPORTANCE.indexOf(imp) >= 0 ? t("imp." + imp) : imp || "?") + "</span>";
+  }
+  function impWord(v) { v = String(v || ""); return IMPORTANCE.indexOf(v) >= 0 ? t("imp." + v) : v || "?"; }
+  function routeWord(route) { return ROUTES.indexOf(route) >= 0 ? t("route." + route) : String(route || "?"); }
+  function took(ms) {
+    var n = Number(ms) || 0;
+    if (n < 1000) return t("dur.ms", { n: n });
+    return n < 60000 ? t("dur.s1", { n: (n / 1000).toFixed(1) }) : dur(n / 1000);
+  }
+  function returnWord(r) {
+    var st = String(r.return_status || "");
+    return st === "sent" || st === "skipped" ? "" : st === "queued" ? t("ret.queued") : st === "dead" ? t("ret.dead") : st;
+  }
+  function ruledWord(r) {
+    return r.mattered === "yes" ? t("ruled.useful") : r.mattered === "no" ? t("ruled.useless") : "";
+  }
+  // `dated`: a list without day headers (the board's latest six) says the day
+  // on the row itself.
+  function rowHtml(r, dated) {
+    var ret = returnWord(r), ruled = ruledWord(r);
+    return '<div class="row' + (S.sel === String(r.id) ? " cur" : "") + '" data-id="' + esc(r.id) + '">' +
+      '<div class="st">' + impPill(r) + "</div>" +
+      '<div class="ttl" title="' + esc(r.title) + '">' + esc(r.title || t("common.untitled")) + "</div>" +
+      '<div class="m1"><span class="src">' + esc(routeWord(r.route)) + '</span><span class="when" title="' + esc(fullTime(r.received_at)) + '">' + esc(dated ? stamp(r.received_at) : hm(r.received_at)) + "</span></div>" +
+      '<div class="sub">' + esc(r.summary || "") + (r.degraded_reason ? '<span class="warn-t"> · ' + esc(r.degraded_reason) + "</span>" : "") + "</div>" +
+      '<div class="m2">' + (r.burst_id ? '<span class="kind" title="' + esc(r.burst_id) + '">' + esc(t("row.burst")) + "</span>" : "") +
+        (ret ? '<span class="pill ' + (r.return_status === "dead" ? "bad" : "warn") + '">' + esc(ret) + "</span>" : "") +
+        (ruled ? '<span class="kind">' + esc(ruled) + "</span>" : "") +
+        '<span class="muted mono" style="font-size:12px">' + esc(took(r.latency_ms)) + "</span>" +
+        (Number(r.cost) > 0 ? '<span class="mono ok-t" style="font-size:12px">' + esc(money(r.cost)) + "</span>" : "") + "</div>" +
+    "</div>";
+  }
+  function listHtml(rows, emptyKey) {
+    if (!rows.length) return emptyHtml("inbox", t(emptyKey));
+    var out = "", lastDay = "";
+    rows.forEach(function (r) {
+      var d = new Date(Number(r.received_at) * 1000), key = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+      if (key !== lastDay) { out += '<div class="day"><span>' + esc(dayLabel(r.received_at)) + "</span></div>"; lastDay = key; }
+      out += rowHtml(r);
+    });
+    return out;
+  }
+
+  // ── the board ──
+  function renderBoard() {
+    if (!S.core) {
+      var blocked = S.needToken || S.offline || !!S.error;
+      $("#heroMain").innerHTML = blocked ? "" : '<div class="sk big"></div>';
+      $("#heroSplit").innerHTML = blocked ? "" : '<div class="sk big"></div>';
+      $("#view-board .hero").hidden = blocked;
+      $("#tiles").innerHTML = ""; $("#banners").innerHTML = ""; $("#latest").innerHTML = "";
+      $("#noisy").innerHTML = waitingHtml();
+      return;
+    }
+    $("#view-board .hero").hidden = false;
+    var s = S.core.summary, routes = s.routes || {}, returns = s.returns || {}, at = s.attention || {}, ag = s.agreement || {};
+    var dead = Number(returns.dead || 0), queued = Number(returns.queued || 0), paid = Number((routes.ai || {}).count || 0);
+    var mode = dead ? "bad" : S.queue.length ? "warn" : "ok";
+    var head = mode === "bad" ? tn("hero.dead", dead) : mode === "warn" ? tn("hero.review", S.queue.length) : t("hero.ok");
+    var action = mode === "bad" ? '<button class="btn sm" type="button" data-go="verdicts" data-ret="dead">' + esc(t("hero.show_dead")) + "</button>"
+      : mode === "warn" ? '<button class="btn sm" type="button" data-go="review">' + esc(t("hero.show_review")) + "</button>" : "";
+    $("#heroMain").innerHTML = '<div class="headline ' + mode + '"><span class="badge">' + icon(mode === "ok" ? "check" : "alert") + "</span><span>" + esc(head) + "</span></div>" +
+      '<div class="headline-sub">' + esc(t("hero.sub", { n: s.judged || 0, paid: paid, cost: money(s.cost) || "$0" })) + "</div>" +
+      (action ? '<div class="hero-actions">' + action + "</div>" : "");
+    $("#heroSplit").innerHTML = splitHtml(routes, s.judged || 0);
+    function tile(key, value, cls, on, hint, target) {
+      return '<button type="button" class="tile ' + cls + (on ? " on" : "") + '"' + (target ? ' data-tile="' + target + '"' : "") + ">" +
+        '<div class="lbl">' + esc(t("tile." + key)) + '</div><div class="val">' + value + '</div><div class="hint">' + esc(hint) + "</div></button>";
+    }
+    var agree = ag.agree_pct == null ? "–" : esc(Math.round(ag.agree_pct)) + "%";
+    $("#tiles").innerHTML =
+      tile("judged", esc(s.judged || 0), "info", false, t("tile.judged.hint", { n: paid }), "verdicts") +
+      tile("spend", esc(money(s.cost) || "$0"), "ok", false, t("tile.spend.hint", { pct: s.paid_ratio_pct || 0 }), "verdicts:ai") +
+      tile("dead", esc(dead), "bad", dead > 0, queued ? t("tile.dead.queued", { n: queued }) : t("tile.dead.hint"), dead ? "verdicts:dead" : "") +
+      tile("agree", agree, "info", false, ag.compared ? t("tile.agree.hint", { n: ag.compared }) : t("tile.agree.none"), "review") +
+      tile("repeats", at.interruptions == null ? "–" : esc(at.repeats || 0), "warn", Number(at.repeats) > 0, at.interruptions == null ? t("tile.none") : t("tile.repeats.hint", { n: at.interruptions }), "noisy") +
+      tile("mattered", at.ruled ? esc(at.mattered || 0) : "–", "ok", false, at.ruled ? t("tile.mattered.hint", { n: at.ruled }) : t("tile.mattered.none"), "");
+    $("#banners").innerHTML = bannersHtml(dead, queued);
+    $("#noisy").innerHTML = noisyHtml(at.noisiest || []);
+    var latest = S.core.recent.slice(0, 6);
+    $("#latest").innerHTML = '<h3>' + icon("scale") + esc(t("latest.title")) + '</h3><p class="desc">' + esc(t("latest.hint")) + "</p>" +
+      (latest.length ? '<div class="list">' + latest.map(function (r) { return rowHtml(r, true); }).join("") + "</div>" : '<p class="muted">' + esc(t("verdicts.empty")) + "</p>") +
+      '<div class="bar-actions"><button class="btn sm" type="button" data-go="verdicts">' + esc(t("latest.all")) + "</button></div>";
+  }
+  // The cost policy as one bar: paid first, then what the rules decided, then
+  // what was reused; the legend carries the counts and what each route cost.
+  function splitHtml(routes, total) {
+    var head = '<div class="chart-head"><b>' + esc(t("split.title")) + "</b><span>" + esc(t("split.window")) + "</span></div>";
+    if (!total) return head + '<p class="muted" style="margin:14px 0 0">' + esc(t("split.none")) + "</p>";
+    var bar = ROUTES.filter(function (k) { return (routes[k] || {}).count; }).map(function (k) {
+      var n = routes[k].count;
+      return '<span class="' + k + '" style="width:' + (100 * n / total) + '%" title="' + esc(routeWord(k) + " · " + n) + '"></span>';
+    }).join("");
+    var legend = ROUTES.map(function (k) {
+      var r = routes[k] || {};
+      return "<div><i class=\"" + k + "\"></i>" + esc(routeWord(k)) + " <b>" + esc(r.count || 0) + "</b>" + (Number(r.cost) > 0 ? ' <span class="mono">' + esc(money(r.cost)) + "</span>" : "") + "</div>";
+    }).join("");
+    return head + '<div class="split-bar">' + bar + '</div><div class="route-legend">' + legend + "</div>";
+  }
+  function bannersHtml(dead, queued) {
+    var out = [];
+    if (dead) out.push(banner("bad", "alert", tn("banner.dead", dead), t("banner.go"), "verdicts", "dead"));
+    else if (queued) out.push(banner("warn", "clock", tn("banner.queued", queued), t("banner.go"), "verdicts", "queued"));
+    if (S.queue.length) out.push(banner("warn", "flag", tn("banner.queue", S.queue.length), t("banner.open"), "review", ""));
+    var g = S.core.gate;
+    if (g && g.verdict === "red") out.push(banner("bad", "alert", t("banner.gate_red", { missed: g.missed || 0, quiet: g.false_quiet || 0, when: stamp(g.at) }), "", "", ""));
+    else if (g && g.verdict === "green") out.push(banner("info", "check", t(g.thin ? "banner.gate_thin" : "banner.gate_green", { n: g.firing_cases || 0, when: stamp(g.at) }), "", "", ""));
+    return out.join("");
+  }
+  function banner(cls, ic, text, action, view, ret) {
+    return '<div class="banner ' + cls + '">' + icon(ic) + '<span class="grow">' + esc(text) + "</span>" +
+      (action ? '<button class="btn sm" type="button" data-go="' + view + '"' + (ret ? ' data-ret="' + ret + '"' : "") + ">" + esc(action) + "</button>" : "") + "</div>";
+  }
+  // Where to go turn something off: every condition that interrupted a person
+  // more than once. The ruling columns count what somebody SAID and stay empty on
+  // an unattended deployment; the self-heal columns are the inference that keeps
+  // the row readable anyway. "Cold" is flapping, or a person saying it did not
+  // matter — silence alone is not a finding.
+  function noisyHtml(list) {
+    var head = '<h3>' + icon("bell") + esc(t("noisy.title")) + '</h3><p class="desc">' + esc(t("noisy.hint")) + "</p>";
+    if (!list.length) return head + '<p class="muted" style="margin:0">' + esc(t("noisy.none")) + "</p>";
+    return head + '<div class="list">' + list.map(function (c) {
+      // "Not worth it" is what the rulings say, not what one of them says.
+      var cold = c.likely_flapping || Number(c.did_not_matter || 0) > Number(c.mattered || 0);
+      var bits = [tn("noisy.interruptions", c.interruptions || 0), tn("noisy.paid", c.paid || 0)];
+      if (c.fired) bits.push(t("noisy.healed", { n: c.self_resolved || 0, of: c.fired }) + (c.median_seconds ? " · " + t("noisy.median", { d: dur(c.median_seconds) }) : ""));
+      var ai = c.ai_ruling ? '<span class="kind" title="' + esc(c.ai_why || "") + '">' + esc(t(c.ai_ruling === "not_worth_it" ? "noisy.ai_no" : "noisy.ai_yes")) + "</span>" : "";
+      return '<div class="row" style="cursor:default">' +
+        '<div class="st"><span class="pill ' + (cold ? "warn" : "") + '">' + esc(t(c.likely_flapping ? "noisy.flapping" : cold ? "noisy.cold" : "noisy.repeat")) + "</span></div>" +
+        '<div class="ttl" title="' + esc(c.identity || "") + '">' + esc(c.title || c.identity || "") + "</div>" +
+        '<div class="m1">' + ai + "</div>" +
+        '<div class="sub">' + esc(bits.join(" · ")) + "</div>" +
+        '<div class="m2"><span class="muted" style="font-size:12px">' + esc(t("noisy.ruled", { yes: c.mattered || 0, no: c.did_not_matter || 0 })) + "</span></div></div>";
+    }).join("") + "</div>";
+  }
+
+  // ── the verdicts ──
+  function renderVerdicts() {
+    var P = S.params, routes = S.core ? S.core.summary.routes || {} : {};
+    var seg = '<div class="seg"><button type="button" class="' + (!P.route ? "on" : "") + '" data-route="">' + esc(t("filter.all")) + "</button>" +
+      ROUTES.map(function (k) { return '<button type="button" class="' + (P.route === k ? "on" : "") + '" data-route="' + k + '">' + esc(routeWord(k)) + ' <span class="n">' + esc((routes[k] || {}).count || 0) + "</span></button>"; }).join("") + "</div>";
+    var ret = '<div class="seg"><button type="button" class="' + (!P.ret ? "on" : "") + '" data-ret="">' + esc(t("filter.returns.any")) + '</button><button type="button" class="' + (P.ret === "dead" ? "on" : "") + '" data-ret="dead">' + esc(t("ret.dead")) + '</button><button type="button" class="' + (P.ret === "queued" ? "on" : "") + '" data-ret="queued">' + esc(t("ret.queued")) + "</button></div>";
+    var chips = P.q ? '<button class="chip" type="button" data-clear="q">' + esc(t("filter.search", { q: P.q })) + " ×</button>" : "";
+    $("#vFilters").innerHTML = seg + ret + '<span class="spacer"></span>' + chips;
+    if (!S.verdicts) { $("#vList").innerHTML = waitingHtml(); $("#vNote").textContent = ""; return; }
+    var rows = S.verdicts;
+    $("#vList").innerHTML = listHtml(rows, P.q || P.route || P.ret ? "verdicts.nomatch" : "verdicts.empty");
+    $("#vNote").textContent = rows.length ? t("verdicts.note", { n: rows.length }) : "";
+  }
+
+  // ── review: where the platform and the judge disagreed ──
+  // One click is one eval label, the cheapest labelling this dataset will get.
+  // Two named buttons take a side; the picker records a third answer.
+  function renderReview() {
+    var box = $("#rvList");
+    if (!S.core) { box.innerHTML = waitingHtml(); $("#rvMatrix").innerHTML = ""; return; }
+    box.innerHTML = S.queue.length ? S.queue.map(function (r) {
+      // The platform's word as the judge's vocabulary says it (warning is
+      // medium): that is what a label can record, so it is what the button sends.
+      var said = r.platform_importance || r.level;
+      var others = IMPORTANCE.filter(function (x) { return x !== said && x !== r.importance; });
+      return '<div class="row" style="cursor:default" data-rv="' + esc(r.id) + '">' +
+        '<div class="st"><span class="pill warn">' + esc(t("review.pill")) + "</span></div>" +
+        '<div class="ttl" title="' + esc(r.summary || "") + '">' + esc(r.title || "") + "</div>" +
+        '<div class="m1"><button class="btn xs ghost" type="button" data-open="' + esc(r.id) + '">' + icon("eye") + "</button></div>" +
+        '<div class="sub">' + th("review.says", { platform: b(impWord(said) + (said !== r.level ? " (" + r.level + ")" : "")), judge: b(impWord(r.importance)) }) + "</div>" +
+        '<div class="m2"><div class="rv-acts">' +
+          '<button class="btn xs" type="button" data-label="' + esc(said) + '" data-src="platform">' + esc(t("review.platform", { v: impWord(said) })) + "</button>" +
+          '<button class="btn xs" type="button" data-label="' + esc(r.importance) + '" data-src="judge">' + esc(t("review.judge", { v: impWord(r.importance) })) + "</button>" +
+          '<select class="sel" data-neither="' + esc(r.id) + '"><option value="">' + esc(t("review.neither")) + "</option>" +
+            others.map(function (x) { return '<option value="' + x + '">' + esc(t("imp." + x)) + "</option>"; }).join("") + "</select></div></div></div>";
+    }).join("") : emptyHtml("check", t("review.none"));
+    $("#rvMatrix").innerHTML = matrixHtml((S.core.summary.agreement || {}).matrix || {});
+  }
+  // The level x importance table behind the agreement figure: the platform's own
+  // word down the side, the judge's across the top.
+  function matrixHtml(matrix) {
+    var levels = Object.keys(matrix).sort();
+    var head = '<h3>' + icon("scale") + esc(t("matrix.title")) + '</h3><p class="desc">' + esc(t("matrix.hint")) + "</p>";
+    if (!levels.length) return head + '<p class="muted" style="margin:0">' + esc(t("matrix.none")) + "</p>";
+    return head + '<table class="tbl matrix"><tr><th>' + esc(t("matrix.corner")) + "</th>" + IMPORTANCE.map(function (x) { return '<th class="num">' + esc(t("imp." + x)) + "</th>"; }).join("") + "</tr>" +
+      levels.map(function (lvl) {
+        return '<tr><td class="mono">' + esc(lvl) + "</td>" + IMPORTANCE.map(function (x) {
+          var n = (matrix[lvl] || {})[x] || 0;
+          return '<td class="num' + (n && lvl === x ? " on" : "") + '">' + (n || "") + "</td>";
+        }).join("") + "</tr>";
+      }).join("") + "</table>";
+  }
+  function label(id, importance, source) {
+    return api("/judgements/" + encodeURIComponent(id) + "/label", { method: "POST", json: { importance: importance, source: source } }).then(function (r) {
+      if (!r.ok) { toast(failText(r), "bad"); return; }
+      toast(t("review.labeled", { v: t("imp." + importance) }), "ok");
+      refreshActive();
+    });
+  }
+  function exportLabels() {
+    api("/labels/export", { raw: true }).then(function (r) {
+      if (!r.ok) {
+        var detail = null;
+        try { detail = JSON.parse(r.data).detail; } catch (_e) { detail = null; }
+        toast(t("common.failed", { why: detail || (r.status ? "HTTP " + r.status : t("common.unreachable")) }), "bad");
+        return;
+      }
       var a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([text], { type: "application/x-ndjson" }));
+      a.href = URL.createObjectURL(new Blob([r.data], { type: "application/x-ndjson" }));
       a.download = "ledger-labels.jsonl";
       a.click();
       URL.revokeObjectURL(a.href);
+      toast(t("review.exported"), "ok");
     });
-  });
+  }
 
-  refresh();
+  // ── one verdict, in a drawer ──
+  function findRow(id) {
+    var pools = [S.verdicts || [], S.core ? S.core.recent : []];
+    for (var i = 0; i < pools.length; i++) for (var k = 0; k < pools[i].length; k++) if (String(pools[i][k].id) === String(id)) return pools[i][k];
+    for (var q = 0; q < S.queue.length; q++) if (String(S.queue[q].id) === String(id)) return S.queue[q];
+    return null;
+  }
+  function openAlert(id) {
+    id = String(id);
+    var params = Object.assign({}, S.params, { open: id });
+    if (S.drawer.id) { S.params = params; history.replaceState(null, "", hashFor(S.view, params)); openDrawer(id); return; }
+    S.drawer.pushed = true;
+    go(S.view, params);
+  }
+  function closeAlert() {
+    if (S.drawer.pushed) { S.drawer.pushed = false; history.back(); return; }
+    var params = Object.assign({}, S.params);
+    delete params.open;
+    S.params = params;
+    history.replaceState(null, "", hashFor(S.view, params));
+    closeDrawerUI();
+  }
+  function openDrawer(id) {
+    S.drawer = { id: id, row: null, pushed: S.drawer.pushed, sig: "" };
+    S.sel = id;
+    $$(".row[data-id]").forEach(function (el) { el.classList.toggle("cur", el.getAttribute("data-id") === id); });
+    $("#drawer").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("on");
+    renderDrawer();
+  }
+  function closeDrawerUI() {
+    S.drawer = { id: "", row: null, pushed: false, sig: "" };
+    $("#drawer").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true");
+    if (!S.settingsOpen) $("#scrim").classList.remove("on");
+  }
+  function kvHtml(pairs) {
+    return '<div class="kv">' + pairs.filter(function (p) { return p[1] !== "" && p[1] != null; }).map(function (p) {
+      return '<span class="k">' + esc(p[0]) + '</span><span class="v">' + esc(p[1]) + "</span>";
+    }).join("") + "</div>";
+  }
+  function renderDrawer() {
+    var id = S.drawer.id, r = findRow(id) || S.extra[id];
+    if (!r) {
+      // Older than the rows in memory: the ledger answers for one id.
+      if (S.extra[id] === undefined) {
+        S.extra[id] = null;
+        $("#drBody").innerHTML = '<div class="sk"></div><div class="sk"></div>';
+        api("/judgements/" + encodeURIComponent(id)).then(function (res) {
+          S.extra[id] = res.ok ? res.data : false;
+          if (S.drawer.id === id) renderDrawer();
+        });
+        return;
+      }
+      if (S.extra[id] === null) return;
+      $("#drStatus").innerHTML = ""; $("#drTitle").textContent = t("drawer.notfound", { id: id }); $("#drMeta").innerHTML = ""; $("#drActions").innerHTML = "";
+      $("#drBody").innerHTML = emptyHtml("inbox", t("drawer.notfound", { id: id }));
+      return;
+    }
+    // A live update redraws the drawer only when this verdict changed, and then
+    // with the sections the reader had open still open.
+    var sig = JSON.stringify(r) + LANG;
+    if (sig === S.drawer.sig && S.drawer.row) return;
+    var open = S.drawer.row && String(S.drawer.row.id) === String(r.id) ? $$("#drBody details[open] > summary").map(function (el) { return el.textContent; }) : [];
+    S.drawer.sig = sig;
+    S.drawer.row = r;
+    $("#drStatus").innerHTML = impPill(r);
+    $("#drTitle").textContent = r.title || t("common.untitled");
+    $("#drMeta").innerHTML = '<span class="src">' + esc(r.source || "") + "</span> · " + esc(fullTime(r.received_at)) + " · " + esc(routeWord(r.route)) + ' · <span class="mono">#' + esc(r.id) + "</span>";
+    $("#drActions").innerHTML = '<button class="btn sm" type="button" data-act="copy">' + icon("link") + esc(t("drawer.copy_link")) + "</button>";
+    var fields = r.fields || null;
+    if (!fields && r.fields_json) { try { fields = JSON.parse(r.fields_json); } catch (_e) { fields = null; } }
+    var ruling = r.mattered ? (ruledWord(r) + (r.mattered_actor ? " · " + r.mattered_actor : "") + (r.mattered_at ? " · " + stamp(r.mattered_at) : "")) : "";
+    var labelled = r.label_importance ? t("imp." + r.label_importance) + " · " + (r.label_source || "") + (r.labeled_at ? " · " + stamp(r.labeled_at) : "") : "";
+    $("#drBody").innerHTML =
+      '<p class="tl-said" style="font-size:14.5px;line-height:1.7;margin:0 0 18px">' + esc(r.summary || "") + "</p>" +
+      '<div class="card"><h3>' + esc(t("drawer.verdict")) + "</h3>" + kvHtml([
+        [t("kv.importance"), (r.is_recovery ? t("imp.recovered") + " · " : "") + (IMPORTANCE.indexOf(r.importance) >= 0 ? t("imp." + r.importance) : r.importance || "")],
+        [t("kv.platform"), r.level], [t("kv.type"), r.event_type], [t("kv.scope"), r.impact_scope],
+        [t("kv.wake"), r.wake_someone], [t("kv.route"), routeWord(r.route) + (r.degraded_reason ? " · " + r.degraded_reason : "")],
+        [t("kv.model"), r.model], [t("kv.tokens"), r.tokens_in || r.tokens_out ? t("kv.tokens_v", { i: r.tokens_in || 0, o: r.tokens_out || 0 }) : ""],
+        [t("kv.cost"), Number(r.cost) > 0 ? money(r.cost) : t("kv.free")], [t("kv.latency"), took(r.latency_ms)],
+      ]) + "</div>" +
+      '<div class="card"><h3>' + esc(t("drawer.trail")) + "</h3>" + kvHtml([
+        [t("kv.returned"), (r.return_status === "sent" ? t("ret.sent") : r.return_status === "skipped" ? t("ret.skipped") : returnWord(r) || r.return_status) + (r.return_attempts ? " · " + t("kv.attempts", { n: r.return_attempts }) : "") + (r.return_error ? " · " + r.return_error : "")],
+        [t("kv.ruling"), ruling], [t("kv.label"), labelled], [t("kv.burst"), r.burst_id],
+        [t("kv.identity"), r.identity], [t("kv.rule"), r.rule_key], [t("kv.correlation"), r.correlation_id], [t("kv.origin"), r.origin],
+      ]) + "</div>" +
+      (fields && Object.keys(fields).length ? '<details class="x"><summary>' + esc(t("drawer.fields")) + '</summary><div class="codebox"><button class="btn xs" type="button" data-copy>' + icon("copy") + esc(t("raw.copy")) + '</button><pre class="code">' + esc(JSON.stringify(fields, null, 2)) + "</pre></div></details>" : "") +
+      (r.body ? '<details class="x"><summary>' + esc(t("drawer.body")) + '</summary><pre class="code prose">' + esc(r.body) + "</pre></details>" : "");
+    $$("#drBody details > summary").forEach(function (el) { if (open.indexOf(el.textContent) >= 0) el.parentNode.open = true; });
+  }
+
+  // ── settings ──
+  function openSettings() { S.settingsOpen = true; $("#settings").classList.add("on"); $("#settings").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("on"); }
+  function closeSettings() { S.settingsOpen = false; $("#settings").classList.remove("on"); $("#settings").setAttribute("aria-hidden", "true"); if (!S.drawer.id) $("#scrim").classList.remove("on"); }
+  var KEYS = [["/", "kb.search"], ["j", "kb.next"], ["k", "kb.prev"], ["Enter", "kb.open"], ["Esc", "kb.close"], ["?", "kb.help"]];
+  function keysHtml() { return '<div class="keys">' + KEYS.map(function (k) { return "<div><kbd>" + esc(k[0]) + "</kbd><span>" + esc(t(k[1])) + "</span></div>"; }).join("") + "</div>"; }
+  function syncTheme() { $$("#stTheme [data-settheme]").forEach(function (el) { el.classList.toggle("on", el.getAttribute("data-settheme") === themePicked); }); }
+  function applyLang() {
+    applyWords();
+    $("#langBtn").textContent = t("lang.other");
+    $$("#stLang [data-setlang]").forEach(function (el) { el.classList.toggle("on", el.getAttribute("data-setlang") === LANG); });
+    $("#stKeys").innerHTML = keysHtml();
+  }
+  function setLang(lang) {
+    if (!STRINGS[lang] || lang === LANG) return;
+    keepLang(lang);
+    applyLang();
+    themeApply();
+    S.vSig = ""; S.drawer.sig = "";
+    renderChrome(); renderView();
+    if (S.drawer.id) renderDrawer();
+  }
+
+  // ── the keyboard and the list ──
+  function moveSel(step) {
+    var rows = $$("#view-" + S.view + " .row[data-id]");
+    if (!rows.length) return;
+    var i = rows.findIndex(function (el) { return el.getAttribute("data-id") === S.sel; });
+    i = i < 0 ? (step > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, i + step));
+    S.sel = rows[i].getAttribute("data-id");
+    rows.forEach(function (el, k) { el.classList.toggle("cur", k === i); });
+    rows[i].scrollIntoView({ block: "nearest" });
+    if (S.drawer.id) openAlert(S.sel);
+  }
+
+  // ── wiring ──
+  document.addEventListener("click", function (e) {
+    var el;
+    if ((el = e.target.closest("#tabs [data-view]"))) { go(el.getAttribute("data-view"), {}); return; }
+    if ((el = e.target.closest("[data-go]"))) { var ret = el.getAttribute("data-ret"); go(el.getAttribute("data-go"), ret ? { ret: ret } : {}); return; }
+    if ((el = e.target.closest("[data-tile]"))) {
+      var target = el.getAttribute("data-tile"), parts = target.split(":");
+      if (parts[0] === "noisy") { $("#noisy").scrollIntoView({ block: "start", behavior: "smooth" }); return; }
+      go(parts[0], parts[1] === "ai" ? { route: "ai" } : parts[1] === "dead" ? { ret: "dead" } : {});
+      return;
+    }
+    if ((el = e.target.closest("[data-route]"))) { setParams({ route: el.getAttribute("data-route") }); loadVerdicts(); renderVerdicts(); return; }
+    if ((el = e.target.closest("#vFilters [data-ret]"))) { setParams({ ret: el.getAttribute("data-ret") }); loadVerdicts(); renderVerdicts(); return; }
+    if ((el = e.target.closest("[data-clear]"))) { setParams({ q: "" }); $("#search").value = ""; loadVerdicts(); renderVerdicts(); return; }
+    if ((el = e.target.closest("[data-label]"))) { label(el.closest("[data-rv]").getAttribute("data-rv"), el.getAttribute("data-label"), el.getAttribute("data-src")); return; }
+    if ((el = e.target.closest("[data-open]"))) { openAlert(el.getAttribute("data-open")); return; }
+    if ((el = e.target.closest(".row[data-id]"))) { S.sel = el.getAttribute("data-id"); openAlert(S.sel); return; }
+    if ((el = e.target.closest("[data-act]"))) {
+      copyText(location.href.split("#")[0] + hashFor("verdicts", { q: S.params.q || "", open: S.drawer.id })).then(function (ok) { toast(ok ? t("drawer.copied") : t("common.failed", { why: "clipboard" }), ok ? "ok" : "bad"); });
+      return;
+    }
+    if ((el = e.target.closest("[data-copy]"))) { var pre = el.parentNode.querySelector("pre"); copyText(pre ? pre.textContent : "").then(function (ok) { toast(ok ? t("raw.copied") : t("common.failed", { why: "clipboard" }), ok ? "ok" : "bad"); }); return; }
+  });
+  document.addEventListener("change", function (e) {
+    var id = e.target.getAttribute && e.target.getAttribute("data-neither");
+    if (id && e.target.value) label(id, e.target.value, "operator");
+  });
+  $("#rvExport").addEventListener("click", exportLabels);
+  $("#searchForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var q = $("#search").value.trim();
+    if (/^#?\d+$/.test(q)) { openAlert(q.replace(/^#/, "")); return; }
+    if (S.view !== "verdicts") go("verdicts", { q: q }); else { setParams({ q: q }); loadVerdicts(); renderVerdicts(); }
+  });
+  $("#drClose").addEventListener("click", closeAlert);
+  $("#scrim").addEventListener("click", function () { if (S.settingsOpen) closeSettings(); else if (S.drawer.id) closeAlert(); });
+  $("#settingsBtn").addEventListener("click", openSettings);
+  $("#stClose").addEventListener("click", closeSettings);
+  $("#langBtn").addEventListener("click", function () { setLang(LANG === "zh" ? "en" : "zh"); });
+  $("#stLang").addEventListener("click", function (e) { var el = e.target.closest("[data-setlang]"); if (el) setLang(el.getAttribute("data-setlang")); });
+  $("#stTheme").addEventListener("click", function (e) { var el = e.target.closest("[data-settheme]"); if (el) themeSet(el.getAttribute("data-settheme")); });
+  $("#stClear").addEventListener("click", async function () {
+    if (!(await confirmDialog(t("st.clear_title"), t("st.clear_body"), t("st.clear"), true))) return;
+    localStorage.removeItem(TOKEN_KEY);
+    $("#stRead").value = ""; $("#tokenInput").value = "";
+    toast(t("st.cleared"), "ok");
+    S.coreSig = ""; refreshActive();
+  });
+  dialogsWire();
+  document.addEventListener("keydown", function (e) {
+    // Keys pressed inside an input-method composition belong to the composition.
+    if (e.isComposing || e.keyCode === 229) return;
+    var tag = String((e.target && e.target.tagName) || "").toLowerCase();
+    var typing = tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable);
+    if (e.key === "Escape") {
+      if (modalState) closeModal(null);
+      else if (S.settingsOpen) closeSettings();
+      else if (S.drawer.id) closeAlert();
+      else if (typing) e.target.blur();
+      return;
+    }
+    if (typing || e.metaKey || e.ctrlKey || e.altKey || modalState) return;
+    if (e.key === "/") { e.preventDefault(); $("#search").focus(); $("#search").select(); return; }
+    if (e.key === "?") { openModal({ title: t("st.shortcuts"), html: keysHtml(), actions: [{ label: t("drawer.close"), value: "ok", kind: "primary" }] }); return; }
+    if (e.key === "j") { e.preventDefault(); moveSel(1); }
+    else if (e.key === "k") { e.preventDefault(); moveSel(-1); }
+    // Enter on a focused button or link is that control's, not "open the row".
+    else if ((e.key === "Enter" || e.key === "o") && S.sel != null && !S.drawer.id && !(e.target.closest && e.target.closest("button, a, summary, [tabindex]"))) { e.preventDefault(); openAlert(S.sel); }
+  });
+  window.addEventListener("hashchange", onRoute);
+
+  function afterTokenSaved() { toast(t("st.saved"), "ok"); S.coreSig = ""; S.vSig = ""; refreshActive(); }
+  tokenWire("tokenInput", "tokenSave", TOKEN_KEY, afterTokenSaved);
+  tokenWire("stRead", "stReadSave", TOKEN_KEY, afterTokenSaved);
+  themeWire(function (mode) { return t("theme." + mode); }, syncTheme);
+
+  injectIcons();
+  applyLang();
+  onRoute();
+
   // ── live control · keep this block identical in all three pages ────────────
   // A board is watched while something is happening, and what it shows changes
   // when the service writes — not when a clock in the browser says so. So there
@@ -556,7 +1860,10 @@
     var el = document.getElementById("rLive");
     if (!el) return;
     el.className = "live " + state;
-    el.textContent = state === "on" ? "live" : "offline";
+    // The word rides on data-t too, so a language switch redraws the state the
+    // connection is in rather than the one the markup started with.
+    el.setAttribute("data-t", state === "on" ? "live.on" : "live.off");
+    el.textContent = t(el.getAttribute("data-t"));
   }
   function liveConnect(url, headers, onChange) {
     if (liveAbort) liveAbort.abort();
@@ -604,7 +1911,7 @@
     liveConnect(url, headers, onChange);
   }
   // ── end live control ──────────────────────────────────────────────────────
-  wireLiveControl(BASE + "/live", readHeaders, refresh);
+  wireLiveControl(BASE + "/live", readHeaders, refreshActive);
 })();
 </script>
 </body>

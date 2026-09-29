@@ -23,13 +23,20 @@
      healthy board reads quiet. Rebuilt 2026-09-29 around how people read an
      inbox: one sentence that says whether anything needs them, a list they can
      scan, one click for the whole story, and each action where it is looked for.
-     The seven pinned blocks are byte-identical to the other two boards
+     The pinned blocks are byte-identical to the other two boards
      (scripts/assert_design.py); everything else here is this page's own. */
   /* ── hookstack design tokens · keep this block identical in all three pages ── */
   :root {
     --bg: #0b0e14; --surface: #11151d; --border: #1f2530; --border-soft: #171c26;
     --text: #d7dde6; --muted: #8b94a3; --accent: #4c8dff;
     --ok: #3dd68c; --warn: #f5a524; --bad: #e5484d;
+    /* The surfaces between those, and the depth under a drawer or a dialog. */
+    --surface-2: #161b25; --hover: #19202c; --code: #080b10; --radius: 12px;
+    --border-strong: #2c3544; --ring: #3a4352; --well: #0e1219; --code-text: #c3cad6;
+    --topbar: rgba(11, 14, 20, .9); --scrim: rgba(3, 5, 9, .55); --scrim-strong: rgba(3, 5, 9, .62);
+    --sheen: rgba(255, 255, 255, .04);
+    --shadow-drawer: -24px 0 60px rgba(0, 0, 0, .45); --shadow-card: 0 20px 60px rgba(0, 0, 0, .5);
+    --shadow-toast: 0 10px 30px rgba(0, 0, 0, .4);
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     /* "PingFang SC" stays in the stack: alert titles arrive in whatever language
        the monitoring system speaks, and they are rendered here verbatim. */
@@ -44,6 +51,12 @@
     --bg: #f4f6f9; --surface: #ffffff; --border: #dde2ea; --border-soft: #eaedf2;
     --text: #1b2230; --muted: #5b6677; --accent: #2160d6;
     --ok: #137a3e; --warn: #9a5800; --bad: #c9262c;
+    --surface-2: #f1f4f8; --hover: #f4f7fb; --code: #f6f8fa;
+    --border-strong: #c5cdd9; --ring: #c2cad6; --well: #f7f9fc; --code-text: #243042;
+    --topbar: rgba(255, 255, 255, .88); --scrim: rgba(15, 23, 42, .28); --scrim-strong: rgba(15, 23, 42, .36);
+    --sheen: rgba(15, 23, 42, .05);
+    --shadow-drawer: -18px 0 48px rgba(15, 23, 42, .14); --shadow-card: 0 18px 50px rgba(15, 23, 42, .18);
+    --shadow-toast: 0 8px 24px rgba(15, 23, 42, .14);
     color-scheme: light;
   }
   .rc { display: flex; gap: 6px; align-items: center; }
@@ -68,23 +81,12 @@
   .tab .count { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 4px; }
   .tab.active .count { color: var(--accent); }
   /* ── end tab shell ──────────────────────────────────────────────────────── */
-  /* This page's own surfaces, valued for each mode like the tokens above. */
-  :root {
-    --surface-2: #161b25; --hover: #19202c; --code: #080b10; --radius: 12px;
-    --border-strong: #2c3544; --ring: #3a4352; --well: #0e1219; --code-text: #c3cad6;
-    --topbar: rgba(11, 14, 20, .9); --scrim: rgba(3, 5, 9, .55); --scrim-strong: rgba(3, 5, 9, .62);
-    --sheen: rgba(255, 255, 255, .04);
-    --shadow-drawer: -24px 0 60px rgba(0, 0, 0, .45); --shadow-card: 0 20px 60px rgba(0, 0, 0, .5);
-    --shadow-toast: 0 10px 30px rgba(0, 0, 0, .4);
-  }
-  :root[data-theme="light"] {
-    --surface-2: #f1f4f8; --hover: #f4f7fb; --code: #f6f8fa;
-    --border-strong: #c5cdd9; --ring: #c2cad6; --well: #f7f9fc; --code-text: #243042;
-    --topbar: rgba(255, 255, 255, .88); --scrim: rgba(15, 23, 42, .28); --scrim-strong: rgba(15, 23, 42, .36);
-    --sheen: rgba(15, 23, 42, .05);
-    --shadow-drawer: -18px 0 48px rgba(15, 23, 42, .14); --shadow-card: 0 18px 50px rgba(15, 23, 42, .18);
-    --shadow-toast: 0 8px 24px rgba(15, 23, 42, .14);
-  }
+  /* ── hookstack components · keep this block identical in all three pages ── */
+  /* What every board is built from: the top bar, buttons and fields, the
+     status pill, the headline and its numbers, the list and its rows, the
+     drawer, the dialog and the toast. Pinned like the palette, because the
+     three boards drifted in exactly these before: three kinds of button, two
+     kinds of row, a window.confirm on one page and a modal on another. */
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: var(--ui); -webkit-font-smoothing: antialiased; }
   [hidden] { display: none !important; }
@@ -157,8 +159,11 @@
   .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); background: color-mix(in srgb, var(--bad) 10%, transparent); }
   .src { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); white-space: nowrap; }
   .kind { font-size: 10.5px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); font-family: var(--mono); }
+  /* A chip that means something keeps its colour: .kind comes after the text
+     colours above, so without these the muted grey won at equal specificity. */
+  .kind.ok-t { color: var(--ok); } .kind.warn-t { color: var(--warn); } .kind.bad-t { color: var(--bad); }
 
-  /* ── the answer first: a sentence, a day of activity, four numbers ── */
+  /* ── the answer first: one sentence, a chart, a few numbers ── */
   .hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; margin-bottom: 14px; }
   .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; min-height: 124px; }
   .headline { display: flex; align-items: center; gap: 12px; font-size: 21px; font-weight: 650; letter-spacing: .01em; }
@@ -204,7 +209,7 @@
   .banner.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: color-mix(in srgb, var(--bad) 8%, var(--surface)); } .banner.bad svg.i { color: var(--bad); }
   .banner.info svg.i { color: var(--accent); }
 
-  /* ── the list: one row per alert, two lines, grouped by day ── */
+  /* ── lists: one row per item, two lines, grouped by day ── */
   .filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
   .list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
   .day { padding: 7px 16px; font-size: 12px; color: var(--muted); background: var(--well); border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; }
@@ -221,15 +226,7 @@
   .row .m2 { grid-area: m2; display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
   .row .when { font-family: var(--mono); font-size: 12px; }
   .row .cost { color: var(--ok); font-family: var(--mono); font-size: 12px; }
-  .row .inc { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; margin-left: 8px; font-weight: 400; cursor: pointer; }
-  .row .inc:hover { color: var(--text); border-color: var(--accent); }
   .row.quiet .ttl { color: var(--muted); font-weight: 500; }
-  .dots { display: inline-flex; gap: 4px; align-items: center; }
-  .dots i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ring); display: block; }
-  .dots i.done { background: var(--accent); border-color: var(--accent); }
-  .dots i.ok { background: var(--ok); border-color: var(--ok); }
-  .dots i.warn { background: var(--warn); border-color: var(--warn); }
-  .dots i.bad { background: var(--bad); border-color: var(--bad); }
   .note { color: var(--muted); font-size: 12px; text-align: center; margin: 12px 0 0; }
   .empty { text-align: center; color: var(--muted); padding: 44px 20px; }
   .empty svg.i { width: 28px; height: 28px; opacity: .7; display: block; margin: 0 auto 10px; }
@@ -237,7 +234,7 @@
   .sk.big { height: 86px; border: 0; border-radius: 10px; }
   @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-  /* ── drawers: the story of one alert, and the settings ── */
+  /* ── drawers: one item's whole story, and the settings ── */
   .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 30; }
   .scrim.on { opacity: 1; pointer-events: auto; }
   .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(840px, 100vw); background: var(--bg); border-left: 1px solid var(--border); transform: translateX(104%); transition: transform .22s ease; z-index: 31; display: flex; flex-direction: column; }
@@ -263,27 +260,7 @@
   .keys div { display: flex; gap: 10px; align-items: center; }
   .keys kbd { min-width: 44px; text-align: center; }
 
-  /* ── the story, top to bottom, like a parcel's tracking page ── */
-  .tl-item { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 0 12px; }
-  .tl-rail { display: flex; flex-direction: column; align-items: center; }
-  .tl-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--ring); background: var(--bg); margin-top: 3px; flex: 0 0 auto; }
-  .tl-item.done .tl-dot { background: var(--accent); border-color: var(--accent); }
-  .tl-item.ok .tl-dot { background: var(--ok); border-color: var(--ok); }
-  .tl-item.warn .tl-dot { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 22%, transparent); }
-  .tl-item.bad .tl-dot { background: var(--bad); border-color: var(--bad); }
-  .tl-line { width: 2px; flex: 1 1 auto; background: var(--border); margin: 4px 0; min-height: 12px; }
-  .tl-item:last-child .tl-line { visibility: hidden; }
-  .tl-body { padding-bottom: 22px; min-width: 0; }
-  .tl-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .tl-name { font-weight: 600; font-size: 13.5px; }
-  .tl-item.none .tl-name { color: var(--muted); font-weight: 500; }
-  .tl-when { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
-  .tl-said { margin-top: 4px; font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
-  .tl-item.none .tl-said { color: var(--muted); }
-  .tl-item.ok .tl-said b.v { color: var(--ok); } .tl-item.bad .tl-said b.v { color: var(--bad); } .tl-item.warn .tl-said b.v { color: var(--warn); }
-  .tl-fine { margin-top: 6px; color: var(--muted); font-size: 12.5px; line-height: 1.75; overflow-wrap: anywhere; }
-  .tl-fine b { color: var(--text); font-weight: 500; }
-  .tl-fine .blocked { color: var(--warn); }
+  /* ── what opens: details, code, raw bytes ── */
   details.x { margin-top: 8px; }
   details.x > summary { cursor: pointer; color: var(--accent); font-size: 12.5px; list-style: none; display: inline-flex; gap: 6px; align-items: center; }
   details.x > summary::-webkit-details-marker { display: none; }
@@ -293,8 +270,6 @@
   .code.prose { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--ui); font-size: 13px; line-height: 1.7; }
   .code .add { color: var(--ok); } .code .del { color: var(--bad); } .code .hunk { color: var(--accent); } .code .meta { color: var(--muted); }
   .codebox { position: relative; }
-  .raw-h { margin: 22px 0 2px; font-size: 13px; font-weight: 600; }
-  .raw-h:first-child { margin-top: 0; }
   .codebox .btn { position: absolute; top: 8px; right: 8px; }
 
   /* ── tables ── */
@@ -308,50 +283,13 @@
   .tbl td.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
   .tbl .nw { white-space: nowrap; }
   .tbl th.num { text-align: right; }
-  .ds { font-size: 12px; white-space: nowrap; }
-  .ds.sent { color: var(--ok); } .ds.queued { color: var(--warn); } .ds.dead { color: var(--bad); }
   .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 16px; }
   .stat .lbl { color: var(--muted); font-size: 12.5px; }
   .stat .val { font-size: 26px; font-weight: 650; font-family: var(--mono); margin-top: 2px; }
   .stat.bad.on .val { color: var(--bad); } .stat.warn.on .val { color: var(--warn); } .stat.ok .val { color: var(--ok); }
 
-  /* ── the ledger: every event, one line, its decision on opening ── */
-  .lg { border-bottom: 1px solid var(--border-soft); }
-  .lg:last-child { border-bottom: 0; }
-  .lg > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 112px 132px minmax(0, 1fr) minmax(0, auto) auto; gap: 12px; align-items: center; padding: 10px 16px; font-size: 13px; }
-  .lg > summary::-webkit-details-marker { display: none; }
-  .lg > summary:hover { background: var(--hover); }
-  .lg[open] > summary { background: var(--surface-2); }
-  .lg .lg-t { color: var(--muted); font-family: var(--mono); font-size: 12px; }
-  .lg > summary .src { justify-self: start; }
-  .lg .lg-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-  .lg .lg-out { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lg .lg-dl { display: inline-flex; gap: 3px; }
-  .lg .lg-dl i { width: 8px; height: 8px; border-radius: 2px; background: var(--border); display: block; }
-  .lg .lg-dl i.sent { background: var(--ok); } .lg .lg-dl i.queued { background: var(--warn); } .lg .lg-dl i.dead { background: var(--bad); }
-  .lg-body { padding: 4px 16px 16px 16px; border-top: 1px solid var(--border-soft); background: var(--well); }
-  .lg-body h4 { margin: 14px 0 6px; font-size: 11.5px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-  .steps { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
-  .steps li { display: flex; gap: 12px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--border-soft); }
-  .steps li:first-child { border-top: 0; }
-  .steps .g { color: var(--muted); font-size: 11.5px; width: 78px; flex: 0 0 auto; }
-  .steps .hit { color: var(--text); }
-  .back { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-  .back .card { margin: 0; padding: 10px 12px; background: var(--bg); }
-  .more { text-align: center; margin-top: 12px; }
-
-  /* ── routing: doors, gates, exits ── */
-  .flow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr) minmax(0, 1fr); gap: 16px; }
-  .flow h4 { margin: 0 0 8px; font-size: 11.5px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-  .node { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
-  .node .nm { font-weight: 600; font-family: var(--mono); font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .node .sub { color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
-  .route { font-size: 12.5px; color: var(--muted); margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); overflow-wrap: anywhere; }
-  .route b { color: var(--text); font-weight: 500; font-family: var(--mono); }
-  .route.unreach { opacity: .45; }
-  .gate { display: block; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; font-family: var(--mono); font-size: 12.5px; background: var(--bg); }
-  .gate span { color: var(--muted); font-family: var(--ui); font-size: 12px; }
+  /* ── editors and forms ── */
   .editor { width: 100%; min-height: 440px; background: var(--code); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; tab-size: 2; }
   .editor:focus { outline: none; border-color: var(--accent); }
   .bar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
@@ -387,30 +325,23 @@
   .toast.ok svg.i { color: var(--ok); } .toast.bad svg.i { color: var(--bad); }
   @keyframes toast-life { 0% { opacity: 0; transform: translateY(8px); } 6% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; transform: translateY(4px); } }
 
-  /* ── hookstack token bar · keep this block identical in all three pages ── */
-  /* One field per credential the BROWSER sends. Service-to-service secrets
-     (the ingest, ruling and action secrets) never appear here: nothing types
-     them, so a field for them would only be somewhere to leak one. */
-  .tokenbar { display: none; gap: 8px; margin-bottom: 16px; }
-  .tokenbar.show { display: flex; }
-  .tokenbar input { flex: 1; background: var(--surface); border: 1px solid var(--border);
-                    border-radius: 8px; color: var(--text); padding: 8px 12px; font-family: var(--mono); }
-  .tokenbar button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
-                     padding: 8px 16px; cursor: pointer; }
-  /* ── end token bar ──────────────────────────────────────────────────────── */
   /* The prompt the token wiring reveals on a 401, as a card that says what to type. */
   #tokenbar.show { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(180px, 280px) auto; gap: 12px; align-items: center; padding: 14px 16px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 7%, var(--surface)); }
   #tokenbar svg.i { color: var(--warn); width: 20px; height: 20px; }
   #tokenbar .tb-text b { display: block; font-size: 14px; }
   #tokenbar .tb-text span { color: var(--muted); font-size: 12.5px; }
-
+  /* ── shared by the judge and the investigator ── */
+  .bar i.ok { background: var(--ok); }
+  .legend .lo::before { background: var(--ok); }
+  .kv { display: grid; grid-template-columns: minmax(120px, 230px) minmax(0, 1fr); gap: 6px 16px; font-size: 13px; }
+  .kv .k { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .kv .v { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+  .card > h3 .count { color: var(--muted); font-family: var(--mono); font-size: 12px; font-weight: 400; }
+  .row .src + .src { margin-left: 0; }
   @media (max-width: 1000px) {
     .hero { grid-template-columns: 1fr; }
     .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .flow { grid-template-columns: 1fr; }
     .brand-sub { display: none; }
-    .lg > summary { grid-template-columns: 96px minmax(0, 1fr) auto; }
-    .lg .src, .lg .lg-out { display: none; }
   }
   @media (max-width: 640px) {
     .top-in, .wrap { padding-left: 12px; padding-right: 12px; }
@@ -423,8 +354,94 @@
     .row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "st m1" "ttl ttl" "sub sub" "m2 m2"; }
     .row .m2 { justify-content: flex-start; }
     .stats { grid-template-columns: 1fr; }
+    .kv { grid-template-columns: 1fr; gap: 2px; }
+    .kv .v { margin-bottom: 8px; }
     #tokenbar.show { grid-template-columns: 1fr; }
     .headline-sub, .hero-actions { margin-left: 0; }
+  }
+  /* ── end components ─────────────────────────────────────────────────────── */
+  /* ── hookstack token bar · keep this block identical in all three pages ── */
+  /* One field per credential the BROWSER sends. Service-to-service secrets
+     (the ingest, ruling and action secrets) never appear here: nothing types
+     them, so a field for them would only be somewhere to leak one. */
+  .tokenbar { display: none; gap: 8px; margin-bottom: 16px; }
+  .tokenbar.show { display: flex; }
+  .tokenbar input { flex: 1; background: var(--surface); border: 1px solid var(--border);
+                    border-radius: 8px; color: var(--text); padding: 8px 12px; font-family: var(--mono); }
+  .tokenbar button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+                     padding: 8px 16px; cursor: pointer; }
+  /* ── end token bar ──────────────────────────────────────────────────────── */
+
+  /* ── this page's own: the stage dots, the story, the deliveries, the ledger, the routing map ── */
+  .row .inc { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; margin-left: 8px; font-weight: 400; cursor: pointer; }
+  .row .inc:hover { color: var(--text); border-color: var(--accent); }
+  .dots { display: inline-flex; gap: 4px; align-items: center; }
+  .dots i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ring); display: block; }
+  .dots i.done { background: var(--accent); border-color: var(--accent); }
+  .dots i.ok { background: var(--ok); border-color: var(--ok); }
+  .dots i.warn { background: var(--warn); border-color: var(--warn); }
+  .dots i.bad { background: var(--bad); border-color: var(--bad); }
+  .tl-item { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 0 12px; }
+  .tl-rail { display: flex; flex-direction: column; align-items: center; }
+  .tl-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--ring); background: var(--bg); margin-top: 3px; flex: 0 0 auto; }
+  .tl-item.done .tl-dot { background: var(--accent); border-color: var(--accent); }
+  .tl-item.ok .tl-dot { background: var(--ok); border-color: var(--ok); }
+  .tl-item.warn .tl-dot { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 22%, transparent); }
+  .tl-item.bad .tl-dot { background: var(--bad); border-color: var(--bad); }
+  .tl-line { width: 2px; flex: 1 1 auto; background: var(--border); margin: 4px 0; min-height: 12px; }
+  .tl-item:last-child .tl-line { visibility: hidden; }
+  .tl-body { padding-bottom: 22px; min-width: 0; }
+  .tl-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .tl-name { font-weight: 600; font-size: 13.5px; }
+  .tl-item.none .tl-name { color: var(--muted); font-weight: 500; }
+  .tl-when { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .tl-said { margin-top: 4px; font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
+  .tl-item.none .tl-said { color: var(--muted); }
+  .tl-item.ok .tl-said b.v { color: var(--ok); } .tl-item.bad .tl-said b.v { color: var(--bad); } .tl-item.warn .tl-said b.v { color: var(--warn); }
+  .tl-fine { margin-top: 6px; color: var(--muted); font-size: 12.5px; line-height: 1.75; overflow-wrap: anywhere; }
+  .tl-fine b { color: var(--text); font-weight: 500; }
+  .tl-fine .blocked { color: var(--warn); }
+  .raw-h { margin: 22px 0 2px; font-size: 13px; font-weight: 600; }
+  .raw-h:first-child { margin-top: 0; }
+  .ds { font-size: 12px; white-space: nowrap; }
+  .ds.sent { color: var(--ok); } .ds.queued { color: var(--warn); } .ds.dead { color: var(--bad); }
+  .lg { border-bottom: 1px solid var(--border-soft); }
+  .lg:last-child { border-bottom: 0; }
+  .lg > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 112px 132px minmax(0, 1fr) minmax(0, auto) auto; gap: 12px; align-items: center; padding: 10px 16px; font-size: 13px; }
+  .lg > summary::-webkit-details-marker { display: none; }
+  .lg > summary:hover { background: var(--hover); }
+  .lg[open] > summary { background: var(--surface-2); }
+  .lg .lg-t { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .lg > summary .src { justify-self: start; }
+  .lg .lg-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .lg .lg-out { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lg .lg-dl { display: inline-flex; gap: 3px; }
+  .lg .lg-dl i { width: 8px; height: 8px; border-radius: 2px; background: var(--border); display: block; }
+  .lg .lg-dl i.sent { background: var(--ok); } .lg .lg-dl i.queued { background: var(--warn); } .lg .lg-dl i.dead { background: var(--bad); }
+  .lg-body { padding: 4px 16px 16px 16px; border-top: 1px solid var(--border-soft); background: var(--well); }
+  .lg-body h4 { margin: 14px 0 6px; font-size: 11.5px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .steps { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+  .steps li { display: flex; gap: 12px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--border-soft); }
+  .steps li:first-child { border-top: 0; }
+  .steps .g { color: var(--muted); font-size: 11.5px; width: 78px; flex: 0 0 auto; }
+  .steps .hit { color: var(--text); }
+  .back { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .back .card { margin: 0; padding: 10px 12px; background: var(--bg); }
+  .more { text-align: center; margin-top: 12px; }
+  .flow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr) minmax(0, 1fr); gap: 16px; }
+  .flow h4 { margin: 0 0 8px; font-size: 11.5px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .node { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+  .node .nm { font-weight: 600; font-family: var(--mono); font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .node .sub { color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
+  .route { font-size: 12.5px; color: var(--muted); margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); overflow-wrap: anywhere; }
+  .route b { color: var(--text); font-weight: 500; font-family: var(--mono); }
+  .route.unreach { opacity: .45; }
+  .gate { display: block; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; font-family: var(--mono); font-size: 12.5px; background: var(--bg); }
+  .gate span { color: var(--muted); font-family: var(--ui); font-size: 12px; }
+  @media (max-width: 1000px) {
+    .flow { grid-template-columns: 1fr; }
+    .lg > summary { grid-template-columns: 96px minmax(0, 1fr) auto; }
+    .lg .src, .lg .lg-out { display: none; }
   }
 </style>
 </head>
@@ -446,8 +463,8 @@
       <button class="btn ghost sm" id="settingsBtn" type="button" data-tt="settings.open"><span data-icon="sliders"></span></button>
       <span class="rc">
     <button id="rTheme" type="button" title="light / dark" aria-label="light / dark">&#9680;</button>
-    <button id="rNow" title="refresh now">&#8635;</button>
-    <span id="rLive" class="live" title="live connection">live</span></span>
+    <button id="rNow" title="refresh now" data-tt="live.refresh">&#8635;</button>
+    <span id="rLive" class="live" title="live connection" data-tt="live.title" data-t="live.on">live</span>
       </span>
     </div>
   </div>
@@ -672,14 +689,24 @@
   </div>
 </aside>
 
+<!-- ── hookstack dialogs · keep this block identical in all three pages ── -->
 <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
   <div class="modal-card"><h3 id="modalTitle"></h3><div class="body" id="modalBody"></div><div class="acts" id="modalActs"></div></div>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
+<!-- ── end dialogs ──────────────────────────────────────────────────────── -->
 
 <script type="application/json" id="strings">
 {
  "en": {
+  "st.clear_title": "Forget both tokens?",
+  "st.clear_body": "This browser keeps them only here. Afterwards it asks for them again before it can show or change anything.",
+  "rt.revert_title": "Throw away the unsaved routing?",
+  "rt.revert_body": "The editor goes back to the file as it was loaded. What was typed since is gone.",
+  "live.on": "live",
+  "live.off": "offline",
+  "live.refresh": "refresh now",
+  "live.title": "live connection: the board redraws when the service writes",
   "app.sub": "every message accounted for, every delivery with an outcome",
   "search.placeholder": "Search alerts, or paste an event id, session or card id…",
   "lang.other": "中文",
@@ -1083,6 +1110,14 @@
   "ago": "{d} ago"
  },
  "zh": {
+  "st.clear_title": "清除这两个口令？",
+  "st.clear_body": "口令只存在这个浏览器里。清除以后，要重新输入才能查看或修改。",
+  "rt.revert_title": "丢掉还没保存的路由修改？",
+  "rt.revert_body": "编辑器回到加载时的文件内容，之后输入的都会丢掉。",
+  "live.on": "实时",
+  "live.off": "离线",
+  "live.refresh": "立即刷新",
+  "live.title": "实时连接：服务一有写入，看板就重画",
   "app.sub": "每条消息有账可查，每次投递都有结果",
   "search.placeholder": "搜索告警，或粘贴事件号、会话、卡片号…",
   "lang.other": "EN",
@@ -1498,21 +1533,41 @@
   var BASE = location.pathname.replace(/\/$/, "");
   var TOKEN_KEY = "hookrelay-read-token";
   var ADMIN_KEY = "hookrelay-admin-token";
-  var LANG_KEY = "hookrelay-lang";
   var VIEWS = ["alerts", "ledger", "deliveries", "silences", "routing", "help"];
   // The pipe's own doors: nothing posts to them from outside, so nothing can silence them.
   var SYNTHETIC = { "card-action": 1, absence: 1 };
 
-  // ── language ──
-  // The strings are the JSON block above this script, one set per language;
-  // hookrelay/tests/test_board.py holds the two sets to the same keys, and every
-  // key this script asks for to one of them.
+  // ── hookstack kit · keep this block identical in all three pages ──────────
+  // What every board draws with: the DOM, its words in two languages, time and
+  // money, icons, the dialog and the toast. Pinned like the palette, because
+  // these drifted too: the console printed dates its own way and asked with
+  // window.confirm, the judge had a third way to print a duration.
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function unique(items) { var seen = {}, out = []; items.forEach(function (x) { if (x && !seen[x]) { seen[x] = 1; out.push(x); } }); return out; }
+  function esc(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+  function b(s) { return "<b>" + esc(s) + "</b>"; }
+
+  // Words. A page's strings are the JSON block above its script, one set per
+  // language; which set is the browser's language until the reader picks one.
+  var LANG_KEY = "hookstack-lang";
   var STRINGS = JSON.parse(document.getElementById("strings").textContent);
   var LANG = pickLang();
   function pickLang() {
-    var saved = localStorage.getItem(LANG_KEY);
+    var saved = null;
+    // The pipe's board kept its choice under its own name before the three
+    // boards shared one; read that too, so nobody's choice is lost.
+    try { saved = localStorage.getItem(LANG_KEY) || localStorage.getItem("hookrelay-lang"); } catch (err) { saved = null; }
     if (saved && STRINGS[saved]) return saved;
     return /^zh/i.test(navigator.language || "") ? "zh" : "en";
+  }
+  function keepLang(lang) {
+    LANG = lang;
+    try { localStorage.setItem(LANG_KEY, lang); } catch (err) { /* a browser that keeps nothing: this page only */ }
   }
   function t(key, vars) {
     var s = (STRINGS[LANG] || {})[key];
@@ -1521,13 +1576,6 @@
     return vars ? s.replace(/\{(\w+)\}/g, function (_m, k) { return vars[k] == null ? "" : String(vars[k]); }) : s;
   }
   function tn(key, n, vars) { return t(key + (n === 1 ? ".one" : ".other"), Object.assign({ n: n }, vars || {})); }
-  function esc(v) {
-    return String(v == null ? "" : v)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-  }
-  function b(s) { return "<b>" + esc(s) + "</b>"; }
-  // A sentence made HTML: the template is escaped here, the values arrive as HTML.
   function th(key, vars) {
     var tpl = esc(t(key));
     return vars ? tpl.replace(/\{(\w+)\}/g, function (_m, k) { return vars[k] == null ? "" : String(vars[k]); }) : tpl;
@@ -1535,22 +1583,33 @@
   function thn(key, n, vars) { return th(key + (n === 1 ? ".one" : ".other"), Object.assign({ n: esc(n) }, vars || {})); }
   function joinList(items) { return items.join(LANG === "zh" ? "、" : ", "); }
   function locale() { return LANG === "zh" ? "zh-CN" : "en-US"; }
+  // The words written into the markup: data-t is text, data-tp a placeholder,
+  // data-tt a title and its accessible name.
+  function applyWords() {
+    document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+    document.body.classList.toggle("zh", LANG === "zh");
+    $$("[data-t]").forEach(function (el) { el.textContent = t(el.getAttribute("data-t")); });
+    $$("[data-tp]").forEach(function (el) { el.setAttribute("placeholder", t(el.getAttribute("data-tp"))); });
+    $$("[data-tt]").forEach(function (el) { el.setAttribute("title", t(el.getAttribute("data-tt"))); el.setAttribute("aria-label", t(el.getAttribute("data-tt"))); });
+  }
 
-  // ── the DOM ──
-  function $(sel, root) { return (root || document).querySelector(sel); }
-  function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
-  function unique(items) { var seen = {}, out = []; items.forEach(function (x) { if (x && !seen[x]) { seen[x] = 1; out.push(x); } }); return out; }
-
-  // ── time and money ──
-  // Absolute clock times, not "3 minutes ago": this page keeps no clock, and a
-  // relative time on a board nobody refreshes goes stale in the one direction
-  // that misleads.
+  // Time and money. Clock times rather than "3 minutes ago" wherever a board
+  // may sit unrefreshed: a relative time goes stale in the one direction that
+  // misleads.
+  // Decoding one part of an address at a time, after it is split: a value with
+  // & or = in it survives, and a stray % leaves the text as typed instead of
+  // throwing before the page has loaded anything.
+  function dec(s) { try { return decodeURIComponent(s); } catch (err) { return s; } }
   function p2(n) { return n < 10 ? "0" + n : String(n); }
-  function hm(ts) { var d = new Date(ts * 1000); return p2(d.getHours()) + ":" + p2(d.getMinutes()); }
-  function hms(ts) { var d = new Date(ts * 1000); return hm(ts) + ":" + p2(d.getSeconds()); }
+  // A row without a time prints nothing: new Date(NaN) makes Intl throw, and one
+  // throw inside a list render replaces the whole view with an error.
+  function okTs(ts) { var n = Number(ts); return ts != null && ts !== "" && isFinite(n) && n > 0; }
+  function hm(ts) { if (!okTs(ts)) return ""; var d = new Date(ts * 1000); return p2(d.getHours()) + ":" + p2(d.getMinutes()); }
+  function hms(ts) { if (!okTs(ts)) return ""; var d = new Date(ts * 1000); return hm(ts) + ":" + p2(d.getSeconds()); }
   function sameDay(a, c) { return a.getFullYear() === c.getFullYear() && a.getMonth() === c.getMonth() && a.getDate() === c.getDate(); }
   function yesterday() { var y = new Date(); y.setDate(y.getDate() - 1); return y; }
   function dayLabel(ts) {
+    if (!okTs(ts)) return "";
     var d = new Date(ts * 1000);
     var long = new Intl.DateTimeFormat(locale(), { month: "long", day: "numeric", weekday: "short" }).format(d);
     if (sameDay(d, new Date())) return t("day.today") + " · " + long;
@@ -1558,12 +1617,14 @@
     return long;
   }
   function stamp(ts) {
+    if (!okTs(ts)) return "";
     var d = new Date(ts * 1000);
     if (sameDay(d, new Date())) return hm(ts);
     if (sameDay(d, yesterday())) return t("day.yesterday") + " " + hm(ts);
     return new Intl.DateTimeFormat(locale(), { month: "short", day: "numeric" }).format(d) + " " + hm(ts);
   }
   function fullTime(ts) {
+    if (!okTs(ts)) return "";
     return new Intl.DateTimeFormat(locale(), { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(ts * 1000));
   }
   function dur(sec) {
@@ -1576,7 +1637,7 @@
     var d = Math.floor(h / 24), hh = h % 24;
     return hh ? t("dur.dh", { d: d, h: hh }) : t("dur.d", { n: d });
   }
-  function ago(ts) { var s = Date.now() / 1000 - Number(ts); return s < 45 ? t("ago.now") : t("ago", { d: dur(s) }); }
+  function ago(ts) { if (!okTs(ts)) return ""; var s = Date.now() / 1000 - Number(ts); return s < 45 ? t("ago.now") : t("ago", { d: dur(s) }); }
   function money(v) {
     if (v == null || v === "") return "";
     var n = Number(v);
@@ -1584,7 +1645,7 @@
     return "$" + n.toFixed(n >= 1 ? 2 : 4).replace(/\.?0+$/, "");
   }
 
-  // ── icons: a handful of plain strokes ──
+  // Icons: a handful of plain strokes.
   var ICONS = {
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>',
     bell: '<path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
@@ -1607,9 +1668,86 @@
     eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
     play: '<path d="M7 5l12 7-12 7z"/>',
     inbox: '<path d="M3 13.5l3-8.5h12l3 8.5"/><path d="M3 13.5V19h18v-5.5h-5.5a3.5 3.5 0 0 1-7 0z"/>',
+    plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    book: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5"/>',
+    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14a6 6 0 0 1 3.5 6"/>',
+    memory: '<ellipse cx="12" cy="5.5" rx="7.5" ry="2.5"/><path d="M4.5 5.5v13c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5v-13"/><path d="M4.5 12c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5"/>',
+    file: '<path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h6"/>',
+    server: '<rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01"/><path d="M7.5 16.5h.01"/>',
+    shield: '<path d="M12 3l7.5 3v6c0 4.5-3.2 7.9-7.5 9-4.3-1.1-7.5-4.5-7.5-9V6z"/>',
+    columns: '<rect x="3.5" y="4" width="4.5" height="16" rx="1"/><rect x="9.75" y="4" width="4.5" height="11" rx="1"/><rect x="16" y="4" width="4.5" height="7" rx="1"/>',
+    approve: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/>',
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    scale: '<path d="M12 4v16"/><path d="M6 20h12"/><path d="M5 8h14"/><path d="M5 8l-2.5 6a2.5 2.5 0 0 0 5 0z"/><path d="M19 8l-2.5 6a2.5 2.5 0 0 0 5 0z"/>',
+    flag: '<path d="M5 21V4h11l-1.5 4L16 12H5"/>',
+    chart: '<path d="M4 20V11"/><path d="M10 20V5"/><path d="M16 20v-7"/><path d="M2.5 20.5h19"/>',
+    trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6.5 7l1 13h9l1-13"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    download: '<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>',
+    back: '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
+    forward: '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
   };
   function icon(name, cls) { return '<svg class="i' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || "") + "</svg>"; }
   function injectIcons() { $$("[data-icon]").forEach(function (el) { if (!el.firstChild) el.innerHTML = icon(el.getAttribute("data-icon")); }); }
+
+  // The dialog, the toast and the clipboard. A toast leaves when its CSS
+  // animation ends, or on a click: the boards keep no timers.
+  var modalState = null;
+  function openModal(opts) {
+    $("#modalTitle").textContent = opts.title || "";
+    $("#modalBody").innerHTML = opts.html || "";
+    $("#modalActs").innerHTML = (opts.actions || []).map(function (a) { return '<button class="btn' + (a.kind ? " " + a.kind : "") + '" type="button" data-v="' + esc(a.value) + '">' + esc(a.label) + "</button>"; }).join("");
+    $("#modal").classList.add("on");
+    var focus = $("#modalBody input") || $("#modalActs .primary") || $("#modalActs .danger");
+    if (focus) focus.focus();
+    return new Promise(function (resolve) { modalState = { resolve: resolve, onClick: opts.onClick }; });
+  }
+  function closeModal(value) {
+    $("#modal").classList.remove("on");
+    var state = modalState;
+    modalState = null;
+    if (state) state.resolve(value);
+  }
+  function confirmDialog(title, text, okLabel, danger) {
+    return openModal({ title: title, html: "<p>" + esc(text) + "</p>", actions: [{ label: t("common.cancel"), value: "cancel" }, { label: okLabel || t("common.confirm"), value: "ok", kind: danger ? "danger" : "primary" }] })
+      .then(function (v) { return v === "ok"; });
+  }
+  function toast(text, kind) {
+    var el = document.createElement("div");
+    el.className = "toast " + (kind || "ok");
+    el.innerHTML = icon(kind === "bad" ? "alert" : "check") + "<span>" + esc(text) + "</span>";
+    // Gone when its CSS animation ends, or on a click: the board keeps no timers.
+    el.addEventListener("animationend", function () { el.remove(); });
+    el.addEventListener("click", function () { el.remove(); });
+    $("#toasts").appendChild(el);
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
+    var ta = document.createElement("textarea");
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
+    ta.remove();
+    return Promise.resolve(ok);
+  }
+  // A click outside the card dismisses it; Enter in one of its fields presses
+  // its primary button.
+  function dialogsWire() {
+    $("#modal").addEventListener("click", function (e) {
+      if (e.target === $("#modal")) { closeModal(null); return; }
+      if (modalState && modalState.onClick && modalState.onClick(e)) return;
+      var btn = e.target.closest("[data-v]");
+      if (btn) closeModal(btn.getAttribute("data-v"));
+    });
+    // The Enter that commits an input-method composition (Chinese, Japanese) is
+    // the typist's, not the dialog's: submitting on it cut the text mid-word.
+    $("#modal").addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); var primary = $("#modalActs .primary"); if (primary) primary.click(); }
+    });
+  }
+  // ── end kit ───────────────────────────────────────────────────────────────
 
   // ── requests: read with the read token, change with the admin token ──
   function readHeaders() {
@@ -1663,17 +1801,18 @@
 
   // ── addresses: #/view?k=v, and the older links other pages still send ──
   function parseHash() {
-    var h = decodeURIComponent(location.hash.replace(/^#/, "")), m;
+    // Split first, decode each part after: see dec().
+    var raw = location.hash.replace(/^#/, ""), h = dec(raw), m;
     if ((m = h.match(/^journey=(.+)$/))) return { view: "alerts", params: { open: m[1] } };
     if ((m = h.match(/^chain=(\d+)$/))) return { view: "alerts", params: { open: m[1] } };
     if (h === "" || h === "timeline" || h === "now") return { view: "alerts", params: {} };
     if (h === "events" || h === "ledger") return { view: "ledger", params: {} };
     if (h === "config") return { view: "routing", params: {} };
     if (h === "help") return { view: "help", params: {} };
-    if (h.charAt(0) === "/") {
-      var q = h.indexOf("?"), path = (q < 0 ? h : h.slice(0, q)).slice(1), params = {};
-      if (q >= 0) h.slice(q + 1).split("&").forEach(function (kv) { var i = kv.indexOf("="); if (i > 0) params[kv.slice(0, i)] = kv.slice(i + 1); });
-      var parts = path.split("/");
+    if (raw.charAt(0) === "/") {
+      var q = raw.indexOf("?"), path = (q < 0 ? raw : raw.slice(0, q)).slice(1), params = {};
+      if (q >= 0) raw.slice(q + 1).split("&").forEach(function (kv) { var i = kv.indexOf("="); if (i > 0) params[dec(kv.slice(0, i))] = dec(kv.slice(i + 1)); });
+      var parts = path.split("/").map(dec);
       if (parts[0] === "alert" && parts.length > 1) return { view: "alerts", params: { open: parts.slice(1).join("/") } };
       if (VIEWS.indexOf(parts[0]) >= 0) return { view: parts[0], params: params };
     }
@@ -2701,27 +2840,7 @@
     return head + '<div class="lg-body" style="margin-top:10px;border-radius:10px">' + stepsHtml(d.steps) + (d.extracted ? '<details class="x"><summary>' + esc(t("rt.dryrun.extracted")) + "</summary>" + codeBox(JSON.stringify(d.extracted, null, 2)) + "</details>" : "") + "</div>";
   }
 
-  // ── dialogs and toasts ──
-  var modalState = null;
-  function openModal(opts) {
-    $("#modalTitle").textContent = opts.title || "";
-    $("#modalBody").innerHTML = opts.html || "";
-    $("#modalActs").innerHTML = (opts.actions || []).map(function (a) { return '<button class="btn' + (a.kind ? " " + a.kind : "") + '" type="button" data-v="' + esc(a.value) + '">' + esc(a.label) + "</button>"; }).join("");
-    $("#modal").classList.add("on");
-    var focus = $("#modalBody input") || $("#modalActs .primary") || $("#modalActs .danger");
-    if (focus) focus.focus();
-    return new Promise(function (resolve) { modalState = { resolve: resolve, onClick: opts.onClick }; });
-  }
-  function closeModal(value) {
-    $("#modal").classList.remove("on");
-    var state = modalState;
-    modalState = null;
-    if (state) state.resolve(value);
-  }
-  function confirmDialog(title, text, okLabel, danger) {
-    return openModal({ title: title, html: "<p>" + esc(text) + "</p>", actions: [{ label: t("common.cancel"), value: "cancel" }, { label: okLabel || t("common.confirm"), value: "ok", kind: danger ? "danger" : "primary" }] })
-      .then(function (v) { return v === "ok"; });
-  }
+  // ── dialogs: the admin token, the settings, the shortcuts ──
   function askAdminToken() {
     return openModal({
       title: t("admin.title"),
@@ -2735,24 +2854,6 @@
       return true;
     });
   }
-  function toast(text, kind) {
-    var el = document.createElement("div");
-    el.className = "toast " + (kind || "ok");
-    el.innerHTML = icon(kind === "bad" ? "alert" : "check") + "<span>" + esc(text) + "</span>";
-    // Gone when its CSS animation ends, or on a click: the board keeps no timers.
-    el.addEventListener("animationend", function () { el.remove(); });
-    el.addEventListener("click", function () { el.remove(); });
-    $("#toasts").appendChild(el);
-  }
-  function copyText(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
-    var ta = document.createElement("textarea");
-    ta.value = text; document.body.appendChild(ta); ta.select();
-    var ok = false;
-    try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
-    ta.remove();
-    return Promise.resolve(ok);
-  }
   function openSettings() { S.settingsOpen = true; $("#settings").classList.add("on"); $("#settings").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("on"); }
   function closeSettings() { S.settingsOpen = false; $("#settings").classList.remove("on"); $("#settings").setAttribute("aria-hidden", "true"); if (!S.drawer.ref) $("#scrim").classList.remove("on"); }
   var KEYS = [["/", "kb.search"], ["j", "kb.next"], ["k", "kb.prev"], ["Enter", "kb.open"], ["Esc", "kb.close"], ["?", "kb.help"]];
@@ -2760,11 +2861,7 @@
 
   // ── language ──
   function applyLang() {
-    document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
-    document.body.classList.toggle("zh", LANG === "zh");
-    $$("[data-t]").forEach(function (el) { el.textContent = t(el.getAttribute("data-t")); });
-    $$("[data-tp]").forEach(function (el) { el.setAttribute("placeholder", t(el.getAttribute("data-tp"))); });
-    $$("[data-tt]").forEach(function (el) { el.setAttribute("title", t(el.getAttribute("data-tt"))); el.setAttribute("aria-label", t(el.getAttribute("data-tt"))); });
+    applyWords();
     $("#langBtn").textContent = t("lang.other");
     $$("#stLang [data-setlang]").forEach(function (el) { el.classList.toggle("on", el.getAttribute("data-setlang") === LANG); });
     $("#stKeys").innerHTML = keysHtml();
@@ -2774,8 +2871,7 @@
   function syncTheme() { $$("#stTheme [data-settheme]").forEach(function (el) { el.classList.toggle("on", el.getAttribute("data-settheme") === themePicked); }); }
   function setLang(lang) {
     if (!STRINGS[lang] || lang === LANG) return;
-    LANG = lang;
-    localStorage.setItem(LANG_KEY, lang);
+    keepLang(lang);
     applyLang();
     themeApply();
     if (S.core) { S.analysed = (S.core.timeline.chains || []).map(analyse); S.byChain = {}; S.analysed.forEach(function (a) { S.byChain[a.chain] = a; }); }
@@ -2864,7 +2960,14 @@
       });
       return;
     }
-    if ((el = e.target.closest("#cfgRevert"))) { S.cfg.text = S.cfg.loaded; S.cfg.dirty = false; S.cfg.msg = null; renderRouting(); return; }
+    if ((el = e.target.closest("#cfgRevert"))) {
+      if (!S.cfg.dirty) return;
+      confirmDialog(t("rt.revert_title"), t("rt.revert_body"), t("rt.revert"), true).then(function (yes) {
+        if (!yes) return;
+        S.cfg.text = S.cfg.loaded; S.cfg.dirty = false; S.cfg.msg = null; renderRouting();
+      });
+      return;
+    }
     if ((el = e.target.closest("#dryRun"))) {
       var door = $("#dryDoor").value, payloadText = $("#dryPayload").value || "{}";
       S.dry.door = door; S.dry.payload = payloadText;
@@ -2916,21 +3019,18 @@
   $("#langBtn").addEventListener("click", function () { setLang(LANG === "zh" ? "en" : "zh"); });
   $("#stTheme").addEventListener("click", function (e) { var el = e.target.closest("[data-settheme]"); if (el) themeSet(el.getAttribute("data-settheme")); });
   $("#stLang").addEventListener("click", function (e) { var el = e.target.closest("[data-setlang]"); if (el) setLang(el.getAttribute("data-setlang")); });
-  $("#stClear").addEventListener("click", function () {
+  $("#stClear").addEventListener("click", async function () {
+    if (!(await confirmDialog(t("st.clear_title"), t("st.clear_body"), t("st.clear"), true))) return;
     localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ADMIN_KEY);
     $("#stRead").value = ""; $("#stAdmin").value = ""; $("#tokenInput").value = "";
     S.routing = null;
     toast(t("st.cleared"), "ok");
     refreshActive();
   });
-  $("#modal").addEventListener("click", function (e) {
-    if (e.target === $("#modal")) { closeModal(null); return; }
-    if (modalState && modalState.onClick && modalState.onClick(e)) return;
-    var btn = e.target.closest("[data-v]");
-    if (btn) closeModal(btn.getAttribute("data-v"));
-  });
-  $("#modal").addEventListener("keydown", function (e) { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); var primary = $("#modalActs .primary"); if (primary) primary.click(); } });
+  dialogsWire();
   document.addEventListener("keydown", function (e) {
+    // Keys pressed inside an input-method composition belong to the composition.
+    if (e.isComposing || e.keyCode === 229) return;
     var tag = String((e.target && e.target.tagName) || "").toLowerCase();
     var typing = tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable);
     if (e.key === "Escape") {
@@ -2963,14 +3063,22 @@
      A `prompt` is the one shape deliberately not used: it can only be answered
      when the page decides to ask, so replacing a token means clearing
      localStorage by hand. */
+  // Every field wired to one key shows what was last saved there, so the
+  // second field for a token never offers the old one back.
+  var tokenFields = [];
   function tokenWire(inputId, buttonId, key, onSaved) {
     var input = document.getElementById(inputId);
     var save = document.getElementById(buttonId);
-    if (input) input.value = localStorage.getItem(key) || "";
+    if (input) { input.value = localStorage.getItem(key) || ""; tokenFields.push({ input: input, key: key }); }
     if (save) save.addEventListener("click", function () {
-      localStorage.setItem(key, (input.value || "").trim());
+      var value = (input.value || "").trim();
+      localStorage.setItem(key, value);
+      tokenSync(key);
       onSaved();
     });
+  }
+  function tokenSync(key) {
+    tokenFields.forEach(function (f) { if (f.key === key) f.input.value = localStorage.getItem(key) || ""; });
   }
   function tokenReveal(needed) {
     var bar = document.getElementById("tokenbar");
@@ -3057,7 +3165,10 @@
     var el = document.getElementById("rLive");
     if (!el) return;
     el.className = "live " + state;
-    el.textContent = state === "on" ? "live" : "offline";
+    // The word rides on data-t too, so a language switch redraws the state the
+    // connection is in rather than the one the markup started with.
+    el.setAttribute("data-t", state === "on" ? "live.on" : "live.off");
+    el.textContent = t(el.getAttribute("data-t"));
   }
   function liveConnect(url, headers, onChange) {
     if (liveAbort) liveAbort.abort();

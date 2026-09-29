@@ -21,6 +21,7 @@ a new one is a conversation rather than a silent regression. See SANCTIONED.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -84,6 +85,27 @@ BLOCKS = (
         "// ── theme wiring · keep this block identical in all three pages ───────────",
         "// ── end theme wiring ──────────────────────────────────────────────────────",
     ),
+    # Added 2026-09-29, when the judge's board and the investigator's console
+    # were rebuilt on the pipe's layout. The palette had been one product for
+    # weeks while the parts built from it were three: three kinds of button, two
+    # kinds of list row, a window.confirm on one page and a modal on another, a
+    # date printed three ways. The components, the dialog every page asks with,
+    # and the helpers they are drawn by are now copied verbatim like the palette.
+    (
+        "components",
+        "/* ── hookstack components · keep this block identical in all three pages ── */",
+        "/* ── end components ─────────────────────────────────────────────────────── */",
+    ),
+    (
+        "dialogs markup",
+        "<!-- ── hookstack dialogs · keep this block identical in all three pages ── -->",
+        "<!-- ── end dialogs ──────────────────────────────────────────────────────── -->",
+    ),
+    (
+        "kit script",
+        "// ── hookstack kit · keep this block identical in all three pages ──────────",
+        "// ── end kit ───────────────────────────────────────────────────────────────",
+    ),
 )
 
 # A colour written into a page's CSS as a literal does not change with the
@@ -96,6 +118,59 @@ BLOCKS = (
 _VARIABLE_BLOCK = re.compile(r':root(?:\[data-theme="(?:light|dark)"\])?\s*\{[^}]*\}')
 _LITERAL_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)")
 _ALLOWED_LITERALS = {"#fff", "#ffffff"}
+
+
+def word_problems(text: str) -> list[str]:
+    """A page's words: two languages with one set of keys and the same blanks,
+    and nothing the script asks for that the set does not hold.
+
+    At runtime a missing key falls back to English and then to the key itself,
+    so a typo renders as `hero.waitng` on somebody's phone while every test that
+    only loads the page stays green. What this reads is a key written out — as
+    the argument, or as either arm of a ternary that is the argument. A key the
+    script builds (`t("route." + name)`) or looks up in a table is the page's own
+    tests' to check.
+    """
+    block = re.search(r'<script type="application/json" id="strings">([\s\S]*?)</script>', text)
+    script = re.search(r"<script>([\s\S]*)</script>", text)
+    if not block or not script:
+        return ["a page needs its strings block and its script, and one of them is missing"]
+    if block.start() > script.start():
+        return ["the strings block must come before the script that reads it at load"]
+    try:
+        words = json.loads(block.group(1))
+    except ValueError as error:
+        return [f"the strings block is not JSON: {error}"]
+    en, zh = words.get("en") or {}, words.get("zh") or {}
+    problems = [
+        f"{lang}.{key}: a word must be a string, not {type(value).__name__}"
+        for lang, table in (("en", en), ("zh", zh))
+        for key, value in table.items()
+        if not isinstance(value, str)
+    ]
+    if problems:
+        return problems
+    if set(en) != set(zh):
+        problems.append(f"the two languages differ in keys: {sorted(set(en) ^ set(zh))[:8]}")
+    for key in sorted(set(en) & set(zh)):
+        if set(re.findall(r"\{(\w+)\}", en[key])) != set(re.findall(r"\{(\w+)\}", zh[key])):
+            problems.append(f"{key}: the two languages leave different blanks")
+    asked: set[str] = set()
+    code = script.group(1)
+    written = re.findall(r'\b(t|th|tn|thn)\("([^"]+)"', code)
+    written += [
+        (fn, key)
+        for fn, yes, no in re.findall(r'\b(t|th|tn|thn)\([^()"]*\?\s*"([^"]+)"\s*:\s*"([^"]+)"', code)
+        for key in (yes, no)
+    ]
+    for fn, key in written:
+        if not key.endswith("."):
+            asked |= {key + ".one", key + ".other"} if fn in ("tn", "thn") else {key}
+    asked |= set(re.findall(r'data-t[pt]?="([^"]+)"', text))
+    missing = sorted(asked - set(en))
+    if missing:
+        problems.append(f"asked for and missing: {missing[:8]}")
+    return problems
 
 
 def literal_colours(text: str) -> list[tuple[int, str]]:
@@ -139,10 +214,9 @@ SANCTIONED = (
     # board asking a question every N seconds.
     "setTimeout(function () { if (controller === liveAbort) liveConnect(url, headers, onChange); },"
     " Math.pow(2, liveRetry) * 500)",
-    # Two transient "saved" labels on the investigator's console, which clear
-    # themselves and schedule nothing. One-shot, fire and forget.
-    'setTimeout(() => { $("#memStatus").textContent = ""; }, 2500)',
-    'setTimeout(() => { $("#promptStatus").textContent = ""; }, 2500)',
+    # The investigator's console had two more — transient "saved" labels that
+    # cleared themselves after 2.5s. They left on 2026-09-29 with the rebuild:
+    # a save says so in a toast now, which leaves when its CSS animation ends.
 )
 
 
@@ -214,6 +288,8 @@ def main() -> int:
     theme_start = BLOCKS[5][1]
     for page in PAGES:
         text = (root / page).read_text(encoding="utf-8")
+        for problem in word_problems(text):
+            failures.append(f"{page}: {problem}")
         at, body = text.find(theme_start), text.find("<body")
         if at < 0 or body < 0 or at > body:
             failures.append(f"{page}: the theme snippet must sit in <head>, before the body paints")
@@ -246,7 +322,7 @@ def main() -> int:
         return 1
     print(
         f"design: {len(BLOCKS)} shared blocks identical across {len(PAGES)} pages, both modes named through "
-        "variables, no unsanctioned timers"
+        "variables, both languages carry every word asked for, no unsanctioned timers"
     )
     return 0
 

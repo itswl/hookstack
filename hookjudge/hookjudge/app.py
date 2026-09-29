@@ -30,7 +30,15 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from hookjudge.alarm import SelfAlarm
-from hookjudge.contract import ACTION_KINDS, ACTION_SILENCE, ACTION_USEFUL, IMPORTANCE, Incoming, Outgoing
+from hookjudge.contract import (
+    ACTION_KINDS,
+    ACTION_SILENCE,
+    ACTION_USEFUL,
+    IMPORTANCE,
+    Incoming,
+    Outgoing,
+    platform_importance,
+)
 from hookjudge.judge import PROVIDER_ERROR_MUST_ACT, ai_verdict, reuse_verdict, rule_reuse_verdict, rule_verdict
 from hookjudge.live import Live
 from hookjudge.settings import Settings
@@ -601,14 +609,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         authorization: str | None = Header(default=None),
         route: str | None = None,
         q: str | None = None,
+        ret: str | None = None,
         limit: int = 50,
         window_hours: int = 24,
     ) -> dict[str, Any]:
-        """The board's data: attention, self-healing, cost and the recent verdicts as JSON."""
+        """The board's data: attention, self-healing, cost and the recent verdicts as JSON.
+
+        `ret` (sent, queued, dead, skipped) narrows the rows to one return outcome."""
         _read_guard(x_read_token, authorization)
         return {
             "summary": await store.summary(now_ts() - max(1, window_hours) * 3600),
-            "recent": await store.recent(limit, route=route, q=q),
+            "recent": await store.recent(limit, route=route, q=q, ret=ret),
             # The golden gate's last verdict as deploy.sh recorded it beside the
             # ledger: counts and a timestamp. None until a deploy has run the
             # gate on this host — which is itself the fact worth showing.
@@ -629,7 +640,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         eval set will ever get.
         """
         _read_guard(x_read_token, authorization)
-        return {"queue": await store.disagreements(limit)}
+        # Each row carries the platform's level in this service's words as well,
+        # so a "the platform is right" press can send a word the label accepts:
+        # `warning` is admitted to the queue as the `medium` it means.
+        queue = await store.disagreements(limit)
+        return {
+            "queue": [{**row, "platform_importance": platform_importance(str(row.get("level") or ""))} for row in queue]
+        }
+
+    @app.get("/judgements/{judgement_id}")
+    async def judgement(
+        judgement_id: int,
+        x_read_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """One verdict, for a link to it that outlived the board's newest rows."""
+        _read_guard(x_read_token, authorization)
+        row = await store.judgement(judgement_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="judgement not found")
+        return row
 
     @app.post("/judgements/{judgement_id}/label")
     async def label_judgement(
@@ -644,7 +674,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         WRITE, so an empty token disables it rather than opening it — see
         _write_guard."""
         _write_guard(x_read_token, authorization)
-        importance = str(payload.get("importance") or "").strip().lower()
+        # A platform's own word is accepted as what it means (warning = medium).
+        importance = platform_importance(str(payload.get("importance") or ""))
         if importance not in IMPORTANCE:
             raise HTTPException(status_code=400, detail=f"importance must be one of {', '.join(IMPORTANCE)}")
         source = str(payload.get("source") or "operator").strip().lower()

@@ -87,9 +87,9 @@ a source that already judged its own signal takes a terminal route instead:
 
 ![hookrelay's board: one sentence on whether anything waits on you, a day of alerts by where they stand, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a ruling, a recovery — each with its seven stages](img/hookrelay-timeline.png)
 
-![hookjudge's status page: eight verdicts, every free route exercised, half paid](img/hookjudge-status.png)
+![hookjudge's board: nine verdicts, every free route exercised, four of them paid, four disagreements waiting for review](img/hookjudge-status.png)
 
-Every screenshot above comes from one local Docker run started from nothing — not mockups.
+Every screenshot above comes from a local Docker run started from nothing — not mockups.
 
 ---
 
