@@ -42,7 +42,7 @@ Seven steps, and each one names the thing that does it — so the positioning ab
 
 ![hookrelay's ledger: every event with its decision chain, its deliveries, and what came back](docs/img/hookrelay-ledger.png)
 
-![hookrelay's board: one card per alert drawn as seven stages — received, judged, notified, investigated, a person, condition, fix — a fix that held, a card waiting on you, a ruling](docs/img/hookrelay-timeline.png)
+![hookrelay's board: one sentence on whether anything waits on you, a day of alerts by where they stand, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a ruling, a recovery — each with its seven stages](docs/img/hookrelay-timeline.png)
 
 ![hookjudge's status page: verdicts with their routes and what each cost](docs/img/hookjudge-status.png)
 

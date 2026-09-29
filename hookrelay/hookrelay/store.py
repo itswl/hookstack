@@ -1199,14 +1199,26 @@ class Store:
             event["channels"] = json.loads(event.pop("channels_json") or "[]")
             event["steps"] = json.loads(event.pop("steps_json") or "[]")
             cursor = await self.read.execute(
-                "SELECT id, channel, status, attempts, last_error, platform_message_id, sent_body"
+                "SELECT id, channel, status, attempts, last_error, platform_message_id, sent_at, sent_body"
                 " FROM deliveries WHERE event_id = ? ORDER BY id",
                 (event["id"],),
             )
             # The labels a card asked with, never its body: the board reads "did
             # somebody answer what this card asked", and the bytes stay on /trace.
+            # `sent_at` is when it went out, which is when a person could first
+            # have seen it — the board's per-channel "last delivered" reads it.
+            #
+            # Only a card that ARRIVED asked anybody. Every attempt keeps the
+            # body it tried (mark_failed writes it too, for the dispute), so a
+            # card that died with the downstream still carried its buttons here
+            # — and the board and the morning card both listed it as waiting on
+            # a person who never received it.
             event["deliveries"] = [
-                {**dict(row), "sent_body": None, "asked": button_labels(row["sent_body"])}
+                {
+                    **dict(row),
+                    "sent_body": None,
+                    "asked": button_labels(row["sent_body"]) if row["status"] == "sent" else [],
+                }
                 for row in await cursor.fetchall()
             ]
         return events

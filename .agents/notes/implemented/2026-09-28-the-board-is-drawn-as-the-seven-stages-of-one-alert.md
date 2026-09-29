@@ -18,12 +18,14 @@ held, red for a fix that did not hold. A pill and one sentence under the
 strip say what the alert needs now. Opening a card shows the same seven
 stages top to bottom with everything each one said, from `/trace`.
 
-The tabs are **now** (the cards, newest first, with four numbers above them:
-waiting on you, in flight, dead letters, ended well in the last day), **journey**
-(the stepper for one alert from any handle), **ledger** (every event as
-recorded — the forensic view the old events tab was), config and help. Quiet
-chains — ticks, repeats, silences, single hops nothing answered — fold into
-one line under the cards.
+The page around the stages was rebuilt on 2026-09-29 to read like an inbox
+(`2026-09-29-the-board-reads-like-an-inbox`): one sentence on whether anything
+is waiting on you, four numbers (waiting on you, in flight, delivery failures,
+ended well in the last day), one row per alert carrying the seven dots, and a
+drawer that opens one alert's story from any handle, where the journey tab
+was. The tabs are alerts, **ledger** (every event as recorded — the forensic
+view the old events tab was), deliveries, silences, routing and help. Quiet
+chains — ticks, repeats, silences — are one checkbox away.
 
 Two feeds grew what the strip needs and nothing heavier: `/status` rows carry
 `is_recovery` and, per delivery, `asked` — the button labels the pipe put on
@@ -60,15 +62,17 @@ pipe's own rows are drawn.
 
 ## Consequences
 
-- The reading view and the forensic view are now different tabs. `now` is
-  what an operator opens; `ledger` is what a dispute opens. The events tab's
-  code is the ledger tab's code, restyled and otherwise unchanged.
+- The reading view and the forensic view are different tabs. `alerts` is
+  what an operator opens; `ledger` is what a dispute opens.
 - The strip's judgements are heuristics over identifiers, and the note names
   them so nobody mistakes them for facts the pipe holds: a hop is the judge's
   when its `fields.brain` says so or its door is named `judge…`; a hop is an
   investigation when it carries a session and is not a verdict card; a
-  delivery is a card when it asked something or the platform gave it an id;
-  "in flight" is a routed origin with nothing back within two hours. A
+  delivery is a card when it asked something, the platform gave it an id, it
+  carried a return to a channel that is not a `to-…` handover, or it was owed
+  to such a channel and never arrived — and only a card that arrived counts as
+  having asked; "in flight" is a routed origin with nothing back within two
+  hours, or an approved procedure nothing has answered. A
   deployment whose doors are named differently gets hollow dots where it
   should get filled ones — the sentence under the strip stays right, because
   it is built from the same rows.
@@ -76,7 +80,6 @@ pipe's own rows are drawn.
   A deployment busier than that in its window under-counts, and the number
   says nothing about it; `/metrics` remains the source for anything that
   goes on a graph.
-- `#events` and `#timeline` still open something sensible (the ledger and
-  the now tab); `#chain=<hop>` opens the card that hop belongs to;
-  `#journey=<handle>` is unchanged.
-- Every documented picture of the pipe's board is stale until reshot.
+- `#events` and `#timeline` still open the ledger and the alerts;
+  `#chain=<hop>` and `#journey=<handle>` open that alert's story.
+- The documented pictures of the pipe's board were reshot on 2026-09-29.

@@ -975,10 +975,24 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             raise HTTPException(status_code=400, detail=f"{error.__class__.__name__}: {error}") from None
         path = Path(app.state.settings.config_path)
         # Atomic replace: never leave a half-written config on disk.
-        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent) or ".", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.replace(tmp_name, path)
+        tmp_name = ""
+        try:
+            fd, tmp_name = tempfile.mkstemp(dir=str(path.parent) or ".", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            os.replace(tmp_name, path)
+        except OSError as error:
+            # Every compose in this family mounts the config read-only, so this is
+            # the usual answer, not an edge: say so instead of a bare 500, and
+            # leave both the file and the running config as they were.
+            if tmp_name:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_name)
+            raise HTTPException(
+                status_code=409,
+                detail=f"the config file cannot be written here ({error.strerror or error}) — "
+                "edit it where it is mounted from, then POST /config/reload",
+            ) from None
         app.state.config = candidate
         return {"applied": True, **_config_summary(candidate)}
 

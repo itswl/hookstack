@@ -85,7 +85,7 @@ MIT 协议。带截图的叙述性总览：[OVERVIEW.md](https://github.com/itsw
 
 ![hookrelay 的账本：每个事件的决策链、投递和回流](../img/hookrelay-ledger.png)
 
-![hookrelay 的看板：每条告警一张卡，固定七个阶段 —— 收到、判定、通知、调查、人、条件、修复 —— 一个修复已生效，一张卡在等你按，一条已裁定](../img/hookrelay-timeline.png)
+![hookrelay 的看板：顶部一句话说有没有事等你处理，旁边是按状态叠起来的一天，下面四个数字和每条告警一行 —— 处理中、投递失败、等你按的卡、已裁定、已恢复 —— 各带七个阶段](../img/hookrelay-timeline.png)
 
 ![hookjudge 的状态页](../img/hookjudge-status.png)
 

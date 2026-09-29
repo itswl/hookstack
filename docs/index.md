@@ -85,7 +85,7 @@ a source that already judged its own signal takes a terminal route instead:
 
 ![hookrelay's ledger: every event with its decision chain, its deliveries, and what came back](img/hookrelay-ledger.png)
 
-![hookrelay's board: one card per alert drawn as seven stages — received, judged, notified, investigated, a person, condition, fix — a fix that held, a card waiting on you, a ruling](img/hookrelay-timeline.png)
+![hookrelay's board: one sentence on whether anything waits on you, a day of alerts by where they stand, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a ruling, a recovery — each with its seven stages](img/hookrelay-timeline.png)
 
 ![hookjudge's status page: eight verdicts, every free route exercised, half paid](img/hookjudge-status.png)
 

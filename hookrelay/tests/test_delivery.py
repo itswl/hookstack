@@ -318,3 +318,22 @@ async def test_recovery_flag_survives_the_ledger_round_trip(store):
     rows = {row["event_id"]: row for row in await store.due_deliveries(now + 1)}
     assert rows[stated]["is_recovery"] == 1
     assert rows[silent]["is_recovery"] is None
+
+
+async def test_only_a_card_that_arrived_asked_anybody(store, cfg):
+    """A failed attempt keeps the body it tried, buttons and all, so the dispute
+    can be answered. Read as "what this card asked", that body put a card which
+    died with its downstream on the board — and on the morning card — as
+    waiting on a person who never received it."""
+    await _route_one(store, cfg)
+    cursor = await store.db.execute("SELECT id FROM deliveries ORDER BY id")
+    ids = [row["id"] for row in await cursor.fetchall()]
+    assert len(ids) >= 2, "the fixture routes to two channels"
+    card = json.dumps({"card": {"title": "db down", "actions": [{"text": "Worth waking me"}]}})
+    await store.mark_sent(ids[0], 1001.0, sent_body=card)
+    await store.mark_failed(ids[1], 1, "connection refused", None, sent_body=card)
+
+    deliveries = (await store.recent_events(1))[0]["deliveries"]
+    by_id = {d["id"]: d for d in deliveries}
+    assert by_id[ids[0]]["asked"] == ["Worth waking me"] and by_id[ids[0]]["sent_at"] == 1001.0
+    assert by_id[ids[1]]["status"] == "dead" and by_id[ids[1]]["asked"] == [], "a dead card asked nobody"

@@ -213,3 +213,26 @@ async def test_search_limit_is_clamped(file_client):
     # A hostile limit must not turn the ledger view into a full-table dump.
     response = await file_client.get("/status", params={"limit": 99999})
     assert response.status_code == 200 and len(response.json()["recent"]) == 1
+
+
+async def test_a_config_that_cannot_be_written_is_a_409_and_changes_nothing(file_client, monkeypatch):
+    """Every compose in this family mounts the config read-only, so the page's
+    Save met a bare 500 on every real deployment. The answer says what happened
+    and what to do, no temp file is left beside the config, and the running
+    config is the one that was running."""
+    import hookrelay.app as app_mod
+
+    def read_only(src, dst):
+        raise OSError(30, "Read-only file system")
+
+    monkeypatch.setattr(app_mod.os, "replace", read_only)
+    response = await file_client.put("/config", content=BETTER_YAML, headers=ADMIN)
+    assert response.status_code == 409
+    assert "Read-only file system" in response.json()["detail"] and "/config/reload" in response.json()["detail"]
+    assert "extra" not in file_client.config_path.read_text()
+    assert not list(file_client.config_path.parent.glob("*.tmp")), "the temp file is cleaned up"
+    summary = (await file_client.get("/config", headers=ADMIN)).json()["yaml"]
+    assert "extra" not in summary
+    hooked = (await file_client.post("/hook/test", json={"title": "still the old routes"})).json()
+    considered = [c["route"] for step in hooked["steps"] if step.get("gate") == "routes" for c in step["considered"]]
+    assert considered == ["all"], "the new route never went live"
