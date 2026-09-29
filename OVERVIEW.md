@@ -101,22 +101,28 @@ bot, around the stack that just failed.
 
 ![hookrelay ledger: every event with its decision chain, its deliveries, and what came back](docs/img/hookrelay-ledger.png)
 
-The board's front page reads the same ledger as operations. A chain is
-everything that quoted one origin's id, and every chain is drawn as the same
-seven stages — received, judged, notified, investigated, a person, condition,
-fix — with the wait between stages on the line and the colour earned by state.
-Here, from the rehearsal: the disk alert's fix **held** (green to the end: the
-condition ended seven seconds after the alert, and the approved procedure was
-told so), one card is **waiting on you** (its buttons were asked three minutes
-ago and nobody pressed), and the gateway alert was **ruled useful** by a press.
-Above the cards, four numbers that decide whether to read further; below them,
-the ticks and repeats folded into one line. Every card opens into the same
-seven stages top to bottom with everything each one said, and from there into
-the audit record — payload digests per hop, bytes and channels, the human
-actions, the end-to-end time — because the record is for arguing about
-afterwards, not for reading alerts.
+The board's front page reads the same ledger as operations, and opens the way
+an inbox does. One sentence says whether anything is waiting on you, beside a
+day of alerts stacked by where each one stands; four numbers under it — waiting
+on you, in flight, delivery failures, ended well in the last day — each open
+the list already filtered. A chain is everything that quoted one origin's id,
+and every row is one chain: its status in a word, the one line that matters
+now — what the card asked and when, who pressed and how long after, why a
+delivery failed — and seven dots for the stages every alert passes through,
+received, judged, notified, investigated, a person, condition, fix, with the
+colour earned by state. Here, from a local run: one alert is **in flight** (its
+handovers are still retrying), one **failed to deliver** (the chat was down,
+and the row says so instead of listing buttons nobody received), six are
+**waiting on you**, one was **ruled useful** by a press and one **recovered**.
+Ticks, repeats and anything inside a silence are one checkbox away. A row opens
+the alert's whole story in a drawer: the same seven stages top to bottom with
+everything each one said, every delivery with a retry beside a dead one, the
+bytes of both directions, and the audit record — payload digests per hop, the
+human actions, the end-to-end time — because the record is for arguing about
+afterwards, not for reading alerts. Deliveries, silences and routing each have
+a tab of their own, and the page speaks Chinese or English.
 
-![hookrelay's board: one card per alert drawn as seven stages — a fix that held, a card waiting on you, a ruling — and the four numbers above them](docs/img/hookrelay-timeline.png)
+![hookrelay's board: one sentence on whether anything waits on you, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a ruling, a recovery — each with its seven stages](docs/img/hookrelay-timeline.png)
 
 ## hookjudge: the judge
 
@@ -380,12 +386,13 @@ the header's strict number reads `0 closed without anyone stepping in`, because
 a person approved the procedure — a request is not an intervention, but an
 approval is, and the board says so rather than flattering itself.
 
-![the pipe's journey of the disk alert: seven stages top to bottom — the verdict, the report, the approve press named with its actor, the condition ending, the fix held](docs/img/hookrelay-audit-press.png)
+![the disk alert's story on the pipe's board: seven stages top to bottom — the verdict, six cards and what each carried, the report, the approve press named with its actor, the condition ending, the fix held](docs/img/hookrelay-audit-press.png)
 
-The same operation from the pipe's side, as one journey: received, judged,
-notified (two cards, and what each asked), investigated, **a person** — the
-approve with the actor who made it — then the condition ending and, last, the
-fix **held**, told by the investigator through the same door its report took.
+The same operation from the pipe's side, as the story its row opens into:
+received, judged, notified — six cards, each named by the message it carried
+and what it asked — investigated, **a person** — the approve with the actor who
+made it — then the condition ending and, last, the fix **held**, told by the
+investigator through the same door its report took.
 This is the record pilot zero never had: on the retired production deployment
 no card ever carried the button, so this line was never written.
 

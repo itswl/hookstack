@@ -143,9 +143,11 @@ async def test_trace_answers_a_handle_over_http(client):
 
 
 def test_the_board_reads_the_journey_from_a_handle():
-    """The page half of the contract: a journey tab, a deep link, and the
-    handle sent to /trace untouched — the ledger does the resolving."""
+    """The page half of the contract: an alert's story opens from a deep link,
+    the older `#journey=` links other pages and cards still carry keep working,
+    and the handle goes to /trace untouched — the ledger does the resolving."""
     page = Path(__file__).resolve().parents[1].joinpath("hookrelay", "status.html").read_text(encoding="utf-8")
-    assert 'data-tab="journey"' in page and 'id="panel-journey"' in page
-    assert "#journey=" in page and 'fetch(BASE + "/trace/" + encodeURIComponent(ref)' in page
+    assert 'id="drawer"' in page and '"#/alert/"' in page
+    assert "^journey=(.+)$" in page, "the links already out there must still open the alert"
+    assert 'api("/trace/" + encodeURIComponent(ref))' in page and "fetch(BASE + path" in page
     assert "setInterval" not in page, "boards are pushed, not polled"

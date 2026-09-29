@@ -13,8 +13,11 @@ note of 2026-09-08 called that the only useful form of an overview.
 `--json` prints the figures instead of the signal, for a person or a test.
 Everything here is the pipe's own account, read by identifiers: a card that
 asked (labels the pipe wrote) and no press in its chain is "waiting"; a later
-event of the same source and title the source stated as a recovery is "ended";
-a return whose title says the fix held is "ended" too. No alert text is read.
+event of the same source and title the source stated as a recovery is "ended",
+counted from when it ended; a return whose title says the fix held is "ended"
+too. A routed single hop under two hours old is "in flight", and so is a
+procedure somebody approved that nothing has answered since. No alert text is
+read.
 """
 
 from __future__ import annotations
@@ -67,6 +70,22 @@ def _recovered(rows: dict[int, dict[str, Any]], row: dict[str, Any], at: float) 
     return best
 
 
+def _approved_unanswered(
+    hops: list[dict[str, Any]], presses: list[dict[str, Any]], rows: dict[int, dict[str, Any]]
+) -> bool:
+    """A person approved the proposed procedure and no report came back after:
+    the machine is working on it, and the board draws it in the in-flight blue."""
+    approved = [
+        float(h.get("at") or 0)
+        for h in presses
+        if (rows.get(int(h.get("id") or 0), {}).get("fields") or {}).get("kind") == "approve"
+    ]
+    if not approved:
+        return False
+    runs = [float(h.get("at") or 0) for h in hops[1:] if h.get("session") and h not in presses]
+    return not any(run > press for run in runs for press in approved)
+
+
 def analyse(timeline: dict[str, Any], status: dict[str, Any], *, now: float, hours: float = 24.0) -> dict[str, Any]:
     """The board's figures, from the same two feeds it reads."""
     rows = {int(r["id"]): r for r in status.get("recent") or [] if r.get("id") is not None}
@@ -109,7 +128,12 @@ def analyse(timeline: dict[str, Any], status: dict[str, Any], *, now: float, hou
             None,
         )
         recovery = _recovered(rows, row, t0) if row else None
-        last = max(float(h.get("at") or t0) for h in hops)
+        # When the chain last MOVED, which for a recovered alert is the
+        # recovery: it is a separate event, not a hop, and an alert that fired
+        # yesterday and ended an hour ago ended well today.
+        last = max(
+            [float(h.get("at") or t0) for h in hops] + ([float(recovery.get("received_at") or 0)] if recovery else [])
+        )
         if fix and str(fix.get("title") or "").endswith("· fix held") or (recovery and not fix):
             if now - last <= hours * 3600:
                 ended += 1
@@ -126,7 +150,7 @@ def analyse(timeline: dict[str, Any], status: dict[str, Any], *, now: float, hou
                     "on": asked_on,
                 }
             )
-        elif len(hops) == 1 and now - t0 < 7200:
+        elif _approved_unanswered(hops, presses, rows) or (len(hops) == 1 and now - t0 < 7200):
             in_flight += 1
     queue = status.get("queue") or {}
     waiting.sort(key=lambda w: w["since"])

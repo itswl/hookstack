@@ -119,3 +119,46 @@ def test_the_card_leads_with_what_waits_and_says_so_in_the_title():
     quiet = needs_you.signal(needs_you.analyse({"chains": []}, {"queue": {}}, now=NOW), now=NOW)
     assert quiet["title"].startswith("Nothing waiting on you · ")
     assert "dead letters 0" in quiet["detail"]
+
+
+def test_an_approved_fix_is_in_flight_and_an_ending_counts_from_when_it_ended():
+    """Two rules the board draws and the card once missed. A procedure somebody
+    approved is the machine's to finish, so it is in flight until a report or its
+    outcome comes back — before, the card counted it nowhere. And an alert that
+    fired yesterday and recovered an hour ago ended well TODAY: the recovery is a
+    separate event, not a hop, so the chain's own hops alone dated it yesterday."""
+    timeline = {
+        "chains": [
+            {
+                "chain": "20",
+                "started_at": NOW - 9000,
+                "hops": [
+                    _hop(20, NOW - 9000, "inbound", "queue"),
+                    _hop(21, NOW - 8900, "probe-notify", "queue · investigation", session="probe:inbound:20"),
+                    _hop(22, NOW - 8000, "card-action", "card action: approve"),
+                ],
+            },
+            {"chain": "23", "started_at": NOW - 90000, "hops": [_hop(23, NOW - 90000, "inbound", "tls")]},
+            {"chain": "24", "started_at": NOW - 4000, "hops": [_hop(24, NOW - 4000, "inbound", "tls")]},
+        ]
+    }
+    status = {
+        "queue": {},
+        "recent": [
+            _row(20, "inbound", "queue"),
+            _row(21, "probe-notify", "queue · investigation"),
+            _row(22, "card-action", "card action: approve", fields={"kind": "approve", "actor": "ou_x"}),
+            _row(23, "inbound", "tls", received_at=NOW - 90000),
+            _row(24, "inbound", "tls", received_at=NOW - 4000, is_recovery=1),
+        ],
+    }
+    figures = needs_you.analyse(timeline, status, now=NOW)
+    assert figures["waiting"] == [] and figures["in_flight"] == 1, "the approved procedure, nothing back since"
+    assert figures["ended_well"] == 1, "fired 25 hours ago, recovered an hour ago"
+
+    reported = {**timeline, "chains": [dict(timeline["chains"][0])]}
+    reported["chains"][0]["hops"] = [
+        *timeline["chains"][0]["hops"],
+        _hop(25, NOW - 7000, "probe-notify", "queue · investigation", session="probe:inbound:20"),
+    ]
+    assert needs_you.analyse(reported, status, now=NOW)["in_flight"] == 0, "a report after the approval answered it"
