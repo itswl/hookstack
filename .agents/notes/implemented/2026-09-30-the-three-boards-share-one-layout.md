@@ -96,9 +96,13 @@ now print nothing for a missing time rather than throwing inside a list render.
 - The console lost its two-pane layout everywhere except sessions. The other
   views are full-width pages, which reads better on a phone and gives a long
   runbook the width it needs.
-- The judge's documentation picture and six of the console's were reshot from
-  one `demo.sh` run plus four more alerts, at no cost. The sessions, audit
-  and waterfall pictures still show the older console, because they record real
-  model runs from 2026-09-08. Reshooting them needs a model run (about $2.50).
-  The prose beside the sessions picture had already drifted from that picture
-  before this change.
+- Every documentation picture was reshot in light mode on 2026-09-30, at the
+  operator's word (「截图用浅色模式截图」), from three scratch runs:
+  - five real investigations on gpt-5.6-luna, $1.10 together, for sessions,
+    audit, waterfall, memory and system, with the gateway hidden behind a
+    proxy named `model-gateway`;
+  - one `demo.sh` run plus four alerts for the judge, the rehearsal loop and
+    the runbook;
+  - the stack smoke plus the inbox states for the pipe.
+  The Chinese README (`README.zh-CN.md`, asked for the same day) and
+  `docs/zh/index.md` show the same pages in Chinese, under `docs/img/zh/`.

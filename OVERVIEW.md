@@ -117,8 +117,9 @@ delivery failed — and seven dots for the stages every alert passes through,
 received, judged, notified, investigated, a person, condition, fix, with the
 colour earned by state. Here, from a local run: one alert is **in flight** (its
 handovers are still retrying), one **failed to deliver** (the chat was down,
-and the row says so instead of listing buttons nobody received), six are
-**waiting on you**, one was **ruled useful** by a press and one **recovered**.
+and the row says so instead of listing buttons nobody received), seven are
+**waiting on you**, one was **ruled useful** by a press, one **recovered** and
+one **fix held**; the picture is the top of that list.
 Ticks, repeats and anything inside a silence are one checkbox away. A row opens
 the alert's whole story in a drawer: the same seven stages top to bottom with
 everything each one said, every delivery with a retry beside a dead one, the
@@ -128,7 +129,7 @@ afterwards, not for reading alerts. Deliveries, silences and routing each have
 a tab of their own; the page speaks Chinese or English and, like the other two
 boards, follows the system's light or dark setting.
 
-![hookrelay's board: one sentence on whether anything waits on you, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a ruling, a recovery — each with its seven stages](docs/img/hookrelay-timeline.png)
+![hookrelay's board: one sentence on whether anything waits on you, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a recovery — each with its seven stages](docs/img/hookrelay-timeline.png)
 
 ## hookjudge: the judge
 
@@ -205,25 +206,26 @@ duration. Select a finished session and the box at the bottom is a follow-up:
 the same engine session resumes, with the first round's tool output, evidence
 and dead ends all still there. A running turn can be stopped at any time.
 
-Below is the session page after the last investigation finished: five sessions
-on the left with their costs, and on the right the report for the eighth
-gateway instance, rendered as Markdown with a bill line reading gpt-5.6-luna ·
-in 1.4k · out 1.1k · cache 35.2kr/43.2kw · $0.3334 · 20.7s. What the report
-says is the part worth reading. The agent names the likely cause (upstream
-latency or connectivity), then says what it could not distinguish and why:
-the container holds no production credentials and no cluster or cloud access,
-so logs, traces and deployment state could not be verified. It compares its
-case with the sibling investigations already in `/data/results` — gateway-7
-and gateway-2 reached the same conclusion — ranks the remediation, and then
-refuses to write a command block: *the runtime interface and failing
-dependency are unconfirmed, so kubectl, cloud CLI or service-manager commands
-would be speculative*. Under the report sit the two rulings a person can
-press — found the cause, missed it — and the button that distils the run into
-a runbook draft. An investigation that states its evidence limits instead of
-a fabricated root cause is the behaviour the environment memory asks for, and
-every inference in it is labelled as one.
+Below is the session page after five real investigations of the demo alerts,
+run on gpt-5.6-luna on 2026-09-30 for $1.10 together: the five sessions on the
+left with what each cost, and on the right the report for the payment-gateway
+alert, rendered as Markdown with a bill line reading gpt-5.6-luna · in 1.5k ·
+out 1.4k · cache 55.6kr/21kw · $0.2137 · 25.1s. What the report says is the part
+worth reading. It opens on its conclusion, then says what it could not
+establish and why: the host is fictional and unreachable from the container
+and the alert carries no diagnostic evidence, so the root cause is **Unknown**,
+and a recent deployment, a gateway fault or a failing dependency are named as
+possible inferences, not findings. It searched the case files before anything
+else, found its siblings still running and so no earlier verdict to agree or
+disagree with, ranked the remediation, and then refused to propose a command:
+*the named host cannot be reached from this container, and the evidence is
+insufficient to select a safe corrective action*. Under the report sit the two
+rulings a person can press — found the cause, missed it — and the button that
+distills the run into a runbook draft. An investigation that states its
+evidence limits instead of a fabricated root cause is the behaviour the
+environment memory asks for, and every inference in it is labelled as one.
 
-![hookprobe sessions console](docs/img/hookprobe-sessions.png)
+![hookprobe's sessions tab: five real investigations on the left, the payment-gateway report on the right, conclusion first, root cause unknown and said so](docs/img/hookprobe-sessions.png)
 
 The investigation is visible while it happens and after: under a running turn,
 every step scrolls in live — a tool call with a one-line summary, the agent's
@@ -233,8 +235,8 @@ after. The audit view below is the same record across runs, newest first:
 every tool call of every run, subagents included, written by the service as
 one line per call to a flight recorder the agent cannot edit. The five runs
 read each other's case files (`Read /data/results/probe:…json`), grep for the
-alert's own terms across the workdir, and one shells out to parse the engine's
-transcript — all of it here, with the session it belongs to.
+alert's own terms across the workdir and list what is there to read — 23 calls,
+all of it here, with the session it belongs to.
 
 ![audit view: every tool call in every run, subagents included, newest first](docs/img/hookprobe-audit.png)
 
@@ -242,8 +244,8 @@ And where the time went. The CLI reports every model call and tool result to
 the service itself (nothing else needs deploying), and the run's page draws
 them on one axis: model calls in blue with their duration, tokens and cost,
 tool calls in amber, a failed call in red with its status code, one row per
-round. The run below took 29 seconds, 98% of them waiting on the model across
-five rounds; its two costliest calls were 76% of its $0.61, and the header
+round. The run below took 25 seconds, all of them waiting on the model across
+five rounds; its two costliest calls were 72% of its $0.21, and the header
 says so before anyone reads the rows.
 
 ![the waterfall: model and tool calls of one investigation on one time axis](docs/img/hookprobe-waterfall.png)
@@ -269,9 +271,11 @@ injected into every investigation. The demo's memory, below, says the objects
 in the demo alerts are fictional and unreachable from the container, that a
 check which cannot reach its target must say so, that reasoning must rest on
 the alert payload and in-container evidence and label every inference, and
-that a reading nobody took must never be reported. A model reads it before its
-first tool call: the memory is not decoration, it is where a report that
-states its limits instead of inventing a cause comes from. Beside it, the
+that a reading nobody took must never be reported. Look back at the report
+above: "the host is fictional/inaccessible", "Root cause: Unknown", "possible
+inferences, not findings" is that memory arriving intact at the model, read
+before its first tool call. The memory is not decoration; it is where a report
+that states its limits instead of inventing a cause comes from. Beside it, the
 prompt view holds the
 methodology appended to the engine's own system prompt; both are read fresh at
 every run, so an edit applies to the next investigation with no restart.
@@ -369,7 +373,7 @@ the smallest brain is on file in
 
 ## The loop, rehearsed: from report to audit record
 
-Four pictures of one loop, taken on 2026-09-29 against the source compose
+Four pictures of one loop, taken on 2026-09-30 against the source compose
 with no model key: three from one `demo.sh` run, the pipe's from the stack
 smoke, which runs the same loop and left the board's other states on screen
 too. Every number in the report was written in advance and its last
@@ -412,25 +416,26 @@ no card ever carried the button, so this line was never written.
 
 ## Running it locally
 
-The pipe-plus-judge demo is self-contained (the stub model and the sink both
-live in the repository), so one command starts hookstack; the investigator
-needs real model credentials and is therefore an opt-in tier. Each service's
-gate is an exact local replica of its CI job — gate before pushing, CI
-confirms after, and that is the fixed discipline of this repository.
+The whole stack is self-contained (the stub model, the rehearsal and the sink
+all live in the repository), so one command starts all of hookstack, the
+investigator included: it comes up on the rehearsal, which costs nothing, and a
+model key makes it real. Each service's gate is an exact local replica of its
+CI job — gate before pushing, CI confirms after, and that is the fixed
+discipline of this repository.
 
 ```bash
-# pipe + judge (with the stub model and the sink)
+# the whole stack: pipe, judge on the stub model, investigator on the rehearsal, sink
 git clone https://github.com/itswl/hookstack && cd hookstack
-docker compose up -d --build      # relay :8100 · judge :8200
-bash scripts/stack-smoke.sh       # or just run the whole smoke check
+docker compose up -d --build      # relay :8100 · judge :8200 · probe :8088
+bash scripts/demo.sh              # the loop end to end, for $0
+bash scripts/stack-smoke.sh       # or the whole smoke check
 ```
 
 ```bash
-# add the investigator (needs real model credentials; any Anthropic-dialect
-# endpoint works: ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN plus the model
-# alias mappings for that provider)
-printf 'ANTHROPIC_API_KEY=sk-ant-...\nHOOKPROBE_EVENT_URL=http://hookprobe:8088/hooks/event\n' >> .env
-docker compose --profile probe up -d --build
+# make the investigator real (any Anthropic-dialect endpoint works:
+# ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN instead of the key)
+printf 'HOOKPROBE_RUNTIME=claude\nHOOKPROBE_MODEL=claude-opus-5\nANTHROPIC_API_KEY=sk-ant-...\n' >> .env
+docker compose up -d --build
 open http://127.0.0.1:8088/ui
 ```
 

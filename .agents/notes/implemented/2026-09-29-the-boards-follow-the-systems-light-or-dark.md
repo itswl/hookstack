@@ -60,5 +60,7 @@ into the design guard rather than into a review note.
   keeps three. A reader who picks light on one board and not the others sees
   them differ until they pick there too, or until the system and their pick
   agree.
-- The documented screenshots stay dark. They describe the pages, and the dark
-  mode is the one they were taken in.
+- The documented screenshots were dark until 2026-09-30, when the operator
+  asked for them light (「截图用浅色模式截图」). They are light now, English on
+  the English pages and Chinese on the Chinese ones
+  ([[the-three-boards-share-one-layout]]).
