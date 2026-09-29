@@ -1,5 +1,5 @@
 ---
-title: One address for every board, and the journey shows the change itself
+title: One address for every board (withdrawn 2026-09-29), and the journey shows the change itself
 status: implemented
 date: 2026-09-28
 scope: stack
@@ -59,3 +59,24 @@ stores — the same fences the investigator lifts with `patches.py`,
 - The pipe's page renders fences by regex; a report whose closing fence is
   not on its own line shows as prose, which is exactly how the investigator's
   own lift treats it.
+
+## Withdrawn, 2026-09-29: the one address
+
+The operator opened the site, asked what the read token was, and after the
+answer (each board still asks the browser for its own credential, three of
+them on the work deployment) said 「算了，你把这个页面取消吧，感觉不实用」.
+Withdrawn the next morning: the gateway service left both composes,
+`deploy/gateway/` is gone, the smoke's gateway step is gone, and the console
+links went back to the published ports (`HOOKRELAY_UI_LINKS` to
+`http://127.0.0.1:8088/ui` and friends, `HOOKPROBE_RELAY_UI_URL` to `:8100`).
+
+What stays, because it was not what the operator withdrew: the journey's
+report, diff, blocked list and proposed steps, drawn on the pipe's own board;
+and the pages' mount-awareness with its guard, inert on a board served at its
+root and the thing that makes a proxy a one-file change if one is ever wanted.
+
+The lesson worth keeping: one origin removed the port hopping and none of the
+credentials. A site that asks three questions before it shows anything is not
+the "one website" that was asked for. A next attempt has to answer the
+credential question first, one login the boards trust, or it will be
+withdrawn for the same reason.

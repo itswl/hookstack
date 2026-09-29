@@ -414,8 +414,8 @@
   var TOKEN_KEY = "hookrelay-read-token";
   var ADMIN_KEY = "hookrelay-admin-token";
   // Where this board is mounted: "" at the root of its own port, or a prefix
-  // behind the gateway that serves the family under one address. Every request
-  // and every link the page builds is relative to it.
+  // when a reverse proxy serves it under one. Every request and every link the
+  // page builds is relative to it (scripts/assert_mount_aware.py).
   var BASE = location.pathname.replace(/\/$/, "");
 
   // ── small helpers ──
