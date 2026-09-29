@@ -35,7 +35,7 @@ docker compose up -d --build
 
 | where | what |
 | --- | --- |
-| http://127.0.0.1:8100/ | the pipe's board (alerts · ledger · deliveries · silences · routing · help, in Chinese or English) |
+| http://127.0.0.1:8100/ | the pipe's board (alerts · ledger · deliveries · silences · routing · help, in Chinese or English, light or dark) |
 | http://127.0.0.1:8200/ | the brain's ledger page (judged / paid ratio / cost / return failures) |
 | `docker compose logs -f sink` | what an operator would actually have received |
 

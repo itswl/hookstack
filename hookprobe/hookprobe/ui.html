@@ -7,6 +7,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hookprobe · sessions</title>
+<script id="theme">
+  /* ── hookstack theme · keep this block identical in all three pages ── */
+  // Before the first paint, so a light system never sees a dark flash: the
+  // reader's pick if they made one, else what the system asks for. The button
+  // and a system that changes its mind are themeWire(), in the page's script.
+  (function () {
+    var picked = null;
+    try { picked = localStorage.getItem("hookstack-theme"); } catch (err) { picked = null; }
+    var system = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", picked === "light" || picked === "dark" ? picked : system);
+  })();
+  /* ── end theme ───────────────────────────────────────────────────────── */
+</script>
 <style>
   /* ── hookstack design tokens · keep this block identical in all three pages ── */
   :root {
@@ -17,11 +30,23 @@
     /* "PingFang SC" stays in the stack: alert titles arrive in whatever language
        the monitoring system speaks, and they are rendered here verbatim. */
     --ui: 14px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    color-scheme: dark;
+  }
+  /* The same roles valued for a white page. Which set applies is data-theme on
+     <html>, set before the first paint by the theme snippet in <head>: what
+     the system asks for, unless the reader picked the other one. Every text
+     colour here clears 4.5:1 on white, and on its own 10% tint. */
+  :root[data-theme="light"] {
+    --bg: #f4f6f9; --surface: #ffffff; --border: #dde2ea; --border-soft: #eaedf2;
+    --text: #1b2230; --muted: #5b6677; --accent: #2160d6;
+    --ok: #137a3e; --warn: #9a5800; --bad: #c9262c;
+    color-scheme: light;
   }
   .rc { display: flex; gap: 6px; align-items: center; }
   .rc button, .rc select { background: var(--surface); border: 1px solid var(--border);
     color: var(--text); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px;
     cursor: pointer; }
+  .rc button svg { display: block; }
   .rc button:hover, .rc select:hover { border-color: var(--accent); }
   .rc .live { font-size: 11px; color: var(--muted); border: 1px solid var(--border);
     border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
@@ -43,6 +68,17 @@
   :root {
     --panel: var(--surface); --line: var(--border); --dim: var(--muted);
     --green: var(--ok); --amber: var(--warn); --red: var(--bad);
+  }
+  /* This page's own surfaces, valued for each mode like the tokens above. */
+  :root {
+    --btn: #21262d; --btn-line: #30363d; --primary: #1f6feb; --hover: #1c2128;
+    --selected: #152238; --selected-line: #1f3a5f; --code-bg: #0b0f14; --code-inline: #22282f;
+    --th: #1a2027; --narr: #9daebe; --track: rgba(255,255,255,.05);
+  }
+  :root[data-theme="light"] {
+    --btn: #f3f5f8; --btn-line: #d3d9e2; --primary: #1f6feb; --hover: #f2f5f9;
+    --selected: #e8f0fe; --selected-line: #c6d7f8; --code-bg: #f6f8fa; --code-inline: #eef1f5;
+    --th: #f3f5f8; --narr: #56657a; --track: rgba(15,23,42,.07);
   }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;
@@ -85,9 +121,9 @@ header h1 span{color:var(--dim);font-weight:400}
 #budget{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:10px;padding:3px 8px;white-space:nowrap}
 #budget.hot{color:var(--red);border-color:var(--red)}
 #budget.unmeasured{border-style:dashed;border-color:var(--dim)}
-button{background:#21262d;border:1px solid #30363d;color:var(--text);border-radius:6px;padding:5px 12px;cursor:pointer;font-size:13px}
+button{background:var(--btn);border:1px solid var(--btn-line);color:var(--text);border-radius:6px;padding:5px 12px;cursor:pointer;font-size:13px}
 button:hover{border-color:var(--accent)}
-button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+button.primary{background:var(--primary);border-color:var(--primary);color:#fff}
 button:disabled{opacity:.45;cursor:default}
 main{flex:1;display:flex;min-height:0}
 aside{width:330px;border-right:1px solid var(--line);background:var(--panel);flex-shrink:0;display:flex;flex-direction:column}
@@ -96,8 +132,8 @@ aside{width:330px;border-right:1px solid var(--line);background:var(--panel);fle
 #q:focus{outline:none;border-color:var(--accent)}
 #list{flex:1;overflow-y:auto}
 .item{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;border-left:2px solid transparent}
-.item:hover{background:#1c2128}
-.item.sel{background:#152238;border-left-color:var(--accent)}
+.item:hover{background:var(--hover)}
+.item.sel{background:var(--selected);border-left-color:var(--accent)}
 .item .key{font-family:var(--mono);font-size:12px;color:var(--accent);word-break:break-all}
 .item .title{color:var(--dim);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
 .item .meta{display:flex;gap:8px;font-size:11px;color:var(--dim);margin-top:4px;align-items:center;flex-wrap:wrap}
@@ -111,7 +147,7 @@ aside{width:330px;border-right:1px solid var(--line);background:var(--panel);fle
 .subhead{color:var(--text);font-size:13px;font-weight:600;margin:14px 0 6px}
 .audit-bar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
 .audit-bar input{background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--text);padding:5px 9px;font-size:12px;width:280px}
-.audit-row{display:flex;gap:10px;font-family:var(--mono);font-size:11.5px;padding:3px 0;border-bottom:1px solid #161b22;align-items:flex-start}
+.audit-row{display:flex;gap:10px;font-family:var(--mono);font-size:11.5px;padding:3px 0;border-bottom:1px solid var(--border-soft);align-items:flex-start}
 .audit-row .ts{color:var(--dim);flex-shrink:0}
 /* Wraps rather than truncates. A session key is the handle for everything else
    here — it is what the filter box takes, what /v1/runs/{key} wants and what a
@@ -133,7 +169,7 @@ aside{width:330px;border-right:1px solid var(--line);background:var(--panel);fle
 .help th,.help td{border:1px solid var(--line);padding:6px 10px;text-align:left;font-size:12.5px;vertical-align:top}
 .help th{color:var(--dim);font-weight:600;background:var(--panel)}
 .help code{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:var(--mono);font-size:12px}
-.help pre{background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.5}
+.help pre{background:var(--code-bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.5}
 .help li{margin:3px 0}
 .badge.running{color:var(--amber)}
 .badge.completed{color:var(--green)}
@@ -143,7 +179,7 @@ section{flex:1;display:flex;flex-direction:column;min-width:0}
       font-family:var(--mono);min-height:36px;word-break:break-all}
 #turns{flex:1;overflow-y:auto;padding:16px}
 .turn{margin-bottom:20px}
-.q,details.q{background:#152238;border:1px solid #1f3a5f;border-radius:8px;padding:8px 12px;margin-bottom:8px;
+.q,details.q{background:var(--selected);border:1px solid var(--selected-line);border-radius:8px;padding:8px 12px;margin-bottom:8px;
    white-space:pre-wrap;word-break:break-word;font-size:13px}
 details.q summary{cursor:pointer;color:var(--dim);white-space:normal}
 .a pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;
@@ -165,7 +201,7 @@ details.q summary{cursor:pointer;color:var(--dim);white-space:normal}
 .tamper{border:1px solid var(--red);border-radius:6px;padding:8px 10px;margin:6px 0}
 .tamper-head{color:var(--red);font-size:12px;font-weight:600}
 .tamper .proc{border-left-color:var(--red);margin-bottom:0}
-.ev-narr{font-family:inherit;font-style:italic;color:#9daebe;white-space:pre-wrap}
+.ev-narr{font-family:inherit;font-style:italic;color:var(--narr);white-space:pre-wrap}
 .ev-live{font-family:inherit;white-space:pre-wrap;color:var(--text)}
 .ev-live.thinking{font-style:italic;color:var(--dim)}
 .ev-live::after{content:"▌";color:var(--accent);animation:none}
@@ -195,8 +231,8 @@ details.proc-past summary{cursor:pointer;color:var(--dim);font-size:12px}
 .hist-diff{color:var(--accent);cursor:pointer;margin-left:8px;text-decoration:underline}
 .diff{font-family:var(--mono);font-size:11.5px;margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:6px 8px}
 .diff-row{white-space:pre-wrap;word-break:break-all;padding:1px 4px}
-.diff-row.add{color:var(--ok);background:rgba(61,214,140,.07)}
-.diff-row.del{color:var(--bad);background:rgba(229,72,77,.07)}
+.diff-row.add{color:var(--ok);background:color-mix(in srgb, var(--ok) 8%, transparent)}
+.diff-row.del{color:var(--bad);background:color-mix(in srgb, var(--bad) 8%, transparent)}
 .diff-row.ctx{color:var(--dim)}
 .diff-row.ctx.quiet{text-align:center;font-style:italic}
 .skill-bar{display:flex;gap:12px;align-items:center;margin-bottom:10px}
@@ -211,11 +247,11 @@ button.danger{color:var(--red);border-color:var(--red)}
 /* the run's own telemetry: model and tool calls on one time axis */
 .wf{border-left:2px solid var(--line);margin:6px 0 8px 6px;padding-left:10px}
 .wf-row{display:grid;grid-template-columns:30px minmax(120px,1fr) minmax(240px,48%);gap:10px;align-items:center;padding:2px 0;font-family:var(--mono);font-size:11px;color:var(--dim)}
-.wf-split{display:flex;height:6px;margin:8px 0 2px 6px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)}
+.wf-split{display:flex;height:6px;margin:8px 0 2px 6px;border-radius:3px;overflow:hidden;background:var(--track)}
 .wf-seg.model{background:var(--accent)}.wf-seg.tool{background:var(--amber)}.wf-seg.gap{background:transparent}
 .wf-then{color:var(--amber)}.wf-label.failed{color:var(--bad)}
 .wf-label.model{color:var(--accent)}.wf-label.tool{color:var(--amber)}
-.wf-track{position:relative;height:9px;border-radius:3px;background:rgba(255,255,255,.05)}
+.wf-track{position:relative;height:9px;border-radius:3px;background:var(--track)}
 .wf-bar{position:absolute;top:0;bottom:0;border-radius:3px;background:var(--accent);opacity:.85}
 .wf-bar.tool{background:var(--amber)}.wf-bar.failed{background:var(--bad)}
 .wf-text{word-break:break-all}
@@ -241,14 +277,14 @@ button.danger{color:var(--red);border-color:var(--red)}
 .md p{margin:6px 0}
 .md ul,.md ol{margin:6px 0;padding-left:24px}
 .md li{margin:2px 0}
-.md code{background:#22282f;border:1px solid var(--line);border-radius:4px;padding:0 4px;
+.md code{background:var(--code-inline);border:1px solid var(--line);border-radius:4px;padding:0 4px;
   font-family:var(--mono);font-size:12px}
-.md pre.code{background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;
+.md pre.code{background:var(--code-bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;
   white-space:pre-wrap;word-break:break-word;margin:8px 0}
 .md pre.code code{background:none;border:none;padding:0;font-size:12px}
 .md table{border-collapse:collapse;margin:8px 0;font-size:12.5px}
 .md th,.md td{border:1px solid var(--line);padding:4px 10px;text-align:left}
-.md th{background:#1a2027}
+.md th{background:var(--th)}
 .md a{color:var(--accent)}
 .pending{color:var(--amber);padding:8px 12px;font-size:13px}
 .pending::after{content:"…";animation:dots 1.2s steps(3,end) infinite}
@@ -280,8 +316,9 @@ button.danger{color:var(--red);border-color:var(--red)}
   <span id="budget" hidden></span>
   <span class="stamp" id="stamp"></span>
   <span class="rc">
+    <button id="rTheme" type="button" title="light / dark" aria-label="light / dark">&#9680;</button>
     <button id="rNow" title="refresh now">&#8635;</button>
-    <span id="rLive" class="live" title="live connection">live</span>
+    <span id="rLive" class="live" title="live connection">live</span></span>
   </span>
   <input id="token" placeholder="bearer token" autocomplete="off">
 </header>
@@ -351,6 +388,61 @@ let viewMode = "sessions"; // or "skills"
     if (bar) bar.classList[needed ? "add" : "remove"]("show");
   }
   /* ── end token wiring ───────────────────────────────────────────────────── */
+  // ── theme wiring · keep this block identical in all three pages ───────────
+  // Dark and light are one set of roles valued twice (the design tokens). A
+  // board follows the system's setting until the reader presses the button for
+  // the other one, and pressing back to what the system says forgets the pick:
+  // the one button is also the way home to "follow the system". The pick is
+  // kept per browser and per board, like the tokens.
+  var themeKey = "hookstack-theme";
+  var themeMedia = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+  var themePicked = themeRead();
+  var themeTitle = function (mode) { return mode === "light" ? "light · switch to dark" : "dark · switch to light"; };
+  var themeChanged = function () {};
+  function themeRead() {
+    var value = null;
+    try { value = localStorage.getItem(themeKey); } catch (err) { value = null; }
+    return value === "light" || value === "dark" ? value : "";
+  }
+  function themeSystem() { return themeMedia && themeMedia.matches ? "light" : "dark"; }
+  function themeApply() {
+    var mode = themePicked || themeSystem();
+    document.documentElement.setAttribute("data-theme", mode);
+    var button = document.getElementById("rTheme");
+    if (button) {
+      button.innerHTML = mode === "light"
+        ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>';
+      button.title = themeTitle(mode);
+      button.setAttribute("aria-label", themeTitle(mode));
+    }
+    themeChanged(mode);
+  }
+  // "" follows the system; "light" or "dark" is the reader's pick.
+  function themeSet(choice) {
+    themePicked = choice === "light" || choice === "dark" ? choice : "";
+    try {
+      if (themePicked) localStorage.setItem(themeKey, themePicked);
+      else localStorage.removeItem(themeKey);
+    } catch (err) { /* a browser that keeps nothing: the pick lasts this page */ }
+    themeApply();
+  }
+  function themeWire(title, onChange) {
+    if (title) themeTitle = title;
+    if (onChange) themeChanged = onChange;
+    var button = document.getElementById("rTheme");
+    if (button) button.addEventListener("click", function () {
+      var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+      themeSet(next === themeSystem() ? "" : next);
+    });
+    if (themeMedia && themeMedia.addEventListener) themeMedia.addEventListener("change", themeApply);
+    else if (themeMedia && themeMedia.addListener) themeMedia.addListener(themeApply);
+    window.addEventListener("storage", function (event) {
+      if (event.key === themeKey) { themePicked = themeRead(); themeApply(); }
+    });
+    themeApply();
+  }
+  // ── end theme wiring ──────────────────────────────────────────────────────
 // Hyphens, like the other two keys. The underscore was a third naming convention
 // across three services for one idea. The old key is read once, so a browser that
 // already holds a token is not asked to retype it.
@@ -2181,6 +2273,7 @@ async function tick() {
   $("#stamp").textContent = "refreshed " + now;
 }
 
+themeWire();
 wireLiveControl(BASE + "/v1/live", readHeaders, tick);
 </script>
 </body>

@@ -14,27 +14,34 @@ in `scripts/stack-smoke.sh`. A red design check is the contract talking.
 
 ## The shared blocks
 
-Three delimited regions, identical in all three files:
+Seven delimited regions, identical in all three files:
 
 | Block | Delimiters | What it holds |
 | --- | --- | --- |
-| Design tokens | `── hookstack design tokens …` / `── end design tokens ──` | Colours, the mono and UI font stacks, the refresh control's own styling |
-| Live control markup | `<span class="rc">` … `</span>` | The ↻ button and the connection indicator |
+| Design tokens | `── hookstack design tokens …` / `── end design tokens ──` | Both sets of colours, the mono and UI font stacks, the header controls' own styling |
+| Live control markup | `<span class="rc">` … the first `</span>` | The light/dark button, ↻, and the connection indicator |
 | Live control script | `── live control …` / `── end live control ──` | One streaming connection, capped reconnect backoff, refetch on wake |
+| Token wiring | `── hookstack token wiring …` / `── end token wiring ──` | The one way a page asks for a token and keeps it |
+| Tab shell | `── hookstack tab shell …` / `── end tab shell ──` | The tab strip every page is navigated by |
+| Theme first paint | `── hookstack theme …` / `── end theme ──` | The snippet in `<head>` that picks light or dark before anything is drawn |
+| Theme wiring | `── theme wiring …` / `── end theme wiring ──` | The button, the reader's pick, and a system that changes its mind |
 
 Copy a block wholesale when changing it, in all three files, in one commit.
 
 ## Tokens
 
 ```
---bg      #0b0e14   page
---surface #11151d   cards, inputs, raised rows
---border  #1f2530   every 1px line          --border-soft #171c26  inner divisions
---text    #d7dde6   body                    --muted       #8b94a3  secondary
---accent  #4c8dff   links, focus, the one primary action
---ok      #3dd68c   delivered, sent, recovered
---warn    #f5a524   queued, running, medium
---bad     #e5484d   dead letters, failures, high and critical
+              dark      light
+--bg          #0b0e14   #f4f6f9   page
+--surface     #11151d   #ffffff   cards, inputs, raised rows
+--border      #1f2530   #dde2ea   every 1px line
+--border-soft #171c26   #eaedf2   inner divisions
+--text        #d7dde6   #1b2230   body
+--muted       #8b94a3   #5b6677   secondary
+--accent      #4c8dff   #2160d6   links, focus, the one primary action
+--ok          #3dd68c   #137a3e   delivered, sent, recovered
+--warn        #f5a524   #9a5800   queued, running, medium
+--bad         #e5484d   #c9262c   dead letters, failures, high and critical
 ```
 
 Two rules that keep a board readable: **colour is earned by state**, so a
@@ -46,6 +53,29 @@ the monitoring system speaks and are rendered here verbatim.
 hookprobe's console additionally aliases its older token names
 (`--panel`, `--line`, `--dim`, `--green`, `--amber`, `--red`) onto the shared
 set, so its existing rules keep working without a sweeping rewrite.
+
+## Two modes
+
+Every page comes in dark and light, and follows the system's setting until the
+reader picks the other one. The tokens carry both sets of values under one set
+of names, and `data-theme` on `<html>` says which applies. A snippet in
+`<head>` sets it before anything is drawn — the reader's pick if there is one,
+otherwise what `prefers-color-scheme` asks for — so a phone in light mode never
+flashes a dark page. The button beside ↻ switches; switching back to what the
+system uses forgets the pick, so the same button is the way back to following
+the system. The pipe's settings drawer offers the three choices by name. The
+pick is kept in the browser under one key, per board, like the tokens.
+
+Every text colour in the light set clears 4.5:1 on white and on its own 10%
+tint, which is how a pill is drawn. The dark set is unchanged.
+
+A page's own colours follow the same rule: named through a variable, with a
+value in each mode, in a `:root { … }` and `:root[data-theme="light"] { … }`
+pair of the page's own. `assert_design.py` fails on any colour literal in a
+page's CSS outside those definitions, because a literal is the same grey on a
+white page as on a dark one; white, for text on a filled accent, is the one
+exception. Making the light mode found eighteen such literals on the
+investigator's console and fifteen on the pipe's board.
 
 ## Getting around
 

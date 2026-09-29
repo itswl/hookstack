@@ -57,6 +57,8 @@ def test_every_key_the_page_asks_for_exists():
         "state.": _js_names("obj", "STATUS_CLS"),
         "press.": [*_js_names("obj", "PRESS_KINDS"), "pressed"],
         "quiet.": [*_js_names("obj", "QUIET_CODES"), "other"],
+        # The button's title in each mode, from the pinned theme wiring.
+        "theme.": ["light", "dark"],
     }
     for prefix, members in families.items():
         assert members, prefix
