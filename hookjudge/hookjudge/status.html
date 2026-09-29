@@ -4,6 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hookjudge</title>
+<script id="theme">
+  /* ── hookstack theme · keep this block identical in all three pages ── */
+  // Before the first paint, so a light system never sees a dark flash: the
+  // reader's pick if they made one, else what the system asks for. The button
+  // and a system that changes its mind are themeWire(), in the page's script.
+  (function () {
+    var picked = null;
+    try { picked = localStorage.getItem("hookstack-theme"); } catch (err) { picked = null; }
+    var system = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", picked === "light" || picked === "dark" ? picked : system);
+  })();
+  /* ── end theme ───────────────────────────────────────────────────────── */
+</script>
 <style>
   /* ── hookstack design tokens · keep this block identical in all three pages ── */
   :root {
@@ -14,11 +27,23 @@
     /* "PingFang SC" stays in the stack: alert titles arrive in whatever language
        the monitoring system speaks, and they are rendered here verbatim. */
     --ui: 14px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    color-scheme: dark;
+  }
+  /* The same roles valued for a white page. Which set applies is data-theme on
+     <html>, set before the first paint by the theme snippet in <head>: what
+     the system asks for, unless the reader picked the other one. Every text
+     colour here clears 4.5:1 on white, and on its own 10% tint. */
+  :root[data-theme="light"] {
+    --bg: #f4f6f9; --surface: #ffffff; --border: #dde2ea; --border-soft: #eaedf2;
+    --text: #1b2230; --muted: #5b6677; --accent: #2160d6;
+    --ok: #137a3e; --warn: #9a5800; --bad: #c9262c;
+    color-scheme: light;
   }
   .rc { display: flex; gap: 6px; align-items: center; }
   .rc button, .rc select { background: var(--surface); border: 1px solid var(--border);
     color: var(--text); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px;
     cursor: pointer; }
+  .rc button svg { display: block; }
   .rc button:hover, .rc select:hover { border-color: var(--accent); }
   .rc .live { font-size: 11px; color: var(--muted); border: 1px solid var(--border);
     border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
@@ -127,8 +152,9 @@
     <span class="sub">judgement only: one event, one verdict, one line in the ledger</span>
     <span class="stamp" id="stamp">loading…</span>
   <span class="rc">
+    <button id="rTheme" type="button" title="light / dark" aria-label="light / dark">&#9680;</button>
     <button id="rNow" title="refresh now">&#8635;</button>
-    <span id="rLive" class="live" title="live connection">live</span>
+    <span id="rLive" class="live" title="live connection">live</span></span>
   </span>
   </header>
   <div class="tokenbar" id="tokenbar">
@@ -295,12 +321,68 @@
     if (bar) bar.classList[needed ? "add" : "remove"]("show");
   }
   /* ── end token wiring ───────────────────────────────────────────────────── */
+  // ── theme wiring · keep this block identical in all three pages ───────────
+  // Dark and light are one set of roles valued twice (the design tokens). A
+  // board follows the system's setting until the reader presses the button for
+  // the other one, and pressing back to what the system says forgets the pick:
+  // the one button is also the way home to "follow the system". The pick is
+  // kept per browser and per board, like the tokens.
+  var themeKey = "hookstack-theme";
+  var themeMedia = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+  var themePicked = themeRead();
+  var themeTitle = function (mode) { return mode === "light" ? "light · switch to dark" : "dark · switch to light"; };
+  var themeChanged = function () {};
+  function themeRead() {
+    var value = null;
+    try { value = localStorage.getItem(themeKey); } catch (err) { value = null; }
+    return value === "light" || value === "dark" ? value : "";
+  }
+  function themeSystem() { return themeMedia && themeMedia.matches ? "light" : "dark"; }
+  function themeApply() {
+    var mode = themePicked || themeSystem();
+    document.documentElement.setAttribute("data-theme", mode);
+    var button = document.getElementById("rTheme");
+    if (button) {
+      button.innerHTML = mode === "light"
+        ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>';
+      button.title = themeTitle(mode);
+      button.setAttribute("aria-label", themeTitle(mode));
+    }
+    themeChanged(mode);
+  }
+  // "" follows the system; "light" or "dark" is the reader's pick.
+  function themeSet(choice) {
+    themePicked = choice === "light" || choice === "dark" ? choice : "";
+    try {
+      if (themePicked) localStorage.setItem(themeKey, themePicked);
+      else localStorage.removeItem(themeKey);
+    } catch (err) { /* a browser that keeps nothing: the pick lasts this page */ }
+    themeApply();
+  }
+  function themeWire(title, onChange) {
+    if (title) themeTitle = title;
+    if (onChange) themeChanged = onChange;
+    var button = document.getElementById("rTheme");
+    if (button) button.addEventListener("click", function () {
+      var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+      themeSet(next === themeSystem() ? "" : next);
+    });
+    if (themeMedia && themeMedia.addEventListener) themeMedia.addEventListener("change", themeApply);
+    else if (themeMedia && themeMedia.addListener) themeMedia.addListener(themeApply);
+    window.addEventListener("storage", function (event) {
+      if (event.key === themeKey) { themePicked = themeRead(); themeApply(); }
+    });
+    themeApply();
+  }
+  // ── end theme wiring ──────────────────────────────────────────────────────
   function readHeaders() {
     var headers = {}, token = localStorage.getItem(KEY);
     if (token) headers["X-Read-Token"] = token;
     return headers;
   }
   tokenWire("tokenInput", "tokenSave", KEY, function () { refresh(); });
+  themeWire();
   function refresh() {
     if (document.hidden) return;
     var headers = {}, token = localStorage.getItem(KEY);

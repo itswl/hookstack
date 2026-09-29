@@ -120,7 +120,8 @@ everything each one said, every delivery with a retry beside a dead one, the
 bytes of both directions, and the audit record — payload digests per hop, the
 human actions, the end-to-end time — because the record is for arguing about
 afterwards, not for reading alerts. Deliveries, silences and routing each have
-a tab of their own, and the page speaks Chinese or English.
+a tab of their own; the page speaks Chinese or English and, like the other two
+boards, follows the system's light or dark setting.
 
 ![hookrelay's board: one sentence on whether anything waits on you, four numbers, and one row per alert — in flight, a delivery that failed, cards waiting on you, a ruling, a recovery — each with its seven stages](docs/img/hookrelay-timeline.png)
 

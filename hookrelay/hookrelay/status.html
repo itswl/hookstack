@@ -5,12 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hookrelay</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2311151d'/%3E%3Cpath d='M6 8h5a3 3 0 0 1 3 3v2a3 3 0 0 0 3 3h1' stroke='%234c8dff' stroke-width='2.2' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='6' cy='8' r='1.8' fill='%234c8dff'/%3E%3Ccircle cx='18' cy='16' r='1.8' fill='%233dd68c'/%3E%3C/svg%3E">
+<script id="theme">
+  /* ── hookstack theme · keep this block identical in all three pages ── */
+  // Before the first paint, so a light system never sees a dark flash: the
+  // reader's pick if they made one, else what the system asks for. The button
+  // and a system that changes its mind are themeWire(), in the page's script.
+  (function () {
+    var picked = null;
+    try { picked = localStorage.getItem("hookstack-theme"); } catch (err) { picked = null; }
+    var system = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", picked === "light" || picked === "dark" ? picked : system);
+  })();
+  /* ── end theme ───────────────────────────────────────────────────────── */
+</script>
 <style>
-  /* One file, no build, no CDN. Dark-first; colour is EARNED by state — a
+  /* One file, no build, no CDN. Dark or light as the system asks; colour is EARNED by state — a
      healthy board reads quiet. Rebuilt 2026-09-29 around how people read an
      inbox: one sentence that says whether anything needs them, a list they can
      scan, one click for the whole story, and each action where it is looked for.
-     The five pinned blocks are byte-identical to the other two boards
+     The seven pinned blocks are byte-identical to the other two boards
      (scripts/assert_design.py); everything else here is this page's own. */
   /* ── hookstack design tokens · keep this block identical in all three pages ── */
   :root {
@@ -21,11 +34,23 @@
     /* "PingFang SC" stays in the stack: alert titles arrive in whatever language
        the monitoring system speaks, and they are rendered here verbatim. */
     --ui: 14px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    color-scheme: dark;
+  }
+  /* The same roles valued for a white page. Which set applies is data-theme on
+     <html>, set before the first paint by the theme snippet in <head>: what
+     the system asks for, unless the reader picked the other one. Every text
+     colour here clears 4.5:1 on white, and on its own 10% tint. */
+  :root[data-theme="light"] {
+    --bg: #f4f6f9; --surface: #ffffff; --border: #dde2ea; --border-soft: #eaedf2;
+    --text: #1b2230; --muted: #5b6677; --accent: #2160d6;
+    --ok: #137a3e; --warn: #9a5800; --bad: #c9262c;
+    color-scheme: light;
   }
   .rc { display: flex; gap: 6px; align-items: center; }
   .rc button, .rc select { background: var(--surface); border: 1px solid var(--border);
     color: var(--text); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px;
     cursor: pointer; }
+  .rc button svg { display: block; }
   .rc button:hover, .rc select:hover { border-color: var(--accent); }
   .rc .live { font-size: 11px; color: var(--muted); border: 1px solid var(--border);
     border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
@@ -43,9 +68,24 @@
   .tab .count { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 4px; }
   .tab.active .count { color: var(--accent); }
   /* ── end tab shell ──────────────────────────────────────────────────────── */
-  :root { --surface-2: #161b25; --hover: #19202c; --code: #080b10; --radius: 12px; }
+  /* This page's own surfaces, valued for each mode like the tokens above. */
+  :root {
+    --surface-2: #161b25; --hover: #19202c; --code: #080b10; --radius: 12px;
+    --border-strong: #2c3544; --ring: #3a4352; --well: #0e1219; --code-text: #c3cad6;
+    --topbar: rgba(11, 14, 20, .9); --scrim: rgba(3, 5, 9, .55); --scrim-strong: rgba(3, 5, 9, .62);
+    --sheen: rgba(255, 255, 255, .04);
+    --shadow-drawer: -24px 0 60px rgba(0, 0, 0, .45); --shadow-card: 0 20px 60px rgba(0, 0, 0, .5);
+    --shadow-toast: 0 10px 30px rgba(0, 0, 0, .4);
+  }
+  :root[data-theme="light"] {
+    --surface-2: #f1f4f8; --hover: #f4f7fb; --code: #f6f8fa;
+    --border-strong: #c5cdd9; --ring: #c2cad6; --well: #f7f9fc; --code-text: #243042;
+    --topbar: rgba(255, 255, 255, .88); --scrim: rgba(15, 23, 42, .28); --scrim-strong: rgba(15, 23, 42, .36);
+    --sheen: rgba(15, 23, 42, .05);
+    --shadow-drawer: -18px 0 48px rgba(15, 23, 42, .14); --shadow-card: 0 18px 50px rgba(15, 23, 42, .18);
+    --shadow-toast: 0 8px 24px rgba(15, 23, 42, .14);
+  }
   * { box-sizing: border-box; }
-  html { color-scheme: dark; }
   body { margin: 0; background: var(--bg); color: var(--text); font: var(--ui); -webkit-font-smoothing: antialiased; }
   [hidden] { display: none !important; }
   a { color: var(--accent); text-decoration: none; }
@@ -58,7 +98,7 @@
   svg.i { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
 
   /* ── top bar: who this is, one search, the switches ── */
-  .top { position: sticky; top: 0; z-index: 20; background: rgba(11, 14, 20, .9); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  .top { position: sticky; top: 0; z-index: 20; background: var(--topbar); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
   .top-in { max-width: 1280px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; gap: 18px; }
   .brand { display: flex; align-items: center; gap: 10px; color: var(--text); white-space: nowrap; }
   .brand:hover { text-decoration: none; }
@@ -86,7 +126,7 @@
 
   /* ── controls ── */
   .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; white-space: nowrap; text-decoration: none; }
-  .btn:hover { border-color: #2c3544; background: var(--surface-2); text-decoration: none; }
+  .btn:hover { border-color: var(--border-strong); background: var(--surface-2); text-decoration: none; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
   .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
@@ -147,7 +187,7 @@
   .legend .la::before { background: var(--accent); } .legend .lq::before { background: var(--muted); opacity: .4; }
   .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
   .tile { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 16px; cursor: pointer; }
-  .tile:hover { border-color: #2c3544; background: var(--surface-2); }
+  .tile:hover { border-color: var(--border-strong); background: var(--surface-2); }
   .tile .lbl { color: var(--muted); font-size: 12.5px; }
   .tile .val { font-size: 28px; font-weight: 650; font-family: var(--mono); line-height: 1.2; margin-top: 4px; }
   .tile .hint { color: var(--muted); font-size: 12px; margin-top: 3px; }
@@ -167,7 +207,7 @@
   /* ── the list: one row per alert, two lines, grouped by day ── */
   .filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
   .list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
-  .day { padding: 7px 16px; font-size: 12px; color: var(--muted); background: #0e1219; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; }
+  .day { padding: 7px 16px; font-size: 12px; color: var(--muted); background: var(--well); border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; }
   .row { display: grid; grid-template-columns: 136px minmax(0, 1fr) auto; grid-template-areas: "st ttl m1" "st sub m2"; gap: 3px 14px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--border-soft); cursor: pointer; position: relative; }
   .row:last-child { border-bottom: 0; }
   .row:hover { background: var(--hover); }
@@ -185,7 +225,7 @@
   .row .inc:hover { color: var(--text); border-color: var(--accent); }
   .row.quiet .ttl { color: var(--muted); font-weight: 500; }
   .dots { display: inline-flex; gap: 4px; align-items: center; }
-  .dots i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #3a4352; display: block; }
+  .dots i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ring); display: block; }
   .dots i.done { background: var(--accent); border-color: var(--accent); }
   .dots i.ok { background: var(--ok); border-color: var(--ok); }
   .dots i.warn { background: var(--warn); border-color: var(--warn); }
@@ -193,15 +233,17 @@
   .note { color: var(--muted); font-size: 12px; text-align: center; margin: 12px 0 0; }
   .empty { text-align: center; color: var(--muted); padding: 44px 20px; }
   .empty svg.i { width: 28px; height: 28px; opacity: .7; display: block; margin: 0 auto 10px; }
-  .sk { height: 60px; border-bottom: 1px solid var(--border-soft); background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .04), transparent); background-size: 200% 100%; animation: sk 1.3s linear infinite; }
+  .sk { height: 60px; border-bottom: 1px solid var(--border-soft); background: linear-gradient(90deg, transparent, var(--sheen), transparent); background-size: 200% 100%; animation: sk 1.3s linear infinite; }
   .sk.big { height: 86px; border: 0; border-radius: 10px; }
   @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
   /* ── drawers: the story of one alert, and the settings ── */
-  .scrim { position: fixed; inset: 0; background: rgba(3, 5, 9, .55); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 30; }
+  .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 30; }
   .scrim.on { opacity: 1; pointer-events: auto; }
-  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(840px, 100vw); background: var(--bg); border-left: 1px solid var(--border); box-shadow: -24px 0 60px rgba(0, 0, 0, .45); transform: translateX(104%); transition: transform .22s ease; z-index: 31; display: flex; flex-direction: column; }
-  .drawer.on { transform: none; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(840px, 100vw); background: var(--bg); border-left: 1px solid var(--border); transform: translateX(104%); transition: transform .22s ease; z-index: 31; display: flex; flex-direction: column; }
+  /* The shadow only while open: parked off-screen, it would still fall across the
+     page's right edge, invisible on dark and a grey band on white. */
+  .drawer.on { transform: none; box-shadow: var(--shadow-drawer); }
   .drawer.narrow { width: min(440px, 100vw); z-index: 33; }
   .dr-head { padding: 18px 22px 0; border-bottom: 1px solid var(--border); background: var(--surface); }
   .dr-top { display: flex; align-items: flex-start; gap: 12px; }
@@ -224,7 +266,7 @@
   /* ── the story, top to bottom, like a parcel's tracking page ── */
   .tl-item { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 0 12px; }
   .tl-rail { display: flex; flex-direction: column; align-items: center; }
-  .tl-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #3a4352; background: var(--bg); margin-top: 3px; flex: 0 0 auto; }
+  .tl-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--ring); background: var(--bg); margin-top: 3px; flex: 0 0 auto; }
   .tl-item.done .tl-dot { background: var(--accent); border-color: var(--accent); }
   .tl-item.ok .tl-dot { background: var(--ok); border-color: var(--ok); }
   .tl-item.warn .tl-dot { background: var(--warn); border-color: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 22%, transparent); }
@@ -247,7 +289,7 @@
   details.x > summary::-webkit-details-marker { display: none; }
   details.x > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
   details.x[open] > summary::before { content: "▾"; }
-  .code { margin: 8px 0 0; padding: 12px 14px; background: var(--code); border: 1px solid var(--border); border-radius: 10px; font-family: var(--mono); font-size: 12px; line-height: 1.55; overflow: auto; max-height: 480px; white-space: pre; color: #c3cad6; }
+  .code { margin: 8px 0 0; padding: 12px 14px; background: var(--code); border: 1px solid var(--border); border-radius: 10px; font-family: var(--mono); font-size: 12px; line-height: 1.55; overflow: auto; max-height: 480px; white-space: pre; color: var(--code-text); }
   .code.prose { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--ui); font-size: 13px; line-height: 1.7; }
   .code .add { color: var(--ok); } .code .del { color: var(--bad); } .code .hunk { color: var(--accent); } .code .meta { color: var(--muted); }
   .codebox { position: relative; }
@@ -288,7 +330,7 @@
   .lg .lg-dl { display: inline-flex; gap: 3px; }
   .lg .lg-dl i { width: 8px; height: 8px; border-radius: 2px; background: var(--border); display: block; }
   .lg .lg-dl i.sent { background: var(--ok); } .lg .lg-dl i.queued { background: var(--warn); } .lg .lg-dl i.dead { background: var(--bad); }
-  .lg-body { padding: 4px 16px 16px 16px; border-top: 1px solid var(--border-soft); background: #0e1219; }
+  .lg-body { padding: 4px 16px 16px 16px; border-top: 1px solid var(--border-soft); background: var(--well); }
   .lg-body h4 { margin: 14px 0 6px; font-size: 11.5px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
   .steps { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
   .steps li { display: flex; gap: 12px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--border-soft); }
@@ -310,7 +352,7 @@
   .route.unreach { opacity: .45; }
   .gate { display: block; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; font-family: var(--mono); font-size: 12.5px; background: var(--bg); }
   .gate span { color: var(--muted); font-family: var(--ui); font-size: 12px; }
-  .editor { width: 100%; min-height: 440px; background: var(--code); color: #d7dde6; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; tab-size: 2; }
+  .editor { width: 100%; min-height: 440px; background: var(--code); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; tab-size: 2; }
   .editor:focus { outline: none; border-color: var(--accent); }
   .bar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
   .msg { font-size: 12.5px; font-family: var(--mono); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 10px; }
@@ -333,15 +375,15 @@
   body.zh [data-only="en"], body:not(.zh) [data-only="zh"] { display: none !important; }
 
   /* ── dialogs and toasts ── */
-  .modal { position: fixed; inset: 0; display: none; place-items: center; z-index: 40; background: rgba(3, 5, 9, .62); }
+  .modal { position: fixed; inset: 0; display: none; place-items: center; z-index: 40; background: var(--scrim-strong); }
   .modal.on { display: grid; }
-  .modal-card { width: min(460px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); padding: 20px; }
+  .modal-card { width: min(460px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-card); padding: 20px; }
   .modal-card h3 { margin: 0 0 8px; font-size: 16px; }
   .modal-card .body { color: var(--muted); font-size: 13.5px; line-height: 1.6; }
   .modal-card .body p { margin: 0 0 8px; }
   .modal-card .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
   .toasts { position: fixed; right: 20px; bottom: 20px; display: grid; gap: 8px; z-index: 50; }
-  .toast { display: flex; align-items: center; gap: 10px; min-width: 240px; max-width: 440px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0, 0, 0, .4); font-size: 13px; cursor: pointer; animation: toast-life 5s ease forwards; }
+  .toast { display: flex; align-items: center; gap: 10px; min-width: 240px; max-width: 440px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); box-shadow: var(--shadow-toast); font-size: 13px; cursor: pointer; animation: toast-life 5s ease forwards; }
   .toast.ok svg.i { color: var(--ok); } .toast.bad svg.i { color: var(--bad); }
   @keyframes toast-life { 0% { opacity: 0; transform: translateY(8px); } 6% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; transform: translateY(4px); } }
 
@@ -403,8 +445,9 @@
       <button class="btn ghost sm" id="langBtn" type="button"></button>
       <button class="btn ghost sm" id="settingsBtn" type="button" data-tt="settings.open"><span data-icon="sliders"></span></button>
       <span class="rc">
+    <button id="rTheme" type="button" title="light / dark" aria-label="light / dark">&#9680;</button>
     <button id="rNow" title="refresh now">&#8635;</button>
-    <span id="rLive" class="live" title="live connection">live</span>
+    <span id="rLive" class="live" title="live connection">live</span></span>
       </span>
     </div>
   </div>
@@ -490,6 +533,9 @@
       <h2 id="help-keys">快捷键</h2>
       <p><kbd>/</kbd> 搜索 · <kbd>j</kbd> 下一条 · <kbd>k</kbd> 上一条 · <kbd>Enter</kbd> 打开 · <kbd>Esc</kbd> 关闭 · <kbd>?</kbd> 显示快捷键</p>
 
+      <h2 id="help-theme">外观</h2>
+      <p>页面默认跟随系统的浅色或深色设置。点刷新按钮旁边的太阳或月亮可以切换；切回和系统一样的那一种，就恢复跟随系统。右上角的设置里也可以直接选。这个选择只保存在当前浏览器里，三个看板各记各的。</p>
+
       <h2 id="help-api">接口速查</h2>
       <p class="muted">在 docker 网络里用 <code>http://hookrelay:8100</code>，在本机用 <code>http://127.0.0.1:8100</code>。读接口带 <code>X-Read-Token</code>，管理接口带 <code>X-Admin-Token</code>。</p>
       <table>
@@ -555,6 +601,9 @@
       <h2>Keyboard</h2>
       <p><kbd>/</kbd> search · <kbd>j</kbd> next · <kbd>k</kbd> previous · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close · <kbd>?</kbd> shortcuts</p>
 
+      <h2 id="help-theme-en">Appearance</h2>
+      <p>The page follows the system's light or dark setting. The sun or moon beside refresh switches it, and switching back to what the system uses returns to following the system. Settings, top right, has the same choice. The pick is kept in this browser only, and each of the three boards keeps its own.</p>
+
       <h2>API quick reference</h2>
       <p class="muted">Inside the family's docker network use <code>http://hookrelay:8100</code>; from the host, <code>http://127.0.0.1:8100</code>. Read endpoints take <code>X-Read-Token</code>, admin endpoints <code>X-Admin-Token</code>.</p>
       <table>
@@ -615,6 +664,7 @@
   </div>
   <div class="settings-body">
     <div class="field"><label data-t="st.lang"></label><div class="seg" id="stLang"><button type="button" data-setlang="zh">中文</button><button type="button" data-setlang="en">English</button></div></div>
+    <div class="field"><label data-t="st.theme"></label><div class="seg" id="stTheme"><button type="button" data-settheme="" data-t="st.theme.system"></button><button type="button" data-settheme="light" data-t="st.theme.light"></button><button type="button" data-settheme="dark" data-t="st.theme.dark"></button></div><p class="hint" data-t="st.theme.hint"></p></div>
     <div class="field"><label for="stRead" data-t="st.read"></label><div class="inline"><input class="inp mono" id="stRead" type="password" autocomplete="off"><button class="btn" id="stReadSave" type="button" data-t="st.save"></button></div><p class="hint" data-t="st.read.hint"></p></div>
     <div class="field"><label for="stAdmin" data-t="st.admin"></label><div class="inline"><input class="inp mono" id="stAdmin" type="password" autocomplete="off"><button class="btn" id="stAdminSave" type="button" data-t="st.save"></button></div><p class="hint" data-t="st.admin.hint"></p></div>
     <div class="field"><div><button class="btn danger sm" id="stClear" type="button" data-t="st.clear"></button></div></div>
@@ -990,6 +1040,13 @@
   "rt.dryrun.bad_json": "The payload is not valid JSON",
   "st.title": "Settings",
   "st.lang": "Language",
+  "theme.light": "Light · switch to dark",
+  "theme.dark": "Dark · switch to light",
+  "st.theme": "Appearance",
+  "st.theme.system": "System",
+  "st.theme.light": "Light",
+  "st.theme.dark": "Dark",
+  "st.theme.hint": "Follows the system's setting unless you pick one. The sun and moon beside refresh switches too.",
   "st.read": "Read token",
   "st.read.hint": "Lets this browser read the ledger: HOOKRELAY_READ_TOKEN on the pipe.",
   "st.admin": "Admin token",
@@ -1386,6 +1443,13 @@
   "rt.dryrun.bad_json": "这段内容不是合法的 JSON",
   "st.title": "设置",
   "st.lang": "语言",
+  "theme.light": "浅色 · 点一下切到深色",
+  "theme.dark": "深色 · 点一下切到浅色",
+  "st.theme": "外观",
+  "st.theme.system": "跟随系统",
+  "st.theme.light": "浅色",
+  "st.theme.dark": "深色",
+  "st.theme.hint": "默认跟随系统设置，选了就按你选的来。刷新旁边的太阳、月亮按钮也能切换。",
   "st.read": "读取口令",
   "st.read.hint": "让这个浏览器读取账本，对应 hookrelay 的 HOOKRELAY_READ_TOKEN。",
   "st.admin": "管理口令",
@@ -2705,11 +2769,15 @@
     $$("#stLang [data-setlang]").forEach(function (el) { el.classList.toggle("on", el.getAttribute("data-setlang") === LANG); });
     $("#stKeys").innerHTML = keysHtml();
   }
+  // The settings drawer's three-way choice, kept in step with the button beside
+  // refresh: "" is "follow the system".
+  function syncTheme() { $$("#stTheme [data-settheme]").forEach(function (el) { el.classList.toggle("on", el.getAttribute("data-settheme") === themePicked); }); }
   function setLang(lang) {
     if (!STRINGS[lang] || lang === LANG) return;
     LANG = lang;
     localStorage.setItem(LANG_KEY, lang);
     applyLang();
+    themeApply();
     if (S.core) { S.analysed = (S.core.timeline.chains || []).map(analyse); S.byChain = {}; S.analysed.forEach(function (a) { S.byChain[a.chain] = a; }); }
     S.rendered = {}; S.ledger.sig = ""; S.drawer.sig = "";
     renderChrome(); renderView();
@@ -2846,6 +2914,7 @@
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#stClose").addEventListener("click", closeSettings);
   $("#langBtn").addEventListener("click", function () { setLang(LANG === "zh" ? "en" : "zh"); });
+  $("#stTheme").addEventListener("click", function (e) { var el = e.target.closest("[data-settheme]"); if (el) themeSet(el.getAttribute("data-settheme")); });
   $("#stLang").addEventListener("click", function (e) { var el = e.target.closest("[data-setlang]"); if (el) setLang(el.getAttribute("data-setlang")); });
   $("#stClear").addEventListener("click", function () {
     localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ADMIN_KEY);
@@ -2908,9 +2977,65 @@
     if (bar) bar.classList[needed ? "add" : "remove"]("show");
   }
   /* ── end token wiring ───────────────────────────────────────────────────── */
+  // ── theme wiring · keep this block identical in all three pages ───────────
+  // Dark and light are one set of roles valued twice (the design tokens). A
+  // board follows the system's setting until the reader presses the button for
+  // the other one, and pressing back to what the system says forgets the pick:
+  // the one button is also the way home to "follow the system". The pick is
+  // kept per browser and per board, like the tokens.
+  var themeKey = "hookstack-theme";
+  var themeMedia = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+  var themePicked = themeRead();
+  var themeTitle = function (mode) { return mode === "light" ? "light · switch to dark" : "dark · switch to light"; };
+  var themeChanged = function () {};
+  function themeRead() {
+    var value = null;
+    try { value = localStorage.getItem(themeKey); } catch (err) { value = null; }
+    return value === "light" || value === "dark" ? value : "";
+  }
+  function themeSystem() { return themeMedia && themeMedia.matches ? "light" : "dark"; }
+  function themeApply() {
+    var mode = themePicked || themeSystem();
+    document.documentElement.setAttribute("data-theme", mode);
+    var button = document.getElementById("rTheme");
+    if (button) {
+      button.innerHTML = mode === "light"
+        ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>';
+      button.title = themeTitle(mode);
+      button.setAttribute("aria-label", themeTitle(mode));
+    }
+    themeChanged(mode);
+  }
+  // "" follows the system; "light" or "dark" is the reader's pick.
+  function themeSet(choice) {
+    themePicked = choice === "light" || choice === "dark" ? choice : "";
+    try {
+      if (themePicked) localStorage.setItem(themeKey, themePicked);
+      else localStorage.removeItem(themeKey);
+    } catch (err) { /* a browser that keeps nothing: the pick lasts this page */ }
+    themeApply();
+  }
+  function themeWire(title, onChange) {
+    if (title) themeTitle = title;
+    if (onChange) themeChanged = onChange;
+    var button = document.getElementById("rTheme");
+    if (button) button.addEventListener("click", function () {
+      var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+      themeSet(next === themeSystem() ? "" : next);
+    });
+    if (themeMedia && themeMedia.addEventListener) themeMedia.addEventListener("change", themeApply);
+    else if (themeMedia && themeMedia.addListener) themeMedia.addListener(themeApply);
+    window.addEventListener("storage", function (event) {
+      if (event.key === themeKey) { themePicked = themeRead(); themeApply(); }
+    });
+    themeApply();
+  }
+  // ── end theme wiring ──────────────────────────────────────────────────────
   tokenWire("tokenInput", "tokenSave", TOKEN_KEY, afterTokenSaved);
   tokenWire("stRead", "stReadSave", TOKEN_KEY, afterTokenSaved);
   tokenWire("stAdmin", "stAdminSave", ADMIN_KEY, afterAdminSaved);
+  themeWire(function (mode) { return t("theme." + mode); }, syncTheme);
 
   injectIcons();
   applyLang();

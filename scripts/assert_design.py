@@ -67,7 +67,49 @@ BLOCKS = (
         "/* ── hookstack tab shell · keep this block identical in all three pages ── */",
         "/* ── end tab shell ──────────────────────────────────────────────────────── */",
     ),
+    # Added 2026-09-29, with the light mode. The tokens carry both sets of
+    # values; this snippet in <head> picks one before the first paint (what the
+    # system asks for, unless the reader picked); the wiring is the button beside
+    # refresh and the listener for a system that changes its mind. Pinned for the
+    # palette's reason: three boards whose toggles behave three ways is the drift
+    # this script exists to catch, and it would be the first thing a reader
+    # moving between them noticed.
+    (
+        "theme first paint",
+        "/* ── hookstack theme · keep this block identical in all three pages ── */",
+        "/* ── end theme ───────────────────────────────────────────────────────── */",
+    ),
+    (
+        "theme wiring",
+        "// ── theme wiring · keep this block identical in all three pages ───────────",
+        "// ── end theme wiring ──────────────────────────────────────────────────────",
+    ),
 )
+
+# A colour written into a page's CSS as a literal does not change with the
+# mode: it is the same grey on a white page as on a dark one. So outside the
+# blocks that DEFINE variables (`:root { … }` and `:root[data-theme="light"]
+# { … }`, the tokens among them), a page names its colours through var() —
+# white is the one literal allowed, for text on a filled accent. Found on
+# 2026-09-29 by making the light mode: eighteen literals on the investigator's
+# console and fifteen on the pipe's board, each one a dark-only surface.
+_VARIABLE_BLOCK = re.compile(r':root(?:\[data-theme="(?:light|dark)"\])?\s*\{[^}]*\}')
+_LITERAL_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)")
+_ALLOWED_LITERALS = {"#fff", "#ffffff"}
+
+
+def literal_colours(text: str) -> list[tuple[int, str]]:
+    """Every colour literal in the page's <style> that is not a variable definition."""
+    found: list[tuple[int, str]] = []
+    for style in re.finditer(r"<style>([\s\S]*?)</style>", text):
+        body = style.group(1)
+        offset = text[: style.start(1)].count("\n")
+        blanked = _VARIABLE_BLOCK.sub(lambda m: "\n" * m.group(0).count("\n"), body)
+        blanked = re.sub(r"/\*[\s\S]*?\*/", lambda m: "\n" * m.group(0).count("\n"), blanked)
+        for match in _LITERAL_COLOUR.finditer(blanked):
+            if match.group(0).lower() not in _ALLOWED_LITERALS:
+                found.append((offset + blanked[: match.start()].count("\n") + 1, match.group(0)))
+    return found
 
 
 # Every setTimeout the boards are allowed to contain, normalised the way
@@ -167,6 +209,20 @@ def main() -> int:
         if len(set(found.values())) > 1:
             failures.append(f"{label}: the pages disagree — " + ", ".join(str(p) for p in found))
 
+    # The mode is chosen before the body paints, or a light system sees a dark
+    # flash on every load; and no colour of a page's own may ignore the mode.
+    theme_start = BLOCKS[5][1]
+    for page in PAGES:
+        text = (root / page).read_text(encoding="utf-8")
+        at, body = text.find(theme_start), text.find("<body")
+        if at < 0 or body < 0 or at > body:
+            failures.append(f"{page}: the theme snippet must sit in <head>, before the body paints")
+        for number, colour in literal_colours(text):
+            failures.append(
+                f"{page}:{number}: the colour {colour} is written as a literal, so it stays the same in both "
+                "modes — name it through a variable with a value in each theme"
+            )
+
     # The whole point of the live control: these boards do not keep a clock at
     # all. What they show changes when the service writes, and the service says
     # so — a page that reintroduces a poll loop is answering a question nobody
@@ -188,7 +244,10 @@ def main() -> int:
     if failures:
         print(f"\n{len(failures)} design assertion(s) failed")
         return 1
-    print(f"design: {len(BLOCKS)} shared blocks identical across {len(PAGES)} pages, no unsanctioned timers")
+    print(
+        f"design: {len(BLOCKS)} shared blocks identical across {len(PAGES)} pages, both modes named through "
+        "variables, no unsanctioned timers"
+    )
     return 0
 
 
