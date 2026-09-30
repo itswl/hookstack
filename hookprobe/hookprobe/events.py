@@ -55,7 +55,8 @@ _EVENT_MESSAGE = """Run one read-only investigation of the alert below: find the
 assess the impact, and give remediation steps in priority order.
 Open the case files first: Grep/Read /data/results/ for earlier investigations of the same \
 alert, and if you find one, cite it and compare — what was the previous verdict, does this \
-one agree.
+one agree. Skip /data/results/{own}.json: that is this investigation's own record, still \
+being written, not an earlier one.
 Answer with a short Markdown report, conclusion first: the opening paragraph is a \
 one-sentence conclusion a notification card can quote verbatim.
 If this investigation taught you a durable fact about the ENVIRONMENT itself — topology, \
@@ -137,7 +138,8 @@ When a gap is what stands between you and the answer, SAY THAT IN THE OPENING SE
 quotes it, and "I need X to finish this" is what the operator can act on, where a plan they cannot \
 check is not. Replying in this thread with the output continues this same investigation.
 
-Open the case files first: Grep/Read /data/results/ for earlier work on the same subject.
+Open the case files first: Grep/Read /data/results/ for earlier work on the same subject. \
+Skip /data/results/{own}.json: that is this run's own record, still being written.
 
 Answer with a short Markdown report, conclusion first: the opening paragraph is a one-sentence \
 answer a notification card can quote verbatim.
@@ -746,7 +748,11 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
         raw_fields = event.get("fields")
         kind = str(raw_fields.get("kind") or "").strip().lower() if isinstance(raw_fields, dict) else ""
         template = {"task": _TASK_MESSAGE, "brief": _BRIEF_MESSAGE}.get(kind, _EVENT_MESSAGE)
+        # The run's own case file sits among the earlier ones from its first
+        # second, and every real report of 2026-09-30 read it back as "an earlier
+        # case, still running, no verdict to compare": the prompt names it.
         message = template.format(
+            own=session_key,
             source=source,
             level=level,
             title=title,

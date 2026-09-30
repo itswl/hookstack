@@ -72,6 +72,9 @@ def test_event_door_escalates_and_skips(tmp_path) -> None:
                 break
         assert engine.calls == 1
         assert "Payment gateway" in engine.messages[0]
+        # Its own case file is among the earlier ones from the start; the prompt
+        # names it so the report does not cite itself as an earlier case.
+        assert "Skip /data/results/probe:inbound:5.json" in engine.messages[0]
         assert detail["origin"] == "relay"
         assert detail["meta"]["title"] == EVENT["title"]
 
@@ -100,6 +103,7 @@ def test_a_work_item_is_investigated_as_work_not_as_an_incident(tmp_path) -> Non
     prompt = engine.messages[0]
     assert "how would this be done" in prompt
     assert "NOT an alert" in prompt
+    assert "Skip /data/results/probe:inbound:77.json" in prompt
     # Assert the INSTRUCTION is gone, not the words: the task prompt says
     # "no root cause to find", which is the point, so a substring check on
     # "root cause" would pass for the wrong reason and fail for the right one.
