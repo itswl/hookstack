@@ -14,7 +14,7 @@
 
 调查员是产品本身，管道和判官是给没有告警平台的团队准备的最小前端。一套部署就是一个团队：它不是工作管理平台，不是多租户 SaaS，也不是 agent 框架。
 
-![hookrelay 的看板：一句话说有几件事等你处理，四个数字，每条告警一行，各带七个阶段](docs/img/zh/hookrelay-timeline.png)
+![hookprobe 的控制台：一次真实的调查，结论在最前面，查不到的根因明说查不到，下面是这次的花费](docs/img/zh/hookprobe-sessions.png)
 
 ## 试一下：十分钟，不要 key，不花钱
 
@@ -39,6 +39,8 @@ bash scripts/demo.sh
 - **关得住的 agent。** 默认只读并在启动时实测，预算用完会明确拒绝，另有二十八条结构性边界，每一条都写明它**挡不住**什么（[containment](docs/containment.md)）。
 - **每个事件一页审计。** 每一跳、摘要、决策和人的操作，每次工具调用的飞行记录，以及每次运行的耗时瀑布图。
 - **模型和聊天工具由你选。** 调查员接任意 Anthropic 方言的端点，判官接任意 OpenAI 兼容的端点，本地模型也可以。飞书经桥接送达，钉钉和企微有插件，也可以把签名 JSON 发到任意 webhook。
+
+![hookrelay 的看板：一句话说有几件事等你处理，四个数字，每条告警一行，各带七个阶段](docs/img/zh/hookrelay-timeline.png)
 
 ![hookjudge 的看板：每条判定走了哪条路径、花了多少](docs/img/zh/hookjudge-status.png)
 
