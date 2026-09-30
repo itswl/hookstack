@@ -175,6 +175,25 @@ The work run's report says how many files its commit-backed diff changed and
 how many gaps it named, so the board's fix stage reads carried out, blocked or
 failed rather than "a report came back".
 
+**The chat's tools are behind a gate, since 2026-09-30.** The investigator's
+MCP allowlist is enforced where the agent asks for a tool and says nothing about
+a socket. Measured that day: one plain HTTP request from inside `probe-watch`
+reached the chat client's own MCP port, with no credential, listed 34 tools —
+20 of which write, including sending a message as the operator — and called one
+the allowlist does not name. The watcher reads colleagues' messages for a
+living, so that is attacker-influenced text one injection away from posting as
+the operator.
+
+So the list became a place. The three probes now sit on a docker network with
+`internal: true`: no route to the host, no route to the internet, no DNS for
+either. Their way out is the egress proxy on its allowlist, as before, and their
+way to the chat is `mcp-gate` (`deploy/mcp-gate/gate.py`), which holds the only
+reach to the chat client and forwards a `tools/call` only when the tool's name
+is on the calling node's list. The watcher now sees eight read tools, the
+planner eleven, and every refusal is recorded in `work-data/mcp-gate/calls.jsonl`.
+An internal network answers no published port, so the three consoles moved to
+`probe-ingress`, a byte pump on both networks, at the same addresses as before.
+
 **The chat is behind a protocol, not in the pipe.** Both deployments reach
 Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a
 card model — title, tone, summary, links, actions as plain facts — and the

@@ -124,6 +124,10 @@ services:
       - ../work-data/hookrelay:/data
     ports:
       - "127.0.0.1:8100:8100"
+    # Both sides: the probes are on an internal network with no route off it
+    # (see `networks:` at the foot of this file), and this has to be reachable
+    # from there AND from the host.
+    networks: [default, probe_net]
 
   # The planner. Same image and same doors as the family's investigator; what
   # makes it "plan" rather than "diagnose" is the `kind: task` its signals
@@ -153,6 +157,75 @@ services:
     environment:
       EGRESS_ALLOW: >-
         ${EGRESS_ALLOW:-open.larksuite.com,model-gateway.example,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
+    # Both sides: the probes are on an internal network with no route off it
+    # (see `networks:` at the foot of this file), and this has to be reachable
+    # from there AND from the host.
+    networks: [default, probe_net]
+
+  # The chat's tools, on a list, in a place. The investigator's own MCP
+  # allowlist is enforced where it asks for a TOOL and says nothing about a
+  # socket: on 2026-09-30 a plain HTTP request from probe-watch reached the chat
+  # client's MCP port with no credential, listed 34 tools — 20 of them writes,
+  # including sending a message as the operator — and called one the allowlist
+  # does not name. The probes now have no route to the host at all, and this
+  # holds the only reach to it. Read deploy/mcp-gate/gate.py for what it does
+  # NOT stop.
+  mcp-gate:
+    image: python:3.14-slim
+    container_name: work-mcp-gate
+    restart: unless-stopped
+    command: ["python3", "-u", "/app/gate.py"]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    # Both sides: the probes are on an internal network with no route off it
+    # (see `networks:` at the foot of this file), and this has to be reachable
+    # from there AND from the host.
+    networks: [default, probe_net]
+    volumes:
+      - ./mcp-gate/gate.py:/app/gate.py:ro
+      # The refusals are the point of keeping this: the only place that can say
+      # "a run asked for a tool nobody gave it".
+      - ../work-data/mcp-gate:/data
+    environment:
+      MCPGATE_UPSTREAM: ${WATCH_CHAT_MCP_URL:-http://host.docker.internal:52222/mcp/}
+      # One token per node, so a refusal names which one asked. Both lists are
+      # READ tools; the writes are simply not reachable through here.
+      MCPGATE_CLIENT_WATCH_TOKEN: ${WATCH_MCPGATE_TOKEN:?set WATCH_MCPGATE_TOKEN in .env}
+      MCPGATE_CLIENT_WATCH_TOOLS: ${WATCH_MCPGATE_TOOLS:?set WATCH_MCPGATE_TOOLS in .env}
+      MCPGATE_CLIENT_PLAN_TOKEN: ${PLAN_MCPGATE_TOKEN:?set PLAN_MCPGATE_TOKEN in .env}
+      MCPGATE_CLIENT_PLAN_TOOLS: ${PLAN_MCPGATE_TOOLS:?set PLAN_MCPGATE_TOOLS in .env}
+      MCPGATE_LEDGER: /data/calls.jsonl
+      TZ: ${WATCH_TZ:-Asia/Singapore}
+
+  # The consoles, which an internal network would otherwise make unreachable:
+  # a published port on such a network answers nothing, measured before this was
+  # written. A byte pump, never an HTTP proxy — the consoles stream events.
+  probe-ingress:
+    image: python:3.14-slim
+    container_name: work-probe-ingress
+    restart: unless-stopped
+    command: ["python3", "-u", "/app/forward.py"]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 128m
+    # Both sides: the probes are on an internal network with no route off it
+    # (see `networks:` at the foot of this file), and this has to be reachable
+    # from there AND from the host.
+    networks: [default, probe_net]
+    volumes:
+      - ./probe-ingress/forward.py:/app/forward.py:ro
+    environment:
+      INGRESS_FORWARD: 8088:probe-plan:8088,8089:probe-watch:8088,8090:probe-work:8088
+    ports:
+      # The same three addresses as before, loopback only, unchanged for anybody
+      # who had them bookmarked.
+      - "127.0.0.1:8088:8088"
+      - "127.0.0.1:8089:8089"
+      - "127.0.0.1:8090:8090"
 
   probe-plan:
     build:
@@ -218,7 +291,7 @@ services:
       # there) go direct — proxying those would break them for nothing.
       HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
       HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
+      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy,mcp-gate}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       # Who wakes when this node cannot work. The selftest watch reports here
@@ -359,9 +432,12 @@ services:
       # holds no long-lived secret: the read-only IAM user behind it is the
       # boundary, exactly like every other row in probe-plan-secrets.
       - ../work-data/probe-plan-kube:/data/home/.kube:ro
-    ports:
-      # The sessions page, for watching a plan being written. Loopback only.
-      - "127.0.0.1:8088:8088"
+    # No route off this network, which is the boundary the MCP gate is worth
+    # something behind: measured on 2026-09-30, this container could reach the
+    # chat client's own port on the host and call any tool it exposes, with no
+    # credential and past its own MCP allowlist. The console moves to
+    # probe-ingress, because an internal network answers no published port.
+    networks: [probe_net]
 
   # The watcher. Same image, same doors, a different job — which is the claim
   # the PRD makes about this family and this is the second instance proving it:
@@ -407,7 +483,7 @@ services:
       # there) go direct — proxying those would break them for nothing.
       HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
       HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
+      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy,mcp-gate}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       # The alarm channel is per NODE, not per stack: on 2026-09-22 the work
@@ -518,8 +594,12 @@ services:
       # live. Still a bind mount, so an edit still applies on the next 20-min tick
       # with no rebuild — the reason it was kept out of an image in the first place.
       - ./watch:/data/jira:ro
-    ports:
-      - "127.0.0.1:8089:8088"
+    # No route off this network, which is the boundary the MCP gate is worth
+    # something behind: measured on 2026-09-30, this container could reach the
+    # chat client's own port on the host and call any tool it exposes, with no
+    # credential and past its own MCP allowlist. The console moves to
+    # probe-ingress, because an internal network answers no published port.
+    networks: [probe_net]
 
   # The clock. A separate service from the watcher it triggers, because "the
   # timer died" and "the watcher died" want different fixes and a timer living
@@ -598,7 +678,7 @@ services:
       # there) go direct — proxying those would break them for nothing.
       HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
       HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy}
+      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy,mcp-gate}
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       # The alarm channel is per NODE, not per stack: on 2026-09-22 the work
@@ -712,8 +792,12 @@ services:
       # input guard still apply; everything else this node may do to the tree is
       # decided by this line.
       - ${PROBE_WORK_CODE:-../work-data/probe-work-code}:/data/code
-    ports:
-      - "127.0.0.1:8090:8088"
+    # No route off this network, which is the boundary the MCP gate is worth
+    # something behind: measured on 2026-09-30, this container could reach the
+    # chat client's own port on the host and call any tool it exposes, with no
+    # credential and past its own MCP allowlist. The console moves to
+    # probe-ingress, because an internal network answers no published port.
+    networks: [probe_net]
 
   # The chat's way back in, for this deployment: dials out to Lark as a THIRD
   # app (one event connection per app; the alert deployment's bridge holds the
@@ -896,6 +980,10 @@ services:
   # visible here as an absence.
   sink:
     profiles: [smoke]
+    # Both sides: the probes are on an internal network with no route off it
+    # (see `networks:` at the foot of this file), and this has to be reachable
+    # from there AND from the host.
+    networks: [default, probe_net]
     image: python:3.14-slim
     container_name: work-sink
     command: ["python", "-u", "/examples/sink.py"]
@@ -909,3 +997,13 @@ services:
 networks:
   default:
     name: work_net
+  # Where the agents live, and the reason this file has a networks block at all.
+  # `internal: true` removes the default route: no host, no internet, no DNS for
+  # either. Everything a probe legitimately reaches is a container on this
+  # network — the pipe, the egress proxy with its allowlist, the MCP gate with
+  # its tool list — and everything it does not is now unreachable rather than
+  # merely not allowed. It also costs the probes their published ports, which is
+  # what probe-ingress exists for.
+  probe_net:
+    name: work_probe_net
+    internal: true

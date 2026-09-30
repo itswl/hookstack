@@ -38,7 +38,7 @@ The published `0.4.0` images predate the boards shown here. To see these, clone 
 - **A card a person can rule on.** Every button is signed before the card leaves, and every press is recorded.
 - **Remediation with a person in the loop.** An approved procedure runs step by step against an allowlist, as argv, never through a shell. A plan a person hands off is carried out by a separate work node, with a write credential of its own and a guard that refuses destructive commands; it made its first real change on 2026-09-30 ([how it went](docs/deployments.md#the-first-real-write)).
 - **Investigations that leave something behind.** A finished run distills a runbook, and the next occurrence starts from it.
-- **Agents you can contain.** Read-only by default and measured at startup, budget ceilings that refuse out loud, and twenty-eight structural boundaries, each written up with what it does **not** stop ([containment](docs/containment.md)).
+- **Agents you can contain.** Read-only by default and measured at startup, budget ceilings that refuse out loud, and twenty-nine structural boundaries, each written up with what it does **not** stop ([containment](docs/containment.md)).
 - **One audit page per event.** Every hop, digest, decision and human action, a flight recorder of every tool call, and a timing waterfall per run.
 - **Your model, your chat.** Any Anthropic-dialect endpoint for the investigator, any OpenAI-compatible one for the judge, local models included. Feishu/Lark through a bridge, DingTalk and WeCom as a plugin, or signed JSON to any webhook.
 

@@ -156,6 +156,15 @@ hookrelay/.venv/bin/python -m ruff format --check deploy/egress-proxy
 hookrelay/.venv/bin/python -m pytest -q deploy/egress-proxy/tests
 echo "egress-proxy: OK"
 
+step_bridge "the chat gate and the console ingress parse, lint and hold their lists"
+# The same reasoning as the egress proxy above: both sit in the path of
+# something an agent does, and neither is inside a service package.
+python3 -m compileall -q deploy/mcp-gate deploy/probe-ingress
+hookrelay/.venv/bin/python -m ruff check deploy/mcp-gate deploy/probe-ingress
+hookrelay/.venv/bin/python -m ruff format --check deploy/mcp-gate deploy/probe-ingress
+hookrelay/.venv/bin/python -m pytest -q deploy/mcp-gate/tests deploy/probe-ingress/tests
+echo "mcp-gate + probe-ingress: OK"
+
 step_bridge "the lark bridge parses and lints"
 python3 -m compileall -q deploy/lark-bridge
 hookrelay/.venv/bin/python -m ruff check deploy/lark-bridge
