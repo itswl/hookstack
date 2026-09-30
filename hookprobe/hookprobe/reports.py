@@ -35,6 +35,20 @@ from typing import Any
 _VERDICT = re.compile(r"^\s*VERDICT:\s*([A-Za-z0-9_-]{1,32})\s*$", re.MULTILINE)
 
 
+def is_context_summary(text: str) -> bool:
+    """Is this answer the summary a compacted session wrote for itself?
+
+    A long session is compacted by asking the model for a summary in a fixed
+    shape, an `<analysis>` block and then a `<summary>` block, and carrying on
+    from it. On the work stack by 2026-09-30, 2 of the planner's 71 runs ended
+    with that summary as their final answer, 12 KB about "the conversation",
+    and the pipe delivered each one as a plan with a hand-off button under it.
+    A report never opens with that tag, so the opening is the whole test.
+    """
+    head = str(text or "").lstrip()[:8000]
+    return head.startswith("<analysis>") and "<summary>" in head
+
+
 def verdict(text: str, allowed: Iterable[str]) -> str:
     """The report's own conclusion, admitted ONLY if the operator declared it.
 

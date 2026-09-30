@@ -42,7 +42,7 @@ from typing import Any
 
 from hookprobe import remediation, suggestions
 from hookprobe.files import atomic_write
-from hookprobe.runs import RUNNING, Run
+from hookprobe.runs import COMPLETED, Run
 
 logger = logging.getLogger("hookprobe.actions")
 
@@ -121,9 +121,11 @@ def declare(
     # off is not offered again on a later re-delivery, and a run still moving
     # or one that produced nothing has nothing to hand over (an empty handoff
     # is a paid run started on nothing, and the node behind that door writes).
+    # Nor does a failed one: its text is a failure report, not a plan, and until
+    # 2026-09-30 it was offered to the node that writes like any other.
     if (
         hands_off
-        and run.status != RUNNING
+        and run.status == COMPLETED
         and str(run.text or "").strip()
         and not (run.meta or {}).get("handed_off_at")
     ):
