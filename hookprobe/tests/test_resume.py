@@ -278,3 +278,64 @@ def test_a_permanent_failure_is_not_retried_and_one_blip_is_the_limit(tmp_path) 
         assert len(run2.turns) == 2, "both attempts are in the record"
 
     asyncio.run(scenario())
+
+
+_SUMMARY = (
+    "<analysis>\nThe conversation began with a request for a read-only investigation.\n</analysis>\n\n"
+    "<summary>\n1. Primary Request and Intent:\n   Plan the change.\n</summary>\n"
+)
+
+
+def test_the_opening_is_what_marks_an_answer_as_the_sessions_own_summary() -> None:
+    from hookprobe.reports import is_context_summary
+
+    assert is_context_summary(_SUMMARY) and is_context_summary("\n  " + _SUMMARY)
+    assert not is_context_summary('{"summary": "ok"}')
+    assert not is_context_summary("## Plan\n\nWrap the notes in <analysis> tags.\n<summary>")
+    assert not is_context_summary("<analysis> with no summary block after it")
+    assert not is_context_summary("")
+
+
+def test_an_answer_that_is_the_sessions_own_summary_is_asked_again_once(tmp_path) -> None:
+    """2 of the planner's 71 runs on the work stack ended with the summary a
+    compacted session writes for itself, and each went out as a plan with a
+    hand-off button under it (2026-09-30). One more turn in the same session
+    asks for the answer; a second summary fails the run, and a failed plan
+    offers nothing to the node that writes."""
+    from hookprobe import actions
+    from hookprobe.engine import EngineResult
+
+    class Compacting(FakeEngine):
+        def __init__(self, summaries: int) -> None:
+            super().__init__()
+            self.summaries = summaries
+            self.attempts = 0
+
+        async def run(self, *, message, session_key, resume=None, on_event=None, **kw):  # type: ignore[override]
+            self.attempts += 1
+            self.messages.append(message)
+            self.resumes.append(resume)
+            if self.attempts <= self.summaries:
+                return EngineResult(text=_SUMMARY, message_count=77, cost_usd=0.05, session_id="sdk-session-1")
+            return self.result
+
+    async def scenario(summaries: int) -> tuple[Compacting, Run]:
+        engine = Compacting(summaries)
+        home = tmp_path / str(summaries)
+        service = RunService(make_settings(home), engine, RunStore(home / "results"))
+        service.retry_backoff_seconds = 0
+        service.start({"message": "plan the cleanup", "sessionKey": "probe:watch:31"})
+        return engine, await _settled(service, "probe:watch:31")
+
+    engine, run = asyncio.run(scenario(1))
+    assert engine.attempts == 2 and run.status == "completed" and run.text == '{"summary": "ok"}'
+    assert engine.resumes[-1] == "sdk-session-1", "asked in the session that holds what it gathered"
+    assert "summary of this session's context" in engine.messages[-1]
+    assert [t["cost_usd"] for t in run.turns] == [0.05, 0.5], "the summary turn is spend like any other"
+
+    engine, run = asyncio.run(scenario(2))
+    assert engine.attempts == 2 and run.status == FAILED
+    assert run.error == "answered with its own context summary instead of the report"
+    assert "<analysis>" not in run.text, "the summary is not what was asked, so it is not the report"
+    offered = [a["kind"] for a in actions.declare(run, tmp_path / "2", hands_off=True)]
+    assert "handoff" not in offered, "a failed plan is not handed to the node that writes"

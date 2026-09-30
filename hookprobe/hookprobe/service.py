@@ -53,6 +53,7 @@ from hookprobe.reports import (
     budget_report,
     cooling_report,
     failure_report,
+    is_context_summary,
     outcome_report,
     superseded_report,
     unanswered_report,
@@ -82,6 +83,13 @@ _RETRY_MESSAGE = (
     "The previous attempt was cut off by a provider error, not by anything you did. "
     "Everything you had gathered is still in this session. Continue from where you stopped "
     "and produce the report — do not start the investigation over."
+)
+# Asked after an answer that was the session's own context summary. The session
+# still holds everything the summary does, so the answer is one turn away.
+_SUMMARY_RETRY_MESSAGE = (
+    "Your last answer was the summary of this session's context, not the answer the brief asked for. "
+    "Using what you already gathered, give that answer now, in the shape the brief asked for. "
+    "Do not start over."
 )
 
 # How far back a recovery may reach for the investigation it verifies. A day,
@@ -1400,6 +1408,15 @@ class RunService:
                 return
             self._fail(run, result.error, result)
             return
+        if is_context_summary(result.text):
+            # Not an answer: see reports.is_context_summary. One more turn in the
+            # same session asks for the real one; a second summary fails the run,
+            # without the summary in the report, since it is not what was asked.
+            reason = "answered with its own context summary instead of the report"
+            if await self._retry_transient(run, reason, result, timeout_s, resume, ask=_SUMMARY_RETRY_MESSAGE):
+                return
+            self._fail(run, reason, replace(result, text=""))
+            return
 
         run.status = COMPLETED
         # Suggestions ride the report as marker lines; lift them into the queue
@@ -1910,7 +1927,13 @@ class RunService:
         self._board_changed()
 
     async def _retry_transient(
-        self, run: Run, error: str, result: EngineResult | None, timeout_s: int, resume: str | None
+        self,
+        run: Run,
+        error: str,
+        result: EngineResult | None,
+        timeout_s: int,
+        resume: str | None,
+        ask: str | None = None,
     ) -> bool:
         """One more attempt at a failure that was about the moment, not the request.
 
@@ -1930,8 +1953,11 @@ class RunService:
         engine reported, so a failure that ran for a minute before the gateway
         gave up is in the ledger rather than erased by the attempt that
         succeeded. Returns True when a replacement turn is now in flight.
+
+        `ask` is a failure of the answer rather than of the provider, which the
+        classification does not cover: the resumed turn asks that instead.
         """
-        if int(run.meta.get("auto_retries") or 0) >= _MAX_AUTO_RETRIES or not transient(error):
+        if int(run.meta.get("auto_retries") or 0) >= _MAX_AUTO_RETRIES or (ask is None and not transient(error)):
             return False
         state = self.budget_state()
         if state is not None and state[0] >= state[1]:
@@ -1943,18 +1969,16 @@ class RunService:
         self._record_turn(run, result)
         run.meta["auto_retries"] = int(run.meta.get("auto_retries") or 0) + 1
         resume_id = run.engine_session_id or resume
-        message = _RETRY_MESSAGE if resume_id else asked
+        message = (ask or _RETRY_MESSAGE) if resume_id else asked
         run.error = None
         run.status = RUNNING
         run.run_id = uuid.uuid4().hex[:12]
         run.finished_at = None
         run.cost_usd = None
         run.current_message = message
-        logger.warning("transient failure, retrying once session=%s error=%s", run.session_key, error[:120])
-        self._publish(
-            run.session_key,
-            {"type": "text", "text": f"provider error, trying once more: {error[:160]}", "ts": time.time()},
-        )
+        logger.warning("retrying once session=%s error=%s", run.session_key, error[:120])
+        said = f"{error[:160]}; asking once more" if ask else f"provider error, trying once more: {error[:160]}"
+        self._publish(run.session_key, {"type": "text", "text": said, "ts": time.time()})
         await asyncio.sleep(self.retry_backoff_seconds)
         self._spawn(run, message, timeout_s, resume=resume_id)
         return True
