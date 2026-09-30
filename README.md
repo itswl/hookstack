@@ -18,7 +18,7 @@ A signal comes in: an alert, a chat message, a ticket, a timer. A pipe signs, ro
 
 The investigator is the product. The pipe and the judge are the smallest alerting front end for a team that has none. One deployment is one team: this is not a work-management platform, a multi-tenant SaaS or an agent framework.
 
-![hookrelay's board: one sentence on what waits on you, four numbers, and one row per alert with its seven stages](docs/img/hookrelay-timeline.png)
+![hookprobe's console: a real investigation, conclusion first, the root cause it could not establish said so, and the bill under it](docs/img/hookprobe-sessions.png)
 
 ## Try it: ten minutes, no keys, no bill
 
@@ -41,6 +41,8 @@ The published `0.4.0` images predate the boards shown here. To see these, clone 
 - **Agents you can contain.** Read-only by default and measured at startup, budget ceilings that refuse out loud, and twenty-eight structural boundaries, each written up with what it does **not** stop ([containment](docs/containment.md)).
 - **One audit page per event.** Every hop, digest, decision and human action, a flight recorder of every tool call, and a timing waterfall per run.
 - **Your model, your chat.** Any Anthropic-dialect endpoint for the investigator, any OpenAI-compatible one for the judge, local models included. Feishu/Lark through a bridge, DingTalk and WeCom as a plugin, or signed JSON to any webhook.
+
+![hookrelay's board: one sentence on what waits on you, four numbers, and one row per alert with its seven stages](docs/img/hookrelay-timeline.png)
 
 ![hookjudge's board: verdicts with their routes and what each cost](docs/img/hookjudge-status.png)
 
