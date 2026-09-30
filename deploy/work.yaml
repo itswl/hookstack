@@ -252,6 +252,13 @@ sources:
       origin: "{meta.source}"
       session: "{meta.session_key}"
       cost_usd: "{meta.cost_usd}"
+      # What the run did, as the node counted it: completed or failed, the files
+      # a diff backed by commits in the clone touched, and the gaps it named. The
+      # board's fix stage for a plan handed off reads carried out, blocked or
+      # failed from these three and nothing else.
+      probe_status: "{meta.status}"
+      changed_files: "{meta.changed_files}"
+      blocked: "{meta.blocked}"
       # Which piece of work this report belongs to, as the node stated it
       # (hookprobe/work.py). Copied, never computed: it is what lets a plan on
       # one node and the work it was handed to on another read as one item.

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from hookrelay.config import Config
 from hookrelay.pipeline import handle_hook
+from hookrelay.timeline import render as render_timeline
 
 JOURNEY = {
     "sources": [
@@ -128,6 +129,79 @@ async def test_the_journey_ends_with_what_the_condition_did_afterwards(store):
     assert [r["id"] for r in trip["refires"]] == [again["event_id"]]
     assert trip["refires"][0]["skip_code"] == "duplicate"
     assert trip["origin"]["is_recovery"] in (0, False, None) and trip["human_actions"] == []
+
+
+# deploy/work.yaml's two doors below the click: the planner posts the plan a
+# person handed off, with its session and work item and no quote, and the work
+# runner reports on what it did.
+HANDOFF = {
+    "sources": [
+        *JOURNEY["sources"],
+        {
+            "name": "plan-approved",
+            "secret": "",
+            "title": "{title}",
+            "body": "{message}",
+            "level": "high",
+            "fields": {"session": "{session}", "work_id": "{work_id}", "kind": "brief"},
+        },
+        {**JOURNEY["sources"][1], "name": "work-notify"},
+    ],
+    "channels": [*JOURNEY["channels"], {"name": "to-work", "type": "generic", "url": "https://work.example/hooks"}],
+    "routes": [
+        *JOURNEY["routes"],
+        {"name": "act-on-it", "source": "plan-approved", "send_to": ["to-work"], "priority": 100, "stop": True},
+        {"name": "work-back", "source": "work-notify", "send_to": ["chat"], "priority": 100, "stop": True},
+    ],
+}
+
+
+async def test_a_plan_handed_off_is_one_journey_with_the_work_it_started(store):
+    """The handoff quotes nothing, but it carries the plan's work item, the
+    `hr-<alert>` the pipe minted. Read by quotes alone, the work run sat in a
+    chain of its own beside the request it carried out, and the board showed
+    one piece of work as two rows (twice on 2026-09-30)."""
+    cfg = Config.from_dict(HANDOFF)
+    alert_id = (await handle_hook(store, cfg, cfg.sources["inbound"], ALERT, now=1000.0))["event_id"]
+    plan_session, work_id = f"probe:inbound:{alert_id}", f"hr-{alert_id}"
+    plan = await handle_hook(
+        store, cfg, cfg.sources["probe-notify"], _report(alert_id, session=plan_session, work_id=work_id), now=1030.0
+    )
+    brief = {"title": f"plan handed off: {plan_session}", "message": "do it", "session": plan_session}
+    handoff = await handle_hook(store, cfg, cfg.sources["plan-approved"], {**brief, "work_id": work_id}, now=1100.0)
+    work_session = f"probe:plan-approved:{handoff['event_id']}"
+    work = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["work-notify"],
+        _report(handoff["event_id"], session=work_session, work_id=work_id),
+        now=1200.0,
+    )
+    for event_id, card_id in ((plan["event_id"], "om_plan"), (work["event_id"], "om_work")):
+        queued = await store.due_deliveries(now=2000.0)
+        card = next(d for d in queued if d["event_id"] == event_id and d["channel"] == "chat")
+        await store.mark_sent(card["id"], 1300.0, "{}", card_id)
+
+    trip = await store.round_trip(alert_id)
+    assert trip is not None
+    assert [r["id"] for r in trip["returns"]] == [plan["event_id"], handoff["event_id"], work["event_id"]]
+    for handle in (str(work["event_id"]), work_session, str(handoff["event_id"])):
+        resolved = await store.resolve_ref(handle)
+        assert resolved is not None and (await store.round_trip(resolved))["origin"]["id"] == alert_id, handle
+    chains = render_timeline(await store.recent_events(10))["chains"]
+    assert [c["chain"] for c in chains] == [str(alert_id)], "one row on the board"
+    assert [h["by_work"] for h in chains[0]["hops"]] == [False, False, True, False]
+
+    # A reply stays in its own conversation: under the plan's card it goes on
+    # with the planner, never with the node that holds a write credential.
+    assert (await store.thread_context("om_plan") or {}).get("session") == plan_session
+    assert (await store.thread_context("om_work") or {}).get("session") == work_session
+
+    # A work item the pipe did not mint names no chain: a console plan hands
+    # off under its own session key.
+    console = {**brief, "title": "plan handed off: probe:console:3", "work_id": "probe:console:3"}
+    alone = await handle_hook(store, cfg, cfg.sources["plan-approved"], console, now=1400.0)
+    assert (await store.round_trip(alone["event_id"]) or {}).get("origin", {}).get("id") == alone["event_id"]
 
 
 async def test_trace_answers_a_handle_over_http(client):

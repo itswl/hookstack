@@ -131,6 +131,17 @@ class ReturnDelivery:
                     "status": run.status,
                     "cost_usd": run.cost_usd,
                     "error": run.error,
+                    # What the run changed and what stopped it, as counts, so a
+                    # pipe can tell work done from work that was not. A diff
+                    # counts only when it is the diff of commits in the clone
+                    # (patches.verify): a run's word that it changed something
+                    # is not a change. On 2026-09-30 a plan handed off came back
+                    # "completed" having changed nothing, blocked on a missing
+                    # permission, and the board could only have called it done.
+                    "changed_files": int((run.meta.get("patch") or {}).get("files") or 0)
+                    if (run.meta.get("patch") or {}).get("matches") is True
+                    else 0,
+                    "blocked": len(run.meta.get("blocked_on") or []),
                     # This report's own conclusion, from the closed vocabulary
                     # this instance was given. "" when the deployment declared
                     # none, which is the default. It is the one field here the

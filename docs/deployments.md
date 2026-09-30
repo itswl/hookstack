@@ -119,9 +119,10 @@ credentials against that declaration at startup and refuses to start when they
 are wider. The work deployment adds a node the alert deployment has no use for:
 `probe-work`, running the same image under `danger-only`, reachable only through
 the handoff a person clicks on a plan card. Its posture check records the
-credentials' blast radius instead of confirming a boundary — today those
-credentials are the same read-only ones the planner has, so the record is a
-list of zeros; the day a write credential is mounted, that list is what an
+credentials' blast radius instead of confirming a boundary. By default those
+are the planner's read-only credentials and the record is a list of zeros;
+since 2026-09-30 the node can hold a write credential of its own
+(`PROBE_WORK_AWS_DIR`, `PROBE_WORK_AWS_PROFILE`), and that list is what an
 operator reads before approving a handoff. The alert deployment's investigator
 has no credentials mounted at all and says so (`no-credentials`). Since
 2026-09-22 the handoff is also the first real use of the write posture: the
@@ -130,7 +131,12 @@ the plan out and commit locally, and `probe-work` mounts the plan's tree
 writable at `/data/code` (`PROBE_WORK_CODE`) — the one writable mount on any
 node. The posture check measures credentials, not mounts, so what that variable
 points at is a grant the operator makes by hand: a scratch copy first, the real
-tree only after a run's commits have been read back.
+tree only after a run's commits have been read back. A handoff quotes nothing;
+it carries the plan's work item, the `hr-<id>` the pipe minted for the request,
+and the pipe's journey and board gather the work run under that request by it.
+The work run's report says how many files its commit-backed diff changed and
+how many gaps it named, so the board's fix stage reads carried out, blocked or
+failed rather than "a report came back".
 
 **The chat is behind a protocol, not in the pipe.** Both deployments reach
 Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a

@@ -162,3 +162,43 @@ def test_an_approved_fix_is_in_flight_and_an_ending_counts_from_when_it_ended():
         _hop(25, NOW - 7000, "probe-notify", "queue · investigation", session="probe:inbound:20"),
     ]
     assert needs_you.analyse(reported, status, now=NOW)["in_flight"] == 0, "a report after the approval answered it"
+
+
+def test_a_plan_handed_off_is_in_flight_until_the_work_reports_and_then_it_ended_well():
+    """The board's handoff rules, which the card mirrors: the pipe marks the hop
+    that joined by work item (`by_work`), and another session's report after it
+    is the work that plan started. Before, a handed-off plan and its work run
+    were two chains, and neither counted anywhere."""
+    hops = [
+        _hop(30, NOW - 3000, "watch", "log cleanup"),
+        _hop(31, NOW - 2900, "plan-notify", "the plan", session="probe:watch:30", asked=["Hand off"]),
+        _hop(32, NOW - 2000, "card-action", "card action: handoff"),
+        _hop(33, NOW - 1990, "plan-approved", "plan handed off", session="probe:watch:30", by_work=True),
+    ]
+    work = _hop(34, NOW - 1700, "work-notify", "plan handed off · investigation", session="probe:plan-approved:33")
+    rows = [
+        _row(30, "watch", "log cleanup"),
+        _row(32, "card-action", "card action: handoff", fields={"kind": "handoff", "actor": "ou_x"}),
+        _row(33, "plan-approved", "plan handed off", fields={"kind": "brief", "work_id": "hr-30"}),
+    ]
+
+    def figures(chain_hops, status_rows):
+        chains = {"chains": [{"chain": "30", "started_at": NOW - 3000, "hops": chain_hops}]}
+        return needs_you.analyse(chains, {"queue": {}, "recent": status_rows}, now=NOW)
+
+    def reported(**fields):
+        return figures([*hops, work], [*rows, _row(34, "work-notify", fields=fields)])
+
+    running = figures(hops, rows)
+    assert running["waiting"] == [] and running["in_flight"] == 1 and running["ended_well"] == 0
+    done = reported(probe_status="completed", changed_files="2", blocked="1")
+    assert (done["in_flight"], done["ended_well"], done["waiting"]) == (0, 1, []), "a verified change: carried out"
+    stuck = reported(probe_status="completed", changed_files="0", blocked="2")
+    assert [w["chain"] for w in stuck["waiting"]] == ["30"] and stuck["ended_well"] == 0, "changed nothing, named gaps"
+    card = needs_you.signal(stuck, now=NOW)
+    assert card["detail"].splitlines()[0] == (
+        "· log cleanup — the work run changed nothing 28m ago and named what it is missing  (#30)"
+    )
+    for fields in ({"probe_status": "failed", "changed_files": "3"}, {}):
+        quiet = reported(**fields)
+        assert (quiet["in_flight"], quiet["ended_well"], quiet["waiting"]) == (0, 0, []), fields

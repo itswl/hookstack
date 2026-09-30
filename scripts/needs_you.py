@@ -16,7 +16,10 @@ asked (labels the pipe wrote) and no press in its chain is "waiting"; a later
 event of the same source and title the source stated as a recovery is "ended",
 counted from when it ended; a return whose title says the fix held is "ended"
 too. A routed single hop under two hours old is "in flight", and so is a
-procedure somebody approved that nothing has answered since. No alert text is
+procedure somebody approved that nothing has answered since. A plan handed off
+is in flight until another session reports after it. That report ended well when
+it changed something, waits on you when it changed nothing and named what it is
+missing, and counts nowhere when it failed or said neither. No alert text is
 read.
 """
 
@@ -51,6 +54,26 @@ def _kind(row: dict[str, Any]) -> str:
     if source.endswith("-due"):
         return "tick"
     return str(fields.get("kind") or "alert")
+
+
+def _count(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _work_outcome(fields: dict[str, Any]) -> str:
+    """The board's workOutcome, from the two counts the work node states."""
+    if fields.get("probe_status") == "failed":
+        return "work_failed"
+    if _count(fields.get("changed_files")) > 0:
+        return "carried_out"
+    return "work_blocked" if _count(fields.get("blocked")) > 0 else "work_reported"
+
+
+def _is_fix(hop: dict[str, Any]) -> bool:
+    return str(hop.get("title") or "").endswith(("· fix held", "· fix did not hold"))
 
 
 def _recovered(rows: dict[int, dict[str, Any]], row: dict[str, Any], at: float) -> dict[str, Any] | None:
@@ -123,10 +146,20 @@ def analyse(timeline: dict[str, Any], status: dict[str, Any], *, now: float, hou
             for delivery in rows.get(int(hop.get("id") or 0), {}).get("deliveries") or []:
                 if delivery.get("asked") and delivery.get("channel") not in asked_on:
                     asked_on.append(str(delivery.get("channel")))
-        fix = next(
-            (h for h in reversed(hops) if str(h.get("title") or "").endswith(("· fix held", "· fix did not hold"))),
-            None,
-        )
+        fix = next((h for h in reversed(hops) if _is_fix(h)), None)
+        # A plan handed off joined by its work item (the pipe's `by_work`); the
+        # reports after it from another session are the work it started.
+        reports = [h for h in hops[1:] if h.get("session") and h not in presses and not _is_fix(h)]
+        handoff = next((h for h in reversed(reports) if h.get("by_work")), None)
+        work = [
+            h
+            for h in reports
+            if handoff is not None
+            and h is not handoff
+            and h.get("session") != handoff.get("session")
+            and float(h.get("at") or 0) >= float(handoff.get("at") or 0)
+        ]
+        outcome = _work_outcome(rows.get(int(work[-1].get("id") or 0), {}).get("fields") or {}) if work else ""
         recovery = _recovered(rows, row, t0) if row else None
         # When the chain last MOVED, which for a recovered alert is the
         # recovery: it is a separate event, not a hop, and an alert that fired
@@ -150,7 +183,18 @@ def analyse(timeline: dict[str, Any], status: dict[str, Any], *, now: float, hou
                     "on": asked_on,
                 }
             )
-        elif _approved_unanswered(hops, presses, rows) or (len(hops) == 1 and now - t0 < 7200):
+        elif outcome == "carried_out":
+            if now - last <= hours * 3600:
+                ended += 1
+        elif outcome == "work_blocked":
+            since = float(work[-1].get("at") or t0)
+            title = str(origin.get("title") or "(untitled)")[:120]
+            waiting.append(
+                {"chain": chain.get("chain"), "title": title, "asked": [], "since": since, "on": [], "blocked": True}
+            )
+        elif outcome:
+            pass  # failed: red on the board; reported: it said neither, and the board says so
+        elif handoff is not None or _approved_unanswered(hops, presses, rows) or (len(hops) == 1 and now - t0 < 7200):
             in_flight += 1
     queue = status.get("queue") or {}
     waiting.sort(key=lambda w: w["since"])
@@ -182,6 +226,12 @@ def signal(figures: dict[str, Any], *, now: float, board: str = "") -> dict[str,
     title = f"Needs you · {len(waiting)} waiting · {day}" if waiting else f"Nothing waiting on you · {day}"
     lines = []
     for item in waiting[:8]:
+        if item.get("blocked"):
+            lines.append(
+                f"· {item['title']} — the work run changed nothing {_ago(now - item['since'])} ago "
+                f"and named what it is missing  (#{item['chain']})"
+            )
+            continue
         where = f" on {', '.join(item['on'])}" if item["on"] else ""
         lines.append(
             f"· {item['title']} — asked {_ago(now - item['since'])} ago{where}: "
