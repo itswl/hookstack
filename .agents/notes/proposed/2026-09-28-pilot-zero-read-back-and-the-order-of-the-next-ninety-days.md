@@ -31,6 +31,12 @@ SRE teams" was read against the archive of the retired production deployment
    records who pressed it as a field rather than a note, and the recovery
    contract of [[execution-success-is-not-recovery]] shipped so the loop closes
    on the condition's evidence rather than on exit codes.
+   *Reached on 2026-09-30 through the handoff, not the allowlist:* a plan a
+   person handed off, carried out on a test cluster by the work node with a
+   write credential of its own (`docs/deployments.md`, "The first real write").
+   The credential was an administrator profile, mounted for the run and taken
+   off after. The allowlisted procedure and a credential scoped to one job are
+   still open.
 4. *Thirty days on the operator's own alert feed*, the weekly page read every
    Monday, with the two attention numbers below required to move the right
    way before anyone outside is asked to run it.
@@ -54,7 +60,7 @@ scratch and is the source of patches, not the successor (operator, 09-24).
 | the approval binds to the version and hash of what was read | proposal supersession already exists; add the hash to the card and the check to the door | step 3 |
 | a gate in front of the chat MCP's writable credential (`mcpgate`) | the work stack's compose | step 3 |
 | the watcher's signing key out of the agent's reach | `post_watch_signal.py` | step 3 |
-| the launcher's per-plan ephemeral worker with only that profile's credentials | not now — the door has never opened; harden it after the first real execution shows what the blast radius argument is worth | after step 3 |
+| the launcher's per-plan ephemeral worker with only that profile's credentials | not built. The door first opened on 2026-09-30, with an administrator profile far wider than its job; that is what the blast radius argument is worth | after step 3 |
 | the offline demo (`scripts/demo.py`: stub engine, plan, comment, v2, approve, ledger) | the shape of step 2's rehearsal | step 2 |
 
 airlock takes no new features; it stays the reference and the test bed.
@@ -149,8 +155,10 @@ owner/assignee — deferred twice and still last
 Step 2 needs a replay adapter that passes the runtime contract suite, a demo
 pipe config that offers `approve` and `followup`, an allowlist shipped inside
 the investigator's image for the rehearsal, and a release, because the
-quickstart runs published images. Step 3 needs a write credential nobody has
-minted yet, and is the first time the containment story meets a live system.
+quickstart runs published images. Step 3 needed a write credential. None was
+minted for it: the first real write, on 2026-09-30, ran on the operator's own
+administrator profile, mounted for that run and removed after. It was the first
+time the containment story met a live system.
 Step 4 needs the alert shape running somewhere again: the platform's forward
 rules toward this stack are disabled, not deleted, and point at a host that no
 longer runs it.

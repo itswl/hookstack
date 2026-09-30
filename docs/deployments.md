@@ -88,6 +88,43 @@ No judge. The watcher already decided what deserves attention, and a judge
 calibrated on alerts — severity keywords, recovery semantics, flap suppression —
 has no vocabulary for a colleague's question.
 
+## The first real write
+
+On 2026-09-30 the work shape made its first change with a write credential, end
+to end:
+
+1. A request came in through the watch door: a daily cleanup of application logs
+   older than three days on the three app nodes of a test cluster.
+2. The planner, read-only, answered with a plan, the permission it lacked, and
+   one question: when to run it. The operator answered in the card's thread,
+   03:00 Asia/Shanghai, and pressed **Act on this plan**.
+3. The work node held a write credential of its own for the first time. It
+   installed a cleanup script, a systemd service and a timer on each node
+   through AWS Systems Manager, ran the cleanup once, and read every node back.
+   About 74 GB came free across the three. Each timer was enabled with its next
+   run at 03:00, and the files on the nodes matched its commits by hash.
+4. It returned the change as commits in its scratch clone, a 79-line diff, in
+   four minutes for $0.05. The pipe's board shows the request, the plan, the
+   press and the work as one row.
+
+The report also said what it could not do. There was no toolchain for a static
+check of the units, and its first command came back failed after the work was
+done, from a bug in its own check; a second command confirmed the result. It
+named the catch for a person: the nodes belong to a managed node group, so a
+replaced node comes up without the timer until the launch template carries it.
+
+An earlier handoff the same day ran on the planner's read-only credential. It
+could not run a command on its nodes, changed nothing, and said so. That is why
+the board grades a work report by what it changed rather than by the fact that
+it came back
+([the decision](../.agents/notes/implemented/2026-09-30-a-handoff-joins-its-request-by-work-item.md)).
+
+The credential was the operator's own administrator profile, far wider than the
+job needed. It was mounted for the run as a directory and two `.env` lines
+(`PROBE_WORK_AWS_DIR`, `PROBE_WORK_AWS_PROFILE`) and taken off the node once the
+result had been read back; the node's posture check measured no write actions
+afterwards. The next write credential should be scoped to its job.
+
 ## Four decisions that differ, and why
 
 **dedup: off for alerts, on for work signals.** In the alert shape the judge

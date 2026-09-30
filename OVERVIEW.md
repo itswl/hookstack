@@ -247,8 +247,12 @@ it marked as inferred.
 The alert shape ran unattended on a production stream from August until
 2026-09-23, when the operator retired it; `deploy/shadow.yaml` stays here as
 its worked example. What runs today is the work deployment, on the operator's
-own machine. Remediation is rehearsed end to end but has not yet run against a
-write credential.
+own machine. The approve-and-run path for a proposed procedure is rehearsed end
+to end and has not yet run against a write credential. The handoff path has: on
+2026-09-30 a plan a person handed off installed a scheduled log cleanup on three
+nodes of a test cluster, with a write credential mounted on the work node for
+that run and taken off afterwards
+([how it went](docs/deployments.md#the-first-real-write)).
 
 ## Where this sits in an AI-native SDLC
 
