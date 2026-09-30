@@ -194,6 +194,19 @@ planner eleven, and every refusal is recorded in `work-data/mcp-gate/calls.jsonl
 An internal network answers no published port, so the three consoles moved to
 `probe-ingress`, a byte pump on both networks, at the same addresses as before.
 
+**The watcher's signature moved out of its reach, the same day.**
+`post_watch_signal.py` signs from a file, which is right on the operator's
+laptop and upside down inside `probe-watch`: the process deciding what to post
+is an agent whose input is colleagues' messages, and it could read the secret.
+The door's only check — "signed by something holding the secret" — then answered
+yes to whatever an injected round chose to say, including a fabricated request
+at `high` as a `task`, which buys a paid planner run and a card that reads as
+real. `deploy/watch-signer` holds the secret now. The watcher posts unsigned to
+it; it signs a signal only when the signal names a conversation the scanner
+offered that round, with a level and kind from a closed set, text cut to a
+length and a ceiling per round. The refusals are in
+`work-data/watch-signer/signals.jsonl`.
+
 **The chat is behind a protocol, not in the pipe.** Both deployments reach
 Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a
 card model — title, tone, summary, links, actions as plain facts — and the
