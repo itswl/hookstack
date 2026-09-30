@@ -197,6 +197,10 @@ _UNITS_EN = ("one", "two", "three", "four", "five", "six", "seven", "eight", "ni
 _UNITS_ZH = "一二三四五六七八九"
 _TEENS.update({f"twenty-{word}": 20 + i for i, word in enumerate(_UNITS_EN, 1)})
 _TEENS.update({f"二十{char}": 20 + i for i, char in enumerate(_UNITS_ZH, 1)})
+# And the round tens either side of them, which is where twenty-nine went next.
+_TEENS.update({"twenty": 20, "thirty": 30, "二十": 20, "三十": 30})
+_TEENS.update({f"thirty-{word}": 30 + i for i, word in enumerate(_UNITS_EN, 1)})
+_TEENS.update({f"三十{char}": 30 + i for i, char in enumerate(_UNITS_ZH, 1)})
 _NUMBER_WORDS = {
     **{
         w: i

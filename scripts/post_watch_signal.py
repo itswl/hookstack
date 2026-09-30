@@ -6,6 +6,14 @@ signing secret never has to leave this host: the watcher runs on a laptop, and
 reaching the door means one ssh per signal rather than a standing tunnel and a
 copy of the secret on a machine that travels.
 
+Inside a container the same arrangement is upside down, because the caller there
+is an AGENT reading colleagues' messages. So `HOOKSTACK_WATCH_SIGNER_TOKEN`
+switches this to the other half of the pair: the signal goes unsigned to
+`deploy/watch-signer`, which holds the secret, checks the signal against what
+the round was handed, and signs it. The secret is then not in any file this
+process can read — which is the whole point, and the reason this mode is chosen
+by the presence of a TOKEN rather than by a flag somebody could forget.
+
     echo '{"title": "...", "detail": "...", "level": "high", "origin": "...",
            "kind": "task"}' | python3 scripts/post_watch_signal.py
 
@@ -45,6 +53,11 @@ DOOR = os.environ.get("HOOKSTACK_WATCH_DOOR") or "http://127.0.0.1:8100/hook/wat
 _REQUIRED = ("title", "level")
 
 
+# Set when something else holds the secret: post unsigned, with this as the
+# bearer, and let that thing sign. See the module docstring.
+SIGNER_TOKEN = os.environ.get("HOOKSTACK_WATCH_SIGNER_TOKEN", "").strip()
+
+
 def _secret() -> str:
     match = re.search(r"^WATCH_INGEST_SECRET=(.+)$", ENV_FILE.read_text(encoding="utf-8"), re.M)
     if not match:
@@ -66,24 +79,19 @@ def main() -> int:
         print(f"signal is missing: {', '.join(missing)}", file=sys.stderr)
         return 2
 
-    try:
-        secret = _secret()
-    except (OSError, SystemExit) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-
     body = json.dumps({"signal": signal}, ensure_ascii=False).encode("utf-8")
-    stamp = str(int(time.time()))
-    signature = hmac.new(secret.encode(), stamp.encode() + b"." + body, hashlib.sha256).hexdigest()
-    request = urllib.request.Request(
-        DOOR,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hook-Signature": signature,
-            "X-Hook-Timestamp": stamp,
-        },
-    )
+    if SIGNER_TOKEN:
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {SIGNER_TOKEN}"}
+    else:
+        try:
+            secret = _secret()
+        except (OSError, SystemExit) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        stamp = str(int(time.time()))
+        signature = hmac.new(secret.encode(), stamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+        headers = {"Content-Type": "application/json", "X-Hook-Signature": signature, "X-Hook-Timestamp": stamp}
+    request = urllib.request.Request(DOOR, data=body, headers=headers)
     try:
         answer = json.loads(urllib.request.urlopen(request, timeout=30).read())
     except urllib.error.HTTPError as exc:
