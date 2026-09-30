@@ -623,11 +623,17 @@ services:
       HOOKPROBE_BLAST_RADIUS: ${HOOKPROBE_BLAST_RADIUS:-}
       HOOKPROBE_AGENT_NAME: work runner
       HOOKPROBE_AGENT_ROLE: does the thing an approved plan describes — the one node a person hands work to, and the only one not on readonly
-      AWS_CONFIG_FILE: /data/aws/config
-      AWS_SHARED_CREDENTIALS_FILE: /data/aws/credentials
+      # The planner's read-only credential unless this node is given its own.
+      # A WRITE credential goes in work-data/probe-work-secrets/aws and is named
+      # by two lines in .env: PROBE_WORK_AWS_DIR=/data/secrets/aws and
+      # PROBE_WORK_AWS_PROFILE=<the profile>. Both files move together, so the
+      # write profile is never looked up in the planner's mount, and removing
+      # the two lines puts this node back on read-only.
+      AWS_CONFIG_FILE: ${PROBE_WORK_AWS_DIR:-/data/aws}/config
+      AWS_SHARED_CREDENTIALS_FILE: ${PROBE_WORK_AWS_DIR:-/data/aws}/credentials
       # No default on purpose: any default that WORKS here is the real profile
       # name, and a real name must not be in this repository.
-      AWS_PROFILE: ${PROBE_PLAN_AWS_PROFILE:?set PROBE_PLAN_AWS_PROFILE in .env}
+      AWS_PROFILE: ${PROBE_WORK_AWS_PROFILE:-${PROBE_PLAN_AWS_PROFILE:?set PROBE_PLAN_AWS_PROFILE in .env}}
       # Every plan arrives at `high` from the plan-approved door, so this gate
       # is not doing selection here — it is the backstop that keeps a stray
       # low-level event from starting a write run.
