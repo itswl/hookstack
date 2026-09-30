@@ -28,6 +28,12 @@ from __future__ import annotations
 from typing import Any
 
 
+def minted_work_id(fields: Any) -> str:
+    """`fields.work_id` when it is a handle the pipe minted (`hr-<n>`), else ''."""
+    work = str((fields or {}).get("work_id") or "") if isinstance(fields, dict) else ""
+    return work if work.startswith("hr-") and work[3:].isdigit() else ""
+
+
 def _chain_key(row: dict[str, Any]) -> str:
     """Which chain this hop belongs to: what it quoted, else its own id.
 
@@ -41,8 +47,15 @@ def _chain_key(row: dict[str, Any]) -> str:
 
 
 def _quoted_id(row: dict[str, Any]) -> str:
-    """The event id this hop quoted, in either spelling, or '' if it quoted nothing."""
-    quoted = str(row.get("correlation_id") or "")
+    """The event id this hop quoted, in either spelling, or '' if it quoted nothing.
+
+    A hop that quoted nothing but carries a work id the pipe itself minted
+    (`hr-<n>`, the handle a node was handed and kept as its work item) belongs
+    to that event's chain. A plan handed off from a card reached the
+    plan-approved door quoting nothing until 2026-09-30, so the work run it
+    started sat in a chain of its own beside the request it carried out.
+    """
+    quoted = str(row.get("correlation_id") or "") or minted_work_id(row.get("fields"))
     if quoted.startswith("hr-") and quoted[3:].isdigit():
         return quoted[3:]
     return quoted
@@ -124,6 +137,9 @@ def render(rows: list[dict[str, Any]], limit: int = 50) -> dict[str, Any]:
                 # still — two field NAMES the doors agreed on, never their text.
                 "session": str((row.get("fields") or {}).get("session") or "")[:120] or None,
                 "sender": str((row.get("fields") or {}).get("sender") or "")[:80] or None,
+                # Joined by its work item, not a quote: a plan handed off. The
+                # board reads another session's reports after it as the work.
+                "by_work": not row.get("correlation_id") and bool(minted_work_id(row.get("fields"))),
                 # What this hop's cards asked a person, if anything — the pipe's
                 # own button labels, so the board can say "waiting on you"
                 # without reading a word of the alert.

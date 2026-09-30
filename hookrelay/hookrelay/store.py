@@ -18,6 +18,8 @@ from typing import Any
 
 import aiosqlite
 
+from hookrelay.timeline import minted_work_id
+
 logger = logging.getLogger("hookrelay.store")
 
 _SCHEMA = """
@@ -607,7 +609,11 @@ class Store:
             if topic_row is None:
                 return None
             card_event_id, channel = int(topic_row["id"]), "(topic)"
-        trip = await self.round_trip(card_event_id)
+        # By quote only. A handoff carries the plan's work item into a new
+        # conversation: gathered by work id, a reply under the PLAN card would
+        # find the work run as the newest session and go to the node holding a
+        # write credential, the hop no chat message takes without a press.
+        trip = await self.round_trip(card_event_id, by_work=False)
         if trip is None:
             return None
         session = return_source = ""
@@ -862,7 +868,7 @@ class Store:
         tail = text.rsplit(":", 1)[-1]
         return int(tail) if text.count(":") >= 2 and tail.isdigit() else None
 
-    async def round_trip(self, event_id: int) -> dict[str, Any] | None:
+    async def round_trip(self, event_id: int, *, by_work: bool = True) -> dict[str, Any] | None:
         """Assemble one alert's whole journey: the original, where it fanned
         out to, what each brain sent back, what a person pressed, and what the
         condition did afterwards.
@@ -870,6 +876,10 @@ class Store:
         This is the view that makes several processing systems COMPARABLE — the
         same payload went to each of them, so the differences in what came back
         are differences in their judgement, not in their input.
+
+        `by_work` also gathers the hops that quoted nothing but carry this
+        chain's own handle as their work item (timeline.minted_work_id): a plan
+        handed off, and the work run it started.
         """
         origin = await self._event_row(event_id)
         if origin is None:
@@ -887,6 +897,8 @@ class Store:
         # that quoted nothing — that is the operation's origin from either end.
         for _ in range(8):
             quoted = str(origin.get("correlation_id") or "")
+            if not quoted and by_work:
+                quoted = minted_work_id(origin.get("fields"))
             quoted_id = quoted[3:] if quoted.startswith("hr-") else quoted
             if not quoted_id.isdigit() or int(quoted_id) == anchor_id:
                 break
@@ -904,12 +916,16 @@ class Store:
         for _ in range(5):
             if not frontier:
                 break
-            marks = ", ".join("?" for _ in frontier) + ", " + ", ".join("?" for _ in frontier)
-            params = [f"hr-{i}" for i in frontier] + [str(i) for i in frontier]
-            cursor = await self.read.execute(
-                f"SELECT id FROM events WHERE correlation_id IN ({marks}) ORDER BY id",  # nosec B608 — placeholders only
-                params,
-            )
+            marks = ", ".join("?" for _ in frontier)
+            sql = f"SELECT id FROM events WHERE correlation_id IN ({marks}, {marks})"  # nosec B608 — placeholders only
+            params: list[Any] = [f"hr-{i}" for i in frontier] + [str(i) for i in frontier]
+            if by_work:
+                # Always later than the event it names, which minted the handle
+                # on egress; the bound keeps the scan to that tail of the ledger.
+                sql += " OR (id > ? AND correlation_id IS NULL"
+                sql += f" AND json_extract(fields_json, '$.work_id') IN ({marks}))"  # nosec B608
+                params += [min(frontier)] + [f"hr-{i}" for i in frontier]
+            cursor = await self.read.execute(sql + " ORDER BY id", params)
             found = [int(row["id"]) for row in await cursor.fetchall() if int(row["id"]) not in group_ids]
             group_ids.extend(found)
             frontier = found

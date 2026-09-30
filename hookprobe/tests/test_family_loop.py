@@ -955,3 +955,65 @@ def test_agent_door_refuses_over_budget_only_when_told_to(tmp_path) -> None:
             == "old:funded"
         )
         assert engine.calls == 0, "idempotent return of an existing run, not a new spend"
+
+
+def test_a_report_says_what_it_changed_and_what_stopped_it(tmp_path) -> None:
+    """Counts, not content: the files a VERIFIED diff touched and the gaps the
+    run named. On 2026-09-30 a plan handed off came back `completed` having
+    changed nothing, blocked on a permission, and the only thing the pipe could
+    read about it was the word completed."""
+    import subprocess
+
+    def git(repo, *args):
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout
+
+    work = "hr-7"  # the brief asks for the plan's key in the message; verify reads every name
+    repo = tmp_path / "code" / "demo-job"
+    repo.mkdir(parents=True)
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "README.md").write_text("# demo-job\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", "chore: readme")
+    (repo / "README.md").write_text("# demo-job\ncleanup timer\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", f"{work} document the timer")
+    real = git(repo, "diff", "HEAD~1", "HEAD")
+    gap = '```blocked\n[{"kind": "probe", "command": "mvn test", "answers": "the build"}]\n```\n'
+
+    _Capture.received = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Capture)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}/hook/work-notify"
+
+    async def scenario(answer: str, n: int) -> None:
+        key = f"probe:plan-approved:{n}"
+        settings = make_settings(tmp_path, return_url=url, return_secret="ret-secret")
+        service = RunService(
+            settings, FakeEngine(result=EngineResult(text=answer, message_count=3)), RunStore(tmp_path / "results")
+        )
+        service.start(
+            {
+                "message": "do it",
+                "sessionKey": key,
+                "_meta": {"title": "t", "level": "high", "event_id": n, "work_id": work},
+            },
+            origin="relay",
+        )
+        for _ in range(300):
+            run = service.get(key)
+            if run is not None and run.return_status:
+                break
+            await asyncio.sleep(0.01)
+        assert run is not None and run.return_status == "sent"
+
+    try:
+        asyncio.run(scenario(f"Done.\n\n{gap}\n```diff\n{real}```\n", 7))
+        asyncio.run(scenario("Changed nothing: no permission.\n\n" + gap, 8))
+        asyncio.run(scenario(f"Done.\n\n```diff\n{real.replace('cleanup timer', 'something else')}```\n", 9))
+    finally:
+        server.shutdown()
+
+    done, blocked, forged = (json.loads(item["body"])["meta"] for item in _Capture.received)
+    assert (done["changed_files"], done["blocked"]) == (1, 1), "a verified change, and a check it could not run"
+    assert (blocked["changed_files"], blocked["blocked"]) == (0, 1)
+    assert forged["changed_files"] == 0, "a diff no commit backs is the run's word, not a change"

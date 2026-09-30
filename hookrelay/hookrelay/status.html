@@ -741,14 +741,14 @@
   "chart.window": "{n} alerts in view",
   "chart.bar": "{h}:00 · {a} alerts · {q} quiet",
   "tile.waiting": "Waiting on you",
-  "tile.waiting.hint": "a card asked and nobody pressed",
+  "tile.waiting.hint": "a card asked and nobody pressed, or work is blocked",
   "tile.inflight": "In flight",
   "tile.inflight.hint": "handed to a node, nothing back yet",
   "tile.dead": "Delivery failures",
   "tile.dead.hint": "deliveries that gave up",
   "tile.dead.queued": "{n} more still queued",
   "tile.ended": "Ended well · 24h",
-  "tile.ended.hint": "conditions that ended, fixes that held",
+  "tile.ended.hint": "conditions that ended, fixes that held, work carried out",
   "banner.dead.one": "1 delivery gave up. That channel did not receive it.",
   "banner.dead.other": "{n} deliveries gave up. Those channels did not receive them.",
   "banner.breaker_open": "Channel {c} kept failing, so deliveries to it are paused for now.",
@@ -786,6 +786,11 @@
   "state.delivered": "Delivered",
   "state.quiet": "Ignored",
   "state.pressed": "A person answered",
+  "state.carrying": "Handed off · being carried out",
+  "state.carried_out": "Carried out",
+  "state.work_blocked": "Work blocked",
+  "state.work_failed": "Work run failed",
+  "state.work_reported": "Work node reported",
   "press.useful": "Ruled useful",
   "press.useless": "Ruled useless",
   "press.followup": "Asked why",
@@ -820,6 +825,11 @@
   "line.answered": "Delivered to {to}",
   "line.part.verdict_back": "verdict after {d}",
   "line.part.report_back": "report after {d}",
+  "line.carrying": "{who} handed it off · the work node has not reported yet",
+  "line.carried_out": "The work node made the change and reported {d} after the handoff",
+  "line.work_blocked": "The work node changed nothing and named what it is missing, {d} after the handoff",
+  "line.work_failed": "The work run failed, {d} after the handoff",
+  "line.work_reported": "The work node reported {d} after the handoff",
   "who.somebody": "somebody",
   "quiet.duplicate": "a repeat inside the dedup window",
   "quiet.folded": "folded into the last card for this condition",
@@ -853,6 +863,7 @@
   "brief.held": "held",
   "brief.not_held": "did not hold",
   "brief.waiting": "awaiting",
+  "brief.carrying": "being carried out",
   "brief.none": "—",
   "drawer.close": "Close",
   "drawer.copy_link": "Copy link",
@@ -894,6 +905,7 @@
   "story.fix_failed": "Did not hold",
   "story.fix_waiting": "{who} approved. The procedure ran; the condition has not answered yet.",
   "story.fix_none": "No fix was approved",
+  "story.work_running": "The plan was handed off. The work node has not reported yet.",
   "story.report": "The report · {n} characters",
   "story.diff.one": "The change · 1 line of diff",
   "story.diff.other": "The change · {n} lines of diff",
@@ -917,6 +929,7 @@
   "msg.recovery": "recovery",
   "msg.verdict": "verdict",
   "msg.report": "report",
+  "msg.handoff": "handoff",
   "msg.fix": "fix verdict",
   "msg.press": "a press",
   "msg.reply": "a reply",
@@ -1152,14 +1165,14 @@
   "chart.window": "共 {n} 条告警",
   "chart.bar": "{h} 点 · {a} 条告警 · {q} 条安静",
   "tile.waiting": "待处理",
-  "tile.waiting.hint": "卡片提了问，还没人回应",
+  "tile.waiting.hint": "卡片提了问还没人回应，或者执行受阻",
   "tile.inflight": "处理中",
   "tile.inflight.hint": "已交给节点，还没有回音",
   "tile.dead": "投递失败",
   "tile.dead.hint": "已放弃重试的投递",
   "tile.dead.queued": "另有 {n} 条在排队",
   "tile.ended": "24 小时内解决",
-  "tile.ended.hint": "条件已结束或修复已生效",
+  "tile.ended.hint": "条件已结束、修复已生效或已按计划执行",
   "banner.dead.one": "有 1 条投递放弃了重试，那个渠道没有收到。",
   "banner.dead.other": "有 {n} 条投递放弃了重试，这些渠道没有收到。",
   "banner.breaker_open": "渠道 {c} 连续失败，暂时停止向它投递。",
@@ -1197,6 +1210,11 @@
   "state.delivered": "已送达",
   "state.quiet": "已忽略",
   "state.pressed": "已有人处理",
+  "state.carrying": "执行中",
+  "state.carried_out": "已执行",
+  "state.work_blocked": "执行受阻",
+  "state.work_failed": "执行失败",
+  "state.work_reported": "执行节点已报告",
   "press.useful": "已标记有用",
   "press.useless": "已标记没用",
   "press.followup": "已追问",
@@ -1231,6 +1249,11 @@
   "line.answered": "已送达 {to}",
   "line.part.verdict_back": "判定用时 {d}",
   "line.part.report_back": "报告用时 {d}",
+  "line.carrying": "{who} 已交给执行 · 执行节点还没有报告",
+  "line.carried_out": "执行节点已完成改动，交接后 {d}报告",
+  "line.work_blocked": "执行节点没有改动，列出了还缺什么，交接后 {d}",
+  "line.work_failed": "执行失败，交接后 {d}",
+  "line.work_reported": "执行节点在交接后 {d}报告",
   "who.somebody": "有人",
   "quiet.duplicate": "去重窗口内的重复",
   "quiet.folded": "合并进了同一条件的上一张卡",
@@ -1264,6 +1287,7 @@
   "brief.held": "已生效",
   "brief.not_held": "未生效",
   "brief.waiting": "等结果",
+  "brief.carrying": "执行中",
   "brief.none": "—",
   "drawer.close": "关闭",
   "drawer.copy_link": "复制链接",
@@ -1305,6 +1329,7 @@
   "story.fix_failed": "未生效",
   "story.fix_waiting": "{who} 已批准，步骤已执行，等条件回应。",
   "story.fix_none": "没有批准任何修复",
+  "story.work_running": "计划已交给执行，执行节点还没有报告。",
   "story.report": "报告全文 · {n} 字",
   "story.diff.one": "改动 · 1 行 diff",
   "story.diff.other": "改动 · {n} 行 diff",
@@ -1328,6 +1353,7 @@
   "msg.recovery": "恢复",
   "msg.verdict": "判定",
   "msg.report": "调查报告",
+  "msg.handoff": "交接",
   "msg.fix": "修复结论",
   "msg.press": "按键",
   "msg.reply": "回复",
@@ -1863,7 +1889,7 @@
   // dead letter has its own banner, tile and tab, and a retry beside it.
   var STAGES = ["received", "judged", "notified", "investigated", "person", "condition", "fix"];
   var QUIET_KINDS = { tick: 1, note: 1, brief: 1, report: 1 };
-  var STATUS_CLS = { waiting: "warn", inflight: "info", approved: "info", fix_held: "ok", resolved: "ok", recovery: "ok", fix_failed: "bad", dead: "bad", quiet: "", pressed: "", answered: "", delivered: "" };
+  var STATUS_CLS = { waiting: "warn", inflight: "info", approved: "info", fix_held: "ok", resolved: "ok", recovery: "ok", fix_failed: "bad", dead: "bad", carried_out: "ok", work_blocked: "warn", work_failed: "bad", work_reported: "", carrying: "info", quiet: "", pressed: "", answered: "", delivered: "" };
   var PRESS_KINDS = { useful: 1, useless: 1, followup: 1, follow_up: 1, replied: 1, remember: 1, approve: 1, silence: 1, handoff: 1 };
   var QUIET_CODES = { duplicate: 1, folded: 1, silenced: 1, no_route: 1, storm: 1 };
   function kindOf(e) {
@@ -1875,6 +1901,22 @@
     return "alert";
   }
   function isFixTitle(title) { return /· fix (held|did not hold)$/.test(String(title || "")); }
+  // A plan handed off joins its chain by the work item it carries, not by a
+  // quote (timeline.py `by_work`, store.round_trip). Reports after it from
+  // another session are the work it started: for a work item, the fix.
+  function sessionOf(r) { var f = r.fields || {}; return r.session || f.session || f.session_key || ""; }
+  function workAfter(handoff, reports, atKey) {
+    return handoff ? reports.filter(function (r) { return r !== handoff && sessionOf(r) && sessionOf(r) !== sessionOf(handoff) && Number(r[atKey]) >= Number(handoff[atKey]); }) : [];
+  }
+  // What the work run's report says it did, from two counts the node states
+  // (hookprobe notify): files in a diff that commits back, and gaps it named.
+  // A report from before 2026-09-30 carries neither and reads as reported.
+  function workOutcome(f) {
+    f = f || {};
+    return f.probe_status === "failed" ? "work_failed" : Number(f.changed_files) > 0 ? "carried_out" : Number(f.blocked) > 0 ? "work_blocked" : "work_reported";
+  }
+  var WORK_LINE = { carried_out: "line.carried_out", work_blocked: "line.work_blocked", work_failed: "line.work_failed", work_reported: "line.work_reported" };
+  var WORK_STAGE = { carried_out: "ok", work_blocked: "warn", work_failed: "bad", work_reported: "done" };
   function heldTitle(title) { return /· fix held$/.test(String(title || "")); }
   function isJudgeRow(r) { return ((r && r.fields) || {}).brain === "hookjudge" || /judge/.test((r && r.source) || ""); }
   function isJudgeHop(h) { var r = S.rows[h.id] || {}; return ((r.fields || {}).brain === "hookjudge") || /judge/.test(h.door || ""); }
@@ -1921,10 +1963,14 @@
     var judged = hops.filter(function (h, i) { return i > 0 && isJudgeHop(h); });
     var fixes = hops.filter(function (h) { return isFixTitle(h.title); });
     var presses = hops.filter(function (h, i) { return i > 0 && isPersonHop(h); });
-    var runs = hops.filter(function (h, i) { return i > 0 && h.session && !isFixTitle(h.title) && !isPersonHop(h); });
+    var reports = hops.filter(function (h, i) { return i > 0 && h.session && !isFixTitle(h.title) && !isPersonHop(h); });
+    var handoff = reports.filter(function (h) { return h.by_work; }).pop() || null, work = workAfter(handoff, reports, "at");
+    var runs = reports.filter(function (h) { return h !== handoff && work.indexOf(h) < 0; });
+    var lastWork = work[work.length - 1], workState = lastWork ? workOutcome((S.rows[lastWork.id] || {}).fields) : "";
+    var handedBy = presses.filter(function (h) { return ((S.rows[h.id] || {}).fields || {}).kind === "handoff"; }).pop();
     var cards = [];
     hops.forEach(function (h, i) {
-      var isReturn = i > 0 && (isJudgeHop(h) || runs.indexOf(h) >= 0 || isFixTitle(h.title));
+      var isReturn = i > 0 && (isJudgeHop(h) || reports.indexOf(h) >= 0 || isFixTitle(h.title));
       ((S.rows[h.id] || {}).deliveries || []).forEach(function (d) { if (isCard(d, isReturn)) cards.push({ hop: h, d: d }); });
     });
     var asked = [], askedAt = null, askedOn = [];
@@ -1975,6 +2021,12 @@
     } else if (dead.length) {
       status = "dead";
       line = thn("line.dead", dead.length, { channels: b(joinList(unique(dead.map(function (d) { return d.channel; })))), error: esc(String(dead[0].last_error || "").slice(0, 120)) });
+    } else if (workState) {
+      status = workState;
+      line = th(WORK_LINE[workState], { d: esc(dur(Number(lastWork.at) - Number(handoff.at))) });
+    } else if (handoff) {
+      status = "carrying";
+      line = th("line.carrying", { who: b(who(handedBy ? ((S.rows[handedBy.id] || {}).fields || {}).actor || handedBy.sender : "")) });
     } else if (approvals.length && !runAfterApproval) {
       status = "approved";
       line = th("line.approved", { who: b(who(approver)) });
@@ -2006,6 +2058,8 @@
     st.person = presses.length ? { cls: "done", at: Number(lastPressHop.at), brief: pressWord(lastKind) } : asked.length ? { cls: "warn", at: null, brief: t("brief.asked") } : { cls: "", at: null, brief: t("brief.none") };
     st.condition = recovery ? { cls: "ok", at: Number(recovery.received_at), brief: t("brief.ended") } : { cls: "", at: null, brief: origin.outcome === "routed" ? t("brief.open") : t("brief.none") };
     st.fix = fix ? { cls: heldTitle(fix.title) ? "ok" : "bad", at: Number(fix.at), brief: heldTitle(fix.title) ? t("brief.held") : t("brief.not_held") }
+      : workState ? { cls: WORK_STAGE[workState], at: Number(lastWork.at), brief: t("state." + workState) }
+      : handoff ? { cls: "warn", at: null, brief: t("brief.carrying") }
       : approvals.length ? { cls: "warn", at: null, brief: t("brief.waiting") } : { cls: "", at: null, brief: t("brief.none") };
     var times = STAGES.map(function (k) { return st[k].at; }).filter(function (x) { return x != null; }).concat(hops.map(function (h) { return Number(h.at); }));
     var quiet = origin.outcome !== "routed" || (hops.length === 1 && !!QUIET_KINDS[kind]) || !!row.is_recovery;
@@ -2399,8 +2453,11 @@
     var replies = returns.filter(function (r) { var f = r.fields || {}; return f.kind === "follow_up" || !!f.sender; });
     var judged = returns.filter(function (r) { return replies.indexOf(r) < 0 && isJudgeRow(r); });
     var fixes = returns.filter(function (r) { return isFixTitle(r.title); });
-    var runs = returns.filter(function (r) { var f = r.fields || {}; return (f.session || f.session_key) && fixes.indexOf(r) < 0 && judged.indexOf(r) < 0 && replies.indexOf(r) < 0; });
-    return { origin: origin, returns: returns, replies: replies, judged: judged, fixes: fixes, runs: runs };
+    var reports = returns.filter(function (r) { return sessionOf(r) && fixes.indexOf(r) < 0 && judged.indexOf(r) < 0 && replies.indexOf(r) < 0; });
+    var handoff = reports.filter(function (r) { return !r.correlation_id && /^hr-\d+$/.test(String((r.fields || {}).work_id || "")); }).pop() || null;
+    var work = workAfter(handoff, reports, "received_at");
+    var runs = reports.filter(function (r) { return r !== handoff && work.indexOf(r) < 0; });
+    return { origin: origin, returns: returns, replies: replies, judged: judged, fixes: fixes, runs: runs, handoff: handoff, work: work };
   }
   function msgKind(ev, C) {
     if (ev === C.origin) return ev.is_recovery ? "recovery" : "alert";
@@ -2408,7 +2465,8 @@
     if (C.replies.indexOf(ev) >= 0) return "reply";
     if (C.fixes.indexOf(ev) >= 0) return "fix";
     if (C.judged.indexOf(ev) >= 0) return "verdict";
-    if (C.runs.indexOf(ev) >= 0) return "report";
+    if (ev === C.handoff) return "handoff";
+    if (C.runs.indexOf(ev) >= 0 || C.work.indexOf(ev) >= 0) return "report";
     return "other";
   }
   function storyHtml(trip) {
@@ -2417,7 +2475,7 @@
     var approvals = presses.filter(function (p) { return p.kind === "approve"; });
     var cards = [];
     [origin].concat(C.returns).forEach(function (ev) {
-      var isReturn = ev !== origin && (C.judged.indexOf(ev) >= 0 || C.runs.indexOf(ev) >= 0 || C.fixes.indexOf(ev) >= 0);
+      var isReturn = ev !== origin && (C.judged.indexOf(ev) >= 0 || C.runs.indexOf(ev) >= 0 || C.fixes.indexOf(ev) >= 0 || C.work.indexOf(ev) >= 0 || ev === C.handoff);
       (ev.deliveries || []).forEach(function (d) {
         var asks = buttonsOn(d.sent_body), chat = !/^to-/.test(d.channel || "");
         if (asks.length || d.platform_message_id || (isReturn && chat) || (d.status !== "sent" && chat)) cards.push({ ev: ev, d: d, asks: asks, kind: msgKind(ev, C) });
@@ -2462,7 +2520,7 @@
       step("investigated", "done", first.received_at, esc(summaryOf(first).slice(0, 600)),
         C.runs.map(function (r) {
           var f = r.fields || {}, sess = f.session || f.session_key || "", board = links[r.source];
-          return "<b>" + esc(r.source) + "</b> · " + esc(f.probe_status || f.status || "") + (f.cost_usd ? " · " + esc(money(f.cost_usd)) : "") +
+          return "<b>" + esc(r.source) + "</b>" + (f.probe_status || f.status ? " · " + esc(f.probe_status || f.status) : "") + (f.cost_usd ? " · " + esc(money(f.cost_usd)) : "") +
             (sess ? ' · <span class="mono">' + esc(sess) + "</span>" : "") +
             (sess && board ? ' · <a href="' + esc(board + "#session=" + encodeURIComponent(sess)) + '" target="_blank" rel="noopener">' + esc(t("story.console")) + "</a>" : "") + after(r.received_at);
         }).join("<br>") + C.runs.map(function (r) { return reportExtras(r.payload, "st-" + r.id); }).join(""));
@@ -2487,7 +2545,14 @@
       var fx = C.fixes[C.fixes.length - 1], held = heldTitle(fx.title), ff = fx.fields || {};
       step("fix", held ? "ok" : "bad", fx.received_at, '<b class="v">' + esc(t(held ? "story.fix_held" : "story.fix_failed")) + "</b> · " + esc(summaryOf(fx).slice(0, 500)),
         (ff.session || ff.session_key ? '<span class="mono">' + esc(ff.session || ff.session_key) + "</span>" + after(fx.received_at) : esc(t("story.after", { d: dur(Number(fx.received_at) - t0) }))));
-    } else if (approvals.length) step("fix", "warn", null, th("story.fix_waiting", { who: b(who(approvals[0].actor)) }));
+    } else if (C.work.length) {
+      var wk = C.work[C.work.length - 1], wf = wk.fields || {}, ws = sessionOf(wk), wb = ((S.core && S.core.status.ui_links) || {})[wk.source];
+      var wo = workOutcome(Object.assign({ probe_status: ((wk.payload || {}).meta || {}).status }, wf));
+      step("fix", WORK_STAGE[wo], wk.received_at, '<b class="v">' + esc(t("state." + wo)) + "</b> · " + esc(summaryOf(wk).slice(0, 500)),
+        "<b>" + esc(wk.source) + "</b>" + (wf.cost_usd ? " · " + esc(money(wf.cost_usd)) : "") + (ws ? ' · <span class="mono">' + esc(ws) + "</span>" : "") +
+        (ws && wb ? ' · <a href="' + esc(wb + "#session=" + encodeURIComponent(ws)) + '" target="_blank" rel="noopener">' + esc(t("story.console")) + "</a>" : "") + after(wk.received_at) + reportExtras(wk.payload, "st-" + wk.id));
+    } else if (C.handoff) step("fix", "warn", null, esc(t("story.work_running")));
+    else if (approvals.length) step("fix", "warn", null, th("story.fix_waiting", { who: b(who(approvals[0].actor)) }));
     else step("fix", "none", null, esc(t("story.fix_none")));
 
     return steps.map(function (s) {
