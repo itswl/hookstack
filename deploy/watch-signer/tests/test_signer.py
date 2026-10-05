@@ -288,6 +288,45 @@ def test_round_key_is_the_scans_clock_or_a_wall_clock_window():
     assert signer_module.round_key(0.0, now=6 * window) != signer_module.round_key(0.0, now=6 * window - 1)
 
 
+def test_the_round_before_is_admitted_and_counted_against_its_own_round(stack):
+    """The scanner rewrites the offer on every tick. A run that outlasts a tick
+    was handed the previous offer, so that one is admitted too — counted
+    against the round that handed it, so neither round's ceiling resets the
+    other's."""
+    url, scan, _ = stack
+    scan.write_text(
+        json.dumps(
+            {
+                "round_at": ROUND_AT,
+                "offered": {"ops chat": 1.0},
+                "previous": {"round_at": ROUND_AT - 1200, "offered": {"old chat": 1.0}},
+            }
+        )
+    )
+    assert post(url, a_signal(origin="chat / old chat"))[0] == 200
+    status, body = post(url, a_signal(origin="chat / older chat"))
+    assert status == 422 and "old chat" in body["error"] and "ops chat" in body["error"]
+    signer_module.PER_ROUND_MAX = 1
+    try:
+        assert post(url, a_signal(origin="chat / ops chat"))[0] == 200
+        assert post(url, a_signal(origin="chat / old chat"))[0] == 429, "the round before already spent its one slot"
+        assert post(url, a_signal(origin="chat / ops chat"))[0] == 429, "and so did this round"
+    finally:
+        signer_module.PER_ROUND_MAX = 20
+
+
+def test_the_producer_half_comes_from_a_closed_set_when_the_deployment_says(stack, monkeypatch):
+    """Unset, any producer passes (the laptop's shape). Set, a round cannot
+    label a chat finding as a Jira one, or as anything nobody recognises."""
+    url, _, _ = stack
+    assert post(url, a_signal(origin="anything at all / ops chat"))[0] == 200
+    monkeypatch.setattr(signer_module, "PRODUCERS", ("chat", "Jira", "scanner"))
+    status, body = post(url, a_signal(origin="mail / ops chat"))
+    assert status == 422 and "not a producer" in body["error"]
+    assert post(url, a_signal(origin="Jira / ops chat"))[0] == 200
+    assert post(url, a_signal(origin="scanner / scanner-notes"))[0] == 200
+
+
 def test_a_scan_that_states_no_offer_is_not_an_offer_of_nothing(stack):
     """A deployment with no prescan hands the round nothing to check against.
     Refusing every signal there would be this boundary silencing the watcher it

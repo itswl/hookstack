@@ -251,6 +251,11 @@ services:
       WATCH_SIGNER_SCAN: /scan/scan.json
       WATCH_SIGNER_LEDGER: /data/signals.jsonl
       WATCH_SIGNER_ROUND_MAX: ${WATCH_SIGNER_ROUND_MAX:-20}
+      # The producers a signal may name: the chat tool (the same value
+      # probe-watch builds its origins with), Jira, and the scanner's own
+      # notes. A round cannot label a chat finding as a Jira one, or either as
+      # something nobody recognises.
+      WATCH_SIGNER_PRODUCERS: ${WATCH_ORIGIN_PREFIX:-${WATCH_CHAT_TOOL}},Jira,scanner
       TZ: ${WATCH_TZ:-Asia/Singapore}
 
   # The consoles, which an internal network would otherwise make unreachable:

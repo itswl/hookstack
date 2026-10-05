@@ -90,9 +90,17 @@ most needs to say so.
   back on a Linux engine before it is trusted there.
 - The probe image carries the withheld-list change; the probes are recreated
   with it. The MCP config on each node's volume is unchanged.
-- Not changed, on the record: the offer is still a single slot read at post
-  time (a run that outlasts the 20-minute tick is checked against the next
-  tick's offer; no run has crossed one in 326); the `reported` cursor stays the
-  agent's promise; the producer half of an origin is free text; the fixture
-  subject in the signer's tests is a `demo-` name now, and the level/kind sets
-  are the signer's own.
+- Second pass, the same day: the scanner now keeps the round before alongside
+  the current offer (`previous` in scan.json), and the signer and the watch
+  wrapper admit a conversation from either, counted against its own round (the
+  counter holds the two newest rounds side by side, so a late post cannot
+  reset the current round's count). One round wide and no wider: a run is
+  capped at 30 minutes and cannot cross two ticks. And the producer half of an
+  origin is a closed set where `WATCH_SIGNER_PRODUCERS` names one — the work
+  compose names the chat tool, Jira and the scanner — so a round cannot label a
+  chat finding as a Jira one; unset, it stays free text, the laptop's shape.
+- Not changed, on the record: the `reported` cursor stays the agent's promise
+  (the signer could write it, but that means mounting the watcher's state into
+  the signer or moving the checker's source of truth — a decision for the
+  operator, not a fix); the fixture subject in the signer's tests is a `demo-`
+  name now, and the level/kind sets are the signer's own.
