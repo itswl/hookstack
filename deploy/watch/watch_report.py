@@ -53,6 +53,27 @@ def die(msg: str, code: int = 2) -> int:
     return code
 
 
+def admitted(scan: dict | None, conversation: str) -> tuple[float | None, str]:
+    """这个会话该记的游标，或者 None 和拒绝的理由。
+
+    None 加空理由 = 扫描文件没有 offered（老格式或读不到）：不检查，也不记账。
+    这一轮的 offer 优先，其次上一轮的（watch_scan.py 写在 previous 里）：一次跑过了
+    下一跳的运行拿到的是上一轮的 offer，投递时文件已经翻页，拿它那一轮的游标记账
+    才是对的——签名器也按同一条规则放行。
+    """
+    known = (scan or {}).get("offered")
+    if known is None:
+        return None, ""
+    if conversation in known:
+        return float(known[conversation]), ""
+    previous = ((scan or {}).get("previous") or {}).get("offered") or {}
+    if conversation in previous:
+        return float(previous[conversation]), ""
+    # 会话名抄错了。现在拦住，比让契约检查在下一轮报一个看不懂的违约好——它按会话
+    # 名认主语，名字错了它会安静地什么都不检查。
+    return None, f"这一轮没有提供过会话 {conversation!r}。可用的是：{sorted(known)}（上一轮：{sorted(previous)}）"
+
+
 def main() -> int:
     argv = sys.argv[1:]
     conversation = argv[argv.index("--conversation") + 1].strip() if "--conversation" in argv else ""
@@ -74,18 +95,17 @@ def main() -> int:
     # 提供 → 任何会话名都是抄错的。原来写成 `if offered and ...`，空表被当成
     # 「没法检查」放行了，一个空轮次里编出来的会话名就这样溜进了账本。和
     # scripts/assert_node_contract.py 的语义对齐：缺键才跳，空表要判。
-    known: dict[str, float] | None = None
+    cursor: float | None = None
     if conversation:
+        scan: dict | None = None
         try:
-            known = (json.loads(SCAN.read_text(encoding="utf-8")) or {}).get("offered")
+            scan = json.loads(SCAN.read_text(encoding="utf-8")) or {}
         except (OSError, json.JSONDecodeError) as exc:
             # 不致命：投递照做，只是记不了账。说出来，因为下一轮会重复这一条。
             print(f"⚠️ 读不到 {SCAN}（{exc}）：这一条会投出去但记不了账", file=sys.stderr)
-        if known is not None and conversation not in known:
-            # 会话名抄错了。现在拦住，比让契约检查在下一轮报一个看不懂的违约好
-            # ——它按会话名认主语，名字错了它会安静地什么都不检查。
-            return die(f"这一轮没有提供过会话 {conversation!r}。可用的是：{sorted(known)}")
-    offered: dict[str, float] = known or {}
+        cursor, why = admitted(scan, conversation)
+        if why:
+            return die(why)
 
     signal.setdefault("origin", origin or f"{ORIGIN_PREFIX} / {conversation}")
     signal.setdefault("level", "low")
@@ -108,8 +128,8 @@ def main() -> int:
         state = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
     except (OSError, json.JSONDecodeError):
         state = {}
-    if conversation and conversation in offered:
-        state.setdefault("reported", {})[conversation] = offered[conversation]
+    if conversation and cursor is not None:
+        state.setdefault("reported", {})[conversation] = cursor
     # 每 feed 的累计投递数。游标只留最新值，答不了「这个群一共给我送过多少条」
     # ——而那正是判断高音量低信号 feed 要用的数（扫描器侧的 stats 记另一半）。
     key = conversation or origin

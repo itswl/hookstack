@@ -422,6 +422,14 @@ def main() -> int:
         SCAN,
         {
             "round_at": now,
+            # 上一轮的 offer 和它的时钟，原样留一轮：一次跑过了下一跳的运行（排队、
+            # 慢模型）投递时读到的是这一轮的 offer，而它拿到的是上一轮的。签名器和
+            # watch_report.py 两边都认，各按自己那轮计数。再往前不留：运行上限 30
+            # 分钟，跨不过两跳。
+            "previous": {
+                "round_at": float((scan_file or {}).get("round_at") or 0),
+                "offered": dict((scan_file or {}).get("offered") or {}),
+            },
             "feeds": cursors,
             # 够不着的源和上次提醒的时间——让「说一次、6 小时后再提醒」跨轮成立。
             "unreachable": unreachable,

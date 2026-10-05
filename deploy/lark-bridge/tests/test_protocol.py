@@ -47,8 +47,10 @@ def _post(url: str, body: bytes, headers: dict[str, str]) -> tuple[int, dict]:
         headers={"content-type": "application/json", **headers},
         method="POST",
     )
+    # A proxy-free opener: a shell HTTP_PROXY must not route a loopback test.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:  # nosec B310 — loopback test server
+        with opener.open(request, timeout=5) as response:  # nosec B310 — loopback test server
             return response.status, json.loads(response.read())
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read() or b"{}")

@@ -227,7 +227,13 @@ client's JSON-RPC responses through, and write `forwarded` only after the chat
 server answered. `probe_net` sets the isolated gateway mode, so "no route to
 the host" holds on a Linux engine and not only on this laptop; the probes'
 MCP config, which is not tracked, has a tracked shape in
-`deploy/mcp-gate/mcp.example.json`.
+`deploy/mcp-gate/mcp.example.json`. The same day, second pass: the scanner
+keeps the round before alongside the current offer, and the signer and the
+watch wrapper admit a conversation from either, counted against its own round,
+so a run that outlasts a twenty-minute tick is no longer checked against the
+offer that replaced its own; and the producer half of an origin is a closed set
+(the chat tool, Jira, the scanner), so a round cannot label a chat finding as a
+Jira one.
 
 **The chat is behind a protocol, not in the pipe.** Both deployments reach
 Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a
