@@ -80,6 +80,14 @@ most needs to say so.
   machine (one line, mode 0600); the compose comment says so. A deployment that
   has not created it gets the old failure, one log line per violation.
 - Applying the gateway mode is a stack recreate, done at a quiet moment.
+  Done 2026-10-05 09:46-09:50 on the work machine (OrbStack, engine 29.4):
+  the option is accepted and the network is created with NO gateway address
+  (IPAM reports none), which is the mode doing its job — yet `.1` on the
+  subnet still answers "connection refused" from inside a probe. That is
+  OrbStack's virtual router, not a Linux bridge interface, and nothing of the
+  host is bound behind it; on this laptop the host is the VM either way. The
+  claim "no route to the host" is read back here, and still has to be read
+  back on a Linux engine before it is trusted there.
 - The probe image carries the withheld-list change; the probes are recreated
   with it. The MCP config on each node's volume is unchanged.
 - Not changed, on the record: the offer is still a single slot read at post
