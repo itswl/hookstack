@@ -207,6 +207,28 @@ offered that round, with a level and kind from a closed set, text cut to a
 length and a ceiling per round. The refusals are in
 `work-data/watch-signer/signals.jsonl`.
 
+**What a review of those two days found, fixed on 2026-10-05.** The timer's
+contract-violation signal had signed from the file the watcher's copy was
+deleted from, so every violation since the redeploy failed to post with one
+log line nobody read; the timer now signs from `work-data/watch-timer-secrets/watch.env`,
+a directory only it mounts. The signer refused the scanner's own fault notes
+(a source that cannot be read was becoming a quiet round); the brief now posts
+them as `scanner / scanner-notes`, which the signer admits without an offer and
+forces to `low`/`note`. A deployment with no prescan hit a lifetime ceiling of
+twenty signals; the ceiling now counts per twenty-minute window when the scan
+states no round. The plan-approved door's secret was never on the list of
+secrets withheld from the agent, so the planner's own Bash step inherited the
+one credential that starts a work run with the write credential — it is
+withheld now, which is what `handoff.py` had claimed all along. The gate and
+the signer refuse a bearer with a non-ASCII byte instead of dropping the
+connection, bound and validate the request length before reading it, report an
+upstream that dies mid-answer as a 502 rather than a closed socket, pass the
+client's JSON-RPC responses through, and write `forwarded` only after the chat
+server answered. `probe_net` sets the isolated gateway mode, so "no route to
+the host" holds on a Linux engine and not only on this laptop; the probes'
+MCP config, which is not tracked, has a tracked shape in
+`deploy/mcp-gate/mcp.example.json`.
+
 **The chat is behind a protocol, not in the pipe.** Both deployments reach
 Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a
 card model — title, tone, summary, links, actions as plain facts — and the

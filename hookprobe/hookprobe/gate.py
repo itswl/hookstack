@@ -416,6 +416,15 @@ SECRETS_WITHHELD_FROM_AGENT = (
     "HOOKPROBE_EVENT_SECRET",
     "HOOKPROBE_RETURN_SECRET",
     "HOOKPROBE_RULING_SECRET",
+    # The plan-approved door's key, and where it is. handoff.py has said since
+    # 2026-09-05 that the agent cannot reach that door because its subprocess
+    # does not inherit the service's secrets — and this one was not on the
+    # list, so the planner's Bash step inherited it all along. A door that
+    # checks nothing but this signature, reached from a network the planner is
+    # on, is a work run with the write credential that nobody pressed for.
+    # Found by review on 2026-10-05; see the note of that date.
+    "HOOKPROBE_HANDOFF_SECRET",
+    "HOOKPROBE_HANDOFF_URL",
     "LARK_APP_ID",
     "LARK_APP_SECRET",
     "LARK_CHAT_ID",

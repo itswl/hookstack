@@ -54,7 +54,7 @@ tomli_w==1.2.0
 types-PyYAML==6.0.12.20260815
 typing-inspection==0.4.4
 typing_extensions==4.16.0
-urllib3==2.7.0
+urllib3==2.8.0
 uvicorn==0.54.0
 uvloop==0.22.1
 watchfiles==1.2.0

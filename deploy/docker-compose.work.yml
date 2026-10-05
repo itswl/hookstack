@@ -6,8 +6,9 @@
 # Three containers and a timer. probe-watch reads chat on a schedule and posts
 # one signal per finding; the pipe routes each on its own level and kind;
 # probe-plan answers the ones that are work. Both watchers use the same poster
-# (scripts/post_watch_signal.py, mounted read-only) so the container and a laptop
-# send byte-identical signatures through one piece of code.
+# (scripts/post_watch_signal.py, mounted read-only): on a laptop it signs from
+# the deployment's .env; inside probe-watch it hands the signal to watch-signer,
+# which holds the key and signs only what the round was handed.
 #
 # The timer is NOT here, on purpose: hookprobe/examples/patrols/patrol.sh reads
 # the brief from a file at send time, so the round's instructions are editable
@@ -16,9 +17,9 @@
 # probe-watch ran as a desktop agent before this and the move is not only
 # tidiness: it read colleagues' messages — attacker-influenced text, by the
 # family's own name for it — with no bash guard, no MCP tool allowlist and no
-# budget ceiling. In here it has all three. What it also has, and what no
-# boundary in this file removes, is the watch door's signing key: see
-# .agents/notes and docs/containment.md for what that means.
+# budget ceiling. In here it has all three. What it does NOT have, since
+# 2026-09-30, is the watch door's signing key: watch-signer below holds it. See
+# .agents/notes and docs/containment.md for what that bounds and what it does not.
 #
 # Separate from the shadow deployment in every way that can collide: its own
 # project name, its own bind-mounted data root (../work-data), its own config
@@ -26,6 +27,19 @@
 # travels must not carry an open door with it.
 
 name: hookstack-work
+
+# The proxy every probe carries, once. Out through the allowlist; everything on
+# the probes' own network (the pipe, the sink, the proxy itself, the MCP gate,
+# the signer), the host name (kept for the proxy's own sake: the probes have no
+# route to the host) and 127.0.0.1 (the CLI posts its own telemetry there) go
+# direct — proxying those would break them for nothing. One anchor rather than
+# three copies: the third copy was extended by hand twice on 2026-09-30, and a
+# copy that misses a peer sends that probe's request through a proxy whose
+# allowlist does not name it, which reads exactly like the peer being down.
+x-probe-proxy: &probe-proxy
+  HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+  HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
+  NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy,mcp-gate,watch-signer}
 
 services:
   hookrelay:
@@ -190,6 +204,11 @@ services:
       - ../work-data/mcp-gate:/data
     environment:
       MCPGATE_UPSTREAM: ${WATCH_CHAT_MCP_URL:-http://host.docker.internal:52222/mcp/}
+      # A credential for the chat server itself, the day its port takes one:
+      # MCPGATE_UPSTREAM_HEADER_<Name_With_Underscores> is sent as the header
+      # <Name-With-Dashes> on every relayed call, over a client's own copy.
+      # None today — the port takes no credential, which is the finding.
+      # MCPGATE_UPSTREAM_HEADER_X_Chat_Key: ${WATCH_CHAT_MCP_KEY:-}
       # One token per node, so a refusal names which one asked. Both lists are
       # READ tools; the writes are simply not reachable through here.
       MCPGATE_CLIENT_WATCH_TOKEN: ${WATCH_MCPGATE_TOKEN:?set WATCH_MCPGATE_TOKEN in .env}
@@ -321,12 +340,8 @@ services:
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=plan
-      # Out through the allowlist; everything on this network, the host (the MCP
-      # server lives there) and 127.0.0.1 (the CLI posts its own telemetry
-      # there) go direct — proxying those would break them for nothing.
-      HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy,mcp-gate,watch-signer}
+      # Out through the allowlist: x-probe-proxy at the top of this file.
+      <<: *probe-proxy
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       # Who wakes when this node cannot work. The selftest watch reports here
@@ -407,9 +422,13 @@ services:
       HOOKPROBE_REFIRE_ANSWER_HOURS: ${HOOKPROBE_REFIRE_ANSWER_HOURS:-}
       HOOKPROBE_SKILLS: ${HOOKPROBE_SKILLS:-}
       # Lives inside the volume above, so it is hot-editable like the system
-      # prompt and needs no mount of its own. Servers reachable from a container
-      # only: an http:// server on the host is `host.docker.internal`, never
-      # 127.0.0.1, and a stdio server cannot be reached from here at all.
+      # prompt and needs no mount of its own — and it is NOT tracked, so this
+      # is the one place that says what it must contain: the chat's MCP server
+      # is reached as http://mcp-gate:8097/mcp/ with this node's bearer from
+      # .env (deploy/mcp-gate/mcp.example.json is the shape). A server on the
+      # host is out of reach from this network, and a stdio server cannot be
+      # reached from here at all. A missing file is one warning in the log and
+      # a round with no chat tools, which reads like a quiet day.
       HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-/data/mcp.json}
       # The closed set of MCP tools this planner may call. EMPTY DENIES ALL —
       # mounting a server is plumbing, naming its tools is policy, and only the
@@ -513,12 +532,8 @@ services:
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=watch
-      # Out through the allowlist; everything on this network, the host (the MCP
-      # server lives there) and 127.0.0.1 (the CLI posts its own telemetry
-      # there) go direct — proxying those would break them for nothing.
-      HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy,mcp-gate,watch-signer}
+      # Out through the allowlist: x-probe-proxy at the top of this file.
+      <<: *probe-proxy
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       # The alarm channel is per NODE, not per stack: on 2026-09-22 the work
@@ -574,10 +589,7 @@ services:
       # one variable would have silently restyled every card.
       WATCH_ORIGIN_PREFIX: ${WATCH_ORIGIN_PREFIX:-${WATCH_CHAT_TOOL}}
       # No signing secret here any more: the poster hands the signal to
-      # watch-signer, which holds it. HOOKSTACK_ENV_FILE is left pointing at a
-      # file that no longer needs to exist — the token is what selects the mode,
-      # and a missing env file is never read in it.
-      HOOKSTACK_ENV_FILE: /data/secrets/watch.env
+      # watch-signer, which holds it. The token is what selects that mode.
       HOOKSTACK_WATCH_SIGNER_TOKEN: ${WATCH_SIGNER_TOKEN:?set WATCH_SIGNER_TOKEN in .env}
       HOOKSTACK_WATCH_DOOR: http://watch-signer:8099/signal
       # The round's findings are timestamped in the operator's zone by the
@@ -589,14 +601,16 @@ services:
       HOOKPROBE_WORKDIR: /data
     volumes:
       - ../work-data/probe-watch:/data
-      # Its own secrets, not the planner's: this one needs the watch door's
-      # signing key and nothing else, and the planner needs Jira/Grafana/AWS and
-      # not that key. Two directories is how "independent credentials per node"
-      # stays true once there are two nodes.
+      # Its own secrets, not the planner's: today the Jira read credential the
+      # timer's scanner also uses, and nothing else — the watch door's signing
+      # key left this directory on 2026-09-30 for watch-signer, and must not
+      # come back to it, because this mount is what the agent can read. Two
+      # directories is how "independent credentials per node" stays true once
+      # there are two nodes.
       - ../work-data/probe-watch-secrets:/data/secrets:ro
       # The poster, read-only. Mounted rather than reimplemented in the brief so
-      # the container and the laptop send byte-identical signatures through one
-      # piece of code.
+      # the container and the laptop run one piece of code — the container's
+      # copy hands the signal to watch-signer instead of signing it.
       - ../scripts:/data/bin:ro
       # What the scan handed this round, READ-ONLY: which conversations it
       # surfaced and how far each was read. The reporting tool takes the cursor
@@ -713,12 +727,8 @@ services:
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=work,service.name=hookprobe,hookstack.node=work
-      # Out through the allowlist; everything on this network, the host (the MCP
-      # server lives there) and 127.0.0.1 (the CLI posts its own telemetry
-      # there) go direct — proxying those would break them for nothing.
-      HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
-      NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy,mcp-gate,watch-signer}
+      # Out through the allowlist: x-probe-proxy at the top of this file.
+      <<: *probe-proxy
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:?set HOOKPROBE_TOKEN in .env}
       HOOKPROBE_MODEL: ${HOOKPROBE_MODEL:-claude-opus-5}
       # The alarm channel is per NODE, not per stack: on 2026-09-22 the work
@@ -973,7 +983,15 @@ services:
       # exactly as before.
       CONTRACT_CURSORS: /timer-state/scan.json
       CONTRACT_SIGNAL_POSTER: /scripts/post_watch_signal.py
-      HOOKSTACK_ENV_FILE: /timer-secrets/watch.env
+      # The timer signs from a file, straight to the pipe: it runs no model and
+      # reads no attacker-influenced text, so the laptop's arrangement is right
+      # for it. The file is in a directory of its own (the mount below) — it
+      # lived in probe-watch's secrets directory until 2026-09-30, when the
+      # watcher's copy was deleted and this line was left pointing at nothing,
+      # so every contract violation from then on failed to post and the timer
+      # logged one line about it that nobody read. The timer cannot use the
+      # signer: no route to probe_net, and the signer would refuse its origin.
+      HOOKSTACK_ENV_FILE: /timer-signing/watch.env
       HOOKSTACK_WATCH_DOOR: http://hookrelay:8100/hook/watch
     volumes:
       - ../hookprobe/examples/patrols:/patrols:ro
@@ -988,11 +1006,17 @@ services:
       # Its own snapshot, writable and separate — kept out of probe-watch's
       # volume so the node being checked cannot reach what it is checked against.
       - ../work-data/watch-timer-state:/timer-state
-      # The watch door's signing key, so a violation can travel as a signal like
-      # everything else. This does give the timer the ability to post signals;
-      # it is the same trade the watcher already makes, and the timer runs no
-      # model and reads no attacker-influenced text.
+      # The Jira read credential the scanner uses (ATL_ENV_FILE above), shared
+      # with probe-watch's secrets directory. Nothing else lives there now.
       - ../work-data/probe-watch-secrets:/timer-secrets:ro
+      # The watch door's signing key, so a violation can travel as a signal like
+      # everything else — in a directory ONLY this service mounts, never
+      # probe-watch's: the agent must not be able to read it back. Create it as
+      # work-data/watch-timer-secrets/watch.env holding the one line
+      # WATCH_INGEST_SECRET=<the value from .env>, mode 0600. This does give the
+      # timer the ability to post signals; it runs no model and reads no
+      # attacker-influenced text, which is the whole difference.
+      - ../work-data/watch-timer-secrets:/timer-signing:ro
       # The brief, read-only and deliberately NOT inside probe-watch's own
       # volume: a brief the agent could edit is the agent rewriting its own next
       # instructions, which is the persistence vector hookprobe.inputs exists to
@@ -1031,9 +1055,9 @@ services:
       - ../hookrelay/examples:/examples:ro
     restart: unless-stopped
 
-# Explicit rather than inherited: the two services find each other by service
-# name on this network, which is what work.yaml's http://probe-plan:8088 and
-# this file's http://hookrelay:8100 both depend on.
+# Explicit rather than inherited. `default` is the host-facing side: the
+# published ports, the bridge, the timer, and the host-side half of every
+# service that sits on both.
 networks:
   default:
     name: work_net
@@ -1043,7 +1067,19 @@ networks:
   # network — the pipe, the egress proxy with its allowlist, the MCP gate with
   # its tool list — and everything it does not is now unreachable rather than
   # merely not allowed. It also costs the probes their published ports, which is
-  # what probe-ingress exists for.
+  # what probe-ingress exists for. The services find each other by name HERE:
+  # work.yaml's http://probe-plan:8088 and this file's http://hookrelay:8100
+  # both resolve on this network, not on `default`.
+  #
+  # `internal` alone keeps the bridge's own gateway address reachable, measured
+  # from inside probe-watch on 2026-10-05: on a Linux engine a host service
+  # bound to 0.0.0.0 — the chat client's port, sshd, docker-proxy — is one
+  # connect away through it. The isolated gateway mode (Docker Engine 28+)
+  # removes that address, which is what makes "no route to the host" true
+  # rather than true-on-this-laptop. Changing it recreates the network and
+  # every container on it.
   probe_net:
     name: work_probe_net
     internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated

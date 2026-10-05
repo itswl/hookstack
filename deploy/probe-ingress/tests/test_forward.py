@@ -2,7 +2,8 @@
 
 The route spec is the whole product: one wrong entry and a console is either
 dark or pointing at the wrong node. A malformed entry stops the container
-instead of listening on a port that goes nowhere.
+instead of listening on a port that goes nowhere — and so does a port that
+cannot be bound, on any route, not only the first.
 """
 
 from __future__ import annotations
@@ -26,10 +27,38 @@ def test_a_route_spec_is_read_as_written():
     assert forward.parse("") == []
 
 
-@pytest.mark.parametrize("spec", ["8089", "8089:probe-watch", "eight:probe-watch:8088", "8089:probe-watch:http"])
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "8089",
+        "8089:probe-watch",
+        "eight:probe-watch:8088",
+        "8089:probe-watch:http",
+        # A port that does not exist, on either side, and a listen port taken
+        # twice: each used to bind (or fail to) inside a daemon thread.
+        "70000:probe-watch:8088",
+        "8089:probe-watch:0",
+        "8088:a:1,8088:b:2",
+    ],
+)
 def test_a_spec_that_would_listen_on_nothing_stops_the_container(spec):
     with pytest.raises(SystemExit):
         forward.parse(spec)
+
+
+def test_a_port_that_cannot_be_bound_is_an_error_before_anything_serves():
+    """Every listener is bound in main() before any serves: the first shape
+    served route one on the main thread and bound the rest in daemon threads,
+    where a taken port was a traceback in the log and a dark console."""
+    taken = socket.socket()
+    taken.bind(("0.0.0.0", 0))  # noqa: S104 — the same wildcard the forwarder binds, so the clash is real
+    taken.listen(1)
+    _, port = taken.getsockname()
+    try:
+        with pytest.raises(OSError):
+            forward.bind(port, "127.0.0.1", 1)
+    finally:
+        taken.close()
 
 
 def test_bytes_go_both_ways_and_the_far_end_closing_ends_it():

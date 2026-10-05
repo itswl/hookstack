@@ -82,18 +82,27 @@ def main() -> int:
     body = json.dumps({"signal": signal}, ensure_ascii=False).encode("utf-8")
     if SIGNER_TOKEN:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {SIGNER_TOKEN}"}
+        # The signer is a peer on the container's own network, never behind the
+        # egress proxy: an HTTP_PROXY in this environment (the probes carry one)
+        # must not route the signal through an allowlist that has no reason to
+        # name it. File mode keeps the default opener — the laptop's door is
+        # loopback and its proxy settings are its own business.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     else:
         try:
             secret = _secret()
         except (OSError, SystemExit) as exc:
-            print(str(exc), file=sys.stderr)
+            # Named in the order a reader would fix it: the token selects the
+            # mode, so its absence is the first thing to say.
+            print(f"no HOOKSTACK_WATCH_SIGNER_TOKEN, and no signing secret to use instead: {exc}", file=sys.stderr)
             return 2
         stamp = str(int(time.time()))
         signature = hmac.new(secret.encode(), stamp.encode() + b"." + body, hashlib.sha256).hexdigest()
         headers = {"Content-Type": "application/json", "X-Hook-Signature": signature, "X-Hook-Timestamp": stamp}
+        opener = urllib.request.build_opener()
     request = urllib.request.Request(DOOR, data=body, headers=headers)
     try:
-        answer = json.loads(urllib.request.urlopen(request, timeout=30).read())
+        answer = json.loads(opener.open(request, timeout=30).read())
     except urllib.error.HTTPError as exc:
         print(f"door refused: HTTP {exc.code} {exc.read()[:200].decode(errors='replace')}", file=sys.stderr)
         return 1
