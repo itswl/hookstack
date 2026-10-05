@@ -167,7 +167,13 @@ def _signed(path: str, since: float) -> dict[str, float | None] | None:
             continue
         if row.get("event") != "signal.signed" or float(row.get("ts") or 0) <= since:
             continue
-        subject = str(row.get("subject") or "")
+        # Rows written before 2026-10-05 carry no `subject`; the origin they do
+        # carry names the same conversation, by the same separator. Read it the
+        # same way, or every signal signed before the field existed looks like
+        # one that went around the boundary.
+        origin = str(row.get("origin") or "")
+        fallback = origin.split(ORIGIN_SEPARATOR, 1)[1].strip() if ORIGIN_SEPARATOR in origin else ""
+        subject = str(row.get("subject") or fallback)
         if not subject or subject == NOTE_SUBJECT:
             continue
         cursor = row.get("cursor")

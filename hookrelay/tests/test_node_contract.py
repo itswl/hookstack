@@ -80,6 +80,15 @@ def test_with_the_signers_ledger_the_record_is_the_signers(tmp_path) -> None:
     assert "signed by the signer" in done.stdout and "cursor moved forward" not in done.stdout
 
 
+def test_a_signer_row_from_before_the_subject_field_is_read_by_its_origin(tmp_path) -> None:
+    """The signer wrote origin/level/kind only until 2026-10-05; the first
+    checks after the change ran against those rows and called a signed signal
+    unsigned. The origin names the conversation by the same separator."""
+    ledger = _signer_rows(tmp_path, [{"event": "signal.signed", "ts": 1788511200.5, "origin": "chat / BCP-SRE"}])
+    done = run("stalled-before.json", "stalled-after.json", "stalled-ledger.json", STALLED_SINCE, signer_ledger=ledger)
+    assert done.returncode == 0, done.stdout
+
+
 def test_a_signal_the_signer_never_signed_went_around_the_boundary(tmp_path) -> None:
     ledger = _signer_rows(tmp_path, [{"event": "signal.signed", "ts": 1788511200.5, "subject": "another chat"}])
     done = run("stalled-before.json", "stalled-after.json", "stalled-ledger.json", STALLED_SINCE, signer_ledger=ledger)
