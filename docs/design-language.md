@@ -110,6 +110,15 @@ back, and the sessions keep their list beside the open conversation, which on
 a phone becomes one pane at a time, like a mail app. Its only drawer is the
 settings.
 
+The pipe's board also installs on a phone (2026-10-05): a web manifest, icons
+drawn from the favicon's own geometry (`scripts/make_app_icons.py`), and a
+service worker that keeps the shell and never the data, so offline the board
+says the pipe is out of reach rather than showing a stale one as current. The
+settings drawer carries the install row: the browser's prompt where there is
+one, the Share → Add to Home Screen hint where there is not, and a plain
+sentence over http, where no browser installs anything. The other two boards
+are not apps yet; the pipe's is the one attention entry.
+
 Before this the same palette sat under three idioms — tabs, a help link that
 unfolded a section, a row of eight buttons — and then, once the palette and the
 tabs were shared, under three sets of parts: three kinds of button, two kinds

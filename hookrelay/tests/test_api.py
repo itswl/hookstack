@@ -139,6 +139,30 @@ async def test_status_page_is_served_and_selfcontained(client):
     assert "<script src=" not in html and 'rel="stylesheet"' not in html
 
 
+async def test_the_board_installs_on_a_phone(client):
+    """A manifest, icons and a service worker, placed so a path prefix keeps
+    them with the board: the manifest's start URL and scope are relative, the
+    worker sits at the page's own level, and the page links them with BASE."""
+    manifest = await client.get("/static/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.headers["content-type"].startswith("application/manifest+json")
+    data = manifest.json()
+    assert data["display"] == "standalone" and data["start_url"] == "../" and data["scope"] == "../"
+    assert {icon["purpose"] for icon in data["icons"]} == {"any", "maskable"}
+    for icon in data["icons"]:
+        assert (await client.get("/static/" + icon["src"])).status_code == 200, icon["src"]
+    worker = await client.get("/sw.js")
+    assert worker.status_code == 200
+    assert worker.headers["content-type"].startswith("application/javascript")
+    assert "no-cache" in worker.headers["cache-control"]
+    # The shell and nothing else: the data paths are not even named in it.
+    code = worker.text.replace("/status or /live", "")
+    assert "/status" not in code and "/live" not in code
+    page = (await client.get("/")).text
+    assert 'name="theme-color"' in page and 'name="apple-mobile-web-app-capable"' in page
+    assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js"' in page
+
+
 async def test_status_recent_carries_parsed_steps(client):
     await client.post("/hook/ci", json={"job": "build", "detail": "ok"})
     data = (await client.get("/status", headers={"X-Read-Token": "read-t"})).json()

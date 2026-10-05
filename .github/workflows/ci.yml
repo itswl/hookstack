@@ -69,7 +69,9 @@ jobs:
           const m = html.match(/<script>([\s\S]*)<\/script>/);
           if (!m) { console.error("no inline script found"); process.exit(1); }
           new Function(m[1]);
-          console.log("status.html inline JS: OK");
+          new Function(fs.readFileSync("hookrelay/static/sw.js", "utf8"));
+          JSON.parse(fs.readFileSync("hookrelay/static/manifest.webmanifest", "utf8"));
+          console.log("status.html inline JS, sw.js and the manifest: OK");
           '
       - name: example plugins import cleanly
         run: |

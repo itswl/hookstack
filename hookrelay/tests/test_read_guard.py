@@ -23,6 +23,7 @@ PUBLIC = {
     "/": "the status page's markup; every call it then makes presents a token",
     "/card-action": "the confirm page a card's link lands on — the token is IN the link",
     "/healthz": "liveness for a container runtime, which has no credential to present",
+    "/sw.js": "the page's service worker, part of the shell: it keeps the page and the icons and never the data",
 }
 
 

@@ -47,7 +47,9 @@ const html = fs.readFileSync("hookrelay/status.html", "utf8");
 const m = html.match(/<script>([\s\S]*)<\/script>/);
 if (!m) { console.error("no inline script found in status.html"); process.exit(1); }
 new Function(m[1]);            // parse only, never execute
-console.log("status.html inline JS: OK");
+new Function(fs.readFileSync("hookrelay/static/sw.js", "utf8"));   // the service worker, the same way
+JSON.parse(fs.readFileSync("hookrelay/static/manifest.webmanifest", "utf8"));
+console.log("status.html inline JS, sw.js and the manifest: OK");
 '
 
 step "example plugins import cleanly"

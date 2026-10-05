@@ -241,6 +241,17 @@ was a self-report, and the watch wrapper writes no state at all. Its first
 promise is now "every conversation it reported was signed by the signer": a
 signal in the pipe with no signer row went around the boundary.
 
+**The board on a phone, since 2026-10-05.** The pipe's board is a web app: a
+manifest, icons and a service worker, linked with the page's own base so a
+board behind a path prefix installs under it. A browser installs an app only
+over https, so the board has to be reachable from the phone over https first —
+on a laptop, a tailnet (`tailscale serve https / http://127.0.0.1:8100`) or a
+tunnel; the work stack's board is on `127.0.0.1:8100` and nothing here opens
+it to the network. Then: open the address, paste the read token in Settings
+(the app keeps it in that browser and nothing else), and Add to Home Screen.
+The worker keeps the shell and never the data, so offline the app shows the
+page and says the pipe is out of reach.
+
 **The chat is behind a protocol, not in the pipe.** Both deployments reach
 Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a
 card model — title, tone, summary, links, actions as plain facts — and the
