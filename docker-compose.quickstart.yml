@@ -32,15 +32,17 @@
 # sidecar dresses, the sink receives) and HOOKRELAY_PLUGINS so the DingTalk
 # dialect resolves. Neither needs a Lark account: the bridge posts a rendered
 # card at the sink and `docker compose logs -f sink` is what an operator would
-# have received. 0.4.0 is the release whose pipe config offers the approve and
-# follow-up buttons and whose investigator carries the rehearsal; this file
-# needs both, so it cannot point at an older tag.
+# have received. 0.4.0 was the release whose pipe config offers the approve and
+# follow-up buttons and whose investigator carries the rehearsal; 0.5.0 is the
+# first whose images carry the boards the pictures show — one attention entry
+# per alert, the relay inbox, dark and light, two languages. This file needs
+# all of it, so it cannot point at an older tag.
 
 name: hookstack
 
 services:
   hookrelay:
-    image: ghcr.io/itswl/hookrelay:0.4.0
+    image: ghcr.io/itswl/hookrelay:0.5.0
     container_name: hs-hookrelay
     restart: unless-stopped
     environment:
@@ -78,7 +80,7 @@ services:
       - sink
 
   hookjudge:
-    image: ghcr.io/itswl/hookjudge:0.4.0
+    image: ghcr.io/itswl/hookjudge:0.5.0
     container_name: hs-hookjudge
     restart: unless-stopped
     environment:
@@ -108,7 +110,7 @@ services:
   # operator would actually have received. It runs from the pipe's own image
   # because that image now carries it — one fewer thing to pull, and no mount.
   sink:
-    image: ghcr.io/itswl/hookrelay:0.4.0
+    image: ghcr.io/itswl/hookrelay:0.5.0
     container_name: hs-sink
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/sink.py"]
@@ -121,7 +123,7 @@ services:
   # exactly the hop a real deployment makes to a custom bot's incoming URL.
   # `ops-feishu` in the baked config is `type: bridge` and points here.
   lark-bridge:
-    image: ghcr.io/itswl/lark-bridge:0.4.0
+    image: ghcr.io/itswl/lark-bridge:0.5.0
     container_name: hs-lark-bridge
     restart: unless-stopped
     environment:
@@ -139,7 +141,7 @@ services:
   # not a model: it reports itself as `stub-4o-mini`. Point the judge's AI vars
   # at a real provider and this stops being used.
   stub-ai:
-    image: ghcr.io/itswl/hookjudge:0.4.0
+    image: ghcr.io/itswl/hookjudge:0.5.0
     container_name: hs-stub-ai
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/stub_ai.py"]
@@ -151,7 +153,7 @@ services:
   # pipe to the same channels; the disk alert in demo.sh also proposes a
   # two-step procedure the approve button runs against the allowlist below.
   hookprobe:
-    image: ghcr.io/itswl/hookprobe:0.4.0
+    image: ghcr.io/itswl/hookprobe:0.5.0
     container_name: hs-hookprobe
     restart: unless-stopped
     # The agent executes arbitrary bash, so the container is bounded even in a

@@ -29,8 +29,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts
 
 The demo runs the whole loop. An alert is judged, a recorded investigation replays through the real read-only gate, the report arrives as a card, an approve press runs two allowlisted commands, and the alert resolves. To use a real model, put `HOOKPROBE_RUNTIME=claude`, `HOOKPROBE_MODEL` and a key in `.env`.
 
-The published `0.4.0` images predate the boards shown here. To see these, clone and run `docker compose up -d --build`.
-
 ## What you get
 
 - **Only the work worth doing.** A storm, a restatement or a recovery never buys a second verdict. On 795 production alerts, 28 of 29 rules answered the same every time, so `rule-reuse` answers them for free.
