@@ -15,6 +15,7 @@ import contextlib
 import html
 import json
 import logging
+import mimetypes
 import os
 import re
 import tempfile
@@ -24,7 +25,8 @@ from typing import Any
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from hookrelay import actions, channels, metrics, registry
 from hookrelay.alarm import SelfAlarm
@@ -382,6 +384,22 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     async def index() -> str:
         """The operator board — every page this service serves hangs off it."""
         return status_page
+
+    # The board as an app on a phone (2026-10-05): the manifest and icons under
+    # /static, and the service worker at the page's own level so its scope is
+    # the board. The manifest's start URL and scope are relative, so a board
+    # served under a path prefix installs under it. The worker keeps the shell
+    # and never the data — static/sw.js says why — and is served no-cache so a
+    # new page is never pinned behind an old worker.
+    static = Path(__file__).parent / "static"
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
+    app.mount("/static", StaticFiles(directory=static), name="static")
+
+    @app.get("/sw.js")
+    async def service_worker() -> FileResponse:
+        """The board's service worker: the shell offline, never the data (static/sw.js)."""
+        headers = {"Cache-Control": "no-cache"}
+        return FileResponse(static / "sw.js", media_type="application/javascript", headers=headers)
 
     # ── inbound ───────────────────────────────────────────────────────────
 

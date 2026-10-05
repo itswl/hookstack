@@ -287,6 +287,8 @@ alert goes.
 
 | surface | what it answers |
 |---|---|
+| `GET /sw.js` | the board's service worker: the page, the manifest and the icons offline, and never the data — every read still needs the token, and nothing from `/status` or `/live` is cached, so offline the board says the pipe is out of reach rather than showing a stale one as current. Served at the page's own level so its scope is the board, and no-cache so a new page is never pinned behind an old worker |
+| `GET /static/…` | the web manifest and icons that make the board an app on a phone. The manifest's start URL and scope are relative, so a board served under a path prefix installs under it |
 | `GET /` | the board, read like an inbox: one sentence on whether anything is waiting on you, then one row per alert with its status in words and its seven stages (received · judged · notified · investigated · a person · condition · fix); a row opens the alert's whole story — every delivery with a retry for the dead ones, the bytes of both directions, the audit record — from any handle; the ledger of every event with its decision chain; deliveries, silences, and routing with the config editor and a dry run; Chinese or English, light or dark following the system |
 | `GET /status?q=&source=&outcome=&before_id=&limit=` | the same as JSON (read token) |
 | `GET /live` | the board's wake-up line — NDJSON, one `changed` per burst of ledger writes, so the page needs no clock (read token) |
