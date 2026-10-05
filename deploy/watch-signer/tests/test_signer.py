@@ -146,6 +146,10 @@ def test_a_signal_about_an_offered_conversation_is_signed_and_forwarded(stack):
     assert sent["signature"] == expected, "the door's own check must pass on the exact bytes"
     assert sent["signal"]["level"] == "high" and sent["signal"]["kind"] == "task"
     assert events(ledger) == ["signal.signed"]
+    # The record of what was reported, for the contract checker: the
+    # conversation and the cursor the scan offered it at.
+    row = json.loads(ledger.read_text().splitlines()[-1])
+    assert row["subject"] == "ops chat" and row["cursor"] == 1.0 and row["round_at"] == ROUND_AT
 
 
 def test_a_conversation_nobody_offered_is_refused(stack):
@@ -304,6 +308,10 @@ def test_the_round_before_is_admitted_and_counted_against_its_own_round(stack):
         )
     )
     assert post(url, a_signal(origin="chat / old chat"))[0] == 200
+    row = json.loads(stack[2].read_text().splitlines()[-1])
+    assert row["subject"] == "old chat" and row["round_at"] == ROUND_AT - 1200, (
+        "counted against the round that handed it"
+    )
     status, body = post(url, a_signal(origin="chat / older chat"))
     assert status == 422 and "old chat" in body["error"] and "ops chat" in body["error"]
     signer_module.PER_ROUND_MAX = 1

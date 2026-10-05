@@ -27,7 +27,7 @@ failure at all.
 
     assert_node_contract.py --before b.json --after a.json \
         --ledger relay-status.json --since <unix> [--source watch] \
-        [--cursors cursors.json]
+        [--cursors cursors.json] [--signer-ledger signals.jsonl]
 
 Exit 0 when every promise held, 1 otherwise, with the violated promise named in
 the words the brief uses — a violation is meant to be readable by whoever wrote
@@ -51,7 +51,27 @@ What replaced them is a promise the split makes checkable for the first time:
 a node can only report a conversation the scan actually OFFERED it. A signal
 naming a conversation nobody surfaced is either a mis-copied name — which breaks
 this checker's own subject matching, silently — or a round reporting something it
-did not read.
+did not read. The offer is one round wide: the scan keeps the round before
+alongside (`previous`), because a run that outlasts a tick posts after the file
+has moved on, and the signer admits it on the same rule.
+
+WHO WRITES `reported` NOW (2026-10-05). The node's own `reported` cursor was a
+self-report — and "a node that forgot to write its state is exactly the node
+whose self-report cannot be trusted" is this file's own argument for reading
+signals from the pipe's ledger rather than from the node. Since the watcher
+posts through `deploy/watch-signer`, that signer records every signal it signed
+with the conversation and the cursor the scan offered it at, in a file the
+agent cannot reach. With `--signer-ledger` this reads that record instead:
+
+  - "every conversation it reported was signed by the signer" replaces the
+    moved-cursor promise. A signal in the pipe with no signer row is a signal
+    that went around the boundary, which is the thing worth a page.
+  - "no conversation is reported further than it has been read" is checked
+    against the signer's recorded cursor.
+  - the offered-only promise is unchanged, read from the same pipe ledger.
+
+Without the flag the node's own cursors are read as before — the single-file
+shape, and the fixtures the gate replays.
 """
 
 from __future__ import annotations
@@ -79,6 +99,10 @@ ORIGIN_SEPARATOR = " / "
 # 12:40 and stayed there, firing every twenty minutes. A detector whose own
 # output is its next input does not report a problem, it becomes one.
 SELF_PRODUCER = "patrol-timer"
+# The scanner's own ⚠️ notes travel as a signal with this subject (see
+# deploy/watch-signer/signer.py NOTE_SUBJECT): a fault relay, not a
+# conversation, so nothing offers it and this does not expect anything to.
+NOTE_SUBJECT = "scanner-notes"
 
 FAILURES: list[str] = []
 RAN: list[str] = []
@@ -120,14 +144,44 @@ def _subjects(ledger: dict[str, Any], source: str, since: float) -> dict[str, fl
         if origin.split(ORIGIN_SEPARATOR, 1)[0].strip() == SELF_PRODUCER:
             continue  # our own violation signal; see SELF_PRODUCER
         subject = origin.split(ORIGIN_SEPARATOR, 1)[1].strip() if ORIGIN_SEPARATOR in origin else ""
-        if subject:
+        if subject and subject != NOTE_SUBJECT:
             out[subject] = max(out.get(subject, 0.0), float(row.get("received_at") or 0))
     return out
 
 
+def _signed(path: str, since: float) -> dict[str, float | None] | None:
+    """What the signer signed since the snapshot: conversation -> the cursor it
+    recorded (None when it recorded none). None when no ledger was named."""
+    if not path:
+        return None
+    signed: dict[str, float | None] = {}
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        print(f"  note  no signer ledger yet ({exc}); nothing signed since the snapshot")
+        return signed
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("event") != "signal.signed" or float(row.get("ts") or 0) <= since:
+            continue
+        subject = str(row.get("subject") or "")
+        if not subject or subject == NOTE_SUBJECT:
+            continue
+        cursor = row.get("cursor")
+        previous = signed.get(subject)
+        if cursor is None:
+            signed.setdefault(subject, None)
+        else:
+            signed[subject] = max(float(cursor), previous) if previous is not None else float(cursor)
+    return signed
+
+
 def main() -> int:
     positional = [a for a in sys.argv[1:] if not a.startswith("--")]
-    named = {"--before", "--after", "--ledger", "--since", "--source", "--cursors"}
+    named = {"--before", "--after", "--ledger", "--since", "--source", "--cursors", "--signer-ledger"}
     values = {n: _opt(n) for n in named}
     positional = [a for a in positional if a not in values.values()]
 
@@ -161,20 +215,31 @@ def main() -> int:
     a_feeds = cursors.get("feeds") or after.get("feeds") or {}
     offered = cursors.get("offered")
     signalled = _subjects(ledger, source, since)
+    signed = _signed(values["--signer-ledger"], since)
 
     print(f"\nthe round posted {len(signalled)} signal(s) across {len(set(signalled))} conversation(s)")
 
-    # 1. The one that was actually broken.
-    stalled = [
-        name
-        for name in signalled
-        if float(a_reported.get(name, 0)) <= float(b_reported.get(name, 0)) and name in b_reported
-    ]
-    check(
-        not stalled,
-        "a conversation it reported has its `reported` cursor moved forward",
-        f"posted a signal and left the cursor where it was: {stalled}",
-    )
+    if signed is not None:
+        # 1. The record is the signer's. A signal the pipe took for this node
+        #    that the signer never signed went around the boundary.
+        unsigned = [name for name in signalled if name not in signed]
+        check(
+            not unsigned,
+            "every conversation it reported was signed by the signer",
+            f"signals in the pipe with no signer row: {unsigned}",
+        )
+    else:
+        # 1. The one that was actually broken, for a node that keeps its own books.
+        stalled = [
+            name
+            for name in signalled
+            if float(a_reported.get(name, 0)) <= float(b_reported.get(name, 0)) and name in b_reported
+        ]
+        check(
+            not stalled,
+            "a conversation it reported has its `reported` cursor moved forward",
+            f"posted a signal and left the cursor where it was: {stalled}",
+        )
 
     # 2. It can only report what it was handed. A subject nobody offered is
     #    either a conversation name copied wrong — which breaks the matching in
@@ -198,20 +263,40 @@ def main() -> int:
     #    rewrote `offered` to empty while the snapshot stayed at 11:40 — and the
     #    check accused that 11:40 round once every twenty minutes, against an
     #    offer made eighty-nine minutes after it.
+    #    Since 2026-10-05 the scan keeps the round before alongside, so the
+    #    skip has a narrower shape: when the scan has moved on exactly once, the
+    #    round before IS the snapshot's round and is checked; only a scan two
+    #    or more ticks ahead leaves nothing to check against. And a round that
+    #    has not moved on is checked against both, because a run that crossed
+    #    the tick posts a conversation it was handed in the round before.
     round_at = float(cursors.get("round_at") or 0)
+    previous = cursors.get("previous") if isinstance(cursors.get("previous"), dict) else {}
+    previous_offered = previous.get("offered") if isinstance(previous.get("offered"), dict) else None
+    previous_at = float(previous.get("round_at") or 0)
     stale_offer = round_at > since > 0
-    if offered is not None and stale_offer:
+    admissible: dict[str, Any] | None = None
+    if offered is None:
+        pass
+    elif not stale_offer:
+        admissible = {**(previous_offered or {}), **offered}
+    elif previous_offered is not None and 0 < previous_at <= since:
+        admissible = previous_offered
+        print(
+            f"  note  the scan has run again since the snapshot ({_clock(round_at)} > {_clock(since)}); "
+            f"checking against the round before ({_clock(previous_at)})"
+        )
+    else:
         print(
             "  note  the scan has run again since the snapshot "
             f"({_clock(round_at)} > {_clock(since)}); its offer describes a later round, "
             "so the promise that needs it is skipped"
         )
-    elif offered is not None:
-        invented = [name for name in signalled if name not in offered]
+    if admissible is not None:
+        invented = [name for name in signalled if name not in admissible]
         check(
             not invented,
             "every conversation it reported was one the scan offered it",
-            f"reported a conversation nothing surfaced: {invented} (offered: {sorted(offered)})",
+            f"reported a conversation nothing surfaced: {invented} (offered: {sorted(admissible)})",
         )
 
     # 3. Structural, and true at every instant rather than only after a round:
@@ -222,8 +307,13 @@ def main() -> int:
     #    itself — it is a conversation that has since been excluded, renamed, or
     #    dropped off the feed list, leaving stale bookkeeping behind. Treating
     #    the missing side as zero made every one of those a permanent violation.
+    reported_now: dict[str, Any] = (
+        {n: c for n, c in signed.items() if c is not None} if signed is not None else a_reported
+    )
     impossible = [
-        (n, a_reported[n], a_feeds[n]) for n in a_reported if n in a_feeds and float(a_reported[n]) > float(a_feeds[n])
+        (n, reported_now[n], a_feeds[n])
+        for n in reported_now
+        if n in a_feeds and float(reported_now[n]) > float(a_feeds[n])
     ]
     check(
         not impossible,

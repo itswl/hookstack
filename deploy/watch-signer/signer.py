@@ -49,10 +49,13 @@ is on the signal and WHICH conversations can carry one. The producer half of an
 origin comes from a closed set when WATCH_SIGNER_PRODUCERS names one (the chat
 tool's own name, Jira, the scanner — what the work compose sets); unset, it is
 free text and a round can mislabel where a signal came from.
-And the `reported` cursor stays the agent's promise: this signs and forwards,
-and the wrapper in front of it writes the cursor afterwards, so a signal that
-landed can still leave the cursor where it was — the contract checker is what
-catches that, from the pipe's ledger.
+Since 2026-10-05 the ledger here is also the record of WHAT WAS REPORTED: every
+`signal.signed` row carries the conversation and the cursor the scan offered it
+at, written by a process the agent cannot reach. The watch wrapper used to write
+a `reported` cursor into the node's own state after posting, which was a
+self-report — a node that forgot to write it was exactly the node whose word
+could not be taken for it. scripts/assert_node_contract.py reads this ledger
+instead (`--signer-ledger`), and the wrapper writes nothing.
 """
 
 from __future__ import annotations
@@ -148,17 +151,30 @@ def conversation_of(origin: str) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class Offer:
-    """What the scan states: this round's offer and clock, and the round before.
+    """What the scan states: this round's offer (conversation -> the cursor it
+    was handed at) and clock, and the round before.
 
-    `offered` is `None` — not the empty set — when the scan states nothing,
+    `offered` is `None` — not the empty dict — when the scan states nothing,
     which is a deployment with no prescan rather than a round that was offered
     nothing. The caller treats those differently on purpose.
     """
 
-    offered: set[str] | None
+    offered: dict[str, float] | None
     round_at: float
-    previous: set[str] | None
+    previous: dict[str, float] | None
     previous_at: float
+
+
+def _cursors(table: Any) -> dict[str, float] | None:
+    if not isinstance(table, dict):
+        return None
+    out: dict[str, float] = {}
+    for name, value in table.items():
+        try:
+            out[str(name)] = float(value or 0)
+        except (TypeError, ValueError):
+            out[str(name)] = 0.0
+    return out
 
 
 def read_offer(scan_file: Path) -> Offer:
@@ -167,15 +183,26 @@ def read_offer(scan_file: Path) -> Offer:
     except (OSError, ValueError) as exc:
         logger.warning("no scan to check against (%s)", exc)
         return Offer(None, 0.0, None, 0.0)
-    offered = scan.get("offered")
     previous = scan.get("previous") if isinstance(scan.get("previous"), dict) else {}
-    before = previous.get("offered")
     return Offer(
-        set(offered) if isinstance(offered, dict) else None,
+        _cursors(scan.get("offered")),
         float(scan.get("round_at") or 0),
-        set(before) if isinstance(before, dict) else None,
+        _cursors(previous.get("offered")),
         float(previous.get("round_at") or 0),
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class Verdict:
+    """What `check` decided: the signal as it will be signed (or None and why),
+    the round it counts against, and the conversation and cursor the ledger
+    records for it."""
+
+    clean: dict[str, Any] | None
+    why: str = ""
+    key: float = 0.0
+    subject: str = ""
+    cursor: float | None = None
 
 
 def round_key(round_at: float, now: float | None = None) -> float:
@@ -245,40 +272,45 @@ class Counter:
                 self._counts[round_at] -= 1
 
 
-def check(signal: dict[str, Any], offer: Offer) -> tuple[dict[str, Any] | None, str, float]:
-    """The signal as it will be signed and the round it counts against, or
-    None, the reason it will not be, and no round."""
+def check(signal: dict[str, Any], offer: Offer) -> Verdict:
+    """The signal as it will be signed, or None and the reason it will not be."""
     title = str(signal.get("title") or "").strip()
     if not title:
-        return None, "no title", 0.0
+        return Verdict(None, "no title")
     level = str(signal.get("level") or "").strip().lower()
     kind = str(signal.get("kind") or "").strip().lower()
     origin = str(signal.get("origin") or "").strip()
     producer, subject = split_origin(origin)
     if producer == CHECKER_PRODUCER:
-        return None, f"{CHECKER_PRODUCER!r} is the contract checker's own producer and never posts through here", 0.0
+        return Verdict(
+            None, f"{CHECKER_PRODUCER!r} is the contract checker's own producer and never posts through here"
+        )
     if PRODUCERS and producer not in PRODUCERS:
-        return None, f"{producer!r} is not a producer this signer forwards (allowed: {', '.join(PRODUCERS)})", 0.0
+        return Verdict(None, f"{producer!r} is not a producer this signer forwards (allowed: {', '.join(PRODUCERS)})")
     key = round_key(offer.round_at)
+    cursor: float | None = None
     if subject == NOTE_SUBJECT:
         # The scanner's own notes: admitted without an offer, at the level that
         # funds nothing. See the module docstring.
         level, kind = "low", "note"
-    elif offer.offered is not None and subject not in offer.offered:
+    elif offer.offered is not None and subject in offer.offered:
+        cursor = offer.offered[subject]
+    elif offer.offered is not None:
         if offer.previous is not None and subject in offer.previous:
             # Handed to the run before the tick that rewrote the file; it
             # counts against the round that handed it. See the module docstring.
-            key = round_key(offer.previous_at)
+            key, cursor = round_key(offer.previous_at), offer.previous[subject]
         elif not subject:
-            msg = f"the origin names no conversation: expected '<producer>{ORIGIN_SEPARATOR}<conversation>'"
-            return None, msg, 0.0
+            return Verdict(
+                None, f"the origin names no conversation: expected '<producer>{ORIGIN_SEPARATOR}<conversation>'"
+            )
         else:
             # The check this exists for. Stated with what WAS offered, because
             # the common cause is a name copied wrong, not an attack, and the two
             # read identically in a log that only says "refused".
             before = f", the round before: {sorted(offer.previous)}" if offer.previous is not None else ""
             msg = f"nothing offered the conversation {subject!r} this round (offered: {sorted(offer.offered)}{before})"
-            return None, msg, 0.0
+            return Verdict(None, msg)
     clean = dict(signal)
     clean["title"] = title[:TITLE_MAX]
     clean["level"] = level if level in LEVELS else "low"
@@ -291,7 +323,7 @@ def check(signal: dict[str, Any], offer: Offer) -> tuple[dict[str, Any] | None, 
     # offered, and a bare origin (admitted only when no offer is stated) is a
     # string of bounded length.
     clean["origin"] = f"{producer[:PRODUCER_MAX]}{ORIGIN_SEPARATOR}{subject}" if subject else origin[:PRODUCER_MAX]
-    return clean, "", key
+    return Verdict(clean, "", key, subject, cursor)
 
 
 _CONTROL_CHARS = getattr(BaseHTTPRequestHandler, "_control_char_table", None)
@@ -373,24 +405,25 @@ class Signer(BaseHTTPRequestHandler):
         if not isinstance(signal, dict):
             self._answer(400, {"error": "the body must be one signal object"})
             return
-        clean, why, key = check(signal, read_offer(self.scan_file))
-        if clean is None:
+        verdict = check(signal, read_offer(self.scan_file))
+        if verdict.clean is None:
             self.ledger.write(
                 event="signal.refused",
-                why=why,
+                why=verdict.why,
                 title=str(signal.get("title") or "")[:120],
                 origin=str(signal.get("origin") or "")[:120],
             )
-            logger.warning("refused a signal: %s", why)
-            self._answer(422, {"error": why})
+            logger.warning("refused a signal: %s", verdict.why)
+            self._answer(422, {"error": verdict.why})
             return
-        if not self.counter.take(key, PER_ROUND_MAX):
-            self.ledger.write(event="signal.over_ceiling", origin=str(clean.get("origin") or "")[:120])
+        if not self.counter.take(verdict.key, PER_ROUND_MAX):
+            self.ledger.write(event="signal.over_ceiling", origin=str(verdict.clean.get("origin") or "")[:120])
             self._answer(429, {"error": f"this round has already posted {PER_ROUND_MAX} signals"})
             return
-        self._forward(clean, key)
+        self._forward(verdict)
 
-    def _forward(self, signal: dict[str, Any], key: float) -> None:
+    def _forward(self, verdict: Verdict) -> None:
+        signal, key = verdict.clean or {}, verdict.key
         body = json.dumps({"signal": signal}, ensure_ascii=False).encode()
         headers = {"Content-Type": "application/json", **sign_timestamped(self.secret, body)}
         request = urllib.request.Request(self.door, data=body, headers=headers)
@@ -423,9 +456,14 @@ class Signer(BaseHTTPRequestHandler):
             landed = {}
         if not isinstance(landed, dict):
             landed = {}
+        # The record of what was reported — see the module docstring. `subject`
+        # and `cursor` are what the contract checker reads back.
         self.ledger.write(
             event="signal.signed",
             origin=str(signal.get("origin") or "")[:120],
+            subject=verdict.subject,
+            cursor=verdict.cursor,
+            round_at=key,
             level=signal.get("level"),
             kind=signal.get("kind"),
             event_id=landed.get("event_id"),

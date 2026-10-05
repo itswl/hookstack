@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """每个 feed 的出场与投递：谁在灌水，谁在喂你。
 
 2026-09-20 从留存的 brief 里反推出一次性的答案（最近 90 轮：47 轮的全部内容只来
 自三个群 feed，其中 71% 整轮 [SILENT]），那个数决定了 WATCH_BATCH_FEEDS 名单。
 但反推只对过去成立——从那之后，两侧各自累计：
 
-    扫描器   scan.json 的 stats[name].offered   每 feed 每轮出场 +1
-    投递侧   状态文件的 counts[key].delivered   每发一条信号 +1
+    扫描器   scan.json 的 stats[name].offered        每 feed 每轮出场 +1
+    投递侧   签名器账本 signals.jsonl 的 signal.signed   每签一条信号一行
 
 本脚本把两份拼成一张表。宿主机直接跑，不进容器：
 
-    python3 data/watch/watch_feed_stats.py
+    python3 deploy/watch/watch_feed_stats.py
 
 读的是两个只读文件，不写任何东西。计数从两侧代码上线那刻起算，窗口起点在表尾
 打印——头一天数字小是正常的，看比例不看绝对值。
 
-Jira 的键形如 "Jira / SRE-1234"，一票一条；出场侧同一键每轮 +1。
+投递侧 2026-10-05 起改读签名器的账本：它由 agent 够不着的进程写，每行带
+subject（" / " 之后的会话名，Jira 的就是裸票号），和扫描器的键空间直接对上。
+之前读的是节点状态文件里 agent 自己记的 counts，那是一份自述。
 """
 
 from __future__ import annotations
@@ -29,28 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCAN = Path(os.environ.get("WATCH_SCAN_FILE") or ROOT / "work-data/watch-timer-state/scan.json")
-def _reported_state() -> Path:
-    """Where the node records what it has already reported.
-
-    `WATCH_REPORTED_STATE` wins, as in the compose. The fallback DISCOVERS the
-    file instead of naming it: its name carries the chat tool's own name, which
-    belongs in `.env` and not in a tracked file — the same reason the compose
-    builds this path from `WATCH_STATE_FILE`. Discovery also fails usefully:
-    naming a file that is not there makes `_load` return {} and every count
-    print as zero, which reads like a real answer.
-    """
-    override = os.environ.get("WATCH_REPORTED_STATE")
-    if override:
-        return Path(override)
-    found = sorted((ROOT / "work-data/probe-watch").glob("*_watch_state.json"))
-    if len(found) == 1:
-        return found[0]
-    problem = "no *_watch_state.json" if not found else f"{len(found)} candidates: {[p.name for p in found]}"
-    print(f"set WATCH_REPORTED_STATE: {problem} under work-data/probe-watch", file=sys.stderr)
-    raise SystemExit(2)
-
-
-STATE = _reported_state()
+LEDGER = Path(os.environ.get("WATCH_SIGNER_LEDGER") or ROOT / "work-data/watch-signer/signals.jsonl")
 
 
 def _load(path: Path) -> dict:
@@ -61,16 +41,32 @@ def _load(path: Path) -> dict:
         return {}
 
 
+def delivered(ledger: Path) -> dict[str, dict]:
+    """每个 subject 签过几条、最近一条何时——签名器账本里 signal.signed 的行。
+    subject 是 " / " 之后的会话名；Jira 的就是裸票号，和扫描器的键直接对上。"""
+    counts: dict[str, dict] = {}
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        print(f"读不到 {ledger}：{exc}", file=sys.stderr)
+        return counts
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("event") != "signal.signed" or not row.get("subject"):
+            continue
+        entry = counts.setdefault(str(row["subject"]), {"delivered": 0, "last": 0.0})
+        entry["delivered"] += 1
+        entry["last"] = max(float(entry["last"]), float(row.get("ts") or 0))
+    return counts
+
+
 def main() -> int:
     scan = _load(SCAN)
-    state = _load(STATE)
     stats = scan.get("stats") or {}
-    # 投递侧记的是 origin 键（"Jira / SRE-22"），出场侧记的是裸键（jira_keys 的
-    # 输出，"SRE-22"）。不归一，同一张票拆成两行、rate 全部落空——第一天的表就
-    # 把送了三条信号的 SRE-22 显示成 0%，而表底的提示正让人去找 0% 的行降频。
-    counts = {}
-    for key, val in (state.get("counts") or {}).items():
-        counts[key.removeprefix("Jira / ")] = val
+    counts = delivered(LEDGER)
     pending = scan.get("pending") or {}
     unreachable = scan.get("unreachable") or {}
     cursors = scan.get("feeds") or {}
@@ -81,7 +77,7 @@ def main() -> int:
         return 0
 
     now = time.time()
-    print("%-34s %7s %6s %6s %9s %s" % ("feed", "offered", "deliv", "rate", "last_msg", "状态"))
+    print(f"{'feed':<34} {'offered':>7} {'deliv':>6} {'rate':>6} {'last_msg':>9} 状态")
     for name in names:
         off = int((stats.get(name) or {}).get("offered") or 0)
         dliv = int((counts.get(name) or {}).get("delivered") or 0)
@@ -93,7 +89,7 @@ def main() -> int:
             flags.append(f"攒着{(now - float(pending[name])) / 60:.0f}min")
         if name in unreachable:
             flags.append("够不着")
-        print("%-34s %7d %6d %6s %9s %s" % (name[:34], off, dliv, rate, age, " ".join(flags)))
+        print(f"{name[:34]:<34} {off:>7d} {dliv:>6d} {rate:>6} {age:>9} {' '.join(flags)}")
 
     tot_off = sum(int((v or {}).get("offered") or 0) for v in stats.values())
     tot_dliv = sum(int((v or {}).get("delivered") or 0) for v in counts.values())
