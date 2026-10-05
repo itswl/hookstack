@@ -22,26 +22,143 @@ CHECKER = ROOT / "scripts" / "assert_node_contract.py"
 FIX = ROOT / "scripts" / "fixtures" / "node-contract"
 
 
-def run(before: str, after: str, ledger: str, since: str, cursors: str = "") -> subprocess.CompletedProcess[str]:
+def _where(name: str) -> str:
+    """A fixture by name, or a path a test wrote itself."""
+    return name if name.startswith("/") else str(FIX / name)
+
+
+def run(
+    before: str, after: str, ledger: str, since: str, cursors: str = "", signer_ledger: str = ""
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
             str(CHECKER),
             "--before",
-            str(FIX / before),
+            _where(before),
             "--after",
-            str(FIX / after),
+            _where(after),
             "--ledger",
-            str(FIX / ledger),
+            _where(ledger),
             "--since",
             since,
             "--source",
             "watch",
-            *(["--cursors", str(FIX / cursors)] if cursors else []),
+            *(["--cursors", _where(cursors)] if cursors else []),
+            *(["--signer-ledger", _where(signer_ledger)] if signer_ledger else []),
         ],
         capture_output=True,
         text=True,
     )
+
+
+# ------------------------------------------------------------- the signer's record
+# Since 2026-10-05 the watcher posts through deploy/watch-signer, which records
+# every signal it signed with the conversation and the cursor the scan offered
+# it at. With --signer-ledger the checker reads that record instead of the
+# node's own `reported`, which was a self-report. The stalled fixture is the
+# real 16:40 round: a signal for BCP-SRE in the pipe, the node's cursor unmoved.
+
+STALLED_SINCE = "1788510500"
+
+
+def _signer_rows(tmp_path, rows: list[dict]) -> str:
+    path = tmp_path / "signals.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return str(path)
+
+
+def test_with_the_signers_ledger_the_record_is_the_signers(tmp_path) -> None:
+    """The node's unmoved cursor is no longer a promise once the signer holds
+    the record: the signal was signed, for the conversation, at the offered
+    cursor — the round kept its promises."""
+    ledger = _signer_rows(
+        tmp_path, [{"event": "signal.signed", "ts": 1788511200.5, "subject": "BCP-SRE", "cursor": 1788510031.0}]
+    )
+    done = run("stalled-before.json", "stalled-after.json", "stalled-ledger.json", STALLED_SINCE, signer_ledger=ledger)
+    assert done.returncode == 0, done.stdout
+    assert "signed by the signer" in done.stdout and "cursor moved forward" not in done.stdout
+
+
+def test_a_signal_the_signer_never_signed_went_around_the_boundary(tmp_path) -> None:
+    ledger = _signer_rows(tmp_path, [{"event": "signal.signed", "ts": 1788511200.5, "subject": "another chat"}])
+    done = run("stalled-before.json", "stalled-after.json", "stalled-ledger.json", STALLED_SINCE, signer_ledger=ledger)
+    assert done.returncode == 1
+    assert "signed by the signer" in done.stdout and "BCP-SRE" in done.stdout
+
+
+def test_a_signed_cursor_beyond_what_was_read_is_still_impossible(tmp_path) -> None:
+    ledger = _signer_rows(
+        tmp_path, [{"event": "signal.signed", "ts": 1788511200.5, "subject": "BCP-SRE", "cursor": 1788599999.0}]
+    )
+    cursors = tmp_path / "scan.json"
+    cursors.write_text(json.dumps({"round_at": 1788510400.0, "feeds": {"BCP-SRE": 1788510031.0}}))
+    done = run("stalled-before.json", "stalled-after.json", "stalled-ledger.json", STALLED_SINCE, str(cursors), ledger)
+    assert done.returncode == 1 and "further than it has been read" in done.stdout
+
+
+def test_the_scanners_own_notes_are_not_a_conversation(tmp_path) -> None:
+    """A fault relay posted as `scanner / scanner-notes` is admitted by the
+    signer without an offer; the checker must not read it as a conversation
+    nothing surfaced."""
+    relay = json.loads((FIX / "stalled-ledger.json").read_text())
+    for row in relay["recent"]:
+        if row.get("source") == "watch":
+            row["fields"]["origin"] = "scanner / scanner-notes"
+    pipe = tmp_path / "status.json"
+    pipe.write_text(json.dumps(relay))
+    cursors = tmp_path / "scan.json"
+    cursors.write_text(json.dumps({"round_at": 1788510400.0, "offered": {}, "feeds": {}}))
+    ledger = _signer_rows(tmp_path, [])
+    done = run("stalled-before.json", "stalled-after.json", str(pipe), STALLED_SINCE, str(cursors), ledger)
+    assert done.returncode == 0, done.stdout
+
+
+def test_the_round_before_is_admissible(tmp_path) -> None:
+    """A run that outlasts a tick posts a conversation it was handed in the
+    round before; the scan keeps that round alongside, and so does this."""
+    ledger = _signer_rows(
+        tmp_path, [{"event": "signal.signed", "ts": 1788511200.5, "subject": "BCP-SRE", "cursor": 1788510031.0}]
+    )
+    # Not stale: the current offer lacks the conversation, the round before has it.
+    cursors = tmp_path / "scan.json"
+    cursors.write_text(
+        json.dumps(
+            {
+                "round_at": 1788510400.0,
+                "offered": {"other": 1.0},
+                "previous": {"round_at": 1788509200.0, "offered": {"BCP-SRE": 1788510031.0}},
+                "feeds": {"BCP-SRE": 1788510031.0},
+            }
+        )
+    )
+    done = run("stalled-before.json", "stalled-after.json", "stalled-ledger.json", STALLED_SINCE, str(cursors), ledger)
+    assert done.returncode == 0, done.stdout
+    # Stale by exactly one tick: the round before IS the snapshot's round, and is checked rather than skipped.
+    cursors.write_text(
+        json.dumps(
+            {
+                "round_at": 1788511600.0,
+                "offered": {},
+                "previous": {"round_at": 1788510400.0, "offered": {"BCP-SRE": 1788510031.0}},
+                "feeds": {"BCP-SRE": 1788510031.0},
+            }
+        )
+    )
+    done = run("stalled-before.json", "stalled-after.json", "stalled-ledger.json", STALLED_SINCE, str(cursors), ledger)
+    assert done.returncode == 0 and "checking against the round before" in done.stdout
+    cursors.write_text(
+        json.dumps(
+            {
+                "round_at": 1788511600.0,
+                "offered": {},
+                "previous": {"round_at": 1788510400.0, "offered": {"nobody": 1.0}},
+                "feeds": {},
+            }
+        )
+    )
+    done = run("stalled-before.json", "stalled-after.json", "stalled-ledger.json", STALLED_SINCE, str(cursors), ledger)
+    assert done.returncode == 1 and "nothing surfaced" in done.stdout
 
 
 def test_the_round_that_posted_a_signal_and_moved_nothing_is_caught() -> None:

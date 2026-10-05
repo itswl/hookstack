@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """确定性扫描：没有新东西就不叫模型。
 
 原来这一段是 brief 里 7518 字节的英文散文，由一个每轮 $0.78 的解释器执行。逐节
@@ -42,7 +41,7 @@ import subprocess
 import sys
 import time
 import unicodedata
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from chat_mcp import Chat, McpError
@@ -109,7 +108,7 @@ def when(iso: str) -> float:
         return 0.0
     # 万一哪天回包不带时区，按 UTC 认，而不是让 .timestamp() 悄悄按本地时区算
     # ——那会凭空产生八小时的偏移，而且只在一个时区里看得出来。
-    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+    return (dt if dt.tzinfo else dt.replace(tzinfo=UTC)).timestamp()
 
 
 def is_fragment(text: str) -> bool:
@@ -155,7 +154,9 @@ def pick_ref(cands: list[dict], name: str) -> str:
     两个以上同类精确匹配时放弃——猜错比取不到更糟。
     """
     for kind in ("feed", "contact"):
-        exact = [c for c in cands if c.get("ret_type") == kind and str(c.get("name") or "") == name and c.get("opaque_ref")]
+        exact = [
+            c for c in cands if c.get("ret_type") == kind and str(c.get("name") or "") == name and c.get("opaque_ref")
+        ]
         if len(exact) == 1:
             return str(exact[0]["opaque_ref"])
         if len(exact) > 1:
@@ -163,7 +164,7 @@ def pick_ref(cands: list[dict], name: str) -> str:
     return ""
 
 
-def records(chat: "Chat", name: str, args: dict) -> list[dict]:
+def records(chat: Chat, name: str, args: dict) -> list[dict]:
     """search_chat_records，重名时自己消解。
 
     聊天服务端对同名的联系人/会话回「Multiple matches…retry with target.ref」。这不是
@@ -199,9 +200,7 @@ def run_jira(notes: list[str]) -> str:
     if not JIRA:
         return ""
     try:
-        p = subprocess.run(
-            [sys.executable, JIRA], capture_output=True, text=True, timeout=180
-        )
+        p = subprocess.run([sys.executable, JIRA], capture_output=True, text=True, timeout=180)
     except (OSError, subprocess.SubprocessError) as exc:
         notes.append(f"Jira 取不到：{type(exc).__name__} {str(exc)[:200]}")
         return ""
@@ -259,7 +258,6 @@ def scan_chat(
                 continue
             # 到期放行。取完（或取失败走 unreachable）都在下面清 pending。
 
-        
         args = {
             "contact_name": name,
             # from_time 是闭区间。原样传游标会把「设定这个游标的那条消息」再取
@@ -332,8 +330,7 @@ def scan_chat(
             pending.pop(name, None)  # 攒的一批已经端出去了；下一批重新起算
         if len(got) >= PER_CHAT:
             notes.append(
-                f"{name}: 一次取满 {PER_CHAT} 条，更早的可能没取到"
-                f"（结果是新的在前，游标仍推进到最新，否则会一直重报）"
+                f"{name}: 一次取满 {PER_CHAT} 条，更早的可能没取到（结果是新的在前，游标仍推进到最新，否则会一直重报）"
             )
         if picked:
             findings.append((name, picked))

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Jira 增量监控：一个项目的全部动静 + 我名下/提及我的工单变化。
 
 - 有变化 → 打印摘要（新建/状态流转/改派/新评论，跳过我自己的操作）
@@ -24,18 +23,17 @@ probe-watch 容器（只读挂载在 /data/jira）。一份代码两个调用方
 容器里跑过，现在 watch_scan.py 在 timer 容器里跑——而 timer 没有挂 HOME 那个卷，
 `~` 底下的写入会直接失败。默认值不变，所以没听说过这两个变量的调用方不受影响。
 """
+
 import base64
 import json
 import os
 import re
-import sys
 import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-STATE_FILE = os.environ.get("ATL_STATE_FILE") or os.path.expanduser(
-    "~/.atlassian_watch_state.json")
+STATE_FILE = os.environ.get("ATL_STATE_FILE") or os.path.expanduser("~/.atlassian_watch_state.json")
 HKT = timezone(timedelta(hours=8))  # Jira 账号时区 Asia/Hong_Kong
 OVERLAP = 120  # 秒，窗口重叠防边界丢事件
 LOOKBACK_MIN = 40 * 60  # 秒，最小回看窗（>= 2 个调度周期）
@@ -45,7 +43,9 @@ REPORTED_TTL = 7 * 86400  # 秒，已汇报记录的保留期
 def load_env():
     path = os.environ.get("ATL_ENV_FILE") or os.path.expanduser("~/.atlassian.env")
     if os.path.exists(path):
-        for line in open(path, encoding="utf-8"):
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+        for line in lines:
             m = re.match(r"\s*(?:export\s+)?(\w+)=['\"]?([^'\"\n]+)['\"]?", line)
             if m and m.group(1) not in os.environ:
                 os.environ[m.group(1)] = m.group(2)
@@ -55,8 +55,7 @@ def req(path, params=None):
     url = os.environ["ATL_SITE"] + path
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    auth = base64.b64encode(
-        f"{os.environ['ATL_EMAIL']}:{os.environ['ATL_TOKEN']}".encode()).decode()
+    auth = base64.b64encode(f"{os.environ['ATL_EMAIL']}:{os.environ['ATL_TOKEN']}".encode()).decode()
     r = urllib.request.Request(url)
     r.add_header("Authorization", "Basic " + auth)
     r.add_header("Accept", "application/json")
@@ -89,7 +88,8 @@ def main():
     now = time.time()
     state = {}
     if os.path.exists(STATE_FILE):
-        state = json.load(open(STATE_FILE, encoding="utf-8"))
+        with open(STATE_FILE, encoding="utf-8") as handle:
+            state = json.load(handle)
     last = state.get("jira_last_check", now - 6 * 3600)
     # 至少回看 LOOKBACK_MIN 秒：一轮跑丢了（agent 崩溃/超时），下一轮仍能覆盖
     # 这段窗口。可以放宽是因为下面按「已汇报过的变更时间戳」逐条去重，重复
@@ -105,27 +105,30 @@ def main():
 
     project = os.environ.get("ATL_PROJECT", "SRE").strip() or "SRE"
     mention = os.environ.get("ATL_MENTION", "").strip()
-    jql_safe = (f'(project = {project} OR assignee = currentUser()) '
-                f'AND updated >= "{since}" ORDER BY updated ASC')
+    jql_safe = f'(project = {project} OR assignee = currentUser()) AND updated >= "{since}" ORDER BY updated ASC'
     # `comment ~` needs an index the account may not have; the original fell back
     # to the safe form on ANY error and that stays. Empty mention skips it
     # entirely rather than sending an empty match.
-    jql_full = jql_safe if not mention else (
-        f'(project = {project} OR assignee = currentUser() OR comment ~ "{mention}") '
-        f'AND updated >= "{since}" ORDER BY updated ASC')
+    jql_full = (
+        jql_safe
+        if not mention
+        else (
+            f'(project = {project} OR assignee = currentUser() OR comment ~ "{mention}") '
+            f'AND updated >= "{since}" ORDER BY updated ASC'
+        )
+    )
     try:
-        d = req("/rest/api/3/search/jql",
-                {"jql": jql_full, "fields": "summary,status,updated", "maxResults": "30"})
+        d = req("/rest/api/3/search/jql", {"jql": jql_full, "fields": "summary,status,updated", "maxResults": "30"})
     except Exception:
-        d = req("/rest/api/3/search/jql",
-                {"jql": jql_safe, "fields": "summary,status,updated", "maxResults": "30"})
+        d = req("/rest/api/3/search/jql", {"jql": jql_safe, "fields": "summary,status,updated", "maxResults": "30"})
 
     reports = []
     for hit in d.get("issues", []):
         key = hit["key"]
-        i = req(f"/rest/api/3/issue/{key}",
-                {"fields": "summary,status,assignee,reporter,created,comment",
-                 "expand": "changelog"})
+        i = req(
+            f"/rest/api/3/issue/{key}",
+            {"fields": "summary,status,assignee,reporter,created,comment", "expand": "changelog"},
+        )
         f = i["fields"]
         lines = []
         # 逐 issue 去重下限：这条工单已经汇报到哪个时间点了
@@ -139,14 +142,12 @@ def main():
                 continue
             newest = max(newest, ts(h["created"]))
             for it in h["items"]:
-                if it["field"] in ("status", "assignee", "summary", "duedate",
-                                   "priority", "description"):
+                if it["field"] in ("status", "assignee", "summary", "duedate", "priority", "description"):
                     frm, to = it.get("fromString") or "-", it.get("toString") or "-"
                     if it["field"] == "description":
                         lines.append(f"✏️ {h['author']['displayName']} 改了描述")
                     else:
-                        lines.append(f"🔀 {h['author']['displayName']}: "
-                                     f"{it['field']} {frm} → {to}")
+                        lines.append(f"🔀 {h['author']['displayName']}: {it['field']} {frm} → {to}")
         for c in (f.get("comment") or {}).get("comments", []):
             c_ts = max(ts(c["created"]), ts(c.get("updated", c["created"])))
             if c_ts >= floor and c["author"].get("accountId") != me:
@@ -168,7 +169,8 @@ def main():
     # 即使这一轮在此之前挂掉，下一轮的回看窗会重新覆盖，且不会重复汇报。
     state["jira_last_check"] = now
     state["reported"] = {k: v for k, v in reported.items() if v > now - REPORTED_TTL}
-    json.dump(state, open(STATE_FILE, "w", encoding="utf-8"))
+    with open(STATE_FILE, "w", encoding="utf-8") as handle:
+        json.dump(state, handle)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """聊天 MCP 的最小客户端：一次 initialize，之后直接 tools/call，中间不放 agent。
 
 为什么不经过 agent：这几个调用没有一处需要判断。列会话、比时间戳、按窗口取

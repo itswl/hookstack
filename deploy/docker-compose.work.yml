@@ -585,7 +585,6 @@ services:
       # post a signal and leave the cursor where it was; only the first of them
       # had an observable effect. One call cannot be half-done.
       WATCH_SCAN_FILE: /scan/scan.json
-      WATCH_REPORTED_STATE: /data/${WATCH_STATE_FILE:?set WATCH_STATE_FILE in .env}
       WATCH_SIGNAL_POSTER: /data/bin/post_watch_signal.py
       # What a card shows a finding came from. Separate from CHAT_TOOL_PREFIX
       # because that one must be the exact lowercase name the MCP server
@@ -987,6 +986,12 @@ services:
       # header says which and why. Unset this and it checks a single-file node
       # exactly as before.
       CONTRACT_CURSORS: /timer-state/scan.json
+      # The record of what the node reported, written by the signer (a process
+      # the agent cannot reach) rather than by the node about itself: every
+      # signed signal's conversation and the cursor it was offered at. The
+      # checker reads it from here; the wrapper inside probe-watch writes no
+      # state any more. See the note of 2026-10-05.
+      CONTRACT_SIGNER_LEDGER: /signer-ledger/signals.jsonl
       CONTRACT_SIGNAL_POSTER: /scripts/post_watch_signal.py
       # The timer signs from a file, straight to the pipe: it runs no model and
       # reads no attacker-influenced text, so the laptop's arrangement is right
@@ -1011,6 +1016,9 @@ services:
       # Its own snapshot, writable and separate — kept out of probe-watch's
       # volume so the node being checked cannot reach what it is checked against.
       - ../work-data/watch-timer-state:/timer-state
+      # The signer's ledger, read-only: what was reported, by whom the agent
+      # cannot reach. CONTRACT_SIGNER_LEDGER above.
+      - ../work-data/watch-signer:/signer-ledger:ro
       # The Jira read credential the scanner uses (ATL_ENV_FILE above), shared
       # with probe-watch's secrets directory. Nothing else lives there now.
       - ../work-data/probe-watch-secrets:/timer-secrets:ro

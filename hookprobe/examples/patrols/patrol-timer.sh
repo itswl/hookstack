@@ -79,6 +79,7 @@ check_contract() {
         --before "$SNAPSHOT" --after "$CONTRACT_STATE" \
         --ledger /tmp/patrol-timer-ledger.json \
         ${CONTRACT_CURSORS:+--cursors "$CONTRACT_CURSORS"} \
+        ${CONTRACT_SIGNER_LEDGER:+--signer-ledger "$CONTRACT_SIGNER_LEDGER"} \
         --since "$since" --source "${CONTRACT_SOURCE:-watch}" 2>&1); then
     return 0
   fi

@@ -233,7 +233,13 @@ watch wrapper admit a conversation from either, counted against its own round,
 so a run that outlasts a twenty-minute tick is no longer checked against the
 offer that replaced its own; and the producer half of an origin is a closed set
 (the chat tool, Jira, the scanner), so a round cannot label a chat finding as a
-Jira one.
+Jira one. Third pass: the signer's ledger is the record of what was reported.
+Every signed signal carries the conversation and the cursor the scan offered it
+at, written by a process the agent cannot reach; the contract checker reads that
+record (`--signer-ledger`) in place of the node's own `reported` cursor, which
+was a self-report, and the watch wrapper writes no state at all. Its first
+promise is now "every conversation it reported was signed by the signer": a
+signal in the pipe with no signer row went around the boundary.
 
 **The chat is behind a protocol, not in the pipe.** Both deployments reach
 Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a
