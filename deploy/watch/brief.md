@@ -55,6 +55,10 @@
 
     echo '<JSON>' | python3 /data/jira/watch_report.py --origin "Jira / SRE-1234"
 
+⚠️ 小节里的故障（含 PRESCAN FAILED）一律用 `--origin "scanner / scanner-notes"`，
+`level` 写 `low`、`kind` 写 `note`。签名器只放行这一个名字的故障转述，并且会把
+它压成 low/note——换别的名字会被拒，拒了就是一条没落地的信号。
+
 退出码：0 送到，1 门拒了或够不着，2 JSON 不对。**非零本身就是一个发现**——在你
 的回答里原样说出来（`⚠️ 投递失败：<code> <stderr>`）。一条没落地的信号绝不能看
 起来像安静的一轮。

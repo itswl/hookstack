@@ -586,6 +586,17 @@ def test_the_withheld_list_is_one_list() -> None:
     assert ClaudeAgentEngine._SECRETS_WITHHELD_FROM_AGENT is gate.SECRETS_WITHHELD_FROM_AGENT
 
 
+def test_the_handoff_door_is_withheld_from_the_agent() -> None:
+    """The one secret that was not on the list for a month. The plan-approved
+    door checks nothing but an HMAC with it, the planner is on the pipe's
+    network, and the bash guard does not police HTTP verbs — so a planner run
+    holding it could sign its own hand-off and start a work run with the write
+    credential. handoff.py's "THE AGENT CANNOT REACH THIS" is true only while
+    these two names stay here."""
+    assert "HOOKPROBE_HANDOFF_SECRET" in gate.SECRETS_WITHHELD_FROM_AGENT
+    assert "HOOKPROBE_HANDOFF_URL" in gate.SECRETS_WITHHELD_FROM_AGENT
+
+
 # ------------------ the bearer the agent holds is not the one the service holds
 
 

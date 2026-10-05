@@ -35,7 +35,7 @@ def server(monkeypatch):
 
     monkeypatch.setattr(bridge, "send_card", fake_send)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), bridge.Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
     yield f"http://127.0.0.1:{srv.server_address[1]}/", sent
     srv.shutdown()
 

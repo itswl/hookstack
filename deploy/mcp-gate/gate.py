@@ -39,16 +39,26 @@ WHAT THIS IS NOT.
     notifications this family does not read. MCP clients treat 405 as "this
     server has no stream" and work POST-only, which is what the investigator
     already does. Session teardown (DELETE) is forwarded; it carries no call.
+    A response the client posts back to a request the server made inside a
+    POST's own stream (a message with `result` or `error` and no `method`)
+    carries no call either, and is passed as it is.
   * Not a stream in either direction, then: an answer is read whole before it is
-    passed on. The chat server closes its SSE answer at the end of each POST, so
-    that is one read; a server that did not would hit the timeout below and be
-    reported as a failure rather than hanging forever.
+    passed on, and an answer larger than ANSWER_MAX is reported as a failure
+    rather than buffered. The chat server closes its SSE answer at the end of
+    each POST, so that is one read; UPSTREAM_TIMEOUT is an idle timeout, per
+    socket operation, so a server that keeps sending is never cut and one that
+    goes silent that long is reported as a failure rather than hanging forever.
+  * Not an audit of what the chat server did: `call.forwarded` is written after
+    the relay answered and `call.failed` when it did not, so a row says what
+    reached the server, not what this gate meant to send.
 """
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import hmac
+import http.client
 import json
 import logging
 import os
@@ -86,7 +96,25 @@ FORWARDED = ("content-type", "accept", "mcp-session-id", "mcp-protocol-version",
 # How much of a call's arguments the ledger keeps. Enough to see what was asked,
 # short enough that the ledger is not a copy of the chat.
 ARGUMENTS_KEPT = 500
+# Idle, per socket operation — see the module docstring.
 UPSTREAM_TIMEOUT = 60.0
+# A JSON-RPC request is a few KB and a listing of 34 tools is a few tens; this
+# container has 128 MB, and a body is held about three times over while it is
+# filtered. Past either bound nothing here should buffer it.
+BODY_MAX = 1024 * 1024
+ANSWER_MAX = 8 * 1024 * 1024
+
+
+def constant_time_eq(expected: str, provided: str | None) -> bool:
+    """Compare two header-derived strings without leaking length by timing.
+
+    Wraps hmac.compare_digest because that function raises TypeError on a
+    str holding non-ASCII, and http.server decodes header bytes as latin-1 —
+    so a single 0xF6 byte in the bearer killed the handler with no 401 and no
+    ledger row. Comparing the utf-8 bytes keeps the constant-time property and
+    answers the way it should. The same copy the family's three doors carry.
+    """
+    return hmac.compare_digest(expected.encode("utf-8"), (provided or "").encode("utf-8"))
 
 
 class Client:
@@ -119,6 +147,10 @@ def load_clients(environ: dict[str, str]) -> list[Client]:
         tools = tuple(t.strip() for t in listed.split(",") if t.strip())
         if len(token) < 16:
             raise SystemExit(f"mcp-gate: {name}'s token is shorter than 16 characters, or empty")
+        if not token.isascii():
+            # A header arrives as latin-1 and is compared as bytes: a token with
+            # a non-ASCII character could never match, and every call a 401.
+            raise SystemExit(f"mcp-gate: {name}'s token must be ASCII")
         if not tools:
             # An empty list would mean "this client may call nothing", which is
             # indistinguishable from a variable that failed to interpolate. Say so.
@@ -179,6 +211,27 @@ def permitted_names(payload: Any, allowed: Client) -> Any:
     return payload
 
 
+def _filtered(item: Any, listings: set[str], client: Client) -> Any:
+    """One JSON-RPC message, filtered when it answers a listing this client asked
+    for and passed through otherwise — including when it is not an object at all,
+    which a `null` keepalive frame or a batch is."""
+    if isinstance(item, dict) and str(item.get("id")) in listings:
+        return permitted_names(item, client)
+    return item
+
+
+def _dumps(obj: Any) -> str:
+    """JSON as the client will decode it. A lone surrogate the chat server sent
+    escaped cannot be encoded raw, so that one case falls back to ASCII escapes
+    rather than dropping the whole answer."""
+    text = json.dumps(obj, ensure_ascii=False)
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        text = json.dumps(obj, ensure_ascii=True)
+    return text
+
+
 def filter_body(body: bytes, listings: set[str], client: Client) -> bytes:
     """Apply `permitted_names` to whichever answers were `tools/list` asks.
 
@@ -193,30 +246,41 @@ def filter_body(body: bytes, listings: set[str], client: Client) -> bytes:
             parsed = json.loads(text)
         except ValueError:
             return body
-        items = parsed if isinstance(parsed, list) else [parsed]
-        out = [permitted_names(item, client) if str(item.get("id")) in listings else item for item in items]
-        return json.dumps(out if isinstance(parsed, list) else out[0], ensure_ascii=False).encode()
-    lines = []
-    for line in text.splitlines(keepends=True):
+        if isinstance(parsed, list):
+            return _dumps([_filtered(item, listings, client) for item in parsed]).encode("utf-8")
+        return _dumps(_filtered(parsed, listings, client)).encode("utf-8")
+    # Split on "\n" alone. str.splitlines also breaks on U+2028 and its kin,
+    # which a tool description may carry, and a message split in two is a
+    # message the filter never sees — a write tool would stay advertised.
+    lines = text.split("\n")
+    for index, line in enumerate(lines):
         stripped = line.strip()
-        if stripped.startswith("data:"):
-            payload = stripped[5:].strip()
-            try:
-                parsed = json.loads(payload)
-            except ValueError:
-                lines.append(line)
-                continue
-            if str(parsed.get("id")) in listings:
-                parsed = permitted_names(parsed, client)
-            lines.append("data: " + json.dumps(parsed, ensure_ascii=False) + "\n")
-        else:
-            lines.append(line)
-    return "".join(lines).encode()
+        if not stripped.startswith("data:"):
+            continue
+        try:
+            parsed = json.loads(stripped[5:].strip())
+        except ValueError:
+            continue
+        lines[index] = "data: " + _dumps(_filtered(parsed, listings, client))
+    return "\n".join(lines).encode("utf-8")
+
+
+_CONTROL_CHARS = getattr(BaseHTTPRequestHandler, "_control_char_table", None)
+
+
+def plain(text: str) -> str:
+    """A request line as the log may show it: control characters escaped, as
+    the stdlib does since 3.12, so a path carrying a carriage return or an ANSI
+    sequence cannot rewrite the line above it on a terminal."""
+    return text.translate(_CONTROL_CHARS) if _CONTROL_CHARS else repr(text)[1:-1]
 
 
 class Gate(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "mcp-gate"
+    # A peer that declares a body and stops sending holds a thread for exactly
+    # this long. The egress proxy beside this sets the same.
+    timeout = 30
 
     # Set by main().
     upstream = ""
@@ -225,7 +289,14 @@ class Gate(BaseHTTPRequestHandler):
     ledger = Ledger("")
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        logger.info("%s", fmt % args)
+        logger.info("%s", plain(fmt % args))
+
+    def handle(self) -> None:
+        # The MCP client resets the keep-alive socket right after the 405 on its
+        # GET, at every session start; the stdlib would print a traceback that
+        # reads exactly like a real failure, six times a day.
+        with contextlib.suppress(ConnectionResetError, BrokenPipeError):
+            super().handle()
 
     # ── who is asking ──
     def _caller(self) -> Client | None:
@@ -235,9 +306,19 @@ class Gate(BaseHTTPRequestHandler):
         for client in self.clients:
             # Every client is compared, and the comparison is constant time: a
             # loop that returns early leaks which prefix was right.
-            if hmac.compare_digest(token, client.token):
+            if constant_time_eq(client.token, token):
                 found = client
         return found if token else None
+
+    def _authorized(self) -> Client | None:
+        """The caller, or None with the 401 already answered and recorded: one
+        prelude for every method, so no path reaches the chat server without a
+        token and no refusal is missing from the ledger."""
+        client = self._caller()
+        if client is None:
+            self.ledger.write(event="call.unauthorized", method=self.command, path=self.path[:80])
+            self._refuse(401, b'{"error":"a bearer token this gateway knows is required"}')
+        return client
 
     def _answer(self, status: int, body: bytes, content_type: str = "application/json", extra: dict | None = None):
         self.send_response(status)
@@ -247,6 +328,13 @@ class Gate(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _refuse(self, status: int, body: bytes) -> None:
+        """An answer given before the request body was read: the connection
+        closes with it, or on keep-alive the unread body is parsed as the next
+        request line."""
+        self.close_connection = True
+        self._answer(status, body)
 
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's spelling
         if self.path == "/healthz":
@@ -261,16 +349,30 @@ class Gate(BaseHTTPRequestHandler):
         self._answer(405, b'{"error":"this gateway has no server-to-client stream; use POST"}')
 
     def do_DELETE(self) -> None:  # noqa: N802
-        self._relay(b"", method="DELETE")
+        client = self._authorized()
+        if client is None:
+            return
+        self._relay(b"", method="DELETE", client=client)
 
     def do_POST(self) -> None:  # noqa: N802
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length) if length else b""
-        client = self._caller()
+        # The token first, then the length, then the body: nothing is read or
+        # held for a caller this gate does not know, and a declared length that
+        # is not a number, negative, or past BODY_MAX is answered, not parsed.
+        client = self._authorized()
         if client is None:
-            self.ledger.write(event="call.unauthorized", path=self.path[:80])
-            self._answer(401, b'{"error":"a bearer token this gateway knows is required"}')
             return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._refuse(400, b'{"error":"Content-Length is not a number"}')
+            return
+        if length < 0:
+            self._refuse(400, b'{"error":"Content-Length is negative"}')
+            return
+        if length > BODY_MAX:
+            self._refuse(413, b'{"error":"a request this large is not a tool call"}')
+            return
+        body = self.rfile.read(length) if length else b""
         try:
             message = json.loads(body or b"null")
         except ValueError:
@@ -279,8 +381,11 @@ class Gate(BaseHTTPRequestHandler):
         items = message if isinstance(message, list) else [message]
         refused: dict[str, dict[str, Any]] = {}
         listings: set[str] = set()
+        permitted: list[dict[str, Any]] = []
         for item in items:
-            if not isinstance(item, dict):
+            if not isinstance(item, dict) or "method" not in item:
+                # A response to a request the chat server made (result or error,
+                # no method), which the client posts back. It carries no call.
                 continue
             method = str(item.get("method") or "")
             rid = str(item.get("id"))
@@ -295,7 +400,7 @@ class Gate(BaseHTTPRequestHandler):
                     "arguments": json.dumps(params.get("arguments"), ensure_ascii=False)[:ARGUMENTS_KEPT],
                 }
                 if client.permits(tool):
-                    self.ledger.write(event="call.forwarded", **call)
+                    permitted.append(call)
                 else:
                     self.ledger.write(event="call.refused", **call)
                     refused[rid] = error(item.get("id"), -32602, f"{tool} is not a tool this gateway forwards")
@@ -306,43 +411,80 @@ class Gate(BaseHTTPRequestHandler):
         if refused:
             # Nothing in a batch that asks for a refused thing is forwarded: a
             # gateway that forwarded the rest would let a caller learn which
-            # half it got away with.
+            # half it got away with. The permitted half is recorded as withheld,
+            # not as forwarded — it never reached the server.
+            for call in permitted:
+                self.ledger.write(event="call.withheld", **call)
             answers = [
                 refused.get(str(item.get("id")))
                 or error(item.get("id"), -32600, "not forwarded: sent with a refused request")
                 for item in items
-                if isinstance(item, dict) and not str(item.get("method") or "").startswith("notifications/")
+                if isinstance(item, dict)
+                and "method" in item
+                and not str(item.get("method") or "").startswith("notifications/")
             ]
             payload = answers if isinstance(message, list) else (answers[0] if answers else {})
             self._answer(200, json.dumps(payload, ensure_ascii=False).encode())
             return
-        self._relay(body, method="POST", listings=listings, client=client)
+        self._relay(body, method="POST", client=client, listings=listings, calls=permitted)
 
-    def _relay(self, body: bytes, *, method: str, listings: set[str] | None = None, client: Client | None = None):
-        if client is None:
-            client = self._caller()
-            if client is None:
-                self._answer(401, b'{"error":"a bearer token this gateway knows is required"}')
-                return
+    def _relay(
+        self,
+        body: bytes,
+        *,
+        method: str,
+        client: Client,
+        listings: set[str] | None = None,
+        calls: list[dict[str, Any]] | None = None,
+    ) -> None:
+        calls = calls or []
         headers = {name: value for name in FORWARDED if (value := self.headers.get(name))}
         headers.update(self.upstream_headers)
         request = urllib.request.Request(self.upstream, data=body or None, headers=headers, method=method)
         # No proxy handler and no redirects: this gate reaches exactly the one
         # address it was configured with, or it fails.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
+        def failed(reason: str) -> None:
+            self.ledger.write(
+                event="call.failed", client=client.name, method=method, tools=[c["tool"] for c in calls], reason=reason
+            )
+            self._answer(502, b'{"error":"the chat server did not answer"}')
+
         try:
             with opener.open(request, timeout=UPSTREAM_TIMEOUT) as answer:
-                raw, status = answer.read(), answer.status
+                raw, status = answer.read(ANSWER_MAX + 1), answer.status
                 content_type = answer.headers.get("Content-Type", "application/json")
                 session = answer.headers.get("Mcp-Session-Id")
+                declared = answer.headers.get("Content-Length", "")
         except urllib.error.HTTPError as exc:
-            raw, status, session = exc.read(), exc.code, None
+            try:
+                raw = exc.read(ANSWER_MAX + 1)
+            except (OSError, http.client.HTTPException):
+                raw = b""
+            status, session = exc.code, None
             content_type = exc.headers.get("Content-Type", "text/plain")
-        except OSError as exc:
-            self.ledger.write(event="call.failed", client=client.name, reason=str(exc)[:200])
-            self._answer(502, b'{"error":"the chat server did not answer"}')
+            declared = exc.headers.get("Content-Length", "")
+        except (OSError, http.client.HTTPException) as exc:
+            # HTTPException is not an OSError: a chunked answer cut mid-chunk is
+            # this branch, not a crash with no answer and no row.
+            failed(str(exc)[:200])
             return
-        out = filter_body(raw, listings or set(), client)
+        if len(raw) > ANSWER_MAX:
+            failed(f"the answer is larger than {ANSWER_MAX} bytes")
+            return
+        if declared.strip().isdigit() and len(raw) < int(declared):
+            # A bounded read returns what arrived and raises nothing when the
+            # server closes early; the declared length is what says it did.
+            failed("the chat server cut its answer short")
+            return
+        try:
+            out = filter_body(raw, listings or set(), client)
+        except Exception as exc:  # noqa: BLE001 — a body the filter cannot read must still get an answer
+            failed(f"the answer could not be filtered: {type(exc).__name__}")
+            return
+        for call in calls:
+            self.ledger.write(event="call.forwarded", status=status, **call)
         self._answer(status, out, content_type, {"Mcp-Session-Id": session} if session else None)
 
 

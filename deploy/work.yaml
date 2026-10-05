@@ -45,8 +45,11 @@
 
 sources:
   # The watcher's door. Signed, and the one door here that faces anything
-  # outside the compose — post_watch_signal.py holds the other half of this
-  # secret and reaches 127.0.0.1:8100, so the credential never leaves the host.
+  # outside the compose. Two things hold the other half of this secret: the
+  # laptop's post_watch_signal.py, which reaches 127.0.0.1:8100 so the
+  # credential never leaves the host, and watch-signer inside the compose,
+  # which signs for probe-watch after checking the signal against the round's
+  # own offer — the watcher itself has not held it since 2026-09-30.
   #
   # dedup is ON for this lane (see `pipeline` below), so the window matters: a
   # watcher that crashes mid-round and re-runs replays signals it already sent,

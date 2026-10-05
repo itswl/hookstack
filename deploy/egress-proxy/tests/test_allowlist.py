@@ -100,7 +100,7 @@ def test_bytes_sent_right_behind_the_connect_reach_the_far_side() -> None:
     proxy = _with("127.0.0.1", str(port))
     gateway = proxy.Server(("127.0.0.1", 0), proxy.Handler)
     for server in (upstream, gateway):
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
     try:
         client = socket.create_connection(("127.0.0.1", gateway.server_address[1]), timeout=5)
         client.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\nHost: x\r\n\r\n".encode() + b"early")

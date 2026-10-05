@@ -1,0 +1,12 @@
+{
+  "_comment": "The probes' MCP client config (HOOKPROBE_MCP_CONFIG, /data/mcp.json on each node's volume, NOT tracked). The chat's MCP server is reached only through mcp-gate: this URL, and the node's own bearer from .env (WATCH_MCPGATE_TOKEN for probe-watch, PLAN_MCPGATE_TOKEN for probe-plan). Name the server as the chat tool is named in HOOKPROBE_MCP_TOOLS. A file that still points at the host is a round with no chat tools and one warning in the log.",
+  "mcpServers": {
+    "chat": {
+      "type": "http",
+      "url": "http://mcp-gate:8097/mcp/",
+      "headers": {
+        "Authorization": "Bearer <WATCH_MCPGATE_TOKEN or PLAN_MCPGATE_TOKEN from .env>"
+      }
+    }
+  }
+}
