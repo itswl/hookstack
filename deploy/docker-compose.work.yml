@@ -962,37 +962,19 @@ services:
       # default would write into a layer that vanishes on restart — and a Jira
       # cursor that resets means a six-hour lookback replayed as new findings.
       ATL_STATE_FILE: /timer-state/atlassian_watch_state.json
-      # The previous round's contract, checked before the next one fires. A
-      # brief makes promises about the node's own state that only a before/after
-      # comparison can see — three stateless formulations all PASSED on the real
-      # 2026-09-04 defect, because the round advanced neither cursor rather than
-      # one. See scripts/assert_node_contract.py.
-      #
-      # The violation is posted BY THE TIMER, deliberately not through the node
-      # whose failure it reports, and at `low`: a new detector that pages
-      # somebody on its first false positive is a detector that gets switched
-      # off. Raise it once a week of rounds says the rate is worth it.
-      # The file name carries the chat tool's own name, so it comes from .env
-      # rather than being written here — the estate guard caught this line on
-      # the commit that introduced it, which is the guard doing its job.
-      CONTRACT_STATE: /node-state/${WATCH_STATE_FILE:?set WATCH_STATE_FILE in .env}
-      CONTRACT_SNAPSHOT: /timer-state/snapshot.json
-      CONTRACT_CHECKER: /scripts/assert_node_contract.py
-      CONTRACT_LEDGER_URL: http://hookrelay:8100/status
-      CONTRACT_READ_TOKEN: ${WORK_READ_TOKEN:-}
-      CONTRACT_SOURCE: watch
-      # The reading cursor moved out of the node's file when the scan took it
-      # over, and two of the four promises changed with it — the checker's
-      # header says which and why. Unset this and it checks a single-file node
-      # exactly as before.
-      CONTRACT_CURSORS: /timer-state/scan.json
-      # The record of what the node reported, written by the signer (a process
-      # the agent cannot reach) rather than by the node about itself: every
-      # signed signal's conversation and the cursor it was offered at. The
-      # checker reads it from here; the wrapper inside probe-watch writes no
-      # state any more. See the note of 2026-10-05.
-      CONTRACT_SIGNER_LEDGER: /signer-ledger/signals.jsonl
-      CONTRACT_SIGNAL_POSTER: /scripts/post_watch_signal.py
+      # Every watch signal in the pipe came through the signer: checked once
+      # per tick over what arrived since the last check, from the pipe's ledger
+      # and the signer's (scripts/assert_watch_signed.py). A miss travels as a
+      # `low` signal the timer signs from its own file. This replaced the
+      # before/after contract check on 2026-10-06, the day after the signer
+      # became the record of what was reported and two of its three promises
+      # came to hold by construction; the note of that date says why.
+      WATCH_SIGNED_LEDGER_URL: http://hookrelay:8100/status
+      WATCH_SIGNED_READ_TOKEN: ${WORK_READ_TOKEN:-}
+      WATCH_SIGNED_SOURCE: watch
+      WATCH_SIGNED_SIGNER_LEDGER: /signer-ledger/signals.jsonl
+      WATCH_SIGNED_STAMP: /timer-state/signed-check.at
+      WATCH_SIGNED_POSTER: /scripts/post_watch_signal.py
       # The timer signs from a file, straight to the pipe: it runs no model and
       # reads no attacker-influenced text, so the laptop's arrangement is right
       # for it. The file is in a directory of its own (the mount below) — it
@@ -1010,14 +992,14 @@ services:
       # (which mounts the same directory at /data/jira). Read-only in both: the
       # code that decides what a round even is must not be editable by the round.
       - ./watch:/watch:ro
-      # The node's state, READ-ONLY. The timer judges it and must not be able to
-      # edit the evidence.
+      # The node's state, READ-ONLY, for the one-time seed of the scan's
+      # cursors (WATCH_SEED_STATE above) and nothing else since 2026-10-06.
       - ../work-data/probe-watch:/node-state:ro
-      # Its own snapshot, writable and separate — kept out of probe-watch's
-      # volume so the node being checked cannot reach what it is checked against.
+      # The scan's own state and the signed-check stamp, writable and separate
+      # from probe-watch's volume: the round cannot edit what it is judged by.
       - ../work-data/watch-timer-state:/timer-state
-      # The signer's ledger, read-only: what was reported, by whom the agent
-      # cannot reach. CONTRACT_SIGNER_LEDGER above.
+      # The signer's ledger, read-only: what was reported, written by a process
+      # the agent cannot reach. WATCH_SIGNED_SIGNER_LEDGER above.
       - ../work-data/watch-signer:/signer-ledger:ro
       # The Jira read credential the scanner uses (ATL_ENV_FILE above), shared
       # with probe-watch's secrets directory. Nothing else lives there now.

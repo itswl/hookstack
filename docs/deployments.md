@@ -235,11 +235,12 @@ offer that replaced its own; and the producer half of an origin is a closed set
 (the chat tool, Jira, the scanner), so a round cannot label a chat finding as a
 Jira one. Third pass: the signer's ledger is the record of what was reported.
 Every signed signal carries the conversation and the cursor the scan offered it
-at, written by a process the agent cannot reach; the contract checker reads that
-record (`--signer-ledger`) in place of the node's own `reported` cursor, which
-was a self-report, and the watch wrapper writes no state at all. Its first
-promise is now "every conversation it reported was signed by the signer": a
-signal in the pipe with no signer row went around the boundary.
+at, written by a process the agent cannot reach, and the watch wrapper writes no
+state at all. The next day the before/after contract check retired with it:
+once the signer held the record, two of its three promises held by construction,
+and the third is the one check the timer still runs each tick
+(`scripts/assert_watch_signed.py`): a watch signal in the pipe with no signer
+row went around the boundary.
 
 **The board on a phone, since 2026-10-05.** The pipe's board is a web app: a
 manifest, icons and a service worker, linked with the page's own base so a

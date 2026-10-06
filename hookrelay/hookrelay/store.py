@@ -1189,7 +1189,7 @@ class Store:
         # query were silently blind without them, and blind looked healthy:
         # /timeline (groups by correlation, sums `fields.cost_usd`) reported a
         # live deployment as 39 chains across 39 hops at $0.00, all unpriced;
-        # scripts/assert_node_contract.py (finds a signal's subject in
+        # the watch checker of the day (finds a signal's subject in
         # `fields.origin`) read every round as "posted 0 signals" and passed.
         # Both are what a quiet week looks like. The checker's own fixture
         # carries fields, written from what the code needs rather than from what
