@@ -29,11 +29,12 @@ from __future__ import annotations
 
 import logging
 import os
-import select
 import socket
 import socketserver
 import sys
 import threading
+
+from common import Server, pump
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s egress %(message)s")
 logger = logging.getLogger("egress")
@@ -60,25 +61,6 @@ def permitted(host: str) -> bool:
         elif host == rule:
             return True
     return False
-
-
-def _pump(a: socket.socket, b: socket.socket) -> None:
-    """Move bytes both ways until either end stops. No inspection: this is a
-    boundary about WHERE, not about what — reading the traffic would put the
-    agent's tool output through one more thing that could log it."""
-    sockets = [a, b]
-    try:
-        while True:
-            ready, _, bad = select.select(sockets, [], sockets, IDLE_SECONDS)
-            if bad or not ready:
-                return
-            for source in ready:
-                data = source.recv(65536)
-                if not data:
-                    return
-                (b if source is a else a).sendall(data)
-    except OSError:
-        return
 
 
 class Handler(socketserver.StreamRequestHandler):
@@ -140,7 +122,7 @@ class Handler(socketserver.StreamRequestHandler):
         self.wfile.flush()
         logger.info("allowed %s", target[:80])
         with upstream:
-            _pump(self.connection, upstream)
+            pump(self.connection, upstream, IDLE_SECONDS)
 
     def _plain(self, parts: list[str]) -> None:
         """One absolute-URI HTTP request, forwarded if its host is listed."""
@@ -182,7 +164,7 @@ class Handler(socketserver.StreamRequestHandler):
         logger.info("allowed %s %s:%s", method, host, port)
         with upstream:
             upstream.sendall(b"\r\n".join(head) + b"\r\n\r\n")
-            _pump(self.connection, upstream)
+            pump(self.connection, upstream, IDLE_SECONDS)
 
     def _refuse(self, code: int, why: str, target: str, level: int = logging.WARNING) -> None:
         # WARNING, not INFO: a refusal here is the whole product of this
@@ -196,11 +178,6 @@ class Handler(socketserver.StreamRequestHandler):
             self.wfile.flush()
         except OSError:
             pass
-
-
-class Server(socketserver.ThreadingTCPServer):
-    allow_reuse_address = True
-    daemon_threads = True
 
 
 def main() -> int:

@@ -169,7 +169,7 @@ _DANGER_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
 # branch, because this is not about what a runner may change — it is about not
 # disabling the thing that records where it went.
 #
-# `deploy/egress-proxy` bounds the investigator's outbound calls by allowlist,
+# `deploy/sidecars/proxy.py` bounds the investigator's outbound calls by allowlist,
 # and it works by environment (HTTP_PROXY/HTTPS_PROXY/NO_PROXY). That made the
 # bypass exactly one shell prefix — `unset HTTPS_PROXY; curl ... -d @/tmp/x` was
 # allowed, measured on 2026-09-10 — which is ordinary tooling, not a determined

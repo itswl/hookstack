@@ -2,7 +2,7 @@
 
 A docker network with `internal: true` is how a container stops being able to
 reach the host — which is the boundary the MCP gate needs to be worth anything
-(deploy/mcp-gate/gate.py). It also stops a PUBLISHED PORT working, measured
+(deploy/sidecars/gate.py). It also stops a PUBLISHED PORT working, measured
 before this was written rather than after: a container on an internal-only
 network answers nothing on 127.0.0.1, because there is no path in either
 direction.
@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import logging
 import os
-import select
 import socket
 import socketserver
 import sys
 import threading
+
+from common import Server, pump
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s ingress %(message)s")
 logger = logging.getLogger("ingress")
@@ -43,7 +44,7 @@ logger = logging.getLogger("ingress")
 ROUTES = os.environ.get("INGRESS_FORWARD", "")
 # On the select loop AND on both sockets: a peer that stops reading parks the
 # pump in sendall, where the select timeout cannot reach it, so the sockets
-# carry the same limit. The egress proxy's twin loop uses 300; the consoles
+# carry the same limit. The egress proxy's own idle limit is 300; the consoles
 # ping every 20 s, so a browser tab that is alive is never idle this long, and
 # a console page left open through a lunch break must not be cut.
 IDLE_SECONDS = 900
@@ -62,29 +63,6 @@ def parse(spec: str) -> list[tuple[int, str, int]]:
             raise SystemExit(f"probe-ingress: {entry!r} listens on a port an earlier entry already took")
         routes.append((int(listen), host, int(port)))
     return routes
-
-
-def _pump(a: socket.socket, b: socket.socket) -> None:
-    """Both ways until either end stops. The same loop as the egress proxy's,
-    and no inspection for the same reason: this is about WHERE, not what."""
-    sockets = [a, b]
-    try:
-        while True:
-            ready, _, bad = select.select(sockets, [], sockets, IDLE_SECONDS)
-            if bad or not ready:
-                return
-            for source in ready:
-                data = source.recv(65536)
-                if not data:
-                    return
-                (b if source is a else a).sendall(data)
-    except OSError:
-        return
-
-
-class Server(socketserver.ThreadingTCPServer):
-    allow_reuse_address = True
-    daemon_threads = True
 
 
 def bind(listen: int, host: str, port: int) -> Server:
@@ -107,7 +85,7 @@ def bind(listen: int, host: str, port: int) -> Server:
             upstream.settimeout(IDLE_SECONDS)
             self.request.settimeout(IDLE_SECONDS)
             with upstream:
-                _pump(self.request, upstream)
+                pump(self.request, upstream, IDLE_SECONDS)
 
     server = Server(("0.0.0.0", listen), Handler)  # noqa: S104 — the container's own network only
     logger.info("127.0.0.1:%d reaches %s:%d", listen, host, port)

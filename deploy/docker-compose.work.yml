@@ -149,7 +149,7 @@ services:
   # The investigators' way out, and a list of where out may be. Policy, not
   # topology: the probes keep their network, so this bounds what HONOURS a proxy
   # (the CLI, curl, aws, WebFetch) and records every destination nobody listed.
-  # The refusal log is the product. See deploy/egress-proxy/proxy.py and
+  # The refusal log is the product. See deploy/sidecars/proxy.py and
   # .agents/notes/proposed/2026-09-10-the-agent-can-read-the-provider-key-and-post-it-anywhere.md
   #
   # This deployment needs a wider list than production's: probe-work is
@@ -167,7 +167,7 @@ services:
     read_only: true
     mem_limit: 128m
     volumes:
-      - ./egress-proxy/proxy.py:/app/proxy.py:ro
+      - ./sidecars:/app:ro
     environment:
       EGRESS_ALLOW: >-
         ${EGRESS_ALLOW:-open.larksuite.com,model-gateway.example,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
@@ -182,7 +182,7 @@ services:
   # client's MCP port with no credential, listed 34 tools — 20 of them writes,
   # including sending a message as the operator — and called one the allowlist
   # does not name. The probes now have no route to the host at all, and this
-  # holds the only reach to it. Read deploy/mcp-gate/gate.py for what it does
+  # holds the only reach to it. Read deploy/sidecars/gate.py for what it does
   # NOT stop.
   mcp-gate:
     image: python:3.14-slim
@@ -198,7 +198,7 @@ services:
     # from there AND from the host.
     networks: [default, probe_net]
     volumes:
-      - ./mcp-gate/gate.py:/app/gate.py:ro
+      - ./sidecars:/app:ro
       # The refusals are the point of keeping this: the only place that can say
       # "a run asked for a tool nobody gave it".
       - ../work-data/mcp-gate:/data
@@ -239,7 +239,7 @@ services:
     mem_limit: 128m
     networks: [probe_net]
     volumes:
-      - ./watch-signer/signer.py:/app/signer.py:ro
+      - ./sidecars:/app:ro
       # The round's own offer, the same file the agent is handed, read at post
       # time so the set is this round's rather than a remembered one.
       - ../work-data/watch-timer-state:/scan:ro
@@ -276,7 +276,7 @@ services:
     # from there AND from the host.
     networks: [default, probe_net]
     volumes:
-      - ./probe-ingress/forward.py:/app/forward.py:ro
+      - ./sidecars:/app:ro
     environment:
       INGRESS_FORWARD: 8088:probe-plan:8088,8089:probe-watch:8088,8090:probe-work:8088
     ports:
@@ -430,7 +430,7 @@ services:
       # prompt and needs no mount of its own — and it is NOT tracked, so this
       # is the one place that says what it must contain: the chat's MCP server
       # is reached as http://mcp-gate:8097/mcp/ with this node's bearer from
-      # .env (deploy/mcp-gate/mcp.example.json is the shape). A server on the
+      # .env (deploy/sidecars/mcp.example.json is the shape). A server on the
       # host is out of reach from this network, and a stdio server cannot be
       # reached from here at all. A missing file is one warning in the log and
       # a round with no chat tools, which reads like a quiet day.

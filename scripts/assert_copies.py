@@ -44,7 +44,6 @@ SERVICES = ("hookrelay", "hookjudge", "hookprobe")
 PINNED = (
     # The one where drift is dangerous rather than untidy: three doors that must
     # agree on what a valid credential comparison is.
-    ("constant_time_eq", {"hookrelay": "security.py", "hookjudge": "app.py", "hookprobe": "wire.py"}),
     # The SSE fan-out behind all three boards. `watcher_count` is deliberately
     # absent from hookprobe (see KNOWN_DIFFERENCES) so it is not pinned here.
     ("Live.__init__", {s: "live.py" for s in SERVICES}),
@@ -61,28 +60,19 @@ PINNED = (
     ("now_ts", {"hookrelay": "store.py", "hookjudge": "store.py"}),
     ("SelfAlarm.__init__", {"hookrelay": "alarm.py", "hookjudge": "alarm.py"}),
     ("SelfAlarm.enabled", {"hookrelay": "alarm.py", "hookjudge": "alarm.py"}),
-    # The deploy sidecars: single-file containers that mount one script each,
-    # so a shared module is not even an option for them — a copy is the only
-    # shape, and these are the copies where drift already cost something. The
-    # two new doors compared their bearer with a bare compare_digest and died
-    # on a non-ASCII byte, exactly what constant_time_eq above was written for.
+    # The sidecars share deploy/sidecars/common.py since 2026-10-06; what is
+    # still a copy is the two helpers the service packages ALSO carry, because
+    # a container that mounts one directory cannot import a service package.
     (
         "constant_time_eq",
         {
             "hookrelay": "security.py",
             "hookjudge": "app.py",
             "hookprobe": "wire.py",
-            "mcp-gate": "deploy/mcp-gate/gate.py",
-            "watch-signer": "deploy/watch-signer/signer.py",
+            "sidecars": "deploy/sidecars/common.py",
         },
     ),
-    ("sign_timestamped", {"hookprobe": "wire.py", "watch-signer": "deploy/watch-signer/signer.py"}),
-    ("Ledger.__init__", {"mcp-gate": "deploy/mcp-gate/gate.py", "watch-signer": "deploy/watch-signer/signer.py"}),
-    ("Ledger.write", {"mcp-gate": "deploy/mcp-gate/gate.py", "watch-signer": "deploy/watch-signer/signer.py"}),
-    # The byte pump behind the egress proxy and the console ingress. Its
-    # rbufsize lesson is recorded in the proxy; the second copy is pinned so the
-    # next lesson lands in both.
-    ("_pump", {"egress-proxy": "deploy/egress-proxy/proxy.py", "probe-ingress": "deploy/probe-ingress/forward.py"}),
+    ("sign_timestamped", {"hookprobe": "wire.py", "sidecars": "deploy/sidecars/common.py"}),
 )
 
 # Copies that differ ON PURPOSE. Listed so the difference is a decision on the
@@ -99,13 +89,6 @@ KNOWN_DIFFERENCES = {
         "knobs to a service under a weight ceiling buys nothing. The WIRE "
         "SCHEME is identical and that is the part that has to be"
     ),
-    "IDLE_SECONDS": (
-        "the egress proxy cuts an idle tunnel at 300 s; probe-ingress at 900 s, "
-        "because a console page left open through a lunch break must come back "
-        "without a reload, and the consoles ping every 20 s so a live tab is "
-        "never idle. The _pump loop they share reads the constant, and the "
-        "constant is the difference"
-    ),
 }
 
 
@@ -114,8 +97,8 @@ def bodies(symbol: str, where: dict[str, str]) -> dict[str, str | None]:
     want_class, _, want_func = symbol.rpartition(".")
     found: dict[str, str | None] = {}
     for service, module in where.items():
-        # A module naming a path (deploy/<sidecar>/<file>.py) is a sidecar
-        # outside the three service packages; the rest resolve as before.
+        # A module naming a path (deploy/sidecars/common.py) sits outside the
+        # three service packages; the rest resolve as before.
         path = Path(module) if "/" in module else Path(service, service, module)
         found[service] = None
         if not path.is_file():

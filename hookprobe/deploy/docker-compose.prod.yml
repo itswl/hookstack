@@ -65,7 +65,7 @@ services:
     mem_limit: 128m
     pids_limit: 64
     volumes:
-      - ../../deploy/egress-proxy/proxy.py:/app/proxy.py:ro
+      - ../../deploy/sidecars:/app:ro
     environment:
       # The model gateway, plus the three documentation hosts this deployment's
       # WebFetch has actually reached in its life (7 aws docs, 2 grafana, 2 raw

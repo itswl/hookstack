@@ -21,7 +21,7 @@ JSON-RPC, answered as JSON or as an SSE stream.
 
 Deliberately stdlib-only and small enough to read in one sitting, like the egress
 proxy beside it, and for the same reason: it is now in the path of every chat
-tool call the family makes.
+tool call the family makes. The plumbing the sidecars share is in common.py.
 
 WHAT THIS IS NOT.
   * Not an argument check. `search_chat_records` with any query is one call to
@@ -55,21 +55,18 @@ WHAT THIS IS NOT.
 
 from __future__ import annotations
 
-import contextlib
 import fnmatch
-import hmac
 import http.client
 import json
 import logging
 import os
 import sys
-import threading
-import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from http.server import ThreadingHTTPServer
 from typing import Any
+
+from common import HttpHandler, Ledger, constant_time_eq
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s mcp-gate %(message)s")
 logger = logging.getLogger("mcp-gate")
@@ -103,18 +100,6 @@ UPSTREAM_TIMEOUT = 60.0
 # filtered. Past either bound nothing here should buffer it.
 BODY_MAX = 1024 * 1024
 ANSWER_MAX = 8 * 1024 * 1024
-
-
-def constant_time_eq(expected: str, provided: str | None) -> bool:
-    """Compare two header-derived strings without leaking length by timing.
-
-    Wraps hmac.compare_digest because that function raises TypeError on a
-    str holding non-ASCII, and http.server decodes header bytes as latin-1 —
-    so a single 0xF6 byte in the bearer killed the handler with no 401 and no
-    ledger row. Comparing the utf-8 bytes keeps the constant-time property and
-    answers the way it should. The same copy the family's three doors carry.
-    """
-    return hmac.compare_digest(expected.encode("utf-8"), (provided or "").encode("utf-8"))
 
 
 class Client:
@@ -167,31 +152,6 @@ def load_clients(environ: dict[str, str]) -> list[Client]:
 
 def error(rid: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}
-
-
-class Ledger:
-    """Append-only JSONL of every call, permitted or not.
-
-    The refusals are the point: they are the only place that can say "this run
-    asked for a tool nobody gave it". Best-effort — a gateway that stops
-    forwarding because a disk filled would take the watcher down with it.
-    """
-
-    def __init__(self, path: str) -> None:
-        self.path = Path(path) if path else None
-        self._lock = threading.Lock()
-
-    def write(self, **fields: Any) -> None:
-        if self.path is None:
-            return
-        line = json.dumps({"ts": round(time.time(), 3), **fields}, ensure_ascii=False)
-        try:
-            with self._lock:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                with self.path.open("a", encoding="utf-8") as handle:
-                    handle.write(line + "\n")
-        except OSError as exc:  # noqa: BLE001 — never fail a call because the ledger cannot be written
-            logger.warning("ledger write failed: %s", exc)
 
 
 def permitted_names(payload: Any, allowed: Client) -> Any:
@@ -265,38 +225,14 @@ def filter_body(body: bytes, listings: set[str], client: Client) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-_CONTROL_CHARS = getattr(BaseHTTPRequestHandler, "_control_char_table", None)
-
-
-def plain(text: str) -> str:
-    """A request line as the log may show it: control characters escaped, as
-    the stdlib does since 3.12, so a path carrying a carriage return or an ANSI
-    sequence cannot rewrite the line above it on a terminal."""
-    return text.translate(_CONTROL_CHARS) if _CONTROL_CHARS else repr(text)[1:-1]
-
-
-class Gate(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+class Gate(HttpHandler):
     server_version = "mcp-gate"
-    # A peer that declares a body and stops sending holds a thread for exactly
-    # this long. The egress proxy beside this sets the same.
-    timeout = 30
 
     # Set by main().
     upstream = ""
     upstream_headers: dict[str, str] = {}  # noqa: RUF012 — plain class config, not a dataclass field
     clients: list[Client] = []  # noqa: RUF012
     ledger = Ledger("")
-
-    def log_message(self, fmt: str, *args: Any) -> None:
-        logger.info("%s", plain(fmt % args))
-
-    def handle(self) -> None:
-        # The MCP client resets the keep-alive socket right after the 405 on its
-        # GET, at every session start; the stdlib would print a traceback that
-        # reads exactly like a real failure, six times a day.
-        with contextlib.suppress(ConnectionResetError, BrokenPipeError):
-            super().handle()
 
     # ── who is asking ──
     def _caller(self) -> Client | None:
@@ -319,22 +255,6 @@ class Gate(BaseHTTPRequestHandler):
             self.ledger.write(event="call.unauthorized", method=self.command, path=self.path[:80])
             self._refuse(401, b'{"error":"a bearer token this gateway knows is required"}')
         return client
-
-    def _answer(self, status: int, body: bytes, content_type: str = "application/json", extra: dict | None = None):
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        for name, value in (extra or {}).items():
-            self.send_header(name, value)
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _refuse(self, status: int, body: bytes) -> None:
-        """An answer given before the request body was read: the connection
-        closes with it, or on keep-alive the unread body is parsed as the next
-        request line."""
-        self.close_connection = True
-        self._answer(status, body)
 
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's spelling
         if self.path == "/healthz":
@@ -361,16 +281,8 @@ class Gate(BaseHTTPRequestHandler):
         client = self._authorized()
         if client is None:
             return
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            self._refuse(400, b'{"error":"Content-Length is not a number"}')
-            return
-        if length < 0:
-            self._refuse(400, b'{"error":"Content-Length is negative"}')
-            return
-        if length > BODY_MAX:
-            self._refuse(413, b'{"error":"a request this large is not a tool call"}')
+        length = self.body_length(BODY_MAX, b'{"error":"a request this large is not a tool call"}')
+        if length is None:
             return
         body = self.rfile.read(length) if length else b""
         try:

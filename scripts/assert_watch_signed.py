@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Every watch signal in the pipe came through the signer.
 
-The watcher posts through `deploy/watch-signer`, which holds the door's secret
+The watcher posts through the watch signer (`deploy/sidecars/signer.py`), which holds the door's secret
 and records every signal it signed with the conversation it named. So a signal
 that reached the pipe's watch door and is NOT in the signer's ledger went
 around that boundary: something else holds the secret, or the signer was
@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 # How a signal names the conversation it came from: `<producer> / <conversation>`.
-# deploy/watch/watch_report.py builds it and deploy/watch-signer/signer.py
+# deploy/watch/watch_report.py builds it and deploy/sidecars/signer.py
 # checks it; this reads the conversation back out of it.
 ORIGIN_SEPARATOR = " / "
 # The timer posts its own findings under this producer, through its own file
