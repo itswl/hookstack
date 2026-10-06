@@ -115,6 +115,8 @@ jobs:
       # whose output was never committed.
       - name: the generated reference matches the code
         run: python3 scripts/gen_reference.py --check
+      - name: the site's front pages are the READMEs, re-addressed
+        run: python3 scripts/gen_front_pages.py --check
       # Was in scripts/gate.sh and nowhere else, so every ceiling it enforces was
       # advisory on any machine but a maintainer's. A cap nobody checks on the way
       # in is a comment.

@@ -91,37 +91,11 @@ ENUMERATED = (
     ),
 )
 
-# A fourth class, found by an external audit repeating an error it had read
-# here: a prose COUNT. "Four routes" sat in judge.py's own header, hookjudge's
-# README (twice — once above a table that already had five rows), OVERVIEW.md
-# and both front pages, for weeks after rule-reuse made it five. ENUMERATED
-# checks that every member is listed; it cannot see a sentence that miscounts
-# them. This reads the number out of every "N routes" / "N条…路由" in the files
-# pinned below and compares it with the ROUTE_* constants that define the set.
-# Pinned files rather than the whole tree, so an unrelated "two routes" in some
-# other document cannot trip it — every match in these files IS about the
-# judge's cost routes, verified when the check was written.
-_ROUTE_CONST = re.compile(r'^ROUTE_[A-Z_]+ = "', re.MULTILINE)
-ROUTE_CONSTANTS = Path("hookjudge/hookjudge/contract.py")
-ROUTE_COUNT_STATED = (
-    Path("README.md"),
-    Path("OVERVIEW.md"),
-    Path("docs/index.md"),
-    Path("docs/zh/index.md"),
-    Path("hookjudge/README.md"),
-    Path("hookjudge/hookjudge/judge.py"),
-)
-_COUNT_EN = re.compile(
-    r"\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+routes\b",
-    re.IGNORECASE,
-)
-_COUNT_ZH = re.compile(r"([一二三四五六七八九十]|\d+)条[^。\n]{0,12}?(?:路由|路径)")
-
-# The same rule for the containment table, which drifted exactly the way this
-# check exists to stop: a boundary was added, the table grew to fifteen rows,
-# and three of the four places that state the count still said fourteen while
-# the fourth said fifteen. Nobody reading either number could tell which was
-# true, and the number is the claim the security page is FOR.
+# The containment table. Its COUNT is no longer stated anywhere in prose
+# (2026-10-06): a number that must be kept equal in five places, in two
+# languages, is a check waiting to be written and a page waiting to drift —
+# this file carried both for a month. The sentences now say "the boundaries"
+# and link to the table; what is still checked is that every row is SORTED.
 BOUNDARY_TABLE = Path("docs/containment.md")
 # And every row must be SORTED, not merely present. The page gained a section
 # on 2026-09-11 splitting the table into what holds against a hostile model,
@@ -131,115 +105,7 @@ BOUNDARY_TABLE = Path("docs/containment.md")
 # nothing checks is prose, and prose about a count is exactly what rotted one
 # paragraph above it ("twelve" against a script carrying seventeen).
 _CLASSIFIED_ROW = re.compile(r"^- \*\*(.+?)\*\*", re.MULTILINE)
-# `_BOUNDARY_ROW` below counts rows and captures nothing; the names need their own.
 _BOUNDARY_NAME = re.compile(r"^\| \*\*(.+?)\*\*", re.MULTILINE)
-BOUNDARY_COUNT_STATED = (
-    Path("README.md"),
-    Path("README.zh-CN.md"),
-    Path("docs/index.md"),
-    Path("docs/zh/index.md"),
-)
-_BOUNDARY_ROW = re.compile(r"^\| \*\*", re.MULTILINE)
-# Deliberately NOT an enumeration of the number words. It was one until
-# 2026-09-10, and it stopped at twenty-five while `_TEENS` learned twenty-six:
-# both English pages then said "twenty-six structural boundaries", matched
-# nothing, and were silently excluded from the check that exists to keep them
-# honest — the report still read "26 boundaries match every page that counts
-# them" while counting one page of three. Match ANY word here and resolve it
-# below, so an unknown word is a failure with a name instead of a page quietly
-# dropping out of the set.
-_BOUNDARY_EN = re.compile(
-    r"\b([a-z]+(?:-[a-z]+)?|\d+)\s+structural\s+(?:security\s+)?boundaries\b",
-    re.IGNORECASE,
-)
-_BOUNDARY_ZH = re.compile(r"([一二三四五六七八九十]{1,3}|\d+)条结构性边界")
-_TEENS = {
-    "eleven": 11,
-    "twelve": 12,
-    "thirteen": 13,
-    "fourteen": 14,
-    "fifteen": 15,
-    "sixteen": 16,
-    "seventeen": 17,
-    "eighteen": 18,
-    "nineteen": 19,
-    "十一": 11,
-    "十二": 12,
-    "十三": 13,
-    "十四": 14,
-    "十五": 15,
-    "十六": 16,
-    "十七": 17,
-    "十八": 18,
-    "十九": 19,
-}
-# Twenty through thirty-nine, composed rather than typed. This map was extended
-# by hand at twenty-six, twenty-seven, twenty-eight and again at thirty — and the
-# time it was caught the checker at least FAILED on the word it could not read
-# rather than silently matching nothing. Composing the tens removes the chore
-# instead of paying it once more per boundary; the next ten is one more tuple.
-_UNITS_EN = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
-_UNITS_ZH = "一二三四五六七八九"
-for _ten, _word, _char in ((20, "twenty", "二十"), (30, "thirty", "三十")):
-    _TEENS[_word] = _TEENS[_char] = _ten
-    _TEENS.update({f"{_word}-{unit}": _ten + i for i, unit in enumerate(_UNITS_EN, 1)})
-    _TEENS.update({f"{_char}{unit}": _ten + i for i, unit in enumerate(_UNITS_ZH, 1)})
-_NUMBER_WORDS = {
-    **{
-        w: i
-        for i, w in enumerate(
-            (
-                "one",
-                "two",
-                "three",
-                "four",
-                "five",
-                "six",
-                "seven",
-                "eight",
-                "nine",
-                "ten",
-            ),
-            1,
-        )
-    },
-    **{w: i for i, w in enumerate("一二三四五六七八九十", 1)},
-}
-
-
-def _stated_boundaries(text: str) -> list[tuple[int, int | None, str]]:
-    """Every (line number, stated boundary count, word) in the text.
-
-    The count is None when the word is not a number this file knows. That is a
-    failure the caller reports, never a match it drops: a page whose count word
-    goes unrecognised is a page nobody is checking.
-    """
-    out: list[tuple[int, int | None, str]] = []
-    for pattern in (_BOUNDARY_EN, _BOUNDARY_ZH):
-        for m in pattern.finditer(text):
-            word = m.group(1).lower()
-            value = _TEENS.get(word) or _NUMBER_WORDS.get(word)
-            if value is None:
-                value = int(word) if word.isdigit() else None
-            out.append((text.count("\n", 0, m.start()) + 1, value, word))
-    return out
-
-
-def _stated_counts(text: str) -> list[tuple[int, int]]:
-    """Every (line number, stated count) in the text, both languages."""
-    out = []
-    for pattern in (_COUNT_EN, _COUNT_ZH):
-        for m in pattern.finditer(text):
-            word = m.group(1).lower()
-            out.append(
-                (
-                    text.count("\n", 0, m.start()) + 1,
-                    _NUMBER_WORDS.get(word) or int(word),
-                )
-            )
-    return out
-
-
 _PLACEHOLDER = re.compile(r"\{[^}]+\}")
 _ROUTE = re.compile(r'@app\.(?:get|post|put|delete)\("([^"]+)"')
 
@@ -321,17 +187,6 @@ def main() -> int:
         if absent:
             problems.append(f"{label}: {doc} does not list {absent} (the tuple has {len(members)})")
 
-    defined = len(_ROUTE_CONST.findall(ROUTE_CONSTANTS.read_text(encoding="utf-8")))
-    stated = 0
-    for doc in ROUTE_COUNT_STATED:
-        for line, count in _stated_counts(doc.read_text(encoding="utf-8")):
-            stated += 1
-            if count != defined:
-                problems.append(
-                    f"{doc}:{line} says {count} routes, but {ROUTE_CONSTANTS} defines {defined} ROUTE_* constants"
-                )
-
-    rows = len(_BOUNDARY_ROW.findall(BOUNDARY_TABLE.read_text(encoding="utf-8")))
     table_text = BOUNDARY_TABLE.read_text(encoding="utf-8")
     named = [n.strip() for n in _BOUNDARY_NAME.findall(table_text)]
     classified = [n.strip() for n in _CLASSIFIED_ROW.findall(table_text)]
@@ -347,16 +202,6 @@ def main() -> int:
         problems.append(f"{BOUNDARY_TABLE}: {name!r} is classified but is not a row in the table")
     for name in duplicated:
         problems.append(f"{BOUNDARY_TABLE}: {name!r} is classified more than once; a row belongs to one list")
-    for doc in BOUNDARY_COUNT_STATED:
-        for line, count, word in _stated_boundaries(doc.read_text(encoding="utf-8")):
-            if count is None:
-                problems.append(
-                    f"{doc}:{line} states the boundary count as {word!r}, which this checker cannot read — "
-                    f"add it to _TEENS, or this page stops being checked"
-                )
-            elif count != rows:
-                problems.append(f"{doc}:{line} says {count} structural boundaries, but {BOUNDARY_TABLE} lists {rows}")
-
     if problems:
         print("docs have fallen behind:", file=sys.stderr)
         for line in problems:
@@ -375,8 +220,7 @@ def main() -> int:
     print(
         f"docs: every route, knob and config key across {len(SERVICES)} services is written up or named as not, "
         f"{len(ENUMERATED)} enumerated sets match their tuples, "
-        f"{stated} stated route counts all equal the {defined} defined, "
-        f"{rows} containment boundaries match every page that counts them"
+        "every containment row is sorted into one of the four lists"
     )
     return 0
 

@@ -33,7 +33,7 @@ upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
 | Component | Does | Deliberately does NOT |
 | --- | --- | --- |
 | [`hookrelay/`](hookrelay) | The pipe. Adapts every upstream dialect into one event, routes it, turns verdicts and reports into a neutral card model, and accounts for every hop | Understand content, or judge |
-| [`hookjudge/`](hookjudge) | The judge. One event in, one verdict out, by five routes in cost order: recovery, reuse, rule-reuse, ai, rule | Render cards, or know channels |
+| [`hookjudge/`](hookjudge) | The judge. One event in, one verdict out, by routes tried in cost order: recovery, reuse, rule-reuse, ai, rule | Render cards, or know channels |
 | [`hookprobe/`](hookprobe) | The investigator. One read-only agent run per important alert, a root-cause report back, follow-ups in the same session | Receive alerts, or send notifications |
 
 A per-platform bridge renders the card model ([docs/bridge-protocol.md](docs/bridge-protocol.md)),

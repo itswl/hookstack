@@ -118,6 +118,8 @@ python3 scripts/assert_docs.py
 # description cannot drift from the code that defines it. This asserts the
 # committed output still matches — the same contract requirements.lock has.
 python3 scripts/gen_reference.py --check
+# The site's two front pages are the READMEs re-addressed (scripts/gen_front_pages.py).
+python3 scripts/gen_front_pages.py --check
 # The root shell scripts run where nobody watches — backup from cron at 04:15,
 # smoke from a deploy checklist — and hookprobe's patrol.sh once shipped
 # unparseable because only ITS component gate ran bash -n. Same lesson, wider
