@@ -64,7 +64,7 @@ def test_one_run_is_exactly_one_turn_on_the_runtime(tmp_path: Path, monkeypatch:
 
 
 def test_an_unscripted_turn_is_an_error_and_not_a_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Proving the instrument reads, the way assert_node_contract.py does: a
+    """Proving the instrument reads, the way the gate's inverted checks do: a
     double that cannot fail is a double that will let the real defect through."""
     client = ScriptedTurns([[_assistant("ok"), _result()]])
     engine = _engine(tmp_path, monkeypatch, client)

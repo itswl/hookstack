@@ -163,7 +163,7 @@ async def test_the_ledger_query_returns_what_the_projections_read(store) -> None
     It did not select either column. On a live deployment that produced 39
     chains across 39 hops — every event its own chain — at $0.00 with all 39
     hops unpriced, which is indistinguishable from a quiet week, so nobody
-    asked. scripts/assert_node_contract.py went blind the same way at the same
+    asked. The watch contract checker of the day went blind the same way at the same
     time, reading every round as "posted 0 signals" and passing.
 
     So this asserts about the SEAM rather than about either side of it.

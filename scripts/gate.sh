@@ -42,25 +42,20 @@ python3 scripts/assert_agent_notes.py
 # own package, and a check that skips when an interpreter lacks them is a check
 # that passes by finding nothing.
 hookrelay/.venv/bin/python scripts/assert_topology.py
-# scripts/assert_node_contract.py, against a REAL round from 2026-09-04 that
-# posted a signal and moved neither cursor. Inverted on purpose — the checker
-# must FAIL here, so this asserts the failure — because a checker that has
-# quietly stopped catching anything looks exactly like one with nothing to
-# catch. The companion case (the same work done correctly, twenty minutes
-# earlier) and the rest live in hookrelay/tests/test_node_contract.py.
-#
-# The LIVE check runs in the patrol timer: it needs a before/after pair of
-# runtime state, which a gate does not have. This proves the instrument still
-# reads.
-if hookrelay/.venv/bin/python scripts/assert_node_contract.py \
-     --before scripts/fixtures/node-contract/stalled-before.json \
-     --after  scripts/fixtures/node-contract/stalled-after.json \
-     --ledger scripts/fixtures/node-contract/stalled-ledger.json \
+# scripts/assert_watch_signed.py, against the pipe's ledger of a REAL round
+# (2026-09-04, one watch signal) and an empty signer ledger. Inverted on
+# purpose — the checker must FAIL here, so this asserts the failure — because a
+# checker that has quietly stopped catching anything looks exactly like one
+# with nothing to catch. The rest lives in hookrelay/tests/test_watch_signed.py;
+# the LIVE check runs in the patrol timer, once per tick.
+if hookrelay/.venv/bin/python scripts/assert_watch_signed.py \
+     --ledger scripts/fixtures/watch-signed/unsigned-ledger.json \
+     --signer-ledger scripts/fixtures/watch-signed/empty-signals.jsonl \
      --since 1788510500 --source watch >/dev/null 2>&1; then
-  echo "  FAIL  assert_node_contract.py passed a round that broke its contract" >&2
+  echo "  FAIL  assert_watch_signed.py passed a signal the signer never signed" >&2
   exit 1
 fi
-echo "node contract: the checker still catches the round it was written for"
+echo "watch signed: the checker still catches a signal that went around the signer"
 
 # The same argument aimed at the SUITE. A green suite proves the code passes its
 # tests; it does not prove the tests would catch the code being wrong, which is

@@ -209,12 +209,12 @@ def test_the_origin_is_rebuilt_from_its_checked_halves(stack):
     assert isinstance(Door.seen[-1]["signal"]["origin"], str)
 
 
-def test_the_contract_checkers_own_producer_is_refused(stack):
-    """The checker skips signals posted under its own name, so a round posting
-    as `patrol-timer` would be a round the checker cannot see."""
+def test_the_timers_own_producer_is_refused(stack):
+    """The signed-check skips signals the timer posted under its own name, so
+    a round posting as `patrol-timer` would be a round that check cannot see."""
     url, _, _ = stack
     status, body = post(url, a_signal(origin="patrol-timer / ops chat"))
-    assert status == 422 and "contract checker" in body["error"]
+    assert status == 422 and "timer's own producer" in body["error"]
     assert Door.seen == []
 
 

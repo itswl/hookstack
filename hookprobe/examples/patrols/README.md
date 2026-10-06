@@ -144,12 +144,13 @@ busy one costs and an empty round costing nothing, and on a watcher most rounds
 are empty. A prescan that FAILS fires anyway, carrying the failure: a prescan
 that broke and a prescan that found nothing look identical from here.
 
-**Check the last round's promises before starting the next.** With
-`CONTRACT_STATE` set it runs `scripts/assert_node_contract.py` over a before/
-after pair of the node's own state and raises a `low` signal when a promise
-broke. Before the fire and not after, because `patrol.sh` returns as soon as the
-event is accepted — the round runs for minutes afterwards, so a timer cannot
-wait for the one it just started.
+**Check that every watch signal came through the signer.** With
+`WATCH_SIGNED_LEDGER_URL` and `WATCH_SIGNED_SIGNER_LEDGER` set it runs
+`scripts/assert_watch_signed.py` once per tick over what the pipe took since the
+last check, and raises a `low` signal when a conversation was signalled that the
+signer never signed — a signal that went around the boundary. The first tick
+after a deploy only sets the stamp. (Until 2026-10-06 this was a before/after
+check of the node's own cursors; the signer's ledger made that redundant.)
 
 Every knob is documented in the script's own header; that is the copy that
 cannot drift from the code.

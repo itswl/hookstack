@@ -37,10 +37,10 @@ checked before it is signed:
     own failure can never be in a set the scanner failed to write). That
     subject is forced to `low` and `note`, the level that tells somebody and
     funds nothing, so an injected round gains a card and nothing else by it.
-  * the contract checker's own producer, `patrol-timer`, is refused: the
-    checker skips signals it posted itself, so a round posting under that name
-    would be a round the checker cannot see. The timer signs from its own file
-    and never comes through here.
+  * the timer's own producer, `patrol-timer`, is refused: the signed-check
+    (scripts/assert_watch_signed.py) skips signals the timer posted itself, so
+    a round posting under that name would be a round that check cannot see.
+    The timer signs from its own file and never comes through here.
 
 WHAT THIS IS NOT. It is not a judgement about content: a round that read a real
 conversation and describes it dishonestly passes here, and nothing short of a
@@ -54,8 +54,8 @@ Since 2026-10-05 the ledger here is also the record of WHAT WAS REPORTED: every
 at, written by a process the agent cannot reach. The watch wrapper used to write
 a `reported` cursor into the node's own state after posting, which was a
 self-report — a node that forgot to write it was exactly the node whose word
-could not be taken for it. scripts/assert_node_contract.py reads this ledger
-instead (`--signer-ledger`), and the wrapper writes nothing.
+could not be taken for it. scripts/assert_watch_signed.py reads this ledger
+against the pipe's, once per tick, and the wrapper writes nothing.
 """
 
 from __future__ import annotations
@@ -96,13 +96,13 @@ PER_ROUND_MAX = int(os.environ.get("WATCH_SIGNER_ROUND_MAX", "20"))
 # The round's length when the scan states no clock: the timer's own cadence.
 ROUND_WINDOW_SECONDS = int(os.environ.get("WATCH_SIGNER_ROUND_SECONDS", "1200"))
 # The separator the origin is built with (`deploy/watch/watch_report.py`) and
-# that scripts/assert_node_contract.py reads the conversation back out of.
+# that scripts/assert_watch_signed.py reads the conversation back out of.
 ORIGIN_SEPARATOR = " / "
 # The one subject admitted without an offer — see the module docstring. The
 # brief names it, so it is a literal here and there rather than a variable
 # the two would have to agree on.
 NOTE_SUBJECT = os.environ.get("WATCH_SIGNER_NOTE_SUBJECT") or "scanner-notes"
-# scripts/assert_node_contract.py's SELF_PRODUCER: the one name it does not
+# scripts/assert_watch_signed.py's SELF_PRODUCER: the one name it does not
 # check, so the one name nothing checked here may post under.
 CHECKER_PRODUCER = "patrol-timer"
 # The producers a signal may name, when the deployment says. Empty admits any.
@@ -133,9 +133,9 @@ def sign_timestamped(secret: str, body: bytes, *, now: float | None = None) -> d
 def split_origin(origin: str) -> tuple[str, str]:
     """The two halves of `<producer> / <conversation>`, stripped.
 
-    An origin with no separator names no conversation — the contract checker's
-    rule, so a signal it would skip is one this refuses rather than one it
-    admits under a name the checker never sees.
+    An origin with no separator names no conversation — the signed-check's
+    rule too, so a signal it would skip is one this refuses rather than one it
+    admits under a name that check never sees.
     """
     text = str(origin or "").strip()
     if ORIGIN_SEPARATOR not in text:
@@ -282,9 +282,7 @@ def check(signal: dict[str, Any], offer: Offer) -> Verdict:
     origin = str(signal.get("origin") or "").strip()
     producer, subject = split_origin(origin)
     if producer == CHECKER_PRODUCER:
-        return Verdict(
-            None, f"{CHECKER_PRODUCER!r} is the contract checker's own producer and never posts through here"
-        )
+        return Verdict(None, f"{CHECKER_PRODUCER!r} is the timer's own producer and never posts through here")
     if PRODUCERS and producer not in PRODUCERS:
         return Verdict(None, f"{producer!r} is not a producer this signer forwards (allowed: {', '.join(PRODUCERS)})")
     key = round_key(offer.round_at)

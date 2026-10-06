@@ -12,8 +12,8 @@ widens one guarantee, runs the tests that claim to protect it, and requires them
 to FAIL. A mutation that survives is a guarantee nobody is really testing, and
 the message says which.
 
-The gate already carries one inverted check of this kind — `assert_node_contract`
-must fail on a round it was written to catch — for the same reason: a checker
+The gate already carries one inverted check of this kind — `assert_watch_signed`
+must fail on a signal that went around the signer — for the same reason: a checker
 that has quietly stopped catching anything looks exactly like one with nothing
 to catch.
 

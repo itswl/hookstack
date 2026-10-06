@@ -58,55 +58,51 @@ in_range() {  # in_range <value> <spec>  — "" matches, "9-19" and "1-5" are ra
   [ "$v" -ge "$lo" ] && [ "$v" -le "$hi" ]
 }
 
-SNAPSHOT="${CONTRACT_SNAPSHOT:-/tmp/patrol-timer-snapshot.json}"
+STAMP="${WATCH_SIGNED_STAMP:-/tmp/patrol-timer-signed.at}"
 
-check_contract() {
-  # A node's brief makes promises about its own state that only a before/after
-  # comparison can check — see scripts/assert_node_contract.py for why three
-  # stateless formulations all passed on the real defect.
-  local since out
-  since="$(cat "$SNAPSHOT.at" 2>/dev/null || echo 0)"
-  [ -n "${CONTRACT_LEDGER_URL:-}" ] || return 0
-  curl -sf ${CONTRACT_READ_TOKEN:+-H "X-Read-Token: $CONTRACT_READ_TOKEN"} \
-    "$CONTRACT_LEDGER_URL" -o /tmp/patrol-timer-ledger.json 2>/dev/null || {
-      log "contract check skipped: ledger unreadable"; return 0; }
-  # Explicit path, not derived from $HERE: this script is mounted at /patrols
-  # and the checker lives in the repo's scripts/, which is a different mount.
-  # CONTRACT_CURSORS points at the reader's own state where a node no longer
-  # keeps both cursors in one file — see the checker's header for which promises
-  # that split changes. Unset for a node that does; the checker handles both.
-  if out=$(python3 "${CONTRACT_CHECKER:-/scripts/assert_node_contract.py}" \
-        --before "$SNAPSHOT" --after "$CONTRACT_STATE" \
-        --ledger /tmp/patrol-timer-ledger.json \
-        ${CONTRACT_CURSORS:+--cursors "$CONTRACT_CURSORS"} \
-        ${CONTRACT_SIGNER_LEDGER:+--signer-ledger "$CONTRACT_SIGNER_LEDGER"} \
-        --since "$since" --source "${CONTRACT_SOURCE:-watch}" 2>&1); then
-    return 0
+check_signed() {
+  # Every watch signal in the pipe came through the signer — see
+  # scripts/assert_watch_signed.py. Checked once per tick over what arrived
+  # since the last check; a miss travels as a `low` signal posted BY THE TIMER,
+  # which signs from its own file and never passes the signer. The first tick
+  # after a deploy only sets the stamp: the pipe's ledger reaches back before
+  # the signer existed, and that history is not a finding.
+  local since now out
+  [ -n "${WATCH_SIGNED_LEDGER_URL:-}" ] && [ -n "${WATCH_SIGNED_SIGNER_LEDGER:-}" ] || return 0
+  now=$(date +%s)
+  if ! since="$(cat "$STAMP" 2>/dev/null)"; then
+    printf '%s' "$now" > "$STAMP"; return 0
   fi
-  log "CONTRACT VIOLATION: $(printf '%s' "$out" | grep FAIL | head -2 | tr '\n' ' ')"
-  # The violation travels as a signal, posted BY THE TIMER — deliberately not
-  # through the node whose failure it is reporting. `low` on purpose: this is a
-  # new detector with no track record, and a new detector that pages somebody on
-  # its first false positive is a detector that gets switched off. Raise it once
-  # a week of real rounds says the rate is worth waking up for.
-  [ -n "${CONTRACT_SIGNAL_POSTER:-}" ] || return 0
+  curl -sf ${WATCH_SIGNED_READ_TOKEN:+-H "X-Read-Token: $WATCH_SIGNED_READ_TOKEN"} \
+    "$WATCH_SIGNED_LEDGER_URL" -o /tmp/patrol-timer-ledger.json 2>/dev/null || {
+      log "signed check skipped: ledger unreadable"; return 0; }
+  if out=$(python3 /scripts/assert_watch_signed.py --ledger /tmp/patrol-timer-ledger.json \
+        --signer-ledger "$WATCH_SIGNED_SIGNER_LEDGER" --since "$since" \
+        --source "${WATCH_SIGNED_SOURCE:-watch}" 2>&1); then
+    printf '%s' "$now" > "$STAMP"; return 0
+  fi
+  printf '%s' "$now" > "$STAMP"
+  log "UNSIGNED SIGNAL: $(printf '%s' "$out" | grep FAIL | head -2 | tr '\n' ' ')"
+  # `low` on purpose: a detector that pages somebody on its first false
+  # positive is a detector that gets switched off.
+  [ -n "${WATCH_SIGNED_POSTER:-}" ] || return 0
   printf '%s' "$(python3 -c "
 import json,sys
 out=sys.stdin.read()
 fails=[l.strip()[6:] for l in out.splitlines() if l.strip().startswith('FAIL')]
 print(json.dumps({
-  'title': '⚠️ 盯守器违约：' + (fails[0].split('—')[0].strip() if fails else 'contract broken'),
-  'detail': '上一轮没有兑现 brief 里的承诺。\n\n' + '\n'.join('- '+f for f in fails),
-  'origin': 'patrol-timer / contract',
+  'title': '⚠️ 有信号绕过了签名器：' + (fails[0].split('—')[0].strip() if fails else 'unsigned'),
+  'detail': '管道的 watch 门收到了签名器账本里没有的信号。\n\n' + '\n'.join('- '+f for f in fails),
+  'origin': 'patrol-timer / signed',
   'level': 'low',
   'kind': 'note',
 }, ensure_ascii=False))
-" <<< "$out")" | python3 "$CONTRACT_SIGNAL_POSTER" >/dev/null 2>&1 \
-    && log "violation posted as a signal" || log "violation signal FAILED to post"
+" <<< "$out")" | python3 "$WATCH_SIGNED_POSTER" >/dev/null 2>&1 \
+    && log "unsigned-signal finding posted as a signal" || log "unsigned-signal finding FAILED to post"
 }
 
 log "patrol-timer up: every ${EVERY}m, hours=[${HOURS:-all}] days=[${DAYS:-all}] tz=${TZ:-system}, brief=$BRIEF"
-[ -n "${CONTRACT_STATE:-}" ] && log "contract check on: state=$CONTRACT_STATE snapshot=$SNAPSHOT"
+[ -n "${WATCH_SIGNED_SIGNER_LEDGER:-}" ] && log "signed check on: every watch signal must be in $WATCH_SIGNED_SIGNER_LEDGER"
 [ -r "$BRIEF" ] || log "WARNING: $BRIEF is not readable — every tick will fail until it is"
 
 while :; do
@@ -125,18 +121,11 @@ while :; do
     continue
   fi
 
-  # THE PREVIOUS ROUND'S CONTRACT, checked before firing the next one.
-  #
-  # Here rather than after the fire because patrol.sh returns as soon as the
-  # event is accepted — the round itself runs for minutes afterwards, so a timer
-  # cannot wait for the one it just started. By the time the next tick comes
-  # round, the last one has long settled.
-  #
-  # Off unless CONTRACT_STATE is set, so the timer stays useful to a patrol that
-  # has no state file to promise anything about.
-  if [ -n "${CONTRACT_STATE:-}" ] && [ -f "$SNAPSHOT" ]; then
-    check_contract || true
-  fi
+  # Before the fire, not after: patrol.sh returns as soon as the event is
+  # accepted and the round runs for minutes afterwards, so what is checked here
+  # is what the LAST round left in the pipe. Off unless the compose names the
+  # two ledgers, so the timer stays useful to a patrol with no signer.
+  check_signed || true
   # A cheap deterministic pass before the expensive one. Three outcomes, and
   # the first is the whole reason this knob exists:
   #
@@ -224,18 +213,6 @@ open(os.environ["BRIEF_OUT"], "w", encoding="utf-8").write(
     fi
   fi
 
-  if [ -n "${CONTRACT_STATE:-}" ] && [ -r "$CONTRACT_STATE" ]; then
-    # Snapshot BEFORE firing: this is what the round about to start will be
-    # measured against. After the prescan, so a skipped round leaves the
-    # previous snapshot in place rather than measuring a round that never ran.
-    cp "$CONTRACT_STATE" "$SNAPSHOT" 2>/dev/null || log "WARNING: could not snapshot $CONTRACT_STATE"
-    SNAPSHOT_AT=$(date +%s)
-    printf '%s' "$SNAPSHOT_AT" > "$SNAPSHOT.at"
-  fi
-
-  # Never `set -e` around this: one failed round must not stop the clock. The
-  # round's own failure travels as a signal (the brief owes the operator that),
-  # and the exit code lands in this log either way.
   if out=$(bash "$HERE/patrol.sh" "$BODY" "$TITLE" 2>&1); then
     log "fired: $out"
   else
