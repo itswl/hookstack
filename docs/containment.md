@@ -25,7 +25,7 @@ Every row below is a claim about a different kind of failure, and reading them
 as one list is how a regex over model output gets trusted the way a signature
 is. The split is stated here rather than left to the third column, because the
 question an operator actually has — *if the model is hostile, which of these is
-still standing?* — is not answerable by reading twenty-nine rows.
+still standing?* — is not answerable by reading the table top to bottom.
 
 Nothing in this process is containment against a model that is genuinely
 adversarial. The read-only credential is, and the row for the bash guard has

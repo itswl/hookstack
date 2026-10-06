@@ -1,6 +1,6 @@
 """The judgement itself — the only thing this service is for.
 
-Five routes, tried in this order, and the order is the cost policy:
+The routes, tried in this order, and the order is the cost policy:
 
   recovery   — the condition ENDED. Reuse what its firing was judged to be; a
                recovery is not a new problem to analyse, and re-analysing it

@@ -19,12 +19,10 @@
 ## 试一下：十分钟，不要 key，不花钱
 
 ```bash
-# 在 clone 下来的仓库根目录
+curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
 docker compose -f docker-compose.quickstart.yml up -d   # 管道 + 判官 + 桩模型 + 跑排练的调查员 + 可读的接收端
-bash scripts/demo.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
 ```
-
-不想 clone，也可以用 `curl` 直接取这两个文件，命令见[英文 README](README.md#try-it-ten-minutes-no-keys-no-bill)。
 
 演示会跑完整条闭环：告警被判定，一次录好的调查经过真实的只读门回放，报告变成卡片，按下批准后跑两条允许清单里的命令，告警恢复。要换成真实模型，在 `.env` 里设置 `HOOKPROBE_RUNTIME=claude`、`HOOKPROBE_MODEL` 和模型 key。
 
@@ -34,10 +32,10 @@ bash scripts/demo.sh
 - **一张人可以裁定的卡片。** 每个按钮在卡片发出前就签了名，每次按下都有记录。
 - **修复有人把关。** 批准后的流程逐步对照允许清单执行，以 argv 运行，从不经过 shell。人交接的计划由单独的执行节点用它自己的写凭证去做，危险命令会被拒绝；2026-09-30 它第一次真实改动了系统（[经过](docs/deployments.md#the-first-real-write)）。
 - **调查会留下东西。** 跑完的调查会提炼成手册，同一条件下次出现时从手册开始。
-- **关得住的 agent。** 默认只读并在启动时实测，预算用完会明确拒绝，另有二十九条结构性边界，每一条都写明它**挡不住**什么（[containment](docs/containment.md)）。
+- **关得住的 agent。** 默认只读并在启动时实测，预算用完会明确拒绝，另有一组结构性边界，每一条都写明它**挡不住**什么（[containment](docs/containment.md)）。
 - **装到手机上的看板。** 管道的看板是个可以添加到主屏幕的 web 应用；口令只留在那个浏览器里，离线时显示页面并告诉你连不上管道。
 - **每个事件一页审计。** 每一跳、摘要、决策和人的操作，每次工具调用的飞行记录，以及每次运行的耗时瀑布图。
-- **模型和聊天工具由你选。** 调查员接任意 Anthropic 方言的端点，判官接任意 OpenAI 兼容的端点，本地模型也可以。飞书经桥接送达，钉钉和企微有插件，也可以把签名 JSON 发到任意 webhook。
+- **模型和聊天工具由你选。** 调查员接任意 Anthropic 方言的端点，判官接任意 OpenAI 兼容的端点，本地模型也可以。飞书经桥接送达（[协议](docs/bridge-protocol.md)），钉钉和企微有插件，也可以把签名 JSON 发到任意 webhook。
 
 ![hookrelay 的看板：一句话说有几件事等你处理，四个数字，每条告警一行，各带七个阶段](docs/img/zh/hookrelay-timeline.png)
 

@@ -107,7 +107,7 @@ Which ones a verdict deserves comes from the verdict:
   policy, and who owns noise when a verdict is reused is a decision that is
   deliberately still open.
 
-## Five routes, and the order is the cost policy
+## The routes, and the order is the cost policy
 
 Every judged event has exactly one route, and it is the first question anyone
 asks about the bill — what did we actually pay for?
@@ -362,7 +362,7 @@ Three things to know before trusting one:
 
 ## Cost tiers
 
-Five routes, cheapest first, and only one of them pays:
+The routes, cheapest first, and only one of them pays:
 
 | route | cost | when |
 | --- | --- | --- |
