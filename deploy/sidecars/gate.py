@@ -68,7 +68,7 @@ from typing import Any
 
 from common import HttpHandler, Ledger, constant_time_eq
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s mcp-gate %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("mcp-gate")
 
 # Methods that carry no tool and are forwarded as they are: the handshake, the
@@ -405,7 +405,9 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def main() -> int:
+def build() -> ThreadingHTTPServer:
+    """The gate, configured from the environment and bound, not yet serving:
+    doors.py runs it beside the proxy and the ingress; main() runs it alone."""
     upstream = os.environ.get("MCPGATE_UPSTREAM", "").strip()
     if not upstream.startswith(("http://", "https://")):
         raise SystemExit("mcp-gate: set MCPGATE_UPSTREAM to the chat server's MCP URL")
@@ -425,7 +427,11 @@ def main() -> int:
         len(Gate.clients),
         ", ".join(f"{c.name}({len(c.tools)})" for c in Gate.clients),
     )
-    ThreadingHTTPServer(("0.0.0.0", port), Gate).serve_forever()  # noqa: S104 — the container's own network only
+    return ThreadingHTTPServer(("0.0.0.0", port), Gate)  # noqa: S104 — the container's own network only
+
+
+def main() -> int:
+    build().serve_forever()
     return 0
 
 

@@ -35,7 +35,7 @@ import threading
 
 from common import Server, pump
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s ingress %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("ingress")
 
 # `<listen port>:<host>:<port>` entries, comma-separated. Empty forwards
@@ -96,11 +96,17 @@ def serve(listen: int, host: str, port: int) -> None:
     bind(listen, host, port).serve_forever()
 
 
-def main() -> int:
+def build() -> list[Server]:
+    """Every route bound before any serves — see the module docstring. doors.py
+    runs them beside the proxy and the gate; main() runs them alone."""
     routes = parse(ROUTES)
     if not routes:
         raise SystemExit("probe-ingress: set INGRESS_FORWARD to <listen>:<host>:<port>[,...]")
-    servers = [bind(*route) for route in routes]
+    return [bind(*route) for route in routes]
+
+
+def main() -> int:
+    servers = build()
     for server in servers[1:]:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     servers[0].serve_forever()

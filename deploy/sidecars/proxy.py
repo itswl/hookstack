@@ -36,7 +36,7 @@ import threading
 
 from common import Server, pump
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s egress %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("egress")
 
 # Comma-separated. A bare name matches exactly; a leading dot matches any
@@ -180,13 +180,19 @@ class Handler(socketserver.StreamRequestHandler):
             pass
 
 
-def main() -> int:
+def build() -> Server:
+    """The proxy, bound and not yet serving: doors.py runs it beside the gate
+    and the ingress in one process; main() runs it alone."""
     if not ALLOW:
         logger.warning("EGRESS_ALLOW is empty — every destination will be refused")
     logger.info("egress proxy on :%s, %s host rule(s), ports %s", PORT, len(ALLOW), sorted(PORTS))
     for rule in ALLOW:
         logger.info("  allow %s", rule)
-    with Server(("0.0.0.0", PORT), Handler) as server:  # nosec B104 — internal network only
+    return Server(("0.0.0.0", PORT), Handler)  # nosec B104 — internal network only
+
+
+def main() -> int:
+    with build() as server:
         threading.current_thread().name = "egress"
         server.serve_forever()
     return 0

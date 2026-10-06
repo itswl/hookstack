@@ -193,6 +193,8 @@ is on the calling node's list. The watcher now sees eight read tools, the
 planner eleven, and every refusal is recorded in `work-data/mcp-gate/calls.jsonl`.
 An internal network answers no published port, so the three consoles moved to
 `probe-ingress`, a byte pump on both networks, at the same addresses as before.
+Since 2026-10-06 the proxy, the gate and the ingress run in one container,
+`doors` (`deploy/sidecars/doors.py`), that keeps the three names as aliases.
 
 **The watcher's signature moved out of its reach, the same day.**
 `post_watch_signal.py` signs from a file, which is right on the operator's
