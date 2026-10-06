@@ -197,21 +197,28 @@ def test_an_unreadable_declaration_is_not_the_same_as_no_declaration(tmp_path) -
     assert posture.verdict("danger-only", kube, aws, empty) == "wider-than-declared"
 
 
-def test_a_declared_writing_node_refuses_to_start_when_it_grew(tmp_path) -> None:
+def test_a_declared_writing_node_refuses_to_start_when_it_grew(tmp_path, monkeypatch) -> None:
     """The whole point: the refusal path that already existed for `readonly`
     now fires for a writing node too, and names the EXCESS rather than
-    everything the node holds."""
+    everything the node holds. Until 2026-10-06 this test ran `warn` without
+    `_with_kube` — no kubeconfig, so no kubectl was ever asked and the assert
+    was true either way; the enforce refusal for a writing posture had no test
+    reaching it, and it is the path the operator's pinned radius leans on."""
+    _with_kube(tmp_path, monkeypatch)
     radius = tmp_path / "radius.txt"
     radius.write_text("deployments (ns prod): restart\n", encoding="utf-8")
 
     async def fake_run(argv, **kw):
         if argv and "kubectl" in argv[0]:
-            return 0, "deployments: delete\n", ""
+            if "--list" in argv:
+                return 0, CAN_I_LIST_ONE_WRITE, ""
+            return 0, "no", ""
         return 1, "", "denied"
 
-    async def scenario():
-        return await posture.on_startup(tmp_path, "danger-only", "warn", run=fake_run, radius=radius)
-
-    record = asyncio.run(scenario())
-    assert record["verdict"] in ("wider-than-declared", "within-declared-radius")
-    assert "declared_radius" in record and record["declared_radius"] == 1
+    with pytest.raises(posture.PostureViolation, match="configmaps"):
+        asyncio.run(posture.on_startup(tmp_path, "danger-only", "enforce", run=fake_run, radius=radius))
+    record = posture.read(tmp_path)
+    assert record["verdict"] == "wider-than-declared", (
+        "recorded even though it refused — the refusal must be explainable"
+    )
+    assert record["beyond_declared"] == ["configmaps: patch update"], "the record names the excess, not everything held"

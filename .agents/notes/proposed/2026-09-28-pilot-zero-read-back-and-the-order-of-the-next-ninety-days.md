@@ -36,7 +36,11 @@ SRE teams" was read against the archive of the retired production deployment
    write credential of its own (`docs/deployments.md`, "The first real write").
    The credential was an administrator profile, mounted for the run and taken
    off after. The allowlisted procedure and a credential scoped to one job are
-   still open.
+   still open. *The wiring landed 2026-10-06* ([[arming-the-work-executor]]):
+   the write node carries the executor's gate knobs and the operator's file
+   mount, and the approve press is its console. What remains is host-side and
+   additive — one allowlisted line, a credential scoped to the job, and the
+   first approved procedure; the porting table's hash-binding row stays open.
 4. *Thirty days on the operator's own alert feed*, the weekly page read every
    Monday, with the two attention numbers below required to move the right
    way before anyone outside is asked to run it.
