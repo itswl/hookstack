@@ -159,7 +159,8 @@ async def test_the_board_installs_on_a_phone(client):
     code = worker.text.replace("/status or /live", "")
     assert "/status" not in code and "/live" not in code
     page = (await client.get("/")).text
-    assert 'name="theme-color"' in page and 'name="apple-mobile-web-app-capable"' in page
+    assert page.count('<meta name="theme-color"') == 2 and 'content="black-translucent"' not in page
+    assert 'name="apple-mobile-web-app-capable"' in page
     assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page
 
 

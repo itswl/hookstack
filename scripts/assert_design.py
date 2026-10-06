@@ -123,6 +123,20 @@ BLOCKS = (
 # the page that registers it.
 FILES = (("service worker", tuple(page.parent / "static" / "sw.js" for page in PAGES)),)
 
+# The head, for the phone (2026-10-06). Two theme-color metas split by the
+# system's preference, so the status bar is right before any script runs; the
+# install block rewrites both to the shown theme, because a media query cannot
+# see a pick. And the iOS status-bar style is `default`: `black-translucent`
+# paints white text over a light header, and it is read once, at launch — the
+# first real phone screenshots showed a light page under a black status bar and
+# a dark page under a white one.
+HEAD_MUST = (
+    '<meta name="theme-color" media="(prefers-color-scheme: light)"',
+    '<meta name="theme-color" media="(prefers-color-scheme: dark)"',
+    '<meta name="apple-mobile-web-app-status-bar-style" content="default">',
+)
+HEAD_MUST_NOT = ("black-translucent",)
+
 # A colour written into a page's CSS as a literal does not change with the
 # mode: it is the same grey on a white page as on a dark one. So outside the
 # blocks that DEFINE variables (`:root { … }` and `:root[data-theme="light"]
@@ -304,6 +318,14 @@ def main() -> int:
                 failures.append(f"{copy}: no {label}")
         if len(set(texts.values())) > 1:
             failures.append(f"{label}: the copies disagree — " + ", ".join(str(p) for p in texts))
+    for page in PAGES:
+        head = (root / page).read_text(encoding="utf-8").split("<body", 1)[0]
+        for needle in HEAD_MUST:
+            if needle not in head:
+                failures.append(f"{page}: the head lacks {needle}")
+        for needle in HEAD_MUST_NOT:
+            if needle in head:
+                failures.append(f"{page}: the head says {needle} — read once at launch, white text over a light header")
 
     # The mode is chosen before the body paints, or a light system sees a dark
     # flash on every load; and no colour of a page's own may ignore the mode.
@@ -344,7 +366,8 @@ def main() -> int:
         return 1
     print(
         f"design: {len(BLOCKS)} shared blocks identical across {len(PAGES)} pages, {len(FILES)} shared file, "
-        "both modes named through variables, both languages carry every word asked for, no unsanctioned timers"
+        "heads carry the phone metas, both modes named through variables, both languages carry every word asked for, "
+        "no unsanctioned timers"
     )
     return 0
 

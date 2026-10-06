@@ -41,6 +41,20 @@ first version put whatever page a navigation returned â€” a journey page, say â€
 into the cache slot the board is restored from offline. Now only the page's
 own path is cached, and only a 200.
 
+## The status bar, the same afternoon
+
+The first screenshots from a real phone showed the pipe's board light under a
+black status bar and dark under a white one. The head had one `theme-color`
+meta rewritten by script and the iOS status-bar style `black-translucent`.
+Now: two `theme-color` metas split by the system's preference, which the
+install block rewrites to the shown theme's surface colour (read from the
+design tokens, not copied) because a media query cannot see a pick; and the
+status-bar style is `default`, since `black-translucent` paints white text
+over a light header and is read once, at launch. `scripts/assert_design.py`
+holds both as a rule for all three heads. The probe console's budget chip also
+moved to its own line at phone width: with it the header's first line was
+wider than the phone and the page scrolled sideways.
+
 ## Consequences
 
 - A browser installs an app only over https; nothing here opens a console to

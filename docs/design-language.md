@@ -120,7 +120,14 @@ drawer carries the install row: the browser's prompt where there is one, the
 Share → Add to Home Screen hint where there is not, and a plain sentence over
 http, where no browser installs anything. The investigator's manifest is named
 for its node: a deployment runs several, and three icons all called
-"hookprobe" tell nobody which is which.
+"hookprobe" tell nobody which is which. The status bar follows the theme the
+page shows, not only the system's: two `theme-color` metas split by the
+system's preference stand in before any script runs, and the install block
+rewrites both to the shown theme's surface colour, because a media query
+cannot see a pick — the first phone screenshots had a light page under a
+black status bar and a dark page under a white one. The iOS status-bar style
+is `default`: `black-translucent` paints white text over a light header, and
+it is read once, at launch.
 
 Before this the same palette sat under three idioms — tabs, a help link that
 unfolded a section, a row of eight buttons — and then, once the palette and the

@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hookjudge</title>
-<meta name="theme-color" content="#11151d">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#11151d">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="hookjudge">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2311151d'/%3E%3Cpath d='M12 5v14M7 19h10M6 8h12M6 8l-2.5 5.5a2.5 2.5 0 0 0 5 0zM18 8l-2.5 5.5a2.5 2.5 0 0 0 5 0z' stroke='%234c8dff' stroke-width='1.8' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E">
 <script id="theme">
@@ -1960,9 +1961,18 @@
       var title = document.querySelector('meta[name="apple-mobile-web-app-title"]');
       if (title && m.short_name) title.setAttribute("content", m.short_name);
     }).catch(function () { /* the meta keeps the page's own name */ });
-    // The status bar follows the theme the page is showing, not only the system's.
-    var meta = document.querySelector('meta[name="theme-color"]');
-    function paint() { if (meta) meta.setAttribute("content", document.documentElement.getAttribute("data-theme") === "light" ? "#ffffff" : "#11151d"); }
+    // The status bar follows the theme the page is SHOWING. The two theme-color
+    // metas in the head split by the system's preference, and a media query
+    // cannot see a pick: a light page sat under a dark status bar. So the page
+    // rewrites both to the surface colour of the theme it shows and drops the
+    // media, reading the colour from the design tokens rather than keeping a
+    // copy of it here. The iOS status-bar style stays `default`: black-translucent
+    // paints white text over a light header, and it is read once, at launch.
+    function paint() {
+      var colour = getComputedStyle(document.documentElement).getPropertyValue("--surface").trim();
+      var metas = document.querySelectorAll('meta[name="theme-color"]');
+      for (var i = 0; colour && i < metas.length; i++) { metas[i].removeAttribute("media"); metas[i].setAttribute("content", colour); }
+    }
     if (window.MutationObserver) new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     paint();
     if ("serviceWorker" in navigator && window.isSecureContext) {

@@ -1648,5 +1648,6 @@ async def test_the_board_installs_on_a_phone(app_client):
     # The shell and nothing else: the data paths are not even named in it.
     assert "/status" not in worker.text and "/live" not in worker.text
     page = (await app_client.get("/")).text
-    assert 'name="theme-color"' in page and 'name="apple-mobile-web-app-capable"' in page
+    assert page.count('<meta name="theme-color"') == 2 and 'content="black-translucent"' not in page
+    assert 'name="apple-mobile-web-app-capable"' in page
     assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page
