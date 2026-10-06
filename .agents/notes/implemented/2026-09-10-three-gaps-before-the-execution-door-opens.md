@@ -153,6 +153,10 @@ schema with one free-text field — rather than to build a parallel typed surfac
   approval.** `HOOKPROBE_REMEDIATION_ALLOWLIST` on that host is empty, so no
   proposal reaches any gate: deployed and answering, never exercised in anger.
   It stays that way until an operator arms remediation, and this bullet should
-  be the first thing revisited when one does.
+  be the first thing revisited when one does. **Revisited 2026-10-06:** the
+  work deployment's write node now carries both knobs and the operator's file
+  mount ([[arming-the-work-executor]]), so an operator CAN arm it with one
+  line; the sentence above stands until the first real press — which is now
+  the moment to check this bullet again.
 * The declined half of the same review is in
   [[two-person-review-needs-a-second-person]].

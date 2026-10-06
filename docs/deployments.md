@@ -123,7 +123,23 @@ The credential was the operator's own administrator profile, far wider than the
 job needed. It was mounted for the run as a directory and two `.env` lines
 (`PROBE_WORK_AWS_DIR`, `PROBE_WORK_AWS_PROFILE`) and taken off the node once the
 result had been read back; the node's posture check measured no write actions
-afterwards. The next write credential should be scoped to its job.
+afterwards. The next write credential is to be scoped to its job — and the run
+above is the handoff path, not the allowlisted one: a plan a person acted on,
+not a procedure the executor ran.
+
+**The executor's gate files, since 2026-10-06.** The write node also carries the
+remediation executor's two gate knobs (`HOOKPROBE_REMEDIATION_ALLOWLIST`,
+`HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST`), empty by default: wiring them arms
+nothing, they make the operator's files nameable at all. The files live in
+`hookprobe/deploy/operator/` (git-ignored; `remediation-allowlist.example`
+beside them says how to write one) and are mounted read-only at
+`/etc/hookprobe/operator/` on `probe-work` alone — the write node, the one place
+an approved procedure can change anything. The approve press for a procedure
+parked there is the **console** (`127.0.0.1:8090`, phone-installable with the
+other boards); a card-borne approve would need the kind split in the pipe first,
+because a card-action kind forwards to exactly one channel. A scoped credential
+and one allowlisted line complete the first real remediation; until both exist
+the knobs stay empty and nothing runs.
 
 ## Four decisions that differ, and why
 
