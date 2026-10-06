@@ -9,7 +9,7 @@ copy of the secret on a machine that travels.
 Inside a container the same arrangement is upside down, because the caller there
 is an AGENT reading colleagues' messages. So `HOOKSTACK_WATCH_SIGNER_TOKEN`
 switches this to the other half of the pair: the signal goes unsigned to
-`deploy/watch-signer`, which holds the secret, checks the signal against what
+the watch signer (`deploy/sidecars/signer.py`), which holds the secret, checks the signal against what
 the round was handed, and signs it. The secret is then not in any file this
 process can read — which is the whole point, and the reason this mode is chosen
 by the presence of a TOKEN rather than by a flag somebody could forget.

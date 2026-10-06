@@ -60,10 +60,7 @@ against the pipe's, once per tick, and the wrapper writes nothing.
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
-import hashlib
-import hmac
 import http.client
 import json
 import logging
@@ -73,9 +70,11 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from common import HttpHandler, Ledger, constant_time_eq, sign_timestamped
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s watch-signer %(message)s")
 logger = logging.getLogger("watch-signer")
@@ -107,27 +106,6 @@ NOTE_SUBJECT = os.environ.get("WATCH_SIGNER_NOTE_SUBJECT") or "scanner-notes"
 CHECKER_PRODUCER = "patrol-timer"
 # The producers a signal may name, when the deployment says. Empty admits any.
 PRODUCERS = tuple(p.strip() for p in os.environ.get("WATCH_SIGNER_PRODUCERS", "").split(",") if p.strip())
-
-
-def constant_time_eq(expected: str, provided: str | None) -> bool:
-    """Compare two header-derived strings without leaking length by timing.
-
-    Wraps hmac.compare_digest because that function raises TypeError on a
-    str holding non-ASCII, and http.server decodes header bytes as latin-1 —
-    so a single 0xF6 byte in the bearer killed the handler with no 401 and no
-    ledger row. Comparing the utf-8 bytes keeps the constant-time property and
-    answers the way it should. The same copy the family's three doors carry.
-    """
-    return hmac.compare_digest(expected.encode("utf-8"), (provided or "").encode("utf-8"))
-
-
-def sign_timestamped(secret: str, body: bytes, *, now: float | None = None) -> dict[str, str]:
-    """Headers for an outbound family delivery; empty when unsigned."""
-    if not secret:
-        return {}
-    stamp = str(int(time.time() if now is None else now))
-    digest = hmac.new(secret.encode(), stamp.encode() + b"." + body, hashlib.sha256).hexdigest()
-    return {"X-Hook-Timestamp": stamp, "X-Hook-Signature": digest}
 
 
 def split_origin(origin: str) -> tuple[str, str]:
@@ -221,27 +199,6 @@ def round_key(round_at: float, now: float | None = None) -> float:
     return float(int(now // ROUND_WINDOW_SECONDS) * ROUND_WINDOW_SECONDS)
 
 
-class Ledger:
-    """Every signal, signed or refused. A refusal here is the one thing that can
-    say "a round tried to post about something nobody handed it"."""
-
-    def __init__(self, path: str) -> None:
-        self.path = Path(path) if path else None
-        self._lock = threading.Lock()
-
-    def write(self, **fields: Any) -> None:
-        if self.path is None:
-            return
-        line = json.dumps({"ts": round(time.time(), 3), **fields}, ensure_ascii=False)
-        try:
-            with self._lock:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                with self.path.open("a", encoding="utf-8") as handle:
-                    handle.write(line + "\n")
-        except OSError as exc:  # noqa: BLE001 — never lose a signal because the ledger cannot be written
-            logger.warning("ledger write failed: %s", exc)
-
-
 class Counter:
     """How many signals each round has posted. Keyed on the round's own clock,
     so a new round starts at zero without anybody resetting anything — and the
@@ -324,22 +281,8 @@ def check(signal: dict[str, Any], offer: Offer) -> Verdict:
     return Verdict(clean, "", key, subject, cursor)
 
 
-_CONTROL_CHARS = getattr(BaseHTTPRequestHandler, "_control_char_table", None)
-
-
-def plain(text: str) -> str:
-    """A request line as the log may show it: control characters escaped, as
-    the stdlib does since 3.12, so a path carrying a carriage return or an ANSI
-    sequence cannot rewrite the line above it on a terminal."""
-    return text.translate(_CONTROL_CHARS) if _CONTROL_CHARS else repr(text)[1:-1]
-
-
-class Signer(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+class Signer(HttpHandler):
     server_version = "watch-signer"
-    # A peer that declares a body and stops sending holds a thread for exactly
-    # this long. The egress proxy beside this sets the same.
-    timeout = 30
 
     door = ""
     secret = ""
@@ -348,60 +291,35 @@ class Signer(BaseHTTPRequestHandler):
     ledger = Ledger("")
     counter = Counter()
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        logger.info("%s", plain(fmt % args))
+    def _say(self, status: int, payload: dict[str, Any]) -> None:
+        self._answer(status, json.dumps(payload, ensure_ascii=False).encode())
 
-    def handle(self) -> None:
-        # A peer that resets the socket mid-exchange has nobody to answer; the
-        # stdlib would print a traceback that reads exactly like a real failure.
-        with contextlib.suppress(ConnectionResetError, BrokenPipeError):
-            super().handle()
-
-    def _answer(self, status: int, payload: dict[str, Any]) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _refuse(self, status: int, message: str) -> None:
-        """An answer given before the body was read: the connection closes with
-        it, or on keep-alive the unread body is parsed as the next request."""
-        self.close_connection = True
-        self._answer(status, {"error": message})
+    def _no(self, status: int, message: str) -> None:
+        self._refuse(status, json.dumps({"error": message}, ensure_ascii=False).encode())
 
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's spelling
-        self._answer(200 if self.path == "/healthz" else 404, {"ok": self.path == "/healthz"})
+        self._say(200 if self.path == "/healthz" else 404, {"ok": self.path == "/healthz"})
 
     def do_POST(self) -> None:  # noqa: N802
         header = self.headers.get("Authorization", "")
         given = header[7:].strip() if header[:7].lower() == "bearer " else ""
         if not constant_time_eq(self.token, given):
             self.ledger.write(event="signal.unauthorized")
-            self._refuse(401, "a bearer token this signer knows is required")
+            self._no(401, "a bearer token this signer knows is required")
             return
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            self._refuse(400, "Content-Length is not a number")
-            return
-        if length < 0:
-            self._refuse(400, "Content-Length is negative")
-            return
-        if length > BODY_MAX:
-            self._refuse(413, f"a signal is at most {BODY_MAX} bytes")
+        length = self.body_length(BODY_MAX, json.dumps({"error": f"a signal is at most {BODY_MAX} bytes"}).encode())
+        if length is None:
             return
         try:
             payload = json.loads(self.rfile.read(length) or b"null")
         except ValueError:
-            self._answer(400, {"error": "not JSON"})
+            self._say(400, {"error": "not JSON"})
             return
         # Either shape: the door's own `{"signal": {...}}` envelope, or the bare
         # signal, because the poster in front of this has sent both over its life.
         signal = payload.get("signal") if isinstance(payload, dict) and "signal" in payload else payload
         if not isinstance(signal, dict):
-            self._answer(400, {"error": "the body must be one signal object"})
+            self._say(400, {"error": "the body must be one signal object"})
             return
         verdict = check(signal, read_offer(self.scan_file))
         if verdict.clean is None:
@@ -412,11 +330,11 @@ class Signer(BaseHTTPRequestHandler):
                 origin=str(signal.get("origin") or "")[:120],
             )
             logger.warning("refused a signal: %s", verdict.why)
-            self._answer(422, {"error": verdict.why})
+            self._say(422, {"error": verdict.why})
             return
         if not self.counter.take(verdict.key, PER_ROUND_MAX):
             self.ledger.write(event="signal.over_ceiling", origin=str(verdict.clean.get("origin") or "")[:120])
-            self._answer(429, {"error": f"this round has already posted {PER_ROUND_MAX} signals"})
+            self._say(429, {"error": f"this round has already posted {PER_ROUND_MAX} signals"})
             return
         self._forward(verdict)
 
@@ -432,14 +350,14 @@ class Signer(BaseHTTPRequestHandler):
             detail = exc.read()[:200].decode(errors="replace")
             self.counter.refund(key)
             self.ledger.write(event="signal.door_refused", status=exc.code, detail=detail)
-            self._answer(502, {"error": f"the door refused it: HTTP {exc.code} {detail}"})
+            self._say(502, {"error": f"the door refused it: HTTP {exc.code} {detail}"})
             return
         except (OSError, http.client.HTTPException) as exc:
             # HTTPException is not an OSError: a door that answers a status line
             # and then cuts the body is this branch, not a crash with no answer.
             self.counter.refund(key)
             self.ledger.write(event="signal.door_unreachable", reason=str(exc)[:200])
-            self._answer(502, {"error": "the door did not answer"})
+            self._say(502, {"error": "the door did not answer"})
             return
         # From here the door HAS the signal. Whatever its answer looks like, the
         # signal landed, and reporting otherwise makes the watcher post it twice.
@@ -466,7 +384,7 @@ class Signer(BaseHTTPRequestHandler):
             kind=signal.get("kind"),
             event_id=landed.get("event_id"),
         )
-        self._answer(200, {"event_id": landed.get("event_id"), "channels": landed.get("channels")})
+        self._say(200, {"event_id": landed.get("event_id"), "channels": landed.get("channels")})
 
 
 def main() -> int:

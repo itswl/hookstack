@@ -143,27 +143,18 @@ for f in scripts/*.py; do
 done
 echo "scripts: OK"
 
-step_bridge "the egress proxy parses, lints and holds its allowlist"
-# Same lesson as the bridge below, applied before it is learned twice: a sidecar
-# that is not inside a service package is reached by no component gate, and this
-# one sits in the path of every call an investigator makes.
-python3 -m compileall -q deploy/egress-proxy
-hookrelay/.venv/bin/python -m ruff check deploy/egress-proxy
-hookrelay/.venv/bin/python -m ruff format --check deploy/egress-proxy
-hookrelay/.venv/bin/python -m pytest -q deploy/egress-proxy/tests
-echo "egress-proxy: OK"
 
-step_bridge "the chat gate and the console ingress parse, lint and hold their lists"
-# The same reasoning as the egress proxy above: both sit in the path of
-# something an agent does, and neither is inside a service package.
-python3 -m compileall -q deploy/mcp-gate deploy/probe-ingress deploy/watch-signer deploy/watch
-hookrelay/.venv/bin/python -m ruff check deploy/mcp-gate deploy/probe-ingress deploy/watch-signer deploy/watch
-hookrelay/.venv/bin/python -m ruff format --check deploy/mcp-gate deploy/probe-ingress deploy/watch-signer deploy/watch
-# deploy/watch/tests covers the one decision the watch wrapper makes on its own
-# (which round's offer admits a conversation); the scanner itself talks to the
-# chat and is read back live, not unit-tested.
-hookrelay/.venv/bin/python -m pytest -q deploy/mcp-gate/tests deploy/probe-ingress/tests deploy/watch-signer/tests deploy/watch/tests
-echo "mcp-gate + probe-ingress + watch-signer + watch wrapper: OK"
+step_bridge "the sidecars and the watch wrapper parse, lint and hold their lists"
+# Four single-file containers sharing deploy/sidecars/common.py, reached by no
+# component gate, each in the path of something an agent does: the egress
+# proxy, the MCP gate, the watch signer, the console ingress. deploy/watch is
+# the scanner and the wrapper the watcher runs; its tests cover the one
+# decision the wrapper makes.
+python3 -m compileall -q deploy/sidecars deploy/watch
+hookrelay/.venv/bin/python -m ruff check deploy/sidecars deploy/watch
+hookrelay/.venv/bin/python -m ruff format --check deploy/sidecars deploy/watch
+hookrelay/.venv/bin/python -m pytest -q deploy/sidecars/tests deploy/watch/tests
+echo "sidecars + watch wrapper: OK"
 
 step_bridge "the lark bridge parses and lints"
 python3 -m compileall -q deploy/lark-bridge

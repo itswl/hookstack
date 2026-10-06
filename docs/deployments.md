@@ -187,7 +187,7 @@ the operator.
 So the list became a place. The three probes now sit on a docker network with
 `internal: true`: no route to the host, no route to the internet, no DNS for
 either. Their way out is the egress proxy on its allowlist, as before, and their
-way to the chat is `mcp-gate` (`deploy/mcp-gate/gate.py`), which holds the only
+way to the chat is `mcp-gate` (`deploy/sidecars/gate.py`), which holds the only
 reach to the chat client and forwards a `tools/call` only when the tool's name
 is on the calling node's list. The watcher now sees eight read tools, the
 planner eleven, and every refusal is recorded in `work-data/mcp-gate/calls.jsonl`.
@@ -201,7 +201,7 @@ is an agent whose input is colleagues' messages, and it could read the secret.
 The door's only check — "signed by something holding the secret" — then answered
 yes to whatever an injected round chose to say, including a fabricated request
 at `high` as a `task`, which buys a paid planner run and a card that reads as
-real. `deploy/watch-signer` holds the secret now. The watcher posts unsigned to
+real. the watch signer (`deploy/sidecars/signer.py`) holds the secret now. The watcher posts unsigned to
 it; it signs a signal only when the signal names a conversation the scanner
 offered that round, with a level and kind from a closed set, text cut to a
 length and a ceiling per round. The refusals are in
@@ -227,7 +227,7 @@ client's JSON-RPC responses through, and write `forwarded` only after the chat
 server answered. `probe_net` sets the isolated gateway mode, so "no route to
 the host" holds on a Linux engine and not only on this laptop; the probes'
 MCP config, which is not tracked, has a tracked shape in
-`deploy/mcp-gate/mcp.example.json`. The same day, second pass: the scanner
+`deploy/sidecars/mcp.example.json`. The same day, second pass: the scanner
 keeps the round before alongside the current offer, and the signer and the
 watch wrapper admit a conversation from either, counted against its own round,
 so a run that outlasts a twenty-minute tick is no longer checked against the
