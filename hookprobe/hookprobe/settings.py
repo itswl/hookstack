@@ -174,7 +174,9 @@ class Settings:
     # (posture.py): `enforce` refuses to start a runner declared readonly whose
     # kubeconfig or AWS identity can mutate, `warn` starts and says so, `off`
     # skips the check. A declared boundary nobody measures is a README, so the
-    # default is enforce; a writing posture (danger-only) is only ever recorded.
+    # default is enforce; a writing posture that has declared no blast radius
+    # is recorded rather than judged, and one that has declared is judged
+    # exactly as a readonly node is (see `blast_radius` below).
     posture_check: str
     # Whether this service receives its own runs' OpenTelemetry (telemetry.py):
     # `on` points the CLI at `POST /otel/v1/{logs,metrics}` here, keeps a
