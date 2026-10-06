@@ -1,0 +1,27 @@
+# Commands this deployment's remediation executor may run once a person has
+# approved them: one full-match regex per line; `#` starts a comment. The file
+# is hot-read — checked over the WHOLE procedure at the click and again before
+# every step, so a list tightened mid-incident stops the steps that have not
+# run yet. Deny by default: absent, empty or unreadable all mean proposals
+# collect and nothing executes.
+#
+# Copy to remediation-allowlist beside this file (git-ignored: the real lines
+# name real commands) and set, in the deployment's .env,
+#   HOOKPROBE_REMEDIATION_ALLOWLIST=/etc/hookprobe/operator/remediation-allowlist
+# — the work compose mounts this directory there, read-only, on the one node
+# that executes: the write node, the service running `HOOKPROBE_BASH_GUARD:
+# danger-only` with the scoped credential.
+#
+# A step the report itself called `risk: high` must full-match a pattern in a
+# SECOND file as well — remediation-high-risk-allowlist beside this one, named
+# by HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST — so arming the executor does
+# not arm its worst half by the same gesture. The risk label is the model's,
+# so that file can only add a requirement, never catch a missing one.
+#
+# Full-match, and each command runs as an argv with no shell: a wildcard
+# cannot hand anything to /bin/sh, but `.*` is still a line you wrote wide.
+# Write the command you mean, and start narrower than you think: the quickstart
+# arms its rehearsal with two observation lines, and that is the shape to keep
+# — the fewest lines that do the job.
+^df -h /data$
+^du -sh /data/results$

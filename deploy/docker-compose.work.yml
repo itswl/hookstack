@@ -729,6 +729,19 @@ services:
       # what a writing node has always done, and the reason `enforce` meant
       # nothing here. Pin what you saw and a credential that grows refuses.
       HOOKPROBE_BLAST_RADIUS: ${HOOKPROBE_BLAST_RADIUS:-}
+      # The remediation executor's gates — what an approved procedure may run —
+      # deny-by-default over the operator's files below: full-match regexes,
+      # one per line, hot-read (a file tightened mid-incident stops the steps
+      # that have not run yet). Unset means proposals collect and nothing
+      # executes; wiring this knob arms nothing by itself, it only makes the
+      # operator's file nameable. The .env sets each path to its IN-CONTAINER
+      # name under the mount below, the same gesture as PROBE_WORK_AWS_DIR.
+      HOOKPROBE_REMEDIATION_ALLOWLIST: ${HOOKPROBE_REMEDIATION_ALLOWLIST:-}
+      # The second gate: a step the report itself called `high` must full-match
+      # a pattern in BOTH files, so arming this executor does not arm its worst
+      # half by the same gesture. The label is the model's, so this file can
+      # only ADD a requirement, never catch a missing one.
+      HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST: ${HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST:-}
       HOOKPROBE_AGENT_NAME: work runner
       HOOKPROBE_AGENT_ROLE: does the thing an approved plan describes — the one node a person hands work to, and the only one not on readonly
       # The planner's read-only credential unless this node is given its own.
@@ -737,6 +750,17 @@ services:
       # PROBE_WORK_AWS_PROFILE=<the profile>. Both files move together, so the
       # write profile is never looked up in the planner's mount, and removing
       # the two lines puts this node back on read-only.
+      # Scope that profile to the job, not the operator: the first write used an
+      # administrator profile that was taken off the node after the run, and the
+      # node has run on the planner's fallback since. Two permissions a scoped
+      # policy must not omit or the node's own measurements fail: eks:GetToken,
+      # because the shared kubeconfig authenticates with `aws eks get-token`,
+      # and iam:SimulatePrincipalPolicy, without which the posture check can
+      # only record `unverifiable` instead of a measured radius. Then pin what
+      # you saw: boot once with HOOKPROBE_BLAST_RADIUS empty, copy kube.mutating
+      # and aws.allowed from GET /v1/posture (the console port above) verbatim
+      # into a file on this node's volume, point HOOKPROBE_BLAST_RADIUS at it,
+      # and recreate — after that a credential that grows refuses to start.
       AWS_CONFIG_FILE: ${PROBE_WORK_AWS_DIR:-/data/aws}/config
       AWS_SHARED_CREDENTIALS_FILE: ${PROBE_WORK_AWS_DIR:-/data/aws}/credentials
       # No default on purpose: any default that WORKS here is the real profile
@@ -776,6 +800,16 @@ services:
       # two must not be one mount, or "the planner is read-only" stops being
       # true the day somebody adds a token to the wrong file.
       - ../work-data/probe-work-secrets:/data/secrets:ro
+      # The operator's gate files for the executor above (remediation-allowlist,
+      # remediation-high-risk-allowlist — the .example beside them in the
+      # checkout says how to write one). The DIRECTORY, not a file: a
+      # single-file bind mount binds an inode, and an editor that replaces the
+      # file rather than writing through it leaves the hot-read gate reading
+      # the version from before the edit while looking armed. Read-only, and
+      # under /etc rather than /data on purpose: /data is this agent's workdir,
+      # and a gate the agent can edit is not a gate. Same directory and mount
+      # path the production compose used for its operator files.
+      - ../hookprobe/deploy/operator:/etc/hookprobe/operator:ro
       # The planner's case files, READ-ONLY. A plan arrives as text; this is the
       # investigation that produced it, so the runner can see what was actually
       # checked rather than only what was concluded. The output, never the

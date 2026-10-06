@@ -517,8 +517,14 @@ pipeline:
     on_new_topic: {kind: task, level: high}
   - routes
 
-# No card_actions: no bridge, so no callback can reach this pipe, and an
-# unsigned button URL in a group chat is one anybody can press on your behalf.
+# The only card kind this file mints is the planner's handoff (below). The
+# work deployment's approve press is its CONSOLE — probe-work's, behind the
+# doors ingress — not a card button: a card-action kind forwards to exactly
+# ONE channel, so one `approve` entry cannot serve both the planner's and the
+# runner's proposals, and pointing it at the wrong node answers the press with
+# a 404 the pipe dead-letters. A card-borne approve for the runner needs the
+# kind split in hookrelay first
+# (.agents/notes/implemented/2026-10-06-arming-the-work-executor.md).
 
 # Buttons on the planner's cards. Only with HOOKRELAY_ACTION_SECRET set
 # (WORK_ACTION_SECRET in .env): empty means no card carries a button, because

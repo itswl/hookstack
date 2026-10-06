@@ -143,28 +143,71 @@ def knobs_passed() -> set[str]:
 SERVICE_HEADER = re.compile(r"^  ([a-z][a-z0-9-]*):\s*$")
 
 
+def _service_blocks(compose: Path) -> dict[str, str]:
+    """Service name -> the service's raw lines, by indentation (not YAML): this
+    runs under the same bare python3 the rest of the gate does."""
+    blocks: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in compose.read_text(encoding="utf-8").splitlines():
+        header = SERVICE_HEADER.match(line)
+        if header:
+            current = header.group(1)
+            blocks[current] = []
+        elif current is not None:
+            blocks[current].append(line)
+    return {service: "\n".join(body) for service, body in blocks.items()}
+
+
 def probe_nodes_missing() -> list[str]:
     """`<compose>: <service> lacks <KNOB>` for every probe node a compose defines
-    without one of the per-node knobs. Parsed by indentation, not YAML, so this
-    runs under the same bare python3 the rest of the gate does."""
+    without one of the per-node knobs."""
     missing: list[str] = []
     for compose in sorted(ROOT.glob("**/docker-compose*.yml")):
         if ".venv" in compose.parts or "node_modules" in compose.parts:
             continue
-        blocks: dict[str, list[str]] = {}
-        current: str | None = None
-        for line in compose.read_text(encoding="utf-8").splitlines():
-            header = SERVICE_HEADER.match(line)
-            if header:
-                current = header.group(1)
-                blocks[current] = []
-            elif current is not None:
-                blocks[current].append(line)
-        for service, body in blocks.items():
-            text = "\n".join(body)
+        for service, text in _service_blocks(compose).items():
             if "HOOKPROBE_MODEL:" not in text:
                 continue
             for knob in EVERY_PROBE_NODE:
+                if f"{knob}:" not in text:
+                    missing.append(f"{compose.relative_to(ROOT)}: {service} lacks {knob}")
+    return missing
+
+
+# The WRITE nodes, checked per node rather than per repository. Everything above
+# asks "can some compose turn this knob"; that question was already true for
+# every knob below, on the demo stack — and on 2026-10-05 the one deployment
+# that RUNS, its write node, passed none of the remediation gates: its approve
+# door could only ever answer "no allowlist configured; proposals collect,
+# nothing executes", and no check in this repository could see it. Found by a
+# human reading a plan; this list is so the next absence is found by the gate.
+# The knobs stay empty-defaulted — wiring one is not arming the gate, it is
+# making the operator's file nameable at all, and unset still denies every
+# procedure. A write node is found by its posture, not a service name: the
+# declaration `HOOKPROBE_BASH_GUARD: danger-only` is what an operator's write
+# credential mounts beside.
+WORK_EXECUTOR_KNOBS: dict[str, str] = {
+    "HOOKPROBE_REMEDIATION_ALLOWLIST": (
+        "deny-by-default is the gate; until the knob exists the operator's file cannot be named"
+    ),
+    "HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST": (
+        "arming the executor must not arm its worst half by the same gesture"
+    ),
+}
+
+
+def write_nodes_missing() -> list[str]:
+    """`<compose>: <service> lacks <KNOB>` for every write node (a service
+    declaring `HOOKPROBE_BASH_GUARD: danger-only`) without one of the executor
+    gate knobs."""
+    missing: list[str] = []
+    for compose in sorted(ROOT.glob("**/docker-compose*.yml")):
+        if ".venv" in compose.parts or "node_modules" in compose.parts:
+            continue
+        for service, text in _service_blocks(compose).items():
+            if "HOOKPROBE_BASH_GUARD: danger-only" not in text:
+                continue
+            for knob in WORK_EXECUTOR_KNOBS:
                 if f"{knob}:" not in text:
                     missing.append(f"{compose.relative_to(ROOT)}: {service} lacks {knob}")
     return missing
@@ -214,6 +257,22 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+    unarmed = write_nodes_missing()
+    if unarmed:
+        print(
+            f"knobs: {len(unarmed)} executor knob(s) missing from a write node — the node that may run "
+            "approved commands cannot name its gate files:",
+            file=sys.stderr,
+        )
+        for line in unarmed:
+            print(f"  {line}", file=sys.stderr)
+        print(
+            "\nAdd the knob to that service's `environment:` block (the same `${NAME:-}` passthrough "
+            "the other deployments carry; unset still denies every procedure), or remove the service "
+            "from WORK_EXECUTOR_KNOBS in this file with the reason.",
+            file=sys.stderr,
+        )
+        return 1
     lacking = probe_nodes_missing()
     if lacking:
         print(
@@ -232,7 +291,8 @@ def main(argv: list[str]) -> int:
     exempt = f", {len(NOT_A_KNOB)} deliberately not settable" if NOT_A_KNOB else ""
     print(
         f"knobs: every one of {len(read)} settings a service reads is reachable from a compose{exempt}; "
-        f"{len(EVERY_PROBE_NODE)} per-node knob(s) present on every probe node"
+        f"{len(EVERY_PROBE_NODE)} per-node knob(s) present on every probe node; "
+        f"{len(WORK_EXECUTOR_KNOBS)} executor knob(s) on every write node"
     )
     return 0
 
