@@ -401,3 +401,49 @@ def test_no_response_is_not_reported_as_a_status_code(monkeypatch) -> None:
     assert refused["held"] is False and "HTTP 403" in refused["detail"]
     ok = asyncio.run(selftest.engine_endpoint_answers(settings, ask=lambda: (0, "200")))
     assert ok["held"] is True and "HTTP 200" in ok["detail"]
+
+
+def test_the_hourly_posture_check_judges_a_writing_nodes_radius(tmp_path, monkeypatch) -> None:
+    """The declaration has to REACH the measurement. `posture.check` without
+    `declared` has nothing to compare a writing node's credential against, the
+    verdict comes back `recorded`, and this check passes hourly for a node
+    whose pinned credential grew — the boot refuses it and the hour says
+    nothing. An already-fixed shape (a value computed correctly and dropped on
+    the way to where it acts), so the fake records what check() was handed."""
+    radius = tmp_path / "radius.txt"
+    radius.write_text("deployments (ns prod): restart\n", encoding="utf-8")
+    seen: dict[str, Any] = {}
+
+    async def fake_check(bash_guard, run=None, declared=None):
+        seen["declared"] = declared
+        return {
+            "bash_guard": bash_guard,
+            "verdict": "wider-than-declared",
+            "kube": {"present": True, "mutating": ["secrets (cluster-wide): delete"], "errors": []},
+            "aws": {"present": False},
+            "beyond_declared": ["secrets (cluster-wide): delete"],
+        }
+
+    monkeypatch.setattr(selftest.posture, "check", fake_check)
+    settings = make_settings(tmp_path, workdir=tmp_path, bash_guard="danger-only", blast_radius=radius)
+    result = asyncio.run(selftest.posture_still_holds(settings))
+    assert seen["declared"] == {"deployments (ns prod): restart"}, "the declared radius reached the measurement"
+    assert result["held"] is False, "a credential wider than the pin must fail the hourly check"
+    assert "secrets (cluster-wide): delete" in result["detail"], "the failure names the excess"
+
+
+def test_an_undeclared_writing_node_still_passes_the_hourly_check(tmp_path, monkeypatch) -> None:
+    """Undeclared is `recorded` by design — an upgrade must not brick a node
+    that ran yesterday — and the hourly check must not be stricter than the
+    boot it re-measures."""
+    seen: dict[str, Any] = {}
+
+    async def fake_check(bash_guard, run=None, declared=None):
+        seen["declared"] = declared
+        return {"bash_guard": bash_guard, "verdict": "recorded", "kube": {"present": False}, "aws": {"present": False}}
+
+    monkeypatch.setattr(selftest.posture, "check", fake_check)
+    settings = make_settings(tmp_path, workdir=tmp_path, bash_guard="danger-only", blast_radius=None)
+    result = asyncio.run(selftest.posture_still_holds(settings))
+    assert seen["declared"] is None
+    assert result["held"] is True
