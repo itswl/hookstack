@@ -607,5 +607,6 @@ def test_the_console_installs_on_a_phone_under_the_nodes_own_name(tmp_path) -> N
         # The shell and nothing else: no data path is even named in it.
         assert "/v1/" not in worker.text and "/sessions" not in worker.text
         page = client.get("/ui").text
-        assert 'name="theme-color"' in page and 'name="apple-mobile-web-app-capable"' in page
+        assert page.count('<meta name="theme-color"') == 2 and 'content="black-translucent"' not in page
+        assert 'name="apple-mobile-web-app-capable"' in page
         assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page
