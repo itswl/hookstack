@@ -394,6 +394,12 @@
   .chip-top { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); font-size: 12px; font-family: var(--mono); white-space: nowrap; }
   .chip-top.hot { color: var(--bad); border-color: var(--bad); }
   .chip-top.unmeasured { border-style: dashed; }
+  /* The budget chip is this page's own header item, and with it the header's
+     first line is wider than a phone: the page scrolled sideways and the
+     header's border stopped short of its own controls (2026-10-06). On a phone
+     the chip takes a line of its own, under the search. Here and not in the
+     shared block above: the other two pages have no chip. */
+  @media (max-width: 640px) { .top-in > .chip-top { order: 4; } }
   .tabs .tab-group { flex-wrap: nowrap; }
   .tabs .tab-group-label { white-space: nowrap; }
   /* Eleven tabs and two group labels: below a very wide screen the grouped tabs
@@ -548,8 +554,8 @@
       <input id="search" type="search" data-tp="search.placeholder" spellcheck="false">
       <kbd>/</kbd>
     </form>
+    <span class="chip-top" id="budget" hidden></span>
     <div class="top-right">
-      <span class="chip-top" id="budget" hidden></span>
       <span class="stamp" id="stamp"></span>
       <button class="btn ghost sm" id="langBtn" type="button"></button>
       <button class="btn ghost sm" id="settingsBtn" type="button" data-tt="settings.open"><span data-icon="sliders"></span></button>
