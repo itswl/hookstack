@@ -102,9 +102,11 @@ caller ── POST /hooks/agent ───────────────▶
 | `GET /v1/skills/{name}/history[/{stamp}]` · `GET /v1/skills/{name}/origin` | Every version a write displaced, and the full revision log. The skills page renders these as a diff + restore. `POST /v1/skills/{name}/history/{stamp}/restore` puts a version back in one call — history used to be readable and not restorable, which was tolerable only while every write to a manifest went through a person. The restore is itself a write, so putting back the wrong version is also reversible. |
 | `GET /v1/runs/{key}/stream` | The open run as it happens — NDJSON, one object per line: an opening `snapshot`, the answer arriving as `delta` chunks (`kind: text` or `thinking`), each finished step, a `ping` every 15s of silence, and `done` when it settles, at which point it closes itself. Deltas are live-only and never recorded; the finished blocks are what the case file keeps. |
 | `GET /ui` | The sessions page ([docs/operating.md](docs/operating.md)). Markup is served unauthenticated; the data calls it makes are not. |
+| `GET /static/manifest.webmanifest` · `GET /static/…` | The web manifest, named for this node (`HOOKPROBE_AGENT_NAME`) so three consoles on one home screen read as three, and the icons that make the console an app on a phone. |
+| `GET /sw.js` | The console's service worker: the page and the icons offline, never the data — the same shell as the pipe's board, one file in three services. |
 | `GET /healthz` | Liveness, unauthenticated. |
 
-Auth: `Authorization: Bearer $HOOKPROBE_TOKEN` on everything except `/healthz`.
+Auth: `Authorization: Bearer $HOOKPROBE_TOKEN` on everything except `/healthz` and the page's shell (`/ui`, `/sw.js`, `/static/…`), which hold no data.
 
 A run that fails (crash, timeout, empty output) still finishes the contract:
 `isFinal: true` with a well-formed report whose `root_cause` names the runner

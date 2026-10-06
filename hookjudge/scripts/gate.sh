@@ -40,7 +40,9 @@ const fs = require("fs");
 const m = fs.readFileSync("hookjudge/status.html", "utf8").match(/<script>([\s\S]*)<\/script>/);
 if (!m) { console.error("no inline script in status.html"); process.exit(1); }
 new Function(m[1]);
-console.log("status.html inline JS: OK");
+new Function(fs.readFileSync("hookjudge/static/sw.js", "utf8"));   // the service worker, the same way
+JSON.parse(fs.readFileSync("hookjudge/static/manifest.webmanifest", "utf8"));
+console.log("status.html inline JS, sw.js and the manifest: OK");
 '
 
 step "pytest"

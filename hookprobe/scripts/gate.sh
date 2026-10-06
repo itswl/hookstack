@@ -40,7 +40,8 @@ const fs = require("fs");
 const m = fs.readFileSync("hookprobe/ui.html", "utf8").match(/<script>([\s\S]*)<\/script>/);
 if (!m) { console.error("no inline script in ui.html"); process.exit(1); }
 new Function(m[1]);
-console.log("ui.html inline JS: OK");
+new Function(fs.readFileSync("hookprobe/static/sw.js", "utf8"));   // the service worker, the same way
+console.log("ui.html inline JS and sw.js: OK");
 '
 
 # The shipped shell. patrol.sh went out with an unbalanced quote inside a

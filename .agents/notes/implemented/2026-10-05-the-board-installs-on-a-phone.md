@@ -21,6 +21,11 @@ Only the pipe's board. The judge's and the investigator's pages stay as they
 are: the pipe's board is the one attention entry, and the other two are
 worked in from a desk.
 
+*Corrected 2026-10-06.* The operator put the investigator's console on a home
+screen the next day and found no icon. All three boards install now, with one
+shell; see
+[2026-10-06-three-boards-install-on-a-phone.md](2026-10-06-three-boards-install-on-a-phone.md).
+
 ## Why
 
 The operator reads on the phone. The card loop covers what needs a ruling; the

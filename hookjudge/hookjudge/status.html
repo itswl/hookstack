@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hookjudge</title>
+<meta name="theme-color" content="#11151d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="hookjudge">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2311151d'/%3E%3Cpath d='M12 5v14M7 19h10M6 8h12M6 8l-2.5 5.5a2.5 2.5 0 0 0 5 0zM18 8l-2.5 5.5a2.5 2.5 0 0 0 5 0z' stroke='%234c8dff' stroke-width='1.8' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E">
 <script id="theme">
   /* ── hookstack theme · keep this block identical in all three pages ── */
@@ -577,6 +581,7 @@
     <div class="field"><label for="stRead" data-t="st.read"></label><div class="inline"><input class="inp mono" id="stRead" type="password" autocomplete="off"><button class="btn" id="stReadSave" type="button" data-t="st.save"></button></div><p class="hint" data-t="st.read.hint"></p></div>
     <div class="field"><div><button class="btn danger sm" id="stClear" type="button" data-t="st.clear"></button></div></div>
     <div class="field"><label data-t="st.shortcuts"></label><div id="stKeys"></div></div>
+    <div class="field"><label data-t="st.install"></label><div id="stInstall"></div></div>
   </div>
 </aside>
 
@@ -590,6 +595,11 @@
 <script type="application/json" id="strings">
 {
  "en": {
+  "st.install": "On this phone",
+  "st.install.add": "Add to the home screen",
+  "st.install.hint": "In Safari or Chrome: Share, then Add to Home Screen. The app keeps the tokens of this browser and nothing else; offline it shows the page and says the judge is out of reach.",
+  "st.install.done": "Installed. This is the app.",
+  "st.install.http": "A browser installs an app only over https. Serve the board over https (a tailnet, a tunnel) and open it there.",
   "st.clear_title": "Forget the token?",
   "st.clear_body": "This browser keeps it only here. Afterwards it asks for it again before it can show anything.",
   "live.on": "live",
@@ -778,6 +788,11 @@
   "kb.help": "Show shortcuts"
  },
  "zh": {
+  "st.install": "装到这部手机",
+  "st.install.add": "添加到主屏幕",
+  "st.install.hint": "在 Safari 或 Chrome 里：分享，然后「添加到主屏幕」。应用只保留这个浏览器里的口令；离线时显示页面，并告诉你连不上判官。",
+  "st.install.done": "已安装。这就是应用。",
+  "st.install.http": "浏览器只在 https 下安装应用。把看板放到 https 后面（tailnet、隧道）再从那里打开。",
   "st.clear_title": "清除口令？",
   "st.clear_body": "口令只存在这个浏览器里。清除以后，要重新输入才能查看。",
   "live.on": "实时",
@@ -1911,6 +1926,55 @@
     liveConnect(url, headers, onChange);
   }
   // ── end live control ──────────────────────────────────────────────────────
+  // ── install on a phone · keep this block identical in all three pages ─────
+  // The board as an app on the home screen: a manifest and a service worker,
+  // linked with BASE so a board served under a path prefix installs under it.
+  // The worker keeps the SHELL offline and never the data — every read still
+  // needs the token, and nothing a page fetches is cached (static/sw.js says
+  // why). Over plain http a browser registers nothing and the page works
+  // exactly as before; the settings drawer says so instead of offering a
+  // button that would do nothing. The page tells the worker which path is the
+  // page, and takes its home-screen title from the manifest — the one place a
+  // service names itself, and on an investigator that name is the node's.
+  function installWire() {
+    var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+    var page = location.pathname.slice(BASE.length + 1).replace(/\/$/, "");
+    var prompt = null;
+    function render() {
+      var box = $("#stInstall");
+      if (!box) return;
+      box.textContent = "";
+      if (standalone) { box.appendChild(muted(t("st.install.done"))); return; }
+      if (!window.isSecureContext) { box.appendChild(muted(t("st.install.http"))); return; }
+      if (!prompt) { box.appendChild(muted(t("st.install.hint"))); return; }
+      var btn = document.createElement("button");
+      btn.type = "button"; btn.className = "btn sm"; btn.textContent = t("st.install.add");
+      btn.addEventListener("click", function () { prompt.prompt(); prompt = null; render(); });
+      box.appendChild(btn);
+    }
+    function muted(text) { var p = document.createElement("div"); p.className = "muted"; p.textContent = text; return p; }
+    function link(rel, href) { var el = document.createElement("link"); el.rel = rel; el.href = href; document.head.appendChild(el); }
+    link("manifest", BASE + "/static/manifest.webmanifest");
+    link("apple-touch-icon", BASE + "/static/icon-192.png");
+    fetch(BASE + "/static/manifest.webmanifest").then(function (r) { return r.json(); }).then(function (m) {
+      var title = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+      if (title && m.short_name) title.setAttribute("content", m.short_name);
+    }).catch(function () { /* the meta keeps the page's own name */ });
+    // The status bar follows the theme the page is showing, not only the system's.
+    var meta = document.querySelector('meta[name="theme-color"]');
+    function paint() { if (meta) meta.setAttribute("content", document.documentElement.getAttribute("data-theme") === "light" ? "#ffffff" : "#11151d"); }
+    if (window.MutationObserver) new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    paint();
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register(BASE + "/sw.js?page=" + encodeURIComponent(page)).catch(function () { /* a browser that refuses: the page is still the page */ });
+    }
+    window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); prompt = e; render(); });
+    window.addEventListener("appinstalled", function () { standalone = true; prompt = null; render(); });
+    $("#settingsBtn").addEventListener("click", render);
+    render();
+  }
+  installWire();
+  // ── end install ───────────────────────────────────────────────────────────
   wireLiveControl(BASE + "/live", readHeaders, refreshActive);
 })();
 </script>

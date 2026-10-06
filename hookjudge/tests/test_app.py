@@ -1627,3 +1627,26 @@ async def test_status_carries_the_last_recorded_gate_verdict(app_client, tmp_pat
     (tmp_path / "eval-gate.json").write_text("not json", encoding="utf-8")
     body = (await app_client.get("/status", headers={"X-Read-Token": "read-t"})).json()
     assert body["eval_gate"] is None, "a damaged record reads as no record, never as a 500 on the board"
+
+
+async def test_the_board_installs_on_a_phone(app_client):
+    """The same shell as the pipe's board: a manifest and icons under /static,
+    the worker at the page's own level, and the page linking them with BASE."""
+    manifest = await app_client.get("/static/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.headers["content-type"].startswith("application/manifest+json")
+    data = manifest.json()
+    assert data["name"] == "hookjudge" and data["display"] == "standalone"
+    assert data["start_url"] == "../" and data["scope"] == "../"
+    assert {icon["purpose"] for icon in data["icons"]} == {"any", "maskable"}
+    for icon in data["icons"]:
+        assert (await app_client.get("/static/" + icon["src"])).status_code == 200, icon["src"]
+    worker = await app_client.get("/sw.js")
+    assert worker.status_code == 200
+    assert worker.headers["content-type"].startswith("application/javascript")
+    assert "no-cache" in worker.headers["cache-control"]
+    # The shell and nothing else: the data paths are not even named in it.
+    assert "/status" not in worker.text and "/live" not in worker.text
+    page = (await app_client.get("/")).text
+    assert 'name="theme-color"' in page and 'name="apple-mobile-web-app-capable"' in page
+    assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page

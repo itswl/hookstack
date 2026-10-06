@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""The board's app icons, drawn from the favicon's own geometry.
+"""The three boards' app icons, drawn from each favicon's own geometry.
 
-The pages carry one SVG favicon inline (a hook in the accent colour on the
-surface colour, a green dot where the hook ends). A phone's home screen wants
-PNGs — 192 and 512, and a "maskable" one whose glyph sits inside the safe
-zone so Android can crop it to any shape. There is no image library in any
-venv and none is worth adding for three files, so this rasterises the same
-shapes directly: a rounded square, a stroked path of lines and quarter arcs,
-two discs, anti-aliased by signed distance. Run it when the favicon changes;
-the output is committed beside the manifest.
+Each page carries one SVG favicon inline — a glyph in the accent colour on the
+surface colour: the pipe's hook, the judge's scales, the investigator's lens.
+A phone's home screen wants PNGs — 192 and 512, and a "maskable" one whose
+glyph sits inside the safe zone so Android can crop it to any shape. There is
+no image library in any venv and none is worth adding for nine files, so this
+rasterises the same shapes directly: a rounded square, stroked polylines
+(lines and arcs as points), a ring, discs, anti-aliased by signed distance.
+Run it when a favicon changes; the output is committed beside each manifest.
 
     python3 scripts/make_app_icons.py
 """
@@ -18,11 +18,14 @@ from __future__ import annotations
 import math
 import struct
 import zlib
+from collections.abc import Callable
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "hookrelay" / "hookrelay" / "static"
+ROOT = Path(__file__).resolve().parent.parent
 SURFACE, ACCENT, OK = (0x11, 0x15, 0x1D), (0x4C, 0x8D, 0xFF), (0x3D, 0xD6, 0x8C)
-STROKE = 2.2  # in the favicon's 24-unit grid
+Colour = tuple[int, int, int]
+# (distance from a point to the shape's centre line, the half width painted, the colour, the bounding box)
+Shape = tuple[Callable[[float, float], float], float, Colour, tuple[float, float, float, float]]
 
 
 def _arc(cx: float, cy: float, r: float, a0: float, a1: float, n: int = 14) -> list[tuple[float, float]]:
@@ -35,7 +38,43 @@ def _arc(cx: float, cy: float, r: float, a0: float, a1: float, n: int = 14) -> l
     ]
 
 
-# M6 8 h5 a3 3 0 0 1 3 3 v2 a3 3 0 0 0 3 3 h1 — the favicon's path, as points.
+def _seg_distance(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+    dx, dy = bx - ax, by - ay
+    length = dx * dx + dy * dy
+    t = 0.0 if length == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def line(points: list[tuple[float, float]], width: float, colour: Colour) -> Shape:
+    """A stroked polyline, round-capped — a favicon's `path` with `fill='none'`."""
+    xs, ys = [x for x, _ in points], [y for _, y in points]
+    box = (min(xs) - width, min(ys) - width, max(xs) + width, max(ys) + width)
+    return (
+        lambda x, y: min(_seg_distance(x, y, *points[i], *points[i + 1]) for i in range(len(points) - 1)),
+        width / 2,
+        colour,
+        box,
+    )
+
+
+def ring(cx: float, cy: float, r: float, width: float, colour: Colour) -> Shape:
+    """A stroked circle."""
+    reach = r + width
+    box = (cx - reach, cy - reach, cx + reach, cy + reach)
+    return (lambda x, y: abs(math.hypot(x - cx, y - cy) - r), width / 2, colour, box)
+
+
+def disc(cx: float, cy: float, r: float, colour: Colour) -> Shape:
+    """A filled circle."""
+    return (lambda x, y: math.hypot(x - cx, y - cy), r, colour, (cx - r - 1, cy - r - 1, cx + r + 1, cy + r + 1))
+
+
+def _pan(cx: float) -> list[tuple[float, float]]:
+    """One pan of the scales: `M{cx} 8 l-2.5 5.5 a2.5 2.5 0 0 0 5 0 z` — two strings and a bowl."""
+    return [(cx, 8.0), (cx - 2.5, 13.5)] + _arc(cx, 13.5, 2.5, 180, 0)[1:] + [(cx, 8.0)]
+
+
+# M6 8 h5 a3 3 0 0 1 3 3 v2 a3 3 0 0 0 3 3 h1 — the pipe's hook, as points.
 HOOK = (
     [(6.0, 8.0), (11.0, 8.0)]
     + _arc(11, 11, 3, -90, 0)[1:]
@@ -44,12 +83,28 @@ HOOK = (
     + [(18.0, 16.0)]
 )
 
-
-def _seg_distance(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
-    dx, dy = bx - ax, by - ay
-    length = dx * dx + dy * dy
-    t = 0.0 if length == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length))
-    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+# Each favicon's shapes, in paint order, on the favicon's own 24-unit grid.
+GLYPHS: dict[str, list[Shape]] = {
+    # The hook, a dot at each end.
+    "hookrelay": [
+        line(HOOK, 2.2, ACCENT),
+        disc(6, 8, 1.8, ACCENT),
+        disc(18, 16, 1.8, OK),
+    ],
+    # M12 5v14 M7 19h10 M6 8h12, and a pan hanging from each end of the beam.
+    "hookjudge": [
+        line([(12.0, 5.0), (12.0, 19.0)], 1.8, ACCENT),
+        line([(7.0, 19.0), (17.0, 19.0)], 1.8, ACCENT),
+        line([(6.0, 8.0), (18.0, 8.0)], 1.8, ACCENT),
+        line(_pan(6), 1.8, ACCENT),
+        line(_pan(18), 1.8, ACCENT),
+    ],
+    # A lens, and a handle in the colour of a finding.
+    "hookprobe": [
+        ring(10.5, 10.5, 5, 2.0, ACCENT),
+        line([(14.5, 14.5), (19.0, 19.0)], 2.2, OK),
+    ],
+}
 
 
 def _coverage(distance: float, half_width: float, px_unit: float) -> float:
@@ -57,15 +112,16 @@ def _coverage(distance: float, half_width: float, px_unit: float) -> float:
     return max(0.0, min(1.0, 0.5 + (half_width - distance) / px_unit))
 
 
-def _blend(base: tuple[int, int, int], colour: tuple[int, int, int], alpha: float) -> tuple[int, int, int]:
+def _blend(base: Colour, colour: Colour, alpha: float) -> Colour:
     return tuple(round(b + (c - b) * alpha) for b, c in zip(base, colour, strict=True))  # type: ignore[return-value]
 
 
-def render(size: int, *, maskable: bool) -> bytes:
+def render(size: int, shapes: list[Shape], *, maskable: bool) -> bytes:
     """One PNG. Maskable: full-bleed background and the glyph at 70% in the centre."""
     unit = size / 24.0
     glyph_scale, offset = (0.7, 24 * 0.15) if maskable else (1.0, 0.0)
     radius = 0.0 if maskable else 6.0 * unit
+    px_unit = 1.0 / (unit * glyph_scale)
     rows = []
     for y in range(size):
         row = bytearray()
@@ -80,10 +136,9 @@ def render(size: int, *, maskable: bool) -> bytes:
                 continue
             gx, gy = (px / unit - offset) / glyph_scale, (py / unit - offset) / glyph_scale
             colour = SURFACE
-            d = min(_seg_distance(gx, gy, *HOOK[i], *HOOK[i + 1]) for i in range(len(HOOK) - 1))
-            colour = _blend(colour, ACCENT, _coverage(d, STROKE / 2, 1.0 / (unit * glyph_scale)))
-            colour = _blend(colour, ACCENT, _coverage(math.hypot(gx - 6, gy - 8), 1.8, 1.0 / (unit * glyph_scale)))
-            colour = _blend(colour, OK, _coverage(math.hypot(gx - 18, gy - 16), 1.8, 1.0 / (unit * glyph_scale)))
+            for distance, half_width, paint, (x0, y0, x1, y1) in shapes:
+                if x0 <= gx <= x1 and y0 <= gy <= y1:
+                    colour = _blend(colour, paint, _coverage(distance(gx, gy), half_width, px_unit))
             row += bytes((*colour, round(255 * alpha)))
         rows.append(b"\x00" + bytes(row))
     raw = zlib.compress(b"".join(rows), 9)
@@ -96,14 +151,16 @@ def render(size: int, *, maskable: bool) -> bytes:
 
 
 def main() -> int:
-    OUT.mkdir(parents=True, exist_ok=True)
-    for name, size, maskable in (
-        ("icon-192.png", 192, False),
-        ("icon-512.png", 512, False),
-        ("icon-maskable-512.png", 512, True),
-    ):
-        (OUT / name).write_bytes(render(size, maskable=maskable))
-        print(f"{OUT / name}: {size}x{size}{' maskable' if maskable else ''}")
+    for service, shapes in GLYPHS.items():
+        out = ROOT / service / service / "static"
+        out.mkdir(parents=True, exist_ok=True)
+        for name, size, maskable in (
+            ("icon-192.png", 192, False),
+            ("icon-512.png", 512, False),
+            ("icon-maskable-512.png", 512, True),
+        ):
+            (out / name).write_bytes(render(size, shapes, maskable=maskable))
+            print(f"{out.relative_to(ROOT) / name}: {size}x{size}{' maskable' if maskable else ''}")
     return 0
 
 
