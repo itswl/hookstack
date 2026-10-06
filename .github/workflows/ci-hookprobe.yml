@@ -34,10 +34,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          # The version this service SHIPS (Dockerfile: python:3.12-slim) —
-          # deliberately behind its siblings' 3.14, because the image also
-          # carries the Node runtime and the Claude Code CLI. Test what ships.
-          python-version: "3.12"
+          # The version this service SHIPS (Dockerfile: python:3.14-slim).
+          # The image also carries the Node runtime and the Claude Code CLI
+          # and moved to 3.14 later than its siblings; this line then kept
+          # saying 3.12, beside a comment claiming to test what ships, until
+          # scripts/assert_python_pins.py started reading both files.
+          python-version: "3.14"
           cache: "pip"
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt

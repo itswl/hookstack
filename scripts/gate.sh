@@ -82,6 +82,11 @@ python3 scripts/assert_no_estate_identifiers.py
 # resolves nothing, it only reads the two files (see the script for what that
 # does and does not catch).
 python3 scripts/assert_locks.py
+# The same two-files-one-truth shape one level down: each service's CI pin and
+# the release gate matrix against its Dockerfile's FROM. ci-hookprobe.yml said
+# 3.12 beside a comment claiming to test what ships while the image was 3.14;
+# nothing read a workflow and a Dockerfile together (2026-10-06).
+python3 scripts/assert_python_pins.py
 # Also a cross-service check, and for the same reason: it weighs the pipe and
 # the brain against the ceilings their own READMEs state. A component gate could
 # hold its own number, but not the fact that all three are measured the same way
