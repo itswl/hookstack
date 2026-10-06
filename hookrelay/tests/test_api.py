@@ -160,7 +160,7 @@ async def test_the_board_installs_on_a_phone(client):
     assert "/status" not in code and "/live" not in code
     page = (await client.get("/")).text
     assert 'name="theme-color"' in page and 'name="apple-mobile-web-app-capable"' in page
-    assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js"' in page
+    assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page
 
 
 async def test_status_recent_carries_parsed_steps(client):

@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import json
 import logging
+import mimetypes
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -27,7 +28,8 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from hookjudge.alarm import SelfAlarm
 from hookjudge.contract import (
@@ -851,5 +853,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def index() -> str:
         """The operator board."""
         return page
+
+    # The board as an app on a phone (2026-10-06), the same shell as the pipe's
+    # board: the manifest and icons under /static, the service worker at the
+    # page's own level so its scope is the board, served no-cache so a new page
+    # is never pinned behind an old worker. static/sw.js says what it keeps.
+    static = Path(__file__).parent / "static"
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
+    app.mount("/static", StaticFiles(directory=static), name="static")
+
+    @app.get("/sw.js")
+    async def service_worker() -> FileResponse:
+        """The board's service worker: the page and the icons offline, never the data (static/sw.js)."""
+        headers = {"Cache-Control": "no-cache"}
+        return FileResponse(static / "sw.js", media_type="application/javascript", headers=headers)
 
     return app

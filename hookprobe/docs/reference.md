@@ -91,7 +91,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_GATE_HOME` | *(empty)* | The agent's home, whose settings and skills are inputs too |
 | `HOOKPROBE_GATE_MCP` | *(empty)* | The MCP tools this node may call, from mcp_tools |
 
-## Routes (63)
+## Routes (65)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -105,6 +105,8 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/sessions/{session_key}/continue` | Follow-up turn in a finished investigation; poll /final for the answer |
 | GET | `/sessions/{session_key}/final` | Poll for the finished report: 202 while running, then the full text once |
 | POST | `/sessions/{session_key}/stop` | Cancel the in-flight turn; it settles as a failed turn within a poll |
+| GET | `/static/manifest.webmanifest` | The web manifest, named for this node; start URL and scope are relative, so a prefix keeps them |
+| GET | `/sw.js` | The console's service worker: the page and the icons offline, never the data (static/sw.js) |
 | GET | `/ui` | The operator board |
 | GET | `/v1/agent` | What this node IS: identity, runtime, the policy it runs under, health |
 | GET | `/v1/agent/description` | The same node in ANP's dialect: what it can be asked, and what stops for a person |

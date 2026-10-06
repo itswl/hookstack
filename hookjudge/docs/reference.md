@@ -39,7 +39,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKJUDGE_AI_MODEL` | *(empty)* | Model name sent to that base |
 | `HOOKJUDGE_AI_STRUCTURED_OUTPUT` | *(empty)* | schema \| tools \| object to pin one, anything else (default "auto") to negotiate downwards from the strongest the provider will accept |
 
-## Routes (12)
+## Routes (13)
 
 | method | path | what it does |
 | --- | --- | --- |
@@ -55,3 +55,4 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | GET | `/metrics` | Prometheus text: judgements by route, cost, interruptions, the wake axis, condition rulings |
 | POST | `/rulings/ai` | A model's retrospective ruling on a CONDITION, from the investigator |
 | GET | `/status` | The board's data: attention, self-healing, cost and the recent verdicts as JSON |
+| GET | `/sw.js` | The board's service worker: the page and the icons offline, never the data (static/sw.js) |

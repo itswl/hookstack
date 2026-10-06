@@ -254,6 +254,8 @@ a judge that answered `wake=no` on an alert a person then called useful.
 | GET    | `/labels/export` | every ruling as eval-harness JSONL — a queue label as `ledger-<id>` on `importance`, a card button as `interrupt-<id>` on `wake`, never merged. **Disabled** without a read token |
 | GET    | `/healthz` | liveness                                          |
 | GET    | `/`        | the operator board: board · verdicts · review · help |
+| GET    | `/sw.js`   | the board's service worker: the page and the icons offline, never the data — the same shell as the pipe's board, one file in three services |
+| GET    | `/static/…` | the web manifest and icons that make the board an app on a phone; start URL and scope are relative, so a board under a path prefix installs under it |
 
 **Why 202 and not the verdict.** Judging takes tens of seconds. Holding the
 sender's connection open for that makes it time out and retry, so the same

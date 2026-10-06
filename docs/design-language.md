@@ -110,14 +110,17 @@ back, and the sessions keep their list beside the open conversation, which on
 a phone becomes one pane at a time, like a mail app. Its only drawer is the
 settings.
 
-The pipe's board also installs on a phone (2026-10-05): a web manifest, icons
-drawn from the favicon's own geometry (`scripts/make_app_icons.py`), and a
-service worker that keeps the shell and never the data, so offline the board
-says the pipe is out of reach rather than showing a stale one as current. The
-settings drawer carries the install row: the browser's prompt where there is
-one, the Share → Add to Home Screen hint where there is not, and a plain
-sentence over http, where no browser installs anything. The other two boards
-are not apps yet; the pipe's is the one attention entry.
+All three boards install on a phone (the pipe's since 2026-10-05, the judge's
+and the investigator's since 2026-10-06): a web manifest, icons drawn from
+each favicon's own geometry (`scripts/make_app_icons.py`), and one service
+worker — the same file in all three services, pinned like the blocks above —
+that keeps the shell and never the data, so offline a board says its service
+is out of reach rather than showing a stale one as current. The settings
+drawer carries the install row: the browser's prompt where there is one, the
+Share → Add to Home Screen hint where there is not, and a plain sentence over
+http, where no browser installs anything. The investigator's manifest is named
+for its node: a deployment runs several, and three icons all called
+"hookprobe" tell nobody which is which.
 
 Before this the same palette sat under three idioms — tabs, a help link that
 unfolded a section, a row of eight buttons — and then, once the palette and the

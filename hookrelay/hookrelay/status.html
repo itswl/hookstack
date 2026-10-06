@@ -3296,16 +3296,19 @@
     liveConnect(url, headers, onChange);
   }
   // ── end live control ──────────────────────────────────────────────────────
-  // ── install on a phone ─────────────────────────────────────────────────
+  // ── install on a phone · keep this block identical in all three pages ─────
   // The board as an app on the home screen: a manifest and a service worker,
   // linked with BASE so a board served under a path prefix installs under it.
   // The worker keeps the SHELL offline and never the data — every read still
-  // needs the token, and nothing from /status or /live is cached (static/sw.js
-  // says why). Over plain http a browser registers nothing and the page works
+  // needs the token, and nothing a page fetches is cached (static/sw.js says
+  // why). Over plain http a browser registers nothing and the page works
   // exactly as before; the settings drawer says so instead of offering a
-  // button that would do nothing.
+  // button that would do nothing. The page tells the worker which path is the
+  // page, and takes its home-screen title from the manifest — the one place a
+  // service names itself, and on an investigator that name is the node's.
   function installWire() {
     var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+    var page = location.pathname.slice(BASE.length + 1).replace(/\/$/, "");
     var prompt = null;
     function render() {
       var box = $("#stInstall");
@@ -3323,13 +3326,17 @@
     function link(rel, href) { var el = document.createElement("link"); el.rel = rel; el.href = href; document.head.appendChild(el); }
     link("manifest", BASE + "/static/manifest.webmanifest");
     link("apple-touch-icon", BASE + "/static/icon-192.png");
+    fetch(BASE + "/static/manifest.webmanifest").then(function (r) { return r.json(); }).then(function (m) {
+      var title = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+      if (title && m.short_name) title.setAttribute("content", m.short_name);
+    }).catch(function () { /* the meta keeps the page's own name */ });
     // The status bar follows the theme the page is showing, not only the system's.
     var meta = document.querySelector('meta[name="theme-color"]');
     function paint() { if (meta) meta.setAttribute("content", document.documentElement.getAttribute("data-theme") === "light" ? "#ffffff" : "#11151d"); }
     if (window.MutationObserver) new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     paint();
     if ("serviceWorker" in navigator && window.isSecureContext) {
-      navigator.serviceWorker.register(BASE + "/sw.js").catch(function () { /* a browser that refuses: the page is still the page */ });
+      navigator.serviceWorker.register(BASE + "/sw.js?page=" + encodeURIComponent(page)).catch(function () { /* a browser that refuses: the page is still the page */ });
     }
     window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); prompt = e; render(); });
     window.addEventListener("appinstalled", function () { standalone = true; prompt = null; render(); });
@@ -3337,6 +3344,7 @@
     render();
   }
   installWire();
+  // ── end install ───────────────────────────────────────────────────────────
   wireLiveControl(BASE + "/live", readHeaders, refreshActive);
 })();
 </script>

@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import time
 import urllib.error
 from collections.abc import AsyncIterator, Callable
@@ -39,7 +40,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from hookprobe import (
     __version__,
@@ -1017,6 +1019,45 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
     async def ui() -> HTMLResponse:
         """The operator board."""
         return HTMLResponse(_UI_PAGE.read_text(encoding="utf-8"))
+
+    # The console as an app on a phone (2026-10-06), the same shell as the
+    # pipe's board: icons under /static, the service worker at the page's own
+    # level. The manifest is a route, not a file, and it is registered BEFORE
+    # the mount so it is the one that answers: a deployment runs several of
+    # these nodes, and three icons all called "hookprobe" on one home screen
+    # tell nobody which is which. The name is the node's, which only this
+    # process knows.
+    static = _UI_PAGE.with_name("static")
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
+
+    @app.get("/static/manifest.webmanifest", include_in_schema=False)
+    async def manifest() -> JSONResponse:
+        """The web manifest, named for this node; start URL and scope are relative, so a prefix keeps them."""
+        body = {
+            "name": settings.agent_name,
+            "short_name": settings.agent_name,
+            "description": settings.agent_role or "hookprobe's console",
+            "start_url": "../ui",
+            "scope": "../",
+            "display": "standalone",
+            "background_color": "#0b0e14",
+            "theme_color": "#11151d",
+            "icons": [
+                {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+                {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                {"src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            ],
+        }
+        return JSONResponse(body, media_type="application/manifest+json")
+
+    app.mount("/static", StaticFiles(directory=static), name="static")
+
+    @app.get("/sw.js", include_in_schema=False)
+    async def service_worker() -> FileResponse:
+        """The console's service worker: the page and the icons offline, never the data (static/sw.js)."""
+        headers = {"Cache-Control": "no-cache"}
+        return FileResponse(static / "sw.js", media_type="application/javascript", headers=headers)
 
     # The rest of the surface, grouped by what it is about. The event door takes
     # no token guard on purpose: it is authenticated by hookrelay's signature.

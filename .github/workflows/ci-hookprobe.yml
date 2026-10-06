@@ -53,7 +53,8 @@ jobs:
           const m = fs.readFileSync("hookprobe/ui.html", "utf8").match(/<script>([\s\S]*)<\/script>/);
           if (!m) { console.error("no inline script"); process.exit(1); }
           new Function(m[1]);
-          console.log("ui.html inline JS: OK");
+          new Function(fs.readFileSync("hookprobe/static/sw.js", "utf8"));
+          console.log("ui.html inline JS and sw.js: OK");
           '
       - name: shell scripts parse
         run: find examples scripts -name '*.sh' -print0 | xargs -0 -r -n1 bash -n

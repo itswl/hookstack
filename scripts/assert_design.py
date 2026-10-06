@@ -106,7 +106,22 @@ BLOCKS = (
         "// ── hookstack kit · keep this block identical in all three pages ──────────",
         "// ── end kit ───────────────────────────────────────────────────────────────",
     ),
+    # Added 2026-10-06. The pipe's board got its install wiring first and the
+    # other two were copied in by hand the day the operator put the
+    # investigator's console on a home screen and found no icon. Pinned so the
+    # third copy does not drift from the first two the way the token wiring did.
+    (
+        "install script",
+        "// ── install on a phone · keep this block identical in all three pages ─────",
+        "// ── end install ───────────────────────────────────────────────────────────",
+    ),
 )
+
+# Whole files copied between the services, byte for byte. The service worker
+# is one file because the three shells are one shape; the one page-specific
+# fact — which path is the page — reaches it in the query of its own URL, from
+# the page that registers it.
+FILES = (("service worker", tuple(page.parent / "static" / "sw.js" for page in PAGES)),)
 
 # A colour written into a page's CSS as a literal does not change with the
 # mode: it is the same grey on a white page as on a dark one. So outside the
@@ -282,6 +297,13 @@ def main() -> int:
             found[page] = block
         if len(set(found.values())) > 1:
             failures.append(f"{label}: the pages disagree — " + ", ".join(str(p) for p in found))
+    for label, copies in FILES:
+        texts = {copy: (root / copy).read_text(encoding="utf-8") for copy in copies if (root / copy).exists()}
+        for copy in copies:
+            if copy not in texts:
+                failures.append(f"{copy}: no {label}")
+        if len(set(texts.values())) > 1:
+            failures.append(f"{label}: the copies disagree — " + ", ".join(str(p) for p in texts))
 
     # The mode is chosen before the body paints, or a light system sees a dark
     # flash on every load; and no colour of a page's own may ignore the mode.
@@ -321,8 +343,8 @@ def main() -> int:
         print(f"\n{len(failures)} design assertion(s) failed")
         return 1
     print(
-        f"design: {len(BLOCKS)} shared blocks identical across {len(PAGES)} pages, both modes named through "
-        "variables, both languages carry every word asked for, no unsanctioned timers"
+        f"design: {len(BLOCKS)} shared blocks identical across {len(PAGES)} pages, {len(FILES)} shared file, "
+        "both modes named through variables, both languages carry every word asked for, no unsanctioned timers"
     )
     return 0
 

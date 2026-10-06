@@ -584,3 +584,28 @@ def test_the_audit_record_of_a_run(tmp_path) -> None:
     )
     assert [x["detail"] for x in rec["tool_calls"]] == ["kubectl get pods"], "other sessions' lines stay out"
     assert [x["detail"] for x in rec["denied"]] == ["kubectl delete pod x"]
+
+
+def test_the_console_installs_on_a_phone_under_the_nodes_own_name(tmp_path) -> None:
+    """The same shell as the pipe's board, and the manifest is a route: a
+    deployment runs several of these nodes, and a home screen with three icons
+    all called "hookprobe" tells nobody which is which."""
+    settings = make_settings(tmp_path, token=TOKEN, agent_name="watcher", agent_role="reads the chat")
+    with TestClient(create_app(settings, RunService(settings, FakeEngine(), RunStore(tmp_path / "results")))) as client:
+        manifest = client.get("/static/manifest.webmanifest")
+        assert manifest.status_code == 200
+        assert manifest.headers["content-type"].startswith("application/manifest+json")
+        data = manifest.json()
+        assert data["name"] == data["short_name"] == "watcher" and data["description"] == "reads the chat"
+        assert data["start_url"] == "../ui" and data["scope"] == "../" and data["display"] == "standalone"
+        assert {icon["purpose"] for icon in data["icons"]} == {"any", "maskable"}
+        for icon in data["icons"]:
+            assert client.get("/static/" + icon["src"]).status_code == 200, icon["src"]
+        worker = client.get("/sw.js")
+        assert worker.status_code == 200 and "no-cache" in worker.headers["cache-control"]
+        assert worker.headers["content-type"].startswith("application/javascript")
+        # The shell and nothing else: no data path is even named in it.
+        assert "/v1/" not in worker.text and "/sessions" not in worker.text
+        page = client.get("/ui").text
+        assert 'name="theme-color"' in page and 'name="apple-mobile-web-app-capable"' in page
+        assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page
