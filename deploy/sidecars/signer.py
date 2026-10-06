@@ -76,7 +76,7 @@ from typing import Any
 
 from common import HttpHandler, Ledger, constant_time_eq, sign_timestamped
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s watch-signer %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("watch-signer")
 
 # What the door does something different with. Anything else becomes `low`,
