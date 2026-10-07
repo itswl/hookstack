@@ -196,16 +196,27 @@ async def agent_token_cannot_write(settings: Settings) -> dict[str, Any]:
 
 async def posture_still_holds(settings: Settings) -> dict[str, Any]:
     """Re-measure the credentials NOW. /v1/posture reports the startup answer,
-    and a credential widened after boot moves nothing that anybody reads."""
+    and a credential widened after boot moves nothing that anybody reads.
+
+    The declared radius goes in WITH the measurement, or a writing node's
+    declaration is never judged here: without it `posture.check` has nothing
+    to compare against, the verdict is `recorded`, and this check passed
+    hourly for a node whose pinned credential grew. Measured 2026-10-06 —
+    the boot refusal was the only judge, so a credential widened while the
+    node ran was caught at the next restart and at no hour in between."""
     try:
-        record = await posture.check(settings.bash_guard)
+        record = await posture.check(settings.bash_guard, declared=posture.declared_radius(settings.blast_radius))
     except Exception as exc:  # noqa: BLE001
         return _check("credentials are no wider than the declared posture", False, f"could not measure: {exc}", "")
     verdict = str(record.get("verdict") or "")
+    detail = posture.summary(record)[:280]
+    beyond = record.get("beyond_declared") or []
+    if verdict == "wider-than-declared" and beyond:
+        detail = f"{detail} · beyond: {', '.join(str(item) for item in beyond)}"[:280]
     return _check(
         "credentials are no wider than the declared posture",
         verdict != "wider-than-declared",
-        posture.summary(record)[:280],
+        detail,
         "a credential whose far side cannot be asked — `unverifiable` is a verdict, not a pass",
     )
 

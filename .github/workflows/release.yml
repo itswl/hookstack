@@ -49,14 +49,16 @@ jobs:
         # Each service gates on the interpreter its own image ships, which is
         # why this carries a version per service rather than one for all three:
         # a gate that passes on a Python nobody deploys has proved less than it
-        # looks like. Keep each entry equal to that service's Dockerfile FROM.
+        # looks like. Keep each entry equal to that service's Dockerfile FROM;
+        # scripts/assert_python_pins.py reads both files and fails on the
+        # drift. hookprobe's entry said 3.12 while its image was 3.14.
         include:
           - service: hookrelay
             python: "3.14"
           - service: hookjudge
             python: "3.14"
           - service: hookprobe
-            python: "3.12"
+            python: "3.14"
     defaults:
       run:
         working-directory: ${{ matrix.service }}
