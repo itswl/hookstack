@@ -39,7 +39,6 @@
     --surface-2: #161b25; --hover: #19202c; --code: #080b10; --radius: 12px;
     --border-strong: #2c3544; --ring: #3a4352; --well: #0e1219; --code-text: #c3cad6;
     --topbar: rgba(11, 14, 20, .9); --scrim: rgba(3, 5, 9, .55); --scrim-strong: rgba(3, 5, 9, .62);
-    --statusbar: transparent;
     --sheen: rgba(255, 255, 255, .04);
     --shadow-drawer: -24px 0 60px rgba(0, 0, 0, .45); --shadow-card: 0 20px 60px rgba(0, 0, 0, .5);
     --shadow-toast: 0 10px 30px rgba(0, 0, 0, .4);
@@ -60,9 +59,6 @@
     --surface-2: #f1f4f8; --hover: #f4f7fb; --code: #f6f8fa;
     --border-strong: #c5cdd9; --ring: #c2cad6; --well: #f7f9fc; --code-text: #243042;
     --topbar: rgba(255, 255, 255, .88); --scrim: rgba(15, 23, 42, .28); --scrim-strong: rgba(15, 23, 42, .36);
-    /* iOS draws the clock white over a translucent bar whatever the page shows:
-       on the white page the strip under it is the dark page's surface. */
-    --statusbar: #11151d;
     --sheen: rgba(15, 23, 42, .05);
     --shadow-drawer: -18px 0 48px rgba(15, 23, 42, .14); --shadow-card: 0 18px 50px rgba(15, 23, 42, .18);
     --shadow-toast: 0 8px 24px rgba(15, 23, 42, .14);
@@ -109,14 +105,19 @@
   svg.i { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
 
   /* ── top bar: who this is, one search, the switches ── */
-  /* Under an installed app's status bar (2026-10-08). The bar is translucent —
-     the head says so, and iOS reads that once, at launch — so the page paints
-     the strip itself and its colour follows the theme live: the header grows
-     by the safe-area inset and lays --statusbar over that first inset of
-     height. The drawer, which covers the header when open, does the same;
-     the sides and the bottom clear the notch and the home indicator. */
-  .top { position: sticky; top: 0; z-index: 20; padding-top: env(safe-area-inset-top); background: linear-gradient(var(--statusbar), var(--statusbar)) top / 100% env(safe-area-inset-top) no-repeat, var(--topbar); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
-  .top-in { max-width: 1280px; margin: 0 auto; padding: 10px max(24px, env(safe-area-inset-right)) 10px max(24px, env(safe-area-inset-left)); display: flex; align-items: center; gap: 18px; }
+  /* What the system covers of the page (2026-10-08): a status bar above, a home
+     indicator below, the notch at the sides when turned. An installed app's
+     status bar is translucent (the head says so; iOS reads it once, at launch),
+     so the header grows by the inset and draws under the bar in its own colour,
+     and the clock follows the page's color-scheme: a light page gets a dark
+     clock, a dark page a light one — nothing is painted for the bar itself. The
+     layout keeps clear of the edges through these four variables and never
+     env() directly: env() is the browser's answer where it gives one, and the
+     install block measures and overwrites the top and the bottom where an
+     installed app draws under the bar and reports nothing. */
+  :root { --safe-top: env(safe-area-inset-top); --safe-right: env(safe-area-inset-right); --safe-bottom: env(safe-area-inset-bottom); --safe-left: env(safe-area-inset-left); }
+  .top { position: sticky; top: 0; z-index: 20; padding-top: var(--safe-top); background: var(--topbar); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  .top-in { max-width: 1280px; margin: 0 auto; padding: 10px max(24px, var(--safe-right)) 10px max(24px, var(--safe-left)); display: flex; align-items: center; gap: 18px; }
   .brand { display: flex; align-items: center; gap: 10px; color: var(--text); white-space: nowrap; }
   .brand:hover { text-decoration: none; }
   .brand b { font-size: 16px; letter-spacing: .01em; }
@@ -132,7 +133,7 @@
   .top-right { display: flex; align-items: center; gap: 8px; }
   .stamp { color: var(--muted); font-size: 12px; font-family: var(--mono); white-space: nowrap; }
 
-  .wrap { max-width: 1280px; margin: 0 auto; padding: 18px max(24px, env(safe-area-inset-right)) 80px max(24px, env(safe-area-inset-left)); }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 18px max(24px, var(--safe-right)) 80px max(24px, var(--safe-left)); }
   .wrap > .tabs { margin: 0 0 20px; }
   .tabs .tab { display: inline-flex; align-items: center; gap: 7px; }
   .tab .count.warn { color: var(--warn); }
@@ -252,7 +253,7 @@
   /* ── drawers: one item's whole story, and the settings ── */
   .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 30; }
   .scrim.on { opacity: 1; pointer-events: auto; }
-  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(840px, 100vw); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); background: linear-gradient(var(--statusbar), var(--statusbar)) top / 100% env(safe-area-inset-top) no-repeat, var(--bg); border-left: 1px solid var(--border); transform: translateX(104%); transition: transform .22s ease; z-index: 31; display: flex; flex-direction: column; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(840px, 100vw); padding: var(--safe-top) 0 var(--safe-bottom); background: var(--bg); border-left: 1px solid var(--border); transform: translateX(104%); transition: transform .22s ease; z-index: 31; display: flex; flex-direction: column; }
   /* The shadow only while open: parked off-screen, it would still fall across the
      page's right edge, invisible on dark and a grey band on white. */
   .drawer.on { transform: none; box-shadow: var(--shadow-drawer); }
@@ -335,7 +336,7 @@
   .modal-card .body { color: var(--muted); font-size: 13.5px; line-height: 1.6; }
   .modal-card .body p { margin: 0 0 8px; }
   .modal-card .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-  .toasts { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom)); display: grid; gap: 8px; z-index: 50; }
+  .toasts { position: fixed; right: 20px; bottom: calc(20px + var(--safe-bottom)); display: grid; gap: 8px; z-index: 50; }
   .toast { display: flex; align-items: center; gap: 10px; min-width: 240px; max-width: 440px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); box-shadow: var(--shadow-toast); font-size: 13px; cursor: pointer; animation: toast-life 5s ease forwards; }
   .toast.ok svg.i { color: var(--ok); } .toast.bad svg.i { color: var(--bad); }
   @keyframes toast-life { 0% { opacity: 0; transform: translateY(8px); } 6% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; transform: translateY(4px); } }
@@ -359,7 +360,7 @@
     .brand-sub { display: none; }
   }
   @media (max-width: 640px) {
-    .top-in, .wrap { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+    .top-in, .wrap { padding-left: max(12px, var(--safe-left)); padding-right: max(12px, var(--safe-right)); }
     .top-in { flex-wrap: wrap; gap: 10px; }
     .search { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
     .top-right { margin-left: auto; }
@@ -3351,14 +3352,49 @@
     // colour of the theme it shows and drops the media, reading the colour from
     // the design tokens rather than keeping a copy here. That is Safari, Android
     // and a desktop app. An iOS home-screen app reads its status bar ONCE, at
-    // launch, and ignores this afterwards — so there the bar is translucent and
-    // the header paints the strip under the clock itself (--statusbar).
+    // launch, and ignores this afterwards — so there the bar is translucent, the
+    // header draws under it in its own colour, and the clock follows the page's
+    // color-scheme (the design tokens set it with the theme).
     function paint() {
       var colour = getComputedStyle(document.documentElement).getPropertyValue("--surface").trim();
       var metas = document.querySelectorAll('meta[name="theme-color"]');
       for (var i = 0; colour && i < metas.length; i++) { metas[i].removeAttribute("media"); metas[i].setAttribute("content", colour); }
     }
     if (window.MutationObserver) new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    // What the system covers of the page. env() is the browser's answer where it
+    // gives one — but an installed app with a translucent status bar draws under
+    // the bar and the home indicator and can report every inset as zero, and then
+    // the header sits beneath the clock with nothing to tap. There the page is as
+    // tall as the whole screen while something is drawn over it, which is what
+    // this detects; the bar's height has to be assumed, since nothing reports it:
+    // a screen nearly twice as tall as it is wide is one of the tall phones (a
+    // 44pt bar, a 34pt indicator), anything else an older one (20pt, none). Once
+    // per size change, never while scrolling: a static padding cannot oscillate
+    // with the system the way a correction applied to the scroll position did.
+    function safeInsets() {
+      var probe = document.createElement("div");
+      probe.style.cssText = "position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
+      document.body.appendChild(probe);
+      var cs = getComputedStyle(probe), px = function (v) { return Math.round(parseFloat(v) || 0); };
+      var out = { top: px(cs.paddingTop), right: px(cs.paddingRight), bottom: px(cs.paddingBottom), left: px(cs.paddingLeft) };
+      probe.remove();
+      return out;
+    }
+    function applySafeInsets() {
+      var env = safeInsets(), top = env.top, bottom = env.bottom;
+      var portrait = window.innerHeight >= window.innerWidth;
+      var screenHeight = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+      if (standalone && window.innerHeight >= screenHeight - 1 && !top) {
+        var tall = Math.max(screen.width, screen.height) / Math.min(screen.width, screen.height) >= 1.9;
+        top = tall ? 44 : 20;
+        if (!bottom && tall) bottom = 34;
+      }
+      document.documentElement.style.setProperty("--safe-top", top + "px");
+      document.documentElement.style.setProperty("--safe-bottom", bottom + "px");
+    }
+    applySafeInsets();
+    window.addEventListener("resize", applySafeInsets);
+    window.addEventListener("orientationchange", applySafeInsets);
     paint();
     if ("serviceWorker" in navigator && window.isSecureContext) {
       navigator.serviceWorker.register(BASE + "/sw.js?page=" + encodeURIComponent(page)).catch(function () { /* a browser that refuses: the page is still the page */ });

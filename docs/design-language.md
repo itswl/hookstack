@@ -128,11 +128,16 @@ cannot see a pick. An installed iOS app is the exception: it reads its status
 bar once, at launch, ignores `theme-color` afterwards, and the `default` style
 follows the device's appearance rather than the page's — a board switched to
 the other theme kept the old bar until relaunch. So there the bar is
-translucent and the header paints the strip under the clock itself, growing
-by the safe-area inset; `viewport-fit=cover` and the `env(safe-area-inset-*)`
-paddings are one decision, not two. iOS draws the clock white over a
-translucent bar whatever the page shows, so the light theme's strip is the
-dark surface. And on a phone every field types at 16px: iOS zooms the page
+translucent and the header grows by the safe-area inset and draws under the
+bar in its own colour; the clock follows the page's color-scheme, which the
+design tokens set with the theme, so a light page gets a dark clock and a dark
+page a light one. Nothing is painted for the bar itself: a dark strip was tried
+first and sat under a dark clock. `viewport-fit=cover` and the safe-area
+paddings are one decision, not two — and the paddings read four variables,
+never `env()` directly, because an installed app can draw under the bar and
+report every inset as zero; the install block measures them and, where it
+must, assumes the bar's height from the screen's shape. On a phone every field
+types at 16px: iOS zooms the page
 in to a smaller one when it takes focus, and does not zoom back.
 
 Before this the same palette sat under three idioms — tabs, a help link that

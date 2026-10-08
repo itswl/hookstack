@@ -110,3 +110,19 @@ requires the opposite and the CSS half that goes with it.
 
 The same day, every field types at 16px on a phone: iOS zooms the page in to a
 field whose text is smaller when it takes focus, and does not zoom back out.
+
+## Corrected again the same evening
+
+The first screenshot back showed the dark strip for what it was: a band
+floating above the header, and the clock dark — on this phone the status bar's
+glyphs follow the page's `color-scheme`, not a fixed white, so the strip was
+built on a four-year-old table. The operator's other installed board does it
+plainly and has for a while: the header grows by the inset and draws under the
+bar in its own colour, nothing painted for the bar. Ported here, with its
+harder-won half: the safe-area paddings read four variables that default to
+`env()` and that the install block overwrites from a measurement, because an
+installed app with a translucent bar can draw under it and report every inset
+as zero; where it does, the bar's height is assumed from the screen's shape
+(44pt and 34pt on a tall phone, 20pt and none on an older one), once per size
+change. `--statusbar` is gone; `scripts/assert_design.py` asks for the
+variables and the measurement instead.
