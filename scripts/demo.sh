@@ -46,7 +46,11 @@ pcurl() { curl -sf -H "Authorization: Bearer $ptoken" "$@"; }
 # Both compose files name the project `hookstack`, so the sink's log is readable
 # without knowing which file started the stack. With no docker on this machine
 # the press below falls back to the console's own door.
-sink_log() { docker compose -p hookstack logs --no-log-prefix sink 2>/dev/null || docker logs hs-sink 2>/dev/null || true; }
+# By container name first: the compose files pin it (hs-sink), while a compose
+# project name depends on the directory the stack was started from, and
+# `docker compose logs` for a project that does not exist answers 0 with no
+# output, which hid every card from a clone under another directory name.
+sink_log() { docker logs hs-sink 2>/dev/null || docker compose -p hookstack logs --no-log-prefix sink 2>/dev/null || true; }
 field() { python3 -c 'import sys, json
 try: print(json.load(sys.stdin).get(sys.argv[1], "") or "")
 except Exception: print("")' "$1"; }
@@ -149,9 +153,16 @@ else
   echo "no approve button reached the sink for this card. Either the sink's log is not readable from here, or the"
   echo "button was withheld on purpose: a target another procedure acted on in the last 15 minutes gets no button"
   echo "(the remediation cooldown — run this demo twice in a row and you will see it)."
-  echo "Pressing the console's own door instead; it makes the same checks and says why when it refuses:"
+  echo "Pressing the console's own door instead; it makes the same checks and says why when it refuses."
+  echo "Like the console page, the press names the version of the proposal it read: the digest the list gave."
+  body="$(PROPOSALS="$proposals" PID="$pid" python3 - <<'PY'
+import json, os
+row = next(r for r in json.loads(os.environ["PROPOSALS"])["proposals"] if r["id"] == os.environ["PID"])
+print(json.dumps({"note": "approved from the console by the demo", "hash": row.get("hash", "")}))
+PY
+)"
   code="$(curl -s -o /tmp/hookstack-demo-answer -w '%{http_code}' -X POST "$probe/v1/remediations/$pid/approve" \
-    -H "Authorization: Bearer $ptoken" -H 'content-type: application/json' -d '{"note":"approved from the console by the demo"}')"
+    -H "Authorization: Bearer $ptoken" -H 'content-type: application/json' -d "$body")"
   python3 -m json.tool < /tmp/hookstack-demo-answer || cat /tmp/hookstack-demo-answer
   [ "$code" = "200" ] && approved=1
   [ "$approved" = "1" ] && echo "(a console press carries no person: the pipe's ledger will show nobody behind it)"
