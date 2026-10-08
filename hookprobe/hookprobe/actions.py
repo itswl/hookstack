@@ -89,7 +89,12 @@ def followup_prompt(run: Run) -> str:
 
 
 def declare(
-    run: Run, workdir: Path, *, cooldown: int = remediation.COOLDOWN_SECONDS, hands_off: bool = False
+    run: Run,
+    workdir: Path,
+    *,
+    cooldown: int = remediation.COOLDOWN_SECONDS,
+    hands_off: bool = False,
+    armed: bool = True,
 ) -> list[dict[str, Any]]:
     """Which actions this report deserves — the judgement, not the buttons.
 
@@ -138,7 +143,10 @@ def declare(
                 "prompt": followup_prompt(run),
             }
         )
-    for row in _open_proposals(run, workdir, cooldown=cooldown):
+    # Not on a node with no allowlist: every press there is refused with "no
+    # allowlist configured", so the button would be one that cannot work. The
+    # console still shows the proposal and says why; the card stays honest.
+    for row in _open_proposals(run, workdir, cooldown=cooldown) if armed else []:
         # The digest rides in the pipe's signed token beside the ref, taken from
         # the same row as the command the button names: the press approves that
         # version of the proposal and no other (remediation.content_hash).

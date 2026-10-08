@@ -71,10 +71,17 @@ def _mint_card_actions(message: dict[str, Any], cfg: Config, settings: Settings,
         return
     raw_meta = payload.get("meta")
     meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+    # Only kinds a press on THIS card could reach: one routed by source offers
+    # no button on a card from a door it has no channel for.
+    source = str(message.get("source") or "")
     payload["actions"] = actions.offered(
         settings.action_secret,
         [item for item in declared if isinstance(item, dict)],
-        {kind: {"params": spec.params} for kind, spec in cfg.card_actions.items()},
+        {
+            kind: {"params": spec.params}
+            for kind, spec in cfg.card_actions.items()
+            if kind == "silence" or spec.channel_for(source)
+        },
         event_id=int(message["event_id"]),
         # The brain's correlation_id points at the ORIGINAL alert; this row is
         # the verdict's own event. A button means "act on the alert", so the

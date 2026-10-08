@@ -488,6 +488,16 @@ kinds, a `forward_to` naming no channel, and any non-`silence` kind without a
 `forward_to` all fail **at boot** — a button that 404s when an operator finally
 presses it is worse than no button.
 
+A kind can instead be routed by the door its card came in through,
+`forward_by_source: {<source>: <channel>}` — for `approve` on a deployment with
+more than one investigator, where a proposal lives in the workdir of the node
+that parked it and the press must go back there. The card gets the button only
+when its door has an entry, a press for a door without one answers 409 before
+its token is spent, and a kind takes `forward_to` or `forward_by_source`, not
+both; the doors and channels it names are checked at boot like every other
+name. The work deployment routes `approve` from `work-notify` to the runner's
+action door and offers it on no other card.
+
 `handoff` is the work shape's approval: a planner that is wired to a handoff
 door (`HOOKPROBE_HANDOFF_URL`) declares it on every finished plan, and the
 press does exactly what the console's *Hand off* button does — posts the plan,

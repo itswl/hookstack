@@ -354,6 +354,14 @@ channels:
     secret: ${PLAN_EVENT_SECRET}
     options: {payload: raw}
 
+  # The work runner's ACTION door, the same shape as the planner's above: one
+  # node, one secret. It carries `approve` from the runner's own cards.
+  - name: to-work-action
+    type: generic
+    url: http://probe-work:8088/hooks/action
+    secret: ${WORK_EVENT_SECRET}
+    options: {payload: raw}
+
   - name: to-watcher
     type: generic
     url: http://probe-watch:8088/hooks/event
@@ -517,13 +525,13 @@ pipeline:
     on_new_topic: {kind: task, level: high}
   - routes
 
-# The only card kind this file mints is the planner's handoff (below). The
-# work deployment's approve press is its CONSOLE — probe-work's, behind the
-# doors ingress — not a card button: a card-action kind forwards to exactly
-# ONE channel, so one `approve` entry cannot serve both the planner's and the
-# runner's proposals, and pointing it at the wrong node answers the press with
-# a 404 the pipe dead-letters. A card-borne approve for the runner needs the
-# kind split in hookrelay first
+# Two kinds of button: the planner's handoff, and `approve` on the work
+# runner's cards. A proposal lives in the workdir of the node that parked it, so
+# `approve` is routed by the door the card came through (forward_by_source,
+# 2026-10-08): a press on a card from work-notify goes back to probe-work and
+# nowhere else. The planner parks proposals too, but nothing executes there, so
+# its cards get no approve. The runner offers the button only once its
+# allowlist has a rule; until then the console shows the proposal and says why
 # (.agents/notes/implemented/2026-10-06-arming-the-work-executor.md).
 
 # Buttons on the planner's cards. Only with HOOKRELAY_ACTION_SECRET set
@@ -536,3 +544,6 @@ pipeline:
 card_actions:
   handoff:
     forward_to: to-plan-action
+  approve:
+    forward_by_source:
+      work-notify: to-work-action

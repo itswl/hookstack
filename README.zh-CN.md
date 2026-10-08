@@ -71,6 +71,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts
 
 ## 开发
 
-`bash scripts/gate.sh` 会跑每个服务的 gate 和整个栈的检查。提交前读它的结论。管道的源码上限是 6,000 行，判官 3,400 行，调查员不设上限。
+`bash scripts/gate.sh` 会跑每个服务的 gate 和整个栈的检查。提交前读它的结论。管道的源码上限是 6,050 行，判官 3,400 行，调查员不设上限。
 
 MIT 协议。

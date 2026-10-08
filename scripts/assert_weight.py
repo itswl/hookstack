@@ -275,7 +275,15 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # you" / "resolved" from the pipe's own books. The board itself
     # (status.html) is outside this number and was rebuilt around seven fixed
     # stages of one alert's journey; nothing in it calls any other service.
-    "hookrelay": (6000, Path("hookrelay/README.md")),
+    # 6000 -> 6050 on 2026-10-08, for a card action routed by the door its card
+    # came through. Split: +38 source, **+25 code**, so the doctrine question
+    # applies, and the answer is routing: the pipe already decided where a press
+    # goes (`forward_to`); one `approve` now has to serve nodes whose proposals
+    # live in their own workdirs, so the press follows its card back to the door
+    # the card came in through, a button is drawn only where that lands, and a
+    # press for a door with no channel is refused before its token is spent.
+    # Receive, route, deliver, account — nothing reads a payload to decide it.
+    "hookrelay": (6050, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

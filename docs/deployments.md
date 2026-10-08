@@ -134,12 +134,13 @@ nothing, they make the operator's files nameable at all. The files live in
 `hookprobe/deploy/operator/` (git-ignored; `remediation-allowlist.example`
 beside them says how to write one) and are mounted read-only at
 `/etc/hookprobe/operator/` on `probe-work` alone — the write node, the one place
-an approved procedure can change anything. The approve press for a procedure
-parked there is the **console** (`127.0.0.1:8090`, phone-installable with the
-other boards); a card-borne approve would need the kind split in the pipe first,
-because a card-action kind forwards to exactly one channel. A scoped credential
-and one allowlisted line complete the first real remediation; until both exist
-the knobs stay empty and nothing runs.
+an approved procedure can change anything. A procedure parked there is
+approved on the runner's own card since 2026-10-08 — the pipe routes `approve`
+by the door the card came in through, so the press goes back to `probe-work` —
+or in its console (`127.0.0.1:8090`); the card offers the button only once the
+runner's allowlist has a rule. A scoped credential and one allowlisted line
+complete the first real remediation; until both exist the knobs stay empty and
+nothing runs.
 
 ## Four decisions that differ, and why
 
