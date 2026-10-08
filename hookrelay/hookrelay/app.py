@@ -874,6 +874,25 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 )
         return {"window_hours": window, "checked": len(rows), **counts, "cards": unseen_rows}
 
+    @app.get("/attention", dependencies=[Depends(_read_guard)])
+    async def attention(hours: int = 168) -> dict[str, Any]:
+        """When a card reached a person, and when a person pressed one: the two
+        numbers the weekly page holds against pilot zero. A card is a delivery
+        sent on a bridge, the channel a person reads; a press is a row in
+        card_actions, the only evidence this service has that a person was
+        there. Times and kinds, never who: the page does the arithmetic, and
+        the night in its operator's own time zone."""
+        since = now_ts() - max(1, min(hours, 24 * 35)) * 3600
+        bridges = {name for name, ch in app.state.config.channels.items() if ch.type == "bridge"}
+        pressed = [a for a in await app.state.store.recent_actions(500) if float(a["pressed_at"]) >= since]
+        return {
+            "since": since,
+            "cards": [d["sent_at"] for d in await app.state.store.sent_since(since) if d["channel"] in bridges],
+            "presses": [{"kind": a["kind"], "pressed_at": a["pressed_at"]} for a in pressed],
+            "people": len({a["actor"] for a in pressed if a["actor"]}),
+            "capped": len(pressed) >= 500,
+        }
+
     @app.get("/trace/{ref}", dependencies=[Depends(_read_guard)])
     async def round_trip(
         ref: str,

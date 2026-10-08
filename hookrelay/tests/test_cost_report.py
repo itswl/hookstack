@@ -479,3 +479,46 @@ def test_the_loudest_condition_is_named_beside_the_wake_count() -> None:
 
     page = cost_report.render(cost_report.compute(JUDGE, None, None, None, hours=168, now=NOW))
     assert "Loudest condition" not in page, "no listing, no claim"
+
+
+def test_the_week_is_held_against_pilot_zero_in_the_operators_own_night() -> None:
+    """Cards that reached a person and presses a person made, the two numbers
+    step 4 has to move. The night is 23:00-07:00 where the operator lives: a
+    card at 16:30 UTC is 00:30 in +0800, and that is the card that woke them."""
+    day = 1_760_000_000 - 1_760_000_000 % 86400  # a UTC midnight
+    cards = [day + 16.5 * 3600, day + 20 * 3600, day + 10 * 3600, day + 12 * 3600]
+    body = {
+        "cards": cards,
+        "presses": [{"kind": "approve"}, {"kind": "approve"}, {"kind": "silence"}],
+        "people": 1,
+        "capped": False,
+    }
+    east = cost_report.reach_metrics(body, offset=8 * 3600)
+    assert (east["cards"], east["night"], east["presses"], east["people"]) == (4, 2, 3, 1)
+    assert cost_report.reach_metrics(body, offset=0)["night"] == 0, "the same four are daytime in UTC"
+    report = cost_report.compute(None, None, None, None, attention=body, offset=8 * 3600, hours=168, now=NOW)
+    page = cost_report.render(report)
+    assert "**Reached a person**: 4 cards, 2 of them between 23:00 and 07:00 (50%)" in page
+    assert "pilot zero: 138, 13, 167, 354, 59 a week, about a third at night" in page
+    assert "**Pressed by a person**: 3 presses by 1 person (approve 2, silence 1) · pilot zero: 9, 0, 0, 0, 0" in page
+
+
+def test_a_quiet_week_and_an_unread_pipe_are_different_sentences() -> None:
+    quiet = {"cards": [], "presses": [], "people": 0, "capped": False}
+    page = cost_report.render(cost_report.compute(None, None, None, None, attention=quiet, hours=168, now=NOW))
+    assert "**Reached a person**: no card this week" in page
+    assert "**Pressed by a person**: nothing this week" in page and "—%" not in page.split("## Attention")[1][:400]
+    unread = cost_report.render(cost_report.compute(None, None, None, None, hours=168, now=NOW))
+    assert "**Reached a person**: _Not read" in unread and "no card this week" not in unread
+
+
+def test_the_night_is_read_in_a_zone_the_operator_wrote_or_this_machines() -> None:
+    assert cost_report.utc_offset("+0800") == 8 * 3600
+    assert cost_report.utc_offset("-05:30") == -(5 * 3600 + 30 * 60)
+    assert isinstance(cost_report.utc_offset(""), int)
+    try:
+        cost_report.utc_offset("CST")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a zone name is ambiguous; only an offset is accepted")

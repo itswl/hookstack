@@ -53,11 +53,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Any
+
+# What a week on this page is held against until a deployment has a history of
+# its own: pilot zero, W34-W38, read back on 2026-09-28 from the retired
+# deployment's ledgers (.agents/notes/proposed/2026-09-28-pilot-zero-read-back-
+# and-the-order-of-the-next-ninety-days.md). Cards that reached a person, a week;
+# about a third of them between 23:00 and 07:00. Presses by a person, a week.
+PILOT_ZERO_CARDS = (138, 13, 167, 354, 59)
+PILOT_ZERO_PRESSES = (9, 0, 0, 0, 0)
 
 
 def _get(url: str, token: str) -> dict | list | None:
@@ -150,6 +159,38 @@ def work_metrics(work: dict | None, proposals: list | None, *, hours: float, now
     }
 
 
+def utc_offset(text: str) -> int:
+    """'+0800' or '-05:30' as seconds east of UTC; '' is this machine's own zone."""
+    if not text.strip():
+        return time.localtime().tm_gmtoff
+    match = re.fullmatch(r"([+-])(\d{2}):?(\d{2})", text.strip())
+    if not match:
+        raise ValueError(f"not a UTC offset like +0800: {text!r}")
+    seconds = int(match[2]) * 3600 + int(match[3]) * 60
+    return seconds if match[1] == "+" else -seconds
+
+
+def reach_metrics(body: dict | None, *, offset: int) -> dict[str, Any] | None:
+    """The pipe's two attention numbers from its /attention: cards that reached
+    a person, how many at night (23:00-07:00 in the operator's zone, the window
+    pilot zero's "a third at night" was counted in), and presses by a person."""
+    if not isinstance(body, dict):
+        return None
+    sent = [float(t) for t in body.get("cards") or []]
+    kinds: dict[str, int] = {}
+    for press in body.get("presses") or []:
+        kind = str(press.get("kind") or "?")
+        kinds[kind] = kinds.get(kind, 0) + 1
+    return {
+        "cards": len(sent),
+        "night": sum(1 for t in sent if not 7 <= time.gmtime(t + offset).tm_hour < 23),
+        "presses": sum(kinds.values()),
+        "people": int(body.get("people") or 0),
+        "kinds": dict(sorted(kinds.items(), key=lambda kv: -kv[1])),
+        "capped": bool(body.get("capped")),
+    }
+
+
 def compute(
     judge: dict | None,
     timeline: dict | None,
@@ -160,11 +201,13 @@ def compute(
     proposals: list | None = None,
     nodes: dict | None = None,
     declines: dict | None = None,
+    attention: dict | None = None,
+    offset: int = 0,
     hours: float,
     now: float,
 ) -> dict[str, Any]:
     """Every figure the page prints, from the raw API bodies. Pure."""
-    report: dict[str, Any] = {"hours": hours, "generated_at": now}
+    report: dict[str, Any] = {"hours": hours, "generated_at": now, "reach": reach_metrics(attention, offset=offset)}
     if work is not None or proposals is not None:
         report["work"] = work_metrics(work, proposals, hours=hours, now=now)
     if nodes is not None:
@@ -555,8 +598,34 @@ def render(r: dict[str, Any]) -> str:
             )
     a = (j or {}).get("attention")
     out += ["", "## Attention", ""]
+    reach = r.get("reach")
+    if not reach:
+        out.append("- **Reached a person**: _Not read (no pipe URL/token, or unreachable)._")
+    else:
+        week = ", ".join(str(n) for n in PILOT_ZERO_CARDS)
+        presses = ", ".join(str(n) for n in PILOT_ZERO_PRESSES)
+        kinds = ", ".join(f"{kind} {n}" for kind, n in reach["kinds"].items())
+        people = f"{reach['people']} {'person' if reach['people'] == 1 else 'people'}"
+        out += [
+            "- **Reached a person**: "
+            + (
+                f"{reach['cards']} card{'s' if reach['cards'] != 1 else ''}, {reach['night']} of them "
+                f"between 23:00 and 07:00 ({_pct(reach['night'], reach['cards'])})"
+                if reach["cards"]
+                else "no card this week"
+            )
+            + f" · pilot zero: {week} a week, about a third at night",
+            "- **Pressed by a person**: "
+            + (
+                f"{reach['presses']} press{'es' if reach['presses'] != 1 else ''} by {people} ({kinds})"
+                if reach["presses"]
+                else "nothing this week"
+            )
+            + (" · the listing hit its cap, so there were more" if reach["capped"] else "")
+            + f" · pilot zero: {presses}",
+        ]
     if not a:
-        out.append("_Not read._")
+        out.append("- **The judge's view**: _Not read._")
     else:
         out += [
             f"- **Interruptions**: {a['interruptions']} across {a['conditions']} conditions · repeats {a['repeats']} ({_pct(a['repeats'], a['interruptions'])}) · likely flapping {a['likely_flapping']}",
@@ -717,6 +786,12 @@ def main() -> int:
         help="a shadow arm's URL; repeatable",
     )
     ap.add_argument("--hours", type=float, default=168.0)
+    ap.add_argument(
+        "--utc-offset",
+        type=utc_offset,
+        default="",
+        help="the operator's zone for the night count, like +0800; default this machine's",
+    )
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
     now = time.time()
@@ -740,6 +815,14 @@ def main() -> int:
     timeline = (
         _get(
             f"{args.relay.rstrip('/')}/timeline?limit=500",
+            os.environ.get("HOOKRELAY_READ_TOKEN", ""),
+        )
+        if args.relay
+        else None
+    )
+    attention = (
+        _get(
+            f"{args.relay.rstrip('/')}/attention?hours={int(args.hours)}",
             os.environ.get("HOOKRELAY_READ_TOKEN", ""),
         )
         if args.relay
@@ -796,6 +879,8 @@ def main() -> int:
         proposals=proposals if isinstance(proposals, list) else None,
         nodes=nodes,
         declines=declines if isinstance(declines, dict) else None,
+        attention=attention if isinstance(attention, dict) else None,
+        offset=args.utc_offset,
         hours=args.hours,
         now=now,
     )

@@ -32,7 +32,7 @@ run=(docker compose -p hookstack-shadow --env-file .env -f deploy/docker-compose
   run --rm --no-deps -T -v "$ROOT/scripts:/scripts:ro")
 
 "${run[@]}" -e "HOOKRELAY_READ_TOKEN=$RELAY_TOKEN" -e "HOOKJUDGE_READ_TOKEN=$JUDGE_TOKEN" -e "HOOKPROBE_TOKEN=$PROBE_TOKEN" \
-  hookjudge python3 /scripts/cost_report.py \
+  hookjudge python3 /scripts/cost_report.py --utc-offset "$(date +%z)" \
   --relay http://hookrelay:8100 --judge http://hookjudge:8200 --probe http://hookprobe:8088 > "$page"
 echo "wrote $page ($(wc -l < "$page") lines)"
 
@@ -40,8 +40,8 @@ echo "wrote $page ($(wc -l < "$page") lines)"
 signal="$(python3 - "$page" "$stamp" <<'PY'
 import json, re, sys
 page, stamp = open(sys.argv[1], encoding="utf-8").read(), sys.argv[2]
-keep = ("Measured", "Priced", "Golden gate", "Kept from a person", "Loudest condition", "Counterfactual",
-        "Declined at the door", "Budget", "The posture refused", "Worth")
+keep = ("Reached a person", "Pressed by a person", "Measured", "Priced", "Golden gate", "Kept from a person",
+        "Loudest condition", "Counterfactual", "Declined at the door", "Budget", "The posture refused", "Worth")
 lines, section = [], ""
 for raw in page.splitlines():
     if raw.startswith("## "):
