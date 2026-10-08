@@ -380,12 +380,15 @@ routes:
 # Recoveries ride along by inheritance: a resolution card for a firing nobody
 # was interrupted for would be the same interruption one step later.
 # `fold` after it: a verdict the judge DID mark for a person is delivered once
-# per condition per hour, and the repeats inside that hour are skipped by name
-# (skip_code folded, each naming the card it folded into). Measured on this
-# deployment's own ledger before the stage existed: 731 wake=yes cards in five
-# weeks, 54% of them repeats inside an hour of a card already sent, and one
-# rule was 65% of every interruption. A recovery is never folded. The digest
-# at the hour's end — "N more, folded" — is the next step, not this one.
+# per condition per window, and the repeats inside it are skipped by name
+# (skip_code folded, each naming the card it folded into). The window is an
+# hour, doubling with each card a condition that keeps coming back costs, up to
+# four. A recovery the person is waiting for goes at once. A firing held after
+# a recovery card goes an hour later unless a recovery follows it, so the last
+# card never says "ended" about a condition that came back. The card that goes
+# counts the repeats it stands for. Replayed on this deployment's own ledger,
+# 731 wake=yes cards in five weeks with one rule 65% of them: 55% fewer cards,
+# five of them sent by that hour-later rule.
 pipeline:
   - name: quiet-wake-no
     type: filter
@@ -408,6 +411,7 @@ pipeline:
     type: fold
     when: {source: judge-notify, wake: "yes"}
     window_seconds: 3600
+    max_window_seconds: 14400
     skip_code: folded
   - silence
   # Which card was this reply under, and which chain and investigation is that?

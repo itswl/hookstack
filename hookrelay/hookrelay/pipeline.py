@@ -17,7 +17,7 @@ import httpx
 from hookrelay import metrics, registry
 from hookrelay.config import Config, Source
 from hookrelay.extract import extract_event, fingerprint
-from hookrelay.processors import EventContext, Runtime
+from hookrelay.processors import EventContext, Runtime, fold_digest, fold_look_back, fold_options
 from hookrelay.settings import Settings
 from hookrelay.store import Store
 
@@ -64,16 +64,12 @@ async def handle_hook(
         ctx.steps.append({"gate": "correlate", "with": quoted})
     rt = Runtime(store=store, config=cfg, settings=settings, http_client=client, dry_run=dry_run)
 
-    for stage in cfg.pipeline:
-        processor = registry.PROCESSORS[stage.type]
-        options = dict(stage.options)
-        options["_name"] = stage.name
-        verdict, detail = await processor.run(rt, ctx, options)
-        if verdict == "skip":
-            if dry_run:
-                return {"dry_run": True, "outcome": "skipped", "skip_code": str(detail), "steps": ctx.steps}
-            event_id = await _record(store, ctx, "skipped", str(detail), [])
-            return {"event_id": event_id, "outcome": "skipped", "skip_code": str(detail), "steps": ctx.steps}
+    skipped = await _walk(rt, ctx, cfg.pipeline)
+    if skipped is not None:
+        if dry_run:
+            return {"dry_run": True, "outcome": "skipped", "skip_code": skipped, "steps": ctx.steps}
+        event_id = await _record(store, ctx, "skipped", skipped, [])
+        return {"event_id": event_id, "outcome": "skipped", "skip_code": skipped, "steps": ctx.steps}
 
     if not ctx.channels:
         if dry_run:
@@ -147,3 +143,75 @@ async def _record(store: Store, ctx: EventContext, outcome: str, skip_code: str 
     await store.insert_decision(event_id, outcome, skip_code, channels, ctx.steps)
     metrics.record_event(ctx.source.name, skip_code or outcome)
     return event_id
+
+
+async def _walk(rt: Runtime, ctx: EventContext, stages: Any) -> str | None:
+    """Run the stages in order; the skip code of the first that skips, else None."""
+    for stage in stages:
+        options = dict(stage.options)
+        options["_name"] = stage.name
+        verdict, detail = await registry.PROCESSORS[stage.type].run(rt, ctx, options)
+        if verdict == "skip":
+            return str(detail)
+    return None
+
+
+async def settle_folds(
+    store: Store, cfg: Config, now: float, *, settings: Settings | None = None, client: httpx.AsyncClient | None = None
+) -> int:
+    """Send the folded firing a person was never told about; how many went.
+
+    The fold stage holds a firing that follows a recovery card inside the window
+    (hookrelay/processors.py, FoldProcessor). If no recovery follows it within a
+    base window and no card has gone since, the condition came back and stayed
+    while the person's last card said it had ended — so the first such firing
+    walks the stages after the fold, the same walk an arriving event takes, and
+    goes with the count of what it stands for. Later firings do not restart the
+    clock: a condition that comes back and keeps firing is told once, a window
+    after it came back. A silence in force by then holds it under the silence's
+    own code instead. The decision is rewritten only while it is still held, so
+    two sweeps cannot both send it.
+    """
+    rt = Runtime(store=store, config=cfg, settings=settings, http_client=client)
+    settled = 0
+    for index, stage in enumerate(cfg.pipeline):
+        if stage.type != "fold":
+            continue
+        window, ceiling, code = fold_options(stage.options)
+        key_field = str(stage.options.get("key") or "title")
+        look_back = fold_look_back(window, ceiling)
+        for event in await store.fold_candidates(key_field, code, since=now - look_back, until=now - window):
+            source = cfg.sources.get(str(event["source"]))
+            fields = json.loads(event["fields_json"] or "{}")
+            key = str(event["title"] if key_field == "title" else fields.get(key_field) or "")
+            if source is None or not key:
+                continue
+            history = await store.condition_ledger(source.name, key_field, key, code, now - look_back)
+            cards = [r for r in history if r["outcome"] == "routed"]
+            if not cards or not cards[-1]["is_recovery"]:
+                continue  # the person was last told it is firing: before this one, or since
+            extracted = {"title": event["title"], "body": event["body"], "level": event["level"], "fields": fields}
+            ctx = EventContext(
+                source=source,
+                payload=json.loads(event["payload_json"] or "null"),
+                extracted=extracted,
+                now=now,
+                steps=json.loads(event["steps_json"] or "[]"),
+                correlation_id=event["correlation_id"],
+            )
+            step: dict[str, Any] = {
+                "gate": stage.name,
+                "result": "settled",
+                "why": "the condition came back after a recovery card and stayed; the last card said it had ended",
+            }
+            fold_digest(ctx, step, [r for r in history if r["id"] != event["id"]], cards[-1])
+            ctx.steps.append(step)
+            skipped = await _walk(rt, ctx, cfg.pipeline[index + 1 :])
+            if skipped is None and not ctx.channels:
+                skipped = "no_route"
+            outcome, channels = ("routed", ctx.channels) if skipped is None else ("skipped", [])
+            if await store.settle_folded(
+                event["id"], code, outcome, skipped, channels, ctx.steps, ctx.extracted["fields"], now
+            ):
+                settled += skipped is None
+    return settled

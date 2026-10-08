@@ -19,6 +19,15 @@ The reference production config runs it after the wake filter with a one-hour
 window. The digest at the hour's end — "N more, folded" — is the next step and
 not this one.
 
+**Corrected 2026-10-08.** Two things here were wrong, and
+[[2026-10-08-the-fold-answers-to-the-last-card]] fixes both. The 54% and 67% in
+the table below were replayed without the recovery exemption this stage
+shipped with. The loudest rule alternated firing and resolved, so every
+recovery went and re-anchored the hour, and the stage as shipped folds 24%.
+And a firing that followed a recovery card inside the hour folded into that
+card, so the last card a person read could say "ended" about a condition that
+had come back. The digest shipped the same day as the fix.
+
 This closes the question the 2026-08-12 note left open, with closure 2 of the
 two it named: the pipe paces its return door. The objection recorded against
 that closure — the brain's ledger no longer describes what was delivered — is
@@ -35,9 +44,9 @@ The judge's ledger from the retired production deployment, replayed on
 | wake=yes cards, five weeks | 731 |
 | from the loudest single rule | 65% |
 | that rule's median gap between cards | 15 minutes |
-| folded by one card per rule per 15 minutes | 33% |
-| folded by one card per rule per hour | 54% |
-| folded by one card per rule per four hours | 67% |
+| folded by one card per rule per 15 minutes | 33% without the recovery exemption; 11% as shipped |
+| folded by one card per rule per hour | 54% without the recovery exemption; 24% as shipped |
+| folded by one card per rule per four hours | 67% without the recovery exemption; 34% as shipped |
 | distinct rules with any wake=yes card | 23 |
 
 The 08-12 note's trigger was "repeated cards from one condition drawing a

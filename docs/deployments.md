@@ -52,6 +52,13 @@ a service block, a channel, and one name in the fan-out.
 The `quiet-wake-no` filter stage drops a card when the judge said nobody needs
 to act now. Measured the week it was added: 440 interruptions, 95% repeats.
 
+The `fold-repeats` stage after it sends a card the judge did mark for a person
+once per condition per window: an hour, widening to four for a condition that
+keeps coming back. A recovery the person is waiting for always goes, and a
+firing that comes back after a recovery card goes an hour later unless it ends
+again. Replayed on the retired deployment's ledger it sends 55% fewer cards. It
+has not run live, because this shape runs nowhere today.
+
 ## The work shape
 
 ```

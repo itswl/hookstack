@@ -8,12 +8,12 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 6,050 source lines, five dependencies) that takes JSON
+A pluggable router (under 6,300 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
 to a chat bridge / generic HTTP (DingTalk and WeCom as shipped plugins) — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 6,050 source lines is the
+Both numbers are **budgets, not descriptions**. 6,300 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
@@ -224,10 +224,12 @@ Pipe *protections* — kept, but named for what they are:
 - **rate limits protect downstream quotas** by deferring, never dropping.
 - **fold is PACING on a return door**: one card per condition per window for
   verdicts the brain already judged worth a person, the repeats recorded as
-  folded into the card they repeat. It drops where a rate limit defers, which
-  is why it is pinned to a return door by name and never stands in front of a
-  brain; the number it answers to is on file
-  (`.agents/notes/implemented/2026-09-28-one-card-per-condition-per-hour-on-the-return-door.md`).
+  folded into the card they repeat. A recovery the person is waiting for always
+  goes, and a firing held after a recovery card goes a base window later unless
+  the condition ended again. It drops where a rate limit defers, which is why
+  it is pinned to a return door by name and never stands in front of a brain;
+  the number it answers to is on file
+  (`.agents/notes/implemented/2026-10-08-the-fold-answers-to-the-last-card.md`).
 
 Judgment features (`filter`, `set`, dedup-as-noise-control) exist for
 **standalone posture** — a small team with no brain that still wants

@@ -191,6 +191,26 @@ class Transaction:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def condition_ledger(
+        self, source: str, key_field: str, key: str, skip_code: str, since: float
+    ) -> list[dict[str, Any]]:
+        """Every card this condition cost through this door since `since`, and
+        every repeat folded under `skip_code`, oldest first — what the fold
+        stage widens its window and writes its digest from."""
+        if key_field == "title":
+            where, value = "e.title = ?", key
+        else:
+            if not key_field.replace("_", "").isalnum():
+                return []
+            where, value = f"json_extract(e.fields_json, '$.{key_field}') = ?", key
+        cursor = await self._db.execute(
+            "SELECT e.id, e.received_at, e.is_recovery, d.outcome FROM events e JOIN decisions d ON d.event_id = e.id"
+            f" WHERE e.source = ? AND {where} AND e.received_at >= ?"  # nosec B608
+            " AND (d.outcome = 'routed' OR (d.outcome = 'skipped' AND d.skip_code = ?)) ORDER BY e.id",
+            (source, value, since, skip_code),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
     async def insert_event(
         self,
         source: str,
@@ -234,6 +254,37 @@ class Transaction:
                 json.dumps(steps, ensure_ascii=False),
             ),
         )
+
+    async def settle_decision(
+        self,
+        event_id: int,
+        held_as: str,
+        outcome: str,
+        skip_code: str | None,
+        channels: list[str],
+        steps: list[dict[str, Any]],
+        fields: dict[str, Any],
+    ) -> bool:
+        """Rewrite a folded event's decision once — only while it is still held
+        as `held_as` — so two sweeps cannot both send it."""
+        cursor = await self._db.execute(
+            "UPDATE decisions SET outcome = ?, skip_code = ?, channels_json = ?, steps_json = ?"
+            " WHERE event_id = ? AND outcome = 'skipped' AND skip_code = ?",
+            (
+                outcome,
+                skip_code,
+                json.dumps(channels, ensure_ascii=False),
+                json.dumps(steps, ensure_ascii=False),
+                event_id,
+                held_as,
+            ),
+        )
+        if cursor.rowcount != 1:
+            return False
+        await self._db.execute(
+            "UPDATE events SET fields_json = ? WHERE id = ?", (json.dumps(fields, ensure_ascii=False), event_id)
+        )
+        return True
 
     async def enqueue_deliveries(self, event_id: int, channels: list[str], now: float) -> None:
         """Every channel this event routed to, in one statement.
@@ -504,6 +555,49 @@ class Store:
         self, source: str, key_field: str, key: str, window_seconds: int, now: float
     ) -> dict[str, Any] | None:
         return await Transaction(self.db).recent_routed(source, key_field, key, window_seconds, now)
+
+    async def condition_ledger(
+        self, source: str, key_field: str, key: str, skip_code: str, since: float
+    ) -> list[dict[str, Any]]:
+        return await Transaction(self.db).condition_ledger(source, key_field, key, skip_code, since)
+
+    async def fold_candidates(self, key_field: str, skip_code: str, since: float, until: float) -> list[dict[str, Any]]:
+        """Firings held under `skip_code` between `since` and `until` with no
+        recovery of their condition after them, oldest first — what a fold
+        settle reads. A later firing does not count against one: it says the
+        condition is still there."""
+        if key_field == "title":
+            same = "x.title = e.title"
+        elif key_field.replace("_", "").isalnum():
+            same = f"json_extract(x.fields_json, '$.{key_field}') = json_extract(e.fields_json, '$.{key_field}')"
+        else:
+            return []
+        cursor = await self.read.execute(
+            "SELECT e.*, d.steps_json FROM events e JOIN decisions d ON d.event_id = e.id"
+            " WHERE d.outcome = 'skipped' AND d.skip_code = ? AND e.is_recovery IS NOT 1"
+            " AND e.received_at >= ? AND e.received_at <= ? AND NOT EXISTS (SELECT 1 FROM events x"
+            f" WHERE x.source = e.source AND x.id > e.id AND x.is_recovery = 1 AND {same}) ORDER BY e.id",  # nosec B608
+            (skip_code, since, until),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def settle_folded(
+        self,
+        event_id: int,
+        held_as: str,
+        outcome: str,
+        skip_code: str | None,
+        channels: list[str],
+        steps: list[dict[str, Any]],
+        fields: dict[str, Any],
+        now: float,
+    ) -> bool:
+        """The decision rewritten and the deliveries queued together, or neither."""
+        async with self.transaction() as tx:
+            if not await tx.settle_decision(event_id, held_as, outcome, skip_code, channels, steps, fields):
+                return False
+            await tx.enqueue_deliveries(event_id, channels, now)
+            return True
 
     async def insert_decision(
         self, event_id: int, outcome: str, skip_code: str | None, channels: list[str], steps: list[dict[str, Any]]

@@ -283,7 +283,19 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # the card came in through, a button is drawn only where that lands, and a
     # press for a door with no channel is refused before its token is spent.
     # Receive, route, deliver, account — nothing reads a payload to decide it.
-    "hookrelay": (6050, Path("hookrelay/README.md")),
+    # 6050 -> 6300 on 2026-10-08, for a fold that answers to what the person
+    # was last told. Split: +240 source, **+167 code**, so the doctrine question
+    # applies, and the answer is pacing: what goes and when, never what an
+    # event says. Everything added reads the pipe's own books for the condition
+    # key the stage already used: (1) a recovery the person is waiting for goes
+    # at once and anything else inside the window folds; (2) the window widens
+    # for a condition that keeps coming back; (3) the card that goes counts what
+    # it stands for; (4) the worker loop sends the one repeat a person must not
+    # miss, a firing held after a recovery card with no recovery behind it a
+    # base window later, through the stages after the fold, the walk an
+    # arriving event takes. Replayed on the retired deployment's judge ledger it
+    # folds 55% of the wake=yes cards where the rule as shipped folded 24%.
+    "hookrelay": (6300, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

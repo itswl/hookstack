@@ -217,6 +217,7 @@ pipeline:
     name: fold-repeats
     when: {source: judge-notify, wake: "yes"}
     window_seconds: 3600
+    max_window_seconds: 14400          # widen for a condition that keeps coming back; absent = fixed
     key: title                         # or a field the door extracts (the judge's `rule`)
     skip_code: folded
   - routes
@@ -226,14 +227,33 @@ pipeline:
 verdict deserves a person; the stage decides only that the same condition does
 not deserve a person again inside the window. The repeat is skipped by name
 (`folded`) with the id of the card it folded into on its own trace, so the
-ledger still describes what a human saw. A recovery is never folded, and the
-window is anchored on the card that was **delivered**, not on the last repeat,
-so a condition firing every fifteen minutes surfaces once an hour rather than
-never. Measured on the retired production deployment's judge ledger before this
-existed: 731 wake=yes cards in five weeks, one card per rule per hour would have
-folded 54% of them, the loudest rule alone was 65% of every interruption. Pin it
-with `when.source` to a return door; on a front door it is dedup by another
-name and dedup's doctrine applies.
+ledger still describes what a human saw. The window is anchored on the card
+that was **delivered**, not on the last repeat, so a condition firing every
+fifteen minutes surfaces once a window rather than never.
+
+What the person was last told decides the edges:
+
+- **A recovery the person is waiting for goes at once.** If the last card said
+  firing, the recovery is never folded, so a firing and its end are two cards.
+- **Anything else inside the window folds**: a repeat, a recovery after a
+  recovery card, and a firing after a recovery card.
+- **A held firing after a recovery card is settled.** The worker loop checks
+  once a minute. A held firing with no recovery after it a base window later
+  goes, the first one only, walking the stages after the fold as an arriving
+  event would. The last card never says "ended" about a condition that came
+  back and stayed.
+- **The window widens** when `max_window_seconds` is set. It doubles with each
+  card in the condition's current run, up to the ceiling. Cards more than twice
+  the ceiling apart start a new run at the base window.
+- **The card that goes counts what it stands for.** `fields.folded` reads like
+  "3 more since the last card, over 46 min", and a bridge card shows it under
+  the brain's details.
+
+Replayed on the retired production deployment's judge ledger, 731 wake=yes
+cards over five weeks with one rule 65% of them, this folds 36% at a fixed
+hour, 55% widening from one hour to four, and 67% to eight, with four or five
+settles in the five weeks. Pin it with `when.source` to a return door; on a
+front door it is dedup by another name and dedup's doctrine applies.
 
 `when` conditions (same everywhere — routes, filter, set):
 

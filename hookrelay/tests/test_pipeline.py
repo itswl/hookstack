@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from hookrelay.config import Config
-from hookrelay.pipeline import handle_hook
+from hookrelay.pipeline import handle_hook, settle_folds
 
 PAYLOAD = {"title": "db down", "message": "primary unreachable", "state": "alerting"}
 
@@ -320,7 +320,7 @@ async def test_a_sampled_card_is_marked_so_the_ledger_and_the_reader_can_tell(st
 # ── fold: one card per condition per window, on the return door ──────────────
 
 
-def _fold_cfg(window: int = 3600, key: str = "title") -> Config:
+def _fold_cfg(window: int = 3600, key: str = "title", ceiling: int = 0, silence: bool = False) -> Config:
     return Config.from_dict(
         {
             "sources": [
@@ -345,9 +345,11 @@ def _fold_cfg(window: int = 3600, key: str = "title") -> Config:
                     "name": "fold-repeats",
                     "when": {"source": "judge-notify", "wake": "yes"},
                     "window_seconds": window,
+                    "max_window_seconds": ceiling or window,
                     "key": key,
                     "skip_code": "folded",
                 },
+                *(["silence"] if silence else []),
                 "routes",
             ],
         }
@@ -430,3 +432,162 @@ async def test_the_fold_leaves_every_other_door_and_every_quiet_verdict_alone(st
     raw = {"title": "db down", "message": "x"}
     for now in (2000.0, 2001.0):
         assert (await handle_hook(store, cfg, cfg.sources["grafana"], raw, now=now))["outcome"] == "routed"
+
+
+async def test_the_card_that_goes_says_how_many_it_stands_for(store):
+    """The repeats held back are not lost to the person: the next card for the
+    condition carries the count and how long the run lasted, and so does its
+    recovery — a digest with no clock of its own."""
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    await handle_hook(store, cfg, source, _loud("Log error spike"), now=0.0)
+    for minutes in (15, 30, 45):
+        await handle_hook(store, cfg, source, _loud("Log error spike"), now=minutes * 60.0)
+    went = await handle_hook(store, cfg, source, _loud("Log error spike"), now=61 * 60.0)
+    assert went["outcome"] == "routed"
+    step = next(s for s in went["steps"] if s.get("gate") == "fold-repeats")
+    assert step["folded_since_last"] == 3
+    (latest,) = await store.recent_events(1)
+    assert latest["fields"]["folded"] == "3 more since the last card, over 46 min"
+
+    await handle_hook(store, cfg, source, _loud("Log error spike"), now=70 * 60.0)
+    resolved = await handle_hook(store, cfg, source, _loud("Log error spike", recovery=True), now=80 * 60.0)
+    assert resolved["outcome"] == "routed"
+    step = next(s for s in resolved["steps"] if s.get("gate") == "fold-repeats")
+    assert step["folded_since_last"] == 1 and "never folded" in step["why"], "the recovery carries the count too"
+
+
+async def test_a_condition_that_keeps_coming_back_gets_its_cards_further_apart(store):
+    """Every fifteen minutes for twelve hours. A fixed hour sends a card every
+    seventy-five minutes; with a ceiling the window doubles with each card the
+    condition already cost — one hour, one, two, four — and after a recovery a
+    new firing starts from the hour again."""
+
+    async def cards(cfg: Config, title: str) -> list[int]:
+        source = cfg.sources["judge-notify"]
+        went = []
+        for minutes in range(0, 721, 15):
+            out = await handle_hook(store, cfg, source, _loud(title), now=minutes * 60.0)
+            if out["outcome"] == "routed":
+                went.append(minutes)
+        return went
+
+    assert await cards(_fold_cfg(window=3600), "Fixed") == [0, 75, 150, 225, 300, 375, 450, 525, 600, 675]
+    widening = _fold_cfg(window=3600, ceiling=4 * 3600)
+    assert await cards(widening, "Widening") == [0, 75, 210, 465, 720]
+
+    # The recovery the person is waiting for goes at once; a firing right after
+    # that recovery card folds — and, if it stays, the worker loop sends it a
+    # base window later, once.
+    source = widening.sources["judge-notify"]
+    resolved = await handle_hook(store, widening, source, _loud("Widening", recovery=True), now=725 * 60.0)
+    assert resolved["outcome"] == "routed"
+    back = await handle_hook(store, widening, source, _loud("Widening"), now=800 * 60.0)
+    assert back["skip_code"] == "folded"
+    assert await settle_folds(store, widening, now=800 * 60.0 + 3599) == 0, "not before a base window of quiet"
+    assert await settle_folds(store, widening, now=800 * 60.0 + 3600) == 1
+    assert await settle_folds(store, widening, now=800 * 60.0 + 7200) == 0, "once"
+    (settled,) = [e for e in await store.recent_events(20) if e["id"] == back["event_id"]]
+    assert settled["outcome"] == "routed" and settled["channels"] == ["to-me"]
+    assert any(st.get("result") == "settled" for st in settled["steps"])
+
+
+def test_a_bridge_card_shows_the_fold_count_under_the_brains_details() -> None:
+    """A brain's card is the brain's; the pipe adds one line, and only this one."""
+    from hookrelay.channels import card_model_for
+    from hookrelay.config import Channel
+
+    channel = Channel(name="to-me", type="bridge", url="http://bridge:9000/send", options={"payload": "processed"})
+    payload = {"meta": {"alert_name": "Log error spike"}, "analysis": {"summary": "1,311 lines"}}
+    message = {"payload": payload, "fields": {"folded": "3 more since the last card, over 46 min"}, "event_id": 9}
+    card = card_model_for(channel, message)
+    assert card["details"].endswith("3 more since the last card, over 46 min")
+    plain = card_model_for(channel, {**message, "fields": {}})
+    assert "more since the last card" not in str(plain.get("details") or "")
+
+
+async def test_a_condition_flapping_between_firing_and_resolved_folds_both_halves(store):
+    """Firing, resolved, firing, every quarter of an hour. The first pair goes;
+    after the recovery card the rest folds, firings and recoveries alike, until
+    the window ends — then a firing goes with the count of what it stands for,
+    and its recovery, awaited, goes at once."""
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    went = []
+    for i, minutes in enumerate(range(0, 106, 15)):
+        out = await handle_hook(store, cfg, source, _loud("Flapping", recovery=bool(i % 2)), now=minutes * 60.0)
+        went.append(out["outcome"] == "routed")
+    assert went == [True, True, False, False, False, False, True, True]
+    (back,) = [e for e in await store.recent_events(10) if e["received_at"] == 90 * 60.0]
+    assert back["fields"]["folded"] == "4 more since the last card, over 1 h"
+    assert await settle_folds(store, cfg, now=(105 + 120) * 60.0) == 0, "every held firing was followed by a recovery"
+
+
+async def test_a_condition_that_comes_back_and_keeps_firing_is_told_once(store):
+    """After a recovery card the condition comes back and re-fires. Every
+    re-fire folds; the first settles a base window after it came back — the
+    later ones say it is still there, they do not restart the clock — and the
+    rest stay held, because the person now knows it is firing."""
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    await handle_hook(store, cfg, source, _loud("Back"), now=0.0)
+    await handle_hook(store, cfg, source, _loud("Back", recovery=True), now=600.0)
+    held = [await handle_hook(store, cfg, source, _loud("Back"), now=t) for t in (1200.0, 2400.0, 3000.0, 4000.0)]
+    assert all(out["skip_code"] == "folded" for out in held)
+    assert await settle_folds(store, cfg, now=1200.0 + 3600) == 1
+    assert await settle_folds(store, cfg, now=1200.0 + 3660) == 0
+    assert await settle_folds(store, cfg, now=4000.0 + 3600) == 0, "once, not once per held firing"
+    (went,) = [e for e in await store.recent_events(20) if e["id"] == held[0]["event_id"]]
+    assert went["outcome"] == "routed" and went["fields"]["folded"] == "3 more since the last card, over 40 min"
+
+
+async def test_a_held_firing_that_ended_again_is_not_settled(store):
+    """Back after the recovery card, then over again before the window was out:
+    both halves fold, and the last card — "it ended" — is true again."""
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    await handle_hook(store, cfg, source, _loud("Brief"), now=0.0)
+    await handle_hook(store, cfg, source, _loud("Brief", recovery=True), now=600.0)
+    back = await handle_hook(store, cfg, source, _loud("Brief"), now=1200.0)
+    over = await handle_hook(store, cfg, source, _loud("Brief", recovery=True), now=1800.0)
+    assert back["skip_code"] == over["skip_code"] == "folded"
+    assert await settle_folds(store, cfg, now=1200.0 + 3600) == 0
+    assert await settle_folds(store, cfg, now=1800.0 + 3600) == 0, "nor the recovery: the last card already said so"
+
+
+async def test_a_held_firing_stays_held_once_a_card_has_gone_since(store):
+    """The window since the recovery card ran out and a later firing went on
+    its own: the person was told, so the one held before it is not sent too."""
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    await handle_hook(store, cfg, source, _loud("Told"), now=0.0)
+    await handle_hook(store, cfg, source, _loud("Told", recovery=True), now=600.0)
+    held = await handle_hook(store, cfg, source, _loud("Told"), now=3000.0)
+    assert held["skip_code"] == "folded"
+    assert (await handle_hook(store, cfg, source, _loud("Told"), now=4300.0))["outcome"] == "routed"
+    assert await settle_folds(store, cfg, now=3000.0 + 3600) == 0
+
+
+async def test_a_repeat_after_a_firing_card_needs_no_settling(store):
+    """Folded into a firing card, the person already knows it is firing."""
+    cfg = _fold_cfg(window=3600)
+    source = cfg.sources["judge-notify"]
+    await handle_hook(store, cfg, source, _loud("Steady"), now=0.0)
+    await handle_hook(store, cfg, source, _loud("Steady"), now=900.0)
+    assert await settle_folds(store, cfg, now=900.0 + 4 * 3600) == 0
+
+
+async def test_a_settle_respects_a_silence_in_force(store):
+    """The held firing walks the stages after the fold; a silence by then holds
+    it under the silence's own code, and nothing is sent."""
+    silenced = _fold_cfg(window=3600, silence=True)
+    source = silenced.sources["judge-notify"]
+    await handle_hook(store, silenced, source, _loud("Quieted"), now=0.0)
+    await handle_hook(store, silenced, source, _loud("Quieted", recovery=True), now=600.0)
+    back = await handle_hook(store, silenced, source, _loud("Quieted"), now=1200.0)
+    assert back["skip_code"] == "folded"
+    await store.add_silence("judge-notify", 1200.0 + 2 * 3600, "maintenance", 1200.0)
+    assert await settle_folds(store, silenced, now=1200.0 + 3600) == 0
+    (held,) = [e for e in await store.recent_events(10) if e["id"] == back["event_id"]]
+    assert held["outcome"] == "skipped" and held["skip_code"] == "silenced", "held by the silence, under its own code"
+    assert all(d["event_id"] != back["event_id"] for d in await store.due_deliveries(now=1200.0 + 3600)), "nothing sent"

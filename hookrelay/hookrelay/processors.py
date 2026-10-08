@@ -329,29 +329,47 @@ class FilterProcessor:
 @registry.processor("fold")
 class FoldProcessor:
     """One card per condition per window, on a RETURN door:
-    {when: {source: judge-notify, wake: "yes"}, window_seconds: 3600, key: title, skip_code: folded}.
+    {when: {source: judge-notify, wake: "yes"}, window_seconds: 3600, max_window_seconds: 14400, key: rule}.
 
     Pacing, not judgment. The brain already said this verdict deserves a person
     (wake=yes); what this stage decides is only that the same condition does not
     deserve a person AGAIN inside the window. The repeat is recorded, skipped by
     name, with the id of the card it folded into, so the ledger still describes
     what a human saw — which is the objection the 2026-08-12 note raised against
-    a suppression the pipe could not account for. A recovery is never folded: it
-    ends the condition, and a "resolved" card nobody received is a firing nobody
-    can stop worrying about.
+    a suppression the pipe could not account for.
 
-    Measured on the retired production deployment's judge ledger (731 wake=yes
-    cards): one card per rule per hour would have folded 54% of them, per four
-    hours 67%; the loudest rule alone was 65% of every interruption, firing at a
-    fifteen-minute median gap. The person those cards were for stopped reading
-    them in the first week. Pinned to a return door by `when.source`, like the
-    wake filter above it; on a front door this would be dedup by another name,
-    and dedup's doctrine applies.
+    What a person was last told anchors the rule (2026-10-08). A recovery the
+    person is waiting for — the last card said the condition was firing — goes
+    at once, so an ordinary firing and its recovery are two cards as always.
+    Anything else inside the window folds: a repeat, a recovery after a recovery
+    card, and a firing after one. That last is the event a person must not
+    miss, so the worker loop settles it (`pipeline.settle_folds`): a folded
+    firing with no recovery after it a base window later, its condition's last
+    card still a recovery, walks the rest of the pipeline and goes. Until then a
+    recovery was never folded and a firing could fold into a recovery card, so
+    a condition flapping between the two sent every recovery, and the one
+    firing that stayed could be the one nobody saw.
+
+    `max_window_seconds` widens the window for a condition that keeps coming
+    back: it doubles with every card in the condition's current run (cards no
+    more than twice the ceiling apart) from the base up to the ceiling, and a
+    condition quiet for twice the ceiling starts from the base again. Absent,
+    the window is fixed. The card that goes says what it stands for:
+    `fields.folded` counts the events held back since the last card and how
+    long they lasted, and a bridge card shows it under the brain's details.
+
+    Replayed on the retired production deployment's judge ledger: 731 wake=yes
+    cards over five weeks, 476 from one rule that alternated firing and resolved
+    at a fifteen-minute median gap. The rule as shipped on 2026-09-28 folded 24%
+    at a fixed hour (the 54% recorded then had not exempted recoveries); this
+    one folds 36% at a fixed hour, 55% widening from an hour to four and 67% to
+    eight, settling four or five times in the five weeks. Pinned to a return
+    door by `when.source`, like the wake filter above it; on a front door this
+    would be dedup by another name, and dedup's doctrine applies.
 
     `key` is which extracted value names the condition — `title` by default,
     or a field the door extracts (the judge's `rule`, say). What was DELIVERED
-    counts, not what arrived: a folded repeat does not extend the window, so a
-    flapping condition surfaces once per window rather than never.
+    counts, not what arrived: a folded repeat does not extend the window.
     """
 
     async def run(self, rt: Runtime, ctx: EventContext, options: dict[str, Any]) -> Verdict:
@@ -361,30 +379,78 @@ class FoldProcessor:
         if when and not all(_condition_matches(cond, context.get(key, "")) for key, cond in when.items()):
             ctx.steps.append({"gate": name, "result": "not_applied"})
             return PASS
-        if ctx.extracted.get("is_recovery"):
-            ctx.steps.append({"gate": name, "result": "pass", "why": "a recovery ends the condition; never folded"})
-            return PASS
         key_field = str(options.get("key") or "title")
         key = context.get(key_field, "")
         if not key:
             ctx.steps.append({"gate": name, "result": "pass", "why": f"no {key_field} to fold on"})
             return PASS
-        window = max(0, int(options.get("window_seconds") or 3600))
-        prior = await rt.store.recent_routed(ctx.source.name, key_field, key, window, ctx.now)
-        if prior is None:
-            ctx.steps.append({"gate": name, "result": "pass"})
+        window, ceiling, code = fold_options(options)
+        since = ctx.now - fold_look_back(window, ceiling)
+        history = await rt.store.condition_ledger(ctx.source.name, key_field, key, code, since)
+        cards = [row for row in history if row["outcome"] == "routed"]
+        last = cards[-1] if cards else None
+        effective = _widened(cards, ctx.now, window, ceiling)
+        awaited = bool(ctx.extracted.get("is_recovery")) and last is not None and not last["is_recovery"]
+        if last is None or ctx.now - float(last["received_at"]) > effective or awaited:
+            step: dict[str, Any] = {"gate": name, "result": "pass"}
+            if awaited:
+                step["why"] = "a recovery the person is waiting for: the last card said firing; never folded"
+            fold_digest(ctx, step, history, last)
+            ctx.steps.append(step)
             return PASS
-        code = str(options.get("skip_code") or "folded")
         ctx.steps.append(
             {
                 "gate": name,
                 "result": "folded",
                 "skip_code": code,
-                "into_event_id": prior["id"],
-                "seconds_ago": int(ctx.now - float(prior["received_at"])),
+                "into_event_id": last["id"],
+                "seconds_ago": int(ctx.now - float(last["received_at"])),
+                "window_seconds": effective,
             }
         )
         return ("skip", code)
+
+
+def fold_options(options: dict[str, Any]) -> tuple[int, int, str]:
+    """(base window, ceiling, skip code) of a fold stage; the ceiling defaults to the base."""
+    window = max(0, int(options.get("window_seconds") or 3600))
+    return (
+        window,
+        max(window, int(options.get("max_window_seconds") or window)),
+        str(options.get("skip_code") or "folded"),
+    )
+
+
+def fold_look_back(window: int, ceiling: int) -> int:
+    """Far enough back to see a run of cards long enough to reach the ceiling."""
+    doublings, width = 0, window
+    while 0 < width < ceiling:
+        doublings, width = doublings + 1, width * 2
+    return (doublings + 1) * 2 * ceiling
+
+
+def _widened(cards: list[dict[str, Any]], now: float, window: int, ceiling: int) -> int:
+    run, after = 0, now
+    for row in reversed(cards):
+        if after - float(row["received_at"]) > 2 * ceiling:
+            break
+        run, after = run + 1, float(row["received_at"])
+    return min(ceiling, window * 2 ** max(0, run - 1))
+
+
+def fold_digest(ctx: EventContext, step: dict[str, Any], history: list[dict[str, Any]], last: Any) -> None:
+    """Write on the card that goes how many events were held back since the last one."""
+    held = [r for r in history if r["outcome"] != "routed" and (last is None or r["id"] > last["id"])]
+    if held:
+        span = int(ctx.now - float(held[0]["received_at"]))
+        ctx.extracted["fields"]["folded"] = f"{len(held)} more since the last card, over {_span(span)}"
+        step["folded_since_last"] = len(held)
+
+
+def _span(seconds: int) -> str:
+    """ "12 min", "3 h 20 min": how long a run of folded repeats lasted."""
+    minutes = max(1, round(seconds / 60))
+    return f"{minutes} min" if minutes < 60 else f"{minutes // 60} h" + (f" {minutes % 60} min" if minutes % 60 else "")
 
 
 @registry.processor("http")
