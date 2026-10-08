@@ -130,10 +130,12 @@ FILES = (("service worker", tuple(page.parent / "static" / "sw.js" for page in P
 # it reads its status bar once, at launch, ignores theme-color changes after,
 # and the `default` style follows the DEVICE's appearance, not the page's — a
 # page switched to the other theme kept the old bar until relaunch. So the bar
-# is translucent and the page paints the strip under the clock itself, which
-# needs viewport-fit=cover and the safe-area insets in the CSS (one without the
-# other is a bar over the header, or insets that are all zero). iOS draws the
-# clock white over a translucent bar, so the light theme's strip is dark.
+# is translucent and the header draws under it in its own colour, the clock
+# following the page's color-scheme (a painted dark strip was tried first and
+# sat under a dark clock) — which needs viewport-fit=cover and the safe-area
+# variables in the CSS: one without the other is a bar over the header, or
+# insets that are all zero. The variables, not env() directly, because an
+# installed app can report every inset as zero and the install block measures.
 HEAD_MUST = (
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
     '<meta name="theme-color" media="(prefers-color-scheme: light)"',
@@ -143,7 +145,12 @@ HEAD_MUST = (
 HEAD_MUST_NOT = ('status-bar-style" content="default"',)
 # The CSS half of viewport-fit=cover: what the page must say to clear the bar
 # and paint under it. Checked in the whole page, not the head.
-PAGE_MUST = ("padding-top: env(safe-area-inset-top)", "var(--statusbar)", "env(safe-area-inset-bottom)")
+PAGE_MUST = (
+    "--safe-top: env(safe-area-inset-top)",
+    "padding-top: var(--safe-top)",
+    "var(--safe-bottom)",
+    "applySafeInsets",
+)
 
 # A colour written into a page's CSS as a literal does not change with the
 # mode: it is the same grey on a white page as on a dark one. So outside the
