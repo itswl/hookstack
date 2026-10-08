@@ -23,6 +23,20 @@ Deliberately stdlib-only and small enough to read in one sitting, like the egres
 proxy beside it, and for the same reason: it is now in the path of every chat
 tool call the family makes. The plumbing the sidecars share is in common.py.
 
+ONE UPSTREAM, OR SEVERAL ON ONE PORT.
+  `MCPGATE_UPSTREAM` is one MCP server, reached whatever path a client asks
+  for: the work deployment's shape. `MCPGATE_ROUTE_<NAME>=<url>` is one per
+  server instead, and the first segment of the request path picks it: a client
+  configured with `http://mcp-gate:8097/jira/` reaches the jira route's URL,
+  exactly that address, with nothing of the rest of the path appended. Each
+  route carries its own `MCPGATE_ROUTE_<NAME>_HEADER_<Name>` credentials and
+  never another's. A client keeps one token, and its list names tools per
+  route (`jira:get_issue`, `chat:chat.list_*`); a token with nothing listed on
+  a route is refused at that route before anything is forwarded, the handshake
+  included. One process, one port, one ledger with the route on every row.
+  Until 2026-10-09 three servers meant a launcher starting three of these on
+  three ports. The two forms do not mix: a gate configured with both stops.
+
 WHAT THIS IS NOT.
   * Not an argument check. `search_chat_records` with any query is one call to
     this gate; the list is names, not intent. What it buys is that the names
@@ -60,6 +74,7 @@ import http.client
 import json
 import logging
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -100,21 +115,70 @@ UPSTREAM_TIMEOUT = 60.0
 # filtered. Past either bound nothing here should buffer it.
 BODY_MAX = 1024 * 1024
 ANSWER_MAX = 8 * 1024 * 1024
+# A route is a path segment and an environment variable's middle: lowercase
+# letters and digits, so `MCPGATE_ROUTE_JIRA_HEADER_X` can only mean one thing.
+# `healthz` is the gate's own.
+ROUTE_NAME = re.compile(r"[a-z0-9]{1,32}")
+RESERVED = frozenset({"healthz"})
+# Sent unless a route's headers say otherwise. urllib's own `Python-urllib/3.x`
+# is refused by Cloudflare's browser integrity check (error 1010), so an MCP
+# server behind it answered every call through this gate with a 403 page.
+USER_AGENT = "mcp-gate"
+
+
+class Route:
+    """One upstream: the one address it reaches, and the headers it adds there."""
+
+    def __init__(self, name: str, url: str, headers: dict[str, str]) -> None:
+        self.name, self.url, self.headers = name, url, headers
+
+    def ledger(self) -> dict[str, str]:
+        """What a ledger row adds about where it went: nothing with one upstream."""
+        return {"route": self.name} if self.name else {}
 
 
 class Client:
-    """One caller: a token, and the tool names it may reach."""
+    """One caller: a token, and per route the tool names it may reach. A plain
+    tuple is the one-upstream form, every name on the route called ""."""
 
-    def __init__(self, name: str, token: str, tools: tuple[str, ...]) -> None:
-        self.name, self.token, self.tools = name, token, tools
+    def __init__(self, name: str, token: str, tools: tuple[str, ...] | dict[str, tuple[str, ...]]) -> None:
+        self.name, self.token = name, token
+        self.tools = dict(tools) if isinstance(tools, dict) else {"": tuple(tools)}
 
-    def permits(self, tool: str) -> bool:
+    def permits(self, tool: str, route: str = "") -> bool:
         # Case-sensitive globs. `chat.list_*` admits a family; a bare name
         # admits one tool. Nothing admits everything unless somebody writes `*`.
-        return any(fnmatch.fnmatchcase(tool, rule) for rule in self.tools)
+        return any(fnmatch.fnmatchcase(tool, rule) for rule in self.tools.get(route, ()))
 
 
-def load_clients(environ: dict[str, str]) -> list[Client]:
+def load_routes(environ: dict[str, str]) -> dict[str, Route]:
+    """Every `MCPGATE_ROUTE_<NAME>=<url>`, with its `_HEADER_<Name>` values."""
+    prefix = "MCPGATE_ROUTE_"
+    routes: dict[str, Route] = {}
+    headers: dict[str, dict[str, str]] = {}
+    for key, value in environ.items():
+        if not key.startswith(prefix):
+            continue
+        name, _, header = key[len(prefix) :].partition("_HEADER_")
+        name = name.lower()
+        if header:
+            headers.setdefault(name, {})[header.replace("_", "-")] = value
+            continue
+        if not ROUTE_NAME.fullmatch(name) or name in RESERVED:
+            raise SystemExit(f"mcp-gate: route {name!r} must be lowercase letters and digits, and not 'healthz'")
+        if not value.strip().startswith(("http://", "https://")):
+            raise SystemExit(f"mcp-gate: {key} must be the MCP server's http(s) URL")
+        routes[name] = Route(name, value.strip(), {})
+    for name, extra in headers.items():
+        if name not in routes:
+            # A credential for a route that is not there is a typo that would
+            # send the route it was meant for nothing at all. Say so.
+            raise SystemExit(f"mcp-gate: MCPGATE_ROUTE_{name.upper()}_HEADER_* names no configured route")
+        routes[name].headers = extra
+    return routes
+
+
+def load_clients(environ: dict[str, str], routes: dict[str, Route] | None = None) -> list[Client]:
     """Every `MCPGATE_CLIENT_<NAME>_TOKEN` in the environment, with its list.
 
     Config in the environment rather than a file because the tokens belong in
@@ -140,7 +204,7 @@ def load_clients(environ: dict[str, str]) -> list[Client]:
             # An empty list would mean "this client may call nothing", which is
             # indistinguishable from a variable that failed to interpolate. Say so.
             raise SystemExit(f"mcp-gate: {name} has a token and no tools; set MCPGATE_CLIENT_{name.upper()}_TOOLS")
-        clients.append(Client(name, token, tools))
+        clients.append(Client(name, token, _per_route(name, tools, routes) if routes else tools))
     if not clients:
         raise SystemExit("mcp-gate: no clients configured; set MCPGATE_CLIENT_<NAME>_TOKEN and _TOOLS")
     if len({c.token for c in clients}) != len(clients):
@@ -150,11 +214,25 @@ def load_clients(environ: dict[str, str]) -> list[Client]:
     return clients
 
 
+def _per_route(client: str, entries: tuple[str, ...], routes: dict[str, Route]) -> dict[str, tuple[str, ...]]:
+    """`<route>:<tool>` entries, grouped by route. With several upstreams a bare
+    name could be meant for any of them, so it stops the gate instead."""
+    grouped: dict[str, list[str]] = {}
+    for entry in entries:
+        route, sep, rule = entry.partition(":")
+        if not sep or not rule.strip():
+            raise SystemExit(f"mcp-gate: {client}'s {entry!r} names no route; with routes write <route>:<tool>")
+        if route not in routes:
+            raise SystemExit(f"mcp-gate: {client}'s {entry!r} names a route that is not configured")
+        grouped.setdefault(route, []).append(rule.strip())
+    return {route: tuple(rules) for route, rules in grouped.items()}
+
+
 def error(rid: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}
 
 
-def permitted_names(payload: Any, allowed: Client) -> Any:
+def permitted_names(payload: Any, allowed: Client, route: str = "") -> Any:
     """A `tools/list` answer, with the tools this client cannot call removed.
 
     Cosmetic by itself — `tools/call` is where the refusal happens — and worth
@@ -166,17 +244,19 @@ def permitted_names(payload: Any, allowed: Client) -> Any:
     result = payload.get("result")
     if isinstance(result, dict) and isinstance(result.get("tools"), list):
         result["tools"] = [
-            tool for tool in result["tools"] if isinstance(tool, dict) and allowed.permits(str(tool.get("name") or ""))
+            tool
+            for tool in result["tools"]
+            if isinstance(tool, dict) and allowed.permits(str(tool.get("name") or ""), route)
         ]
     return payload
 
 
-def _filtered(item: Any, listings: set[str], client: Client) -> Any:
+def _filtered(item: Any, listings: set[str], client: Client, route: str) -> Any:
     """One JSON-RPC message, filtered when it answers a listing this client asked
     for and passed through otherwise — including when it is not an object at all,
     which a `null` keepalive frame or a batch is."""
     if isinstance(item, dict) and str(item.get("id")) in listings:
-        return permitted_names(item, client)
+        return permitted_names(item, client, route)
     return item
 
 
@@ -192,7 +272,7 @@ def _dumps(obj: Any) -> str:
     return text
 
 
-def filter_body(body: bytes, listings: set[str], client: Client) -> bytes:
+def filter_body(body: bytes, listings: set[str], client: Client, route: str = "") -> bytes:
     """Apply `permitted_names` to whichever answers were `tools/list` asks.
 
     Two shapes, because the transport has two: a JSON body, or an SSE stream
@@ -207,8 +287,8 @@ def filter_body(body: bytes, listings: set[str], client: Client) -> bytes:
         except ValueError:
             return body
         if isinstance(parsed, list):
-            return _dumps([_filtered(item, listings, client) for item in parsed]).encode("utf-8")
-        return _dumps(_filtered(parsed, listings, client)).encode("utf-8")
+            return _dumps([_filtered(item, listings, client, route) for item in parsed]).encode("utf-8")
+        return _dumps(_filtered(parsed, listings, client, route)).encode("utf-8")
     # Split on "\n" alone. str.splitlines also breaks on U+2028 and its kin,
     # which a tool description may carry, and a message split in two is a
     # message the filter never sees — a write tool would stay advertised.
@@ -221,16 +301,17 @@ def filter_body(body: bytes, listings: set[str], client: Client) -> bytes:
             parsed = json.loads(stripped[5:].strip())
         except ValueError:
             continue
-        lines[index] = "data: " + _dumps(_filtered(parsed, listings, client))
+        lines[index] = "data: " + _dumps(_filtered(parsed, listings, client, route))
     return "\n".join(lines).encode("utf-8")
 
 
 class Gate(HttpHandler):
     server_version = "mcp-gate"
 
-    # Set by main().
+    # Set by build(). `routes` empty means the one upstream serves every path.
     upstream = ""
     upstream_headers: dict[str, str] = {}  # noqa: RUF012 — plain class config, not a dataclass field
+    routes: dict[str, Route] = {}  # noqa: RUF012
     clients: list[Client] = []  # noqa: RUF012
     ledger = Ledger("")
 
@@ -256,6 +337,23 @@ class Gate(HttpHandler):
             self._refuse(401, b'{"error":"a bearer token this gateway knows is required"}')
         return client
 
+    def _route(self, client: Client) -> Route | None:
+        """Where this request goes, or None with the refusal answered and
+        recorded. The token is checked first, so a caller without one learns
+        nothing about which routes exist."""
+        if not self.routes:
+            return Route("", self.upstream, self.upstream_headers)
+        name = self.path.split("?", 1)[0].strip("/").split("/", 1)[0]
+        route = self.routes.get(name)
+        if route is not None and client.tools.get(name):
+            return route
+        self.ledger.write(event="route.refused", client=client.name, route=name[:40], known=route is not None)
+        if route is None:
+            self._answer(404, b'{"error":"no MCP server at this path"}')
+        else:
+            self._answer(403, b'{"error":"this token has no tools on this MCP server"}')
+        return None
+
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's spelling
         if self.path == "/healthz":
             # No token: it says the gate is up and nothing about who may use it.
@@ -270,16 +368,18 @@ class Gate(HttpHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         client = self._authorized()
-        if client is None:
+        route = self._route(client) if client else None
+        if client is None or route is None:
             return
-        self._relay(b"", method="DELETE", client=client)
+        self._relay(b"", method="DELETE", client=client, route=route)
 
     def do_POST(self) -> None:  # noqa: N802
         # The token first, then the length, then the body: nothing is read or
         # held for a caller this gate does not know, and a declared length that
         # is not a number, negative, or past BODY_MAX is answered, not parsed.
         client = self._authorized()
-        if client is None:
+        route = self._route(client) if client else None
+        if client is None or route is None:
             return
         length = self.body_length(BODY_MAX, b'{"error":"a request this large is not a tool call"}')
         if length is None:
@@ -308,10 +408,11 @@ class Gate(HttpHandler):
                 tool = str(params.get("name") or "")
                 call = {
                     "client": client.name,
+                    **route.ledger(),
                     "tool": tool,
                     "arguments": json.dumps(params.get("arguments"), ensure_ascii=False)[:ARGUMENTS_KEPT],
                 }
-                if client.permits(tool):
+                if client.permits(tool, route.name):
                     permitted.append(call)
                 else:
                     self.ledger.write(event="call.refused", **call)
@@ -338,7 +439,7 @@ class Gate(HttpHandler):
             payload = answers if isinstance(message, list) else (answers[0] if answers else {})
             self._answer(200, json.dumps(payload, ensure_ascii=False).encode())
             return
-        self._relay(body, method="POST", client=client, listings=listings, calls=permitted)
+        self._relay(body, method="POST", client=client, route=route, listings=listings, calls=permitted)
 
     def _relay(
         self,
@@ -346,22 +447,29 @@ class Gate(HttpHandler):
         *,
         method: str,
         client: Client,
+        route: Route,
         listings: set[str] | None = None,
         calls: list[dict[str, Any]] | None = None,
     ) -> None:
         calls = calls or []
-        headers = {name: value for name in FORWARDED if (value := self.headers.get(name))}
-        headers.update(self.upstream_headers)
-        request = urllib.request.Request(self.upstream, data=body or None, headers=headers, method=method)
+        headers = {"User-Agent": USER_AGENT}
+        headers.update({name: value for name in FORWARDED if (value := self.headers.get(name))})
+        headers.update(route.headers)
+        request = urllib.request.Request(route.url, data=body or None, headers=headers, method=method)
         # No proxy handler and no redirects: this gate reaches exactly the one
-        # address it was configured with, or it fails.
+        # address the route was configured with, or it fails.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
         def failed(reason: str) -> None:
             self.ledger.write(
-                event="call.failed", client=client.name, method=method, tools=[c["tool"] for c in calls], reason=reason
+                event="call.failed",
+                client=client.name,
+                **route.ledger(),
+                method=method,
+                tools=[c["tool"] for c in calls],
+                reason=reason,
             )
-            self._answer(502, b'{"error":"the chat server did not answer"}')
+            self._answer(502, b'{"error":"the MCP server did not answer"}')
 
         try:
             with opener.open(request, timeout=UPSTREAM_TIMEOUT) as answer:
@@ -391,7 +499,7 @@ class Gate(HttpHandler):
             failed("the chat server cut its answer short")
             return
         try:
-            out = filter_body(raw, listings or set(), client)
+            out = filter_body(raw, listings or set(), client, route.name)
         except Exception as exc:  # noqa: BLE001 — a body the filter cannot read must still get an answer
             failed(f"the answer could not be filtered: {type(exc).__name__}")
             return
@@ -408,24 +516,29 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def build() -> ThreadingHTTPServer:
     """The gate, configured from the environment and bound, not yet serving:
     doors.py runs it beside the proxy and the ingress; main() runs it alone."""
-    upstream = os.environ.get("MCPGATE_UPSTREAM", "").strip()
-    if not upstream.startswith(("http://", "https://")):
-        raise SystemExit("mcp-gate: set MCPGATE_UPSTREAM to the chat server's MCP URL")
-    Gate.upstream = upstream
-    Gate.clients = load_clients(dict(os.environ))
-    Gate.upstream_headers = {
-        name.split("MCPGATE_UPSTREAM_HEADER_", 1)[1].replace("_", "-"): value
-        for name, value in os.environ.items()
-        if name.startswith("MCPGATE_UPSTREAM_HEADER_")
-    }
-    Gate.ledger = Ledger(os.environ.get("MCPGATE_LEDGER", "/data/calls.jsonl"))
-    port = int(os.environ.get("MCPGATE_PORT", "8097"))
+    environ = dict(os.environ)
+    routes = load_routes(environ)
+    upstream = environ.get("MCPGATE_UPSTREAM", "").strip()
+    single = {key: value for key, value in environ.items() if key.startswith("MCPGATE_UPSTREAM_HEADER_")}
+    if routes and (upstream or single):
+        raise SystemExit("mcp-gate: MCPGATE_UPSTREAM is one MCP server and MCPGATE_ROUTE_<NAME> is several; set one")
+    if not routes and not upstream.startswith(("http://", "https://")):
+        raise SystemExit("mcp-gate: set MCPGATE_UPSTREAM to the MCP server's URL, or MCPGATE_ROUTE_<NAME> for several")
+    Gate.upstream, Gate.routes = upstream, routes
+    Gate.clients = load_clients(environ, routes)
+    Gate.upstream_headers = {key.split("_HEADER_", 1)[1].replace("_", "-"): value for key, value in single.items()}
+    Gate.ledger = Ledger(environ.get("MCPGATE_LEDGER", "/data/calls.jsonl"))
+    port = int(environ.get("MCPGATE_PORT", "8097"))
+
+    def host(url: str) -> str:
+        return url.split("://", 1)[1].split("/", 1)[0]
+
     logger.info(
         "up on :%d for %s, %d client(s): %s",
         port,
-        upstream.split("://", 1)[1].split("/", 1)[0],
+        ", ".join(f"/{r.name}/ -> {host(r.url)}" for r in routes.values()) or host(upstream),
         len(Gate.clients),
-        ", ".join(f"{c.name}({len(c.tools)})" for c in Gate.clients),
+        ", ".join(f"{c.name}({sum(len(t) for t in c.tools.values())})" for c in Gate.clients),
     )
     return ThreadingHTTPServer(("0.0.0.0", port), Gate)  # noqa: S104 — the container's own network only
 
