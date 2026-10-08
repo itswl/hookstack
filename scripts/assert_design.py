@@ -123,19 +123,27 @@ BLOCKS = (
 # the page that registers it.
 FILES = (("service worker", tuple(page.parent / "static" / "sw.js" for page in PAGES)),)
 
-# The head, for the phone (2026-10-06). Two theme-color metas split by the
-# system's preference, so the status bar is right before any script runs; the
-# install block rewrites both to the shown theme, because a media query cannot
-# see a pick. And the iOS status-bar style is `default`: `black-translucent`
-# paints white text over a light header, and it is read once, at launch — the
-# first real phone screenshots showed a light page under a black status bar and
-# a dark page under a white one.
+# The head, for the phone (2026-10-06, corrected 2026-10-08). Two theme-color
+# metas split by the system's preference, so a browser's bar is right before
+# any script runs; the install block rewrites both to the shown theme, because
+# a media query cannot see a pick. An iOS home-screen app is another matter:
+# it reads its status bar once, at launch, ignores theme-color changes after,
+# and the `default` style follows the DEVICE's appearance, not the page's — a
+# page switched to the other theme kept the old bar until relaunch. So the bar
+# is translucent and the page paints the strip under the clock itself, which
+# needs viewport-fit=cover and the safe-area insets in the CSS (one without the
+# other is a bar over the header, or insets that are all zero). iOS draws the
+# clock white over a translucent bar, so the light theme's strip is dark.
 HEAD_MUST = (
+    '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
     '<meta name="theme-color" media="(prefers-color-scheme: light)"',
     '<meta name="theme-color" media="(prefers-color-scheme: dark)"',
-    '<meta name="apple-mobile-web-app-status-bar-style" content="default">',
+    '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">',
 )
-HEAD_MUST_NOT = ("black-translucent",)
+HEAD_MUST_NOT = ('status-bar-style" content="default"',)
+# The CSS half of viewport-fit=cover: what the page must say to clear the bar
+# and paint under it. Checked in the whole page, not the head.
+PAGE_MUST = ("padding-top: env(safe-area-inset-top)", "var(--statusbar)", "env(safe-area-inset-bottom)")
 
 # A colour written into a page's CSS as a literal does not change with the
 # mode: it is the same grey on a white page as on a dark one. So outside the
@@ -325,7 +333,11 @@ def main() -> int:
                 failures.append(f"{page}: the head lacks {needle}")
         for needle in HEAD_MUST_NOT:
             if needle in head:
-                failures.append(f"{page}: the head says {needle} — read once at launch, white text over a light header")
+                failures.append(f"{page}: the head says {needle} — read once at launch, and it follows the device")
+        whole = (root / page).read_text(encoding="utf-8")
+        for needle in PAGE_MUST:
+            if needle not in whole:
+                failures.append(f"{page}: viewport-fit=cover without {needle} in the CSS")
 
     # The mode is chosen before the body paints, or a light system sees a dark
     # flash on every load; and no colour of a page's own may ignore the mode.

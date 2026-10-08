@@ -1648,6 +1648,10 @@ async def test_the_board_installs_on_a_phone(app_client):
     # The shell and nothing else: the data paths are not even named in it.
     assert "/status" not in worker.text and "/live" not in worker.text
     page = (await app_client.get("/")).text
-    assert page.count('<meta name="theme-color"') == 2 and 'content="black-translucent"' not in page
+    assert page.count('<meta name="theme-color"') == 2
+    # An installed iOS app reads its status bar once, at launch: the bar is
+    # translucent there and the page paints the strip under the clock itself.
+    assert 'content="black-translucent"' in page and "viewport-fit=cover" in page
+    assert "env(safe-area-inset-top)" in page
     assert 'name="apple-mobile-web-app-capable"' in page
     assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page
