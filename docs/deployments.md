@@ -272,7 +272,11 @@ http://127.0.0.1:8100`) or a tunnel; the work stack's board is on
 here opens them to the network. Then: open the address, paste the read token
 in Settings (the app keeps it in that browser and nothing else), and Add to
 Home Screen. The worker keeps the shell and never the data, so offline the app
-shows the page and says its service is out of reach.
+shows the page and says its service is out of reach. The operator runs the
+pipe's board and the watcher's console this way, through a tunnel of their own.
+iOS keeps the status-bar style an icon was added with, so after an update that
+changes it the icon has to be added again; each board's settings drawer says so
+when it finds itself under the old, opaque bar.
 
 **The chat is behind a protocol, not in the pipe.** Both deployments reach
 Feishu through a `bridge` channel and the lark-bridge sidecar: the pipe sends a

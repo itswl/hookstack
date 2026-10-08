@@ -204,6 +204,19 @@ approval is a person stepping in, and the board says so.
 The same alert from the pipe's side: received, judged, six cards notified,
 investigated, approved by a named person, the condition ending, the fix held.
 
+## On a phone
+
+![the three boards at a phone's width: the pipe's attention entry with its six tabs in one row, the investigator's actions page under its runtime group with the procedure a person approved and what each command printed, and the judge's board](docs/img/hookstack-phones.png)
+
+The same three boards at a phone's width, from a run of the rehearsal above.
+Each installs as an app and runs under the status bar in its own colour; its
+tabs fit one row, and the investigator's two groups each take one cell, the open
+one unfolding its pages beneath as a segmented control. Wide tables become one
+block per row, and every field types at a size the phone does not zoom into. A
+press from a phone, on a card or in the console, approves the version of the
+procedure that was on the screen; one that changed since is refused and the
+console shows it again.
+
 ## Running it locally
 
 One command starts the whole stack, the investigator included, on the
