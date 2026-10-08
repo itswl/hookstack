@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from hookprobe import remediation
+from tests.helpers import approve_as_read, read_hash
 
 REPORT = """Root cause: the cache is stale.
 
@@ -86,7 +87,7 @@ def test_approval_without_an_allowlist_is_refused(tmp_path):
 
     run, service = asyncio.run(scenario())
     with pytest.raises(PermissionError):
-        service.approve_remediation(run.meta["remediation_proposal"])
+        approve_as_read(service, run.meta["remediation_proposal"])
     assert remediation.load(tmp_path, run.meta["remediation_proposal"])["status"] == "proposed"
 
 
@@ -111,7 +112,7 @@ def test_an_approved_allowlisted_command_runs_and_is_audited(tmp_path):
                 break
             await asyncio.sleep(0.01)
         pid = run.meta["remediation_proposal"]
-        service.approve_remediation(pid, actor="ops-lead")
+        approve_as_read(service, pid, actor="ops-lead")
         for _ in range(300):
             row = remediation.load(tmp_path, pid)
             if row["status"] in ("executed", "failed"):
@@ -160,7 +161,7 @@ def test_a_failing_step_stops_the_sequence(tmp_path):
                 break
             await asyncio.sleep(0.01)
         pid = run.meta["remediation_proposal"]
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
         for _ in range(300):
             row = remediation.load(tmp_path, pid)
             if row["status"] in ("executed", "failed"):
@@ -215,7 +216,7 @@ def test_shutdown_waits_for_a_procedure_instead_of_stranding_it(tmp_path):
         service.start({"message": "Title: t\ngo", "sessionKey": "k1"})
         run = await _finish(service, "k1")
         pid = run.meta["remediation_proposal"]
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
         assert remediation.load(tmp_path, pid)["status"] == "running"
 
         cancelled = await service.shutdown(grace_seconds=5.0)
@@ -267,7 +268,10 @@ def test_a_restart_settles_a_procedure_it_died_in_the_middle_of(tmp_path):
     with TestClient(create_app(settings, service)) as client:
         rows = client.get("/v1/remediations", headers=auth).json()["proposals"]
         # Terminal now, so the row is one an operator can act on the truth of.
-        assert client.post("/v1/remediations/a1b2c3d4e5/approve", headers=auth).status_code == 409
+        assert (
+            client.post("/v1/remediations/a1b2c3d4e5/approve", json={"hash": rows[0]["hash"]}, headers=auth).status_code
+            == 409
+        )
 
     assert len(rows) == 1
     assert rows[0]["status"] == "failed"
@@ -298,7 +302,7 @@ def test_a_row_that_cannot_be_written_after_execution_is_loud(tmp_path, monkeypa
         run = await _finish(service, "k1")
         pid = run.meta["remediation_proposal"]
         monkeypatch.setattr("hookprobe.service.remediation.save", failing_save)
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
         await service.shutdown(grace_seconds=5.0)
         return pid
 
@@ -491,7 +495,7 @@ def test_a_procedure_approved_after_the_condition_ended_does_not_run(tmp_path):
     # annotates the investigation. No turn, no cost, no new run id.
     assert service.record_recovery("alerts", "t") is not None
     with pytest.raises(remediation.Moved) as caught:
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
     assert "the condition ended" in str(caught.value)
     row = remediation.load(tmp_path, pid)
     assert row["status"] == "superseded"
@@ -499,7 +503,7 @@ def test_a_procedure_approved_after_the_condition_ended_does_not_run(tmp_path):
     # Terminal: approve and reject both require `proposed`, so the retired row
     # cannot be walked back into running by a second press.
     with pytest.raises(ValueError):
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
 
 
 def test_a_superseded_procedure_is_not_counted_as_a_human_dismissal(tmp_path):
@@ -511,7 +515,7 @@ def test_a_superseded_procedure_is_not_counted_as_a_human_dismissal(tmp_path):
     run, service = _proposed(tmp_path)
     service.record_recovery("alerts", "t")
     with pytest.raises(remediation.Moved):
-        service.approve_remediation(run.meta["remediation_proposal"])
+        approve_as_read(service, run.meta["remediation_proposal"])
     events = [r.get("event") for r in automation.ledger(tmp_path, "remediation")]
     assert "dismissed" not in events and "approved" not in events
 
@@ -537,7 +541,7 @@ def test_the_chat_is_told_a_pressed_procedure_did_not_run(tmp_path):
     pid = run.meta["remediation_proposal"]
     service.record_recovery("alerts", "t")
     with pytest.raises(remediation.Moved):
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
     notice = service.report_superseded(pid, "the condition ended after these steps were written")
     assert notice is not None
     assert notice.origin == "relay", "a notice that does not return is a log line"
@@ -574,7 +578,7 @@ def test_the_notice_does_not_masquerade_as_work(tmp_path):
     pid = run.meta["remediation_proposal"]
     service.record_recovery("alerts", "t")
     with pytest.raises(remediation.Moved):
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
     notice = service.report_superseded(pid, "the condition ended after these steps were written")
     assert notice is not None
 
@@ -605,7 +609,7 @@ def test_a_notice_earns_no_buttons(tmp_path):
     pid = run.meta["remediation_proposal"]
     service.record_recovery("alerts", "t")
     with pytest.raises(remediation.Moved):
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
     notice = service.report_superseded(pid, "the condition ended after these steps were written")
     assert notice is not None
     assert actions.declare(notice, tmp_path) == []
@@ -641,7 +645,7 @@ def test_the_list_says_which_proposals_are_past_their_window(tmp_path):
 
     # The gate and the board already agreed; this is the third reader joining.
     with pytest.raises(ValueError, match="past the"):
-        remediation.approve(tmp_path, old, allowlist=None)
+        remediation.approve(tmp_path, old, allowlist=None, read_hash=read_hash(tmp_path, old))
     assert work.proposal_stale(by_id[old], now)
 
 
@@ -805,7 +809,7 @@ def test_a_second_procedure_against_the_same_target_is_refused_and_stays_approva
     earlier = _acted(tmp_path, "echo remediated", ago=60)
 
     with pytest.raises(remediation.Cooling) as caught:
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
     assert "echo remediated" in str(caught.value) and "Nothing ran" in str(caught.value)
     row = remediation.load(tmp_path, pid)
     assert row["status"] == "proposed", "held, not retired"
@@ -819,7 +823,7 @@ def test_a_second_procedure_against_the_same_target_is_refused_and_stays_approva
     older = remediation.load(tmp_path, earlier)
     older["executed_at"] = older["approved_at"] = time.time() - (remediation.COOLDOWN_SECONDS + 60)
     remediation.save(tmp_path, older)
-    approved = remediation.approve(tmp_path, pid, allowlist=tmp_path / "allow.txt")
+    approved = remediation.approve(tmp_path, pid, allowlist=tmp_path / "allow.txt", read_hash=read_hash(tmp_path, pid))
     assert approved["status"] == "running"
 
 
@@ -830,7 +834,7 @@ def test_the_allowlist_refusal_comes_before_the_cooldown(tmp_path):
     run, service = _proposed(tmp_path, allow="")
     _acted(tmp_path, "echo remediated", ago=60)
     with pytest.raises(PermissionError):
-        service.approve_remediation(run.meta["remediation_proposal"])
+        approve_as_read(service, run.meta["remediation_proposal"])
 
 
 def test_the_button_is_not_offered_while_the_target_is_cooling(tmp_path):
@@ -855,7 +859,7 @@ def test_the_chat_is_told_a_pressed_procedure_was_held(tmp_path):
     pid = run.meta["remediation_proposal"]
     _acted(tmp_path, "echo remediated", ago=60)
     with pytest.raises(remediation.Cooling) as caught:
-        service.approve_remediation(pid)
+        approve_as_read(service, pid)
     notice = service.report_cooling(pid, str(caught.value))
     assert notice is not None and notice.origin == "relay" and notice.cost_usd == 0.0
     assert notice.meta["notice"] == "cooling" and notice.meta["proposal"] == pid
@@ -946,7 +950,9 @@ def test_approval_refuses_the_whole_procedure_for_one_high_step(tmp_path):
     ]
     proposal_id = remediation.propose(tmp_path, "ses-x", steps)
     with pytest.raises(PermissionError) as excinfo:
-        remediation.approve(tmp_path, proposal_id, allowlist=allow, high_risk_allowlist=None)
+        remediation.approve(
+            tmp_path, proposal_id, allowlist=allow, high_risk_allowlist=None, read_hash=read_hash(tmp_path, proposal_id)
+        )
     assert "high risk" in str(excinfo.value)
     assert remediation.load(tmp_path, proposal_id)["status"] == "proposed", "nothing was decided"
 
@@ -978,7 +984,7 @@ def test_a_procedure_that_really_ran_verifies_its_work_item(tmp_path):
             origin="relay",
         )
         run = await _finish(service, "probe:alerts:7")
-        service.approve_remediation(run.meta["remediation_proposal"])
+        approve_as_read(service, run.meta["remediation_proposal"])
         for _ in range(300):
             row = remediation.load(tmp_path, run.meta["remediation_proposal"])
             if row["status"] in (remediation.EXECUTED, remediation.FAILED):
@@ -1025,7 +1031,7 @@ def test_a_refire_inside_the_window_means_the_procedure_did_not_hold(tmp_path):
             origin="relay",
         )
         run = await _finish(service, "probe:alerts:8")
-        service.approve_remediation(run.meta["remediation_proposal"], actor="ou_1")
+        approve_as_read(service, run.meta["remediation_proposal"], actor="ou_1")
         for _ in range(300):
             row = remediation.load(tmp_path, run.meta["remediation_proposal"])
             if row["status"] in (remediation.EXECUTED, remediation.FAILED):
@@ -1160,3 +1166,80 @@ def test_a_re_fire_reuses_the_pending_proposal_instead_of_parking_a_sixth(tmp_pa
     assert second.meta.get("remediation_proposal_reused") is True
     assert "remediation_proposal_reused" not in first.meta
     assert len(remediation.list_all(tmp_path)) == 1, "one procedure, one row"
+
+
+def test_an_approval_names_the_version_it_read(tmp_path: Path) -> None:
+    """What the digest covers is what decides what runs and whether it may, and
+    nothing the lifecycle rewrites. A press that names no version, or names the
+    one before the file was rewritten, is refused with the row untouched; read
+    again as it is now, it approves, and the row records which version."""
+    import json
+
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    pid = remediation.propose(
+        tmp_path, "probe:inbound:1", [{"action": "say", "command": "echo hi", "risk": "low", "rollback": ""}]
+    )
+    row = remediation.load(tmp_path, pid)
+    assert row is not None
+    read = remediation.content_hash(row)
+    lived = {**row, "status": "running", "results": [{"exit": 0}], "approved_by": "x", "resolved_at": 9.0}
+    assert remediation.content_hash(lived) == read, "the lifecycle moves no digest"
+    for field, other in (
+        ("steps", [{"action": "say", "command": "echo bye", "risk": "low", "rollback": ""}]),
+        ("cursor", {"ended": True}),
+        ("created_at", 2.0),
+        ("session_key", "probe:inbound:2"),
+        ("id", "0123456789"),
+    ):
+        assert remediation.content_hash({**row, field: other}) != read, field
+
+    with pytest.raises(remediation.Changed, match="which version"):
+        remediation.approve(tmp_path, pid, allowlist=allow)
+    tampered = {**row, "steps": [{"action": "say", "command": "echo nobody read this", "risk": "low", "rollback": ""}]}
+    (tmp_path / remediation.DIRNAME / f"{pid}.json").write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(remediation.Changed, match="not the one that was read"):
+        remediation.approve(tmp_path, pid, allowlist=allow, read_hash=read)
+    after = remediation.load(tmp_path, pid)
+    assert after is not None
+    assert after["status"] == "proposed" and not after.get("results"), "nothing ran; the row is left as it is"
+
+    now_read = remediation.content_hash(after)
+    approved = remediation.approve(tmp_path, pid, allowlist=allow, read_hash=now_read)
+    assert approved["status"] == "running"
+    assert approved["approved_hash"] == now_read
+
+
+def test_the_console_presses_with_the_digest_it_listed(tmp_path: Path) -> None:
+    """The list gives every row the digest of itself as listed, and the console's
+    press must name it: none answers 409 with nothing run; the listed one
+    approves and lands on the row."""
+    from fastapi.testclient import TestClient
+
+    from hookprobe.app import create_app
+    from hookprobe.runs import RunStore
+    from hookprobe.service import RunService
+    from tests.helpers import FakeEngine, make_settings
+
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    pid = remediation.propose(
+        tmp_path, "probe:inbound:9", [{"action": "say", "command": "echo hi", "risk": "low", "rollback": ""}]
+    )
+    settings = make_settings(tmp_path, token="t", remediation_allowlist=allow)
+    service = RunService(settings, FakeEngine(), RunStore(tmp_path / "results"))
+    auth = {"Authorization": "Bearer t"}
+    with TestClient(create_app(settings, service)) as client:
+        listed = {r["id"]: r for r in client.get("/v1/remediations", headers=auth).json()["proposals"]}
+        assert listed[pid]["hash"] == read_hash(tmp_path, pid)
+        refused = client.post(f"/v1/remediations/{pid}/approve", json={"by": "me"}, headers=auth)
+        assert refused.status_code == 409
+        assert "which version" in refused.json()["detail"]
+        still = remediation.load(tmp_path, pid)
+        assert still is not None and still["status"] == "proposed"
+        ok = client.post(
+            f"/v1/remediations/{pid}/approve", json={"by": "me", "hash": listed[pid]["hash"]}, headers=auth
+        )
+        assert ok.status_code == 200
+    done = remediation.load(tmp_path, pid)
+    assert done is not None and done["approved_hash"] == listed[pid]["hash"]

@@ -26,7 +26,7 @@ from hookprobe.notify import ReturnDelivery
 from hookprobe.runs import COMPLETED, Run, RunStore
 from hookprobe.service import RunService
 from hookprobe.wire import sign_timestamped
-from tests.helpers import FakeEngine, GatedEngine, make_settings
+from tests.helpers import FakeEngine, GatedEngine, make_settings, read_hash
 
 TOKEN = "secret-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -132,6 +132,7 @@ def test_a_report_with_a_procedure_offers_it_by_name(tmp_path: Path) -> None:
     assert kinds == ["followup", "approve", "useful", "useless"]
     approve = declared[1]
     assert approve["ref"] == proposal_id
+    assert approve["hash"] == read_hash(tmp_path, proposal_id), "the button approves the version it names"
     assert "kubectl rollout restart deploy/gateway-2" in approve["text"]
     assert "medium risk" in approve["text"], "a person judging at a glance wants the risk"
     assert len(approve["text"]) <= 72, "a label nobody reads is not a label"
@@ -472,7 +473,9 @@ def test_a_press_that_named_nothing_gives_its_claim_back(tmp_path: Path) -> None
 
         assert _press(client, "approve", params={"ref": "0000000000"}, at=7).status_code == 404
         # Same press identity, this time naming something real.
-        retried = _press(client, "approve", params={"ref": proposal_id}, at=7).json()
+        retried = _press(
+            client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}, at=7
+        ).json()
         assert retried["status"] == "approved"
 
 
@@ -487,7 +490,7 @@ def test_a_card_press_cannot_stand_in_for_the_allowlist(tmp_path: Path) -> None:
     with client:
         run = _drain(client, "probe:inbound:5")
         proposal_id = run["meta"]["remediation_proposal"]
-        answer = _press(client, "approve", params={"ref": proposal_id}).json()
+        answer = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
 
         assert answer["status"] == "denied"
         assert "no allowlist configured" in answer["detail"]
@@ -504,7 +507,12 @@ def test_a_press_only_runs_what_the_allowlist_already_permitted(tmp_path: Path) 
     with client:
         run = _drain(client, "probe:inbound:5")
         proposal_id = run["meta"]["remediation_proposal"]
-        answer = _press(client, "approve", params={"ref": proposal_id}, actor="ou_night_shift").json()
+        answer = _press(
+            client,
+            "approve",
+            params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)},
+            actor="ou_night_shift",
+        ).json()
         assert answer["status"] == "approved"
         for _ in range(400):
             row = remediation.load(tmp_path, proposal_id)
@@ -525,12 +533,17 @@ def test_a_redelivered_approval_does_not_run_the_commands_twice(tmp_path: Path) 
     client, _ = _investigated(tmp_path, text=report, remediation_allowlist=allow)
     with client:
         proposal_id = _drain(client, "probe:inbound:5")["meta"]["remediation_proposal"]
-        assert _press(client, "approve", params={"ref": proposal_id}).json()["status"] == "approved"
+        assert (
+            _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()[
+                "status"
+            ]
+            == "approved"
+        )
         for _ in range(400):
             if remediation.load(tmp_path, proposal_id)["status"] in ("executed", "failed"):
                 break
             time.sleep(0.01)
-        again = _press(client, "approve", params={"ref": proposal_id}).json()
+        again = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
         assert again["duplicate"] is True and again["status"] == "approved"
 
     row = remediation.load(tmp_path, proposal_id)
@@ -546,7 +559,7 @@ def test_a_press_on_a_proposal_somebody_already_settled_is_stale_not_a_rerun(tmp
     with client:
         proposal_id = _drain(client, "probe:inbound:5")["meta"]["remediation_proposal"]
         assert client.post(f"/v1/remediations/{proposal_id}/reject", headers=AUTH).status_code == 200
-        answer = _press(client, "approve", params={"ref": proposal_id}).json()
+        answer = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
 
     assert answer["status"] == "stale"
     assert "rejected" in answer["detail"]
@@ -720,7 +733,7 @@ def test_a_press_against_a_target_something_just_touched_runs_nothing(tmp_path: 
         row["status"], row["executed_at"] = "executed", time.time() - 60
         remediation.save(tmp_path, row)
 
-        answer = _press(client, "approve", params={"ref": proposal_id}).json()
+        answer = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
         assert answer["status"] == "cooling"
         assert "inside the 15m cooldown" in answer["detail"]
 
@@ -759,7 +772,7 @@ def test_a_press_that_arrives_after_the_condition_ended_runs_nothing(tmp_path: P
         answered = client.post("/hooks/event", content=recovery, headers=headers).json()
         assert answered["status"] == "verified", answered
 
-        answer = _press(client, "approve", params={"ref": proposal_id}).json()
+        answer = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
         assert answer["status"] == "superseded"
         assert "the condition ended" in answer["detail"]
 
@@ -774,6 +787,41 @@ def test_a_press_that_arrives_after_the_condition_ended_runs_nothing(tmp_path: P
         assert superseded[0]["cost_usd"] == 0.0
 
 
+def test_a_press_for_a_proposal_rewritten_since_its_card_runs_nothing(tmp_path: Path) -> None:
+    """The button approves the version of the proposal it was minted from. A file
+    rewritten under the same id afterwards is another proposal: the press is
+    refused, nothing runs, the row is left as it is — still approvable by
+    somebody who reads it as it now is — and the refusal goes back to the chat as
+    a report, because the bridge has already repainted the card. A button minted
+    before presses named a version is refused the same way."""
+    allow = tmp_path / "allow.txt"
+    allow.write_text("echo .*\n", encoding="utf-8")
+    report = 'ok\n```remediation\n[{"action":"probe","command":"echo repaired","risk":"low"}]\n```\n'
+    client, _ = _investigated(tmp_path, text=report, remediation_allowlist=allow)
+    with client:
+        run = _drain(client, "probe:inbound:5")
+        proposal_id = run["meta"]["remediation_proposal"]
+        on_the_card = next(a for a in actions.declare(_as_run(run), tmp_path) if a["kind"] == "approve")["hash"]
+        path = tmp_path / remediation.DIRNAME / f"{proposal_id}.json"
+        row = json.loads(path.read_text(encoding="utf-8"))
+        row["steps"][0]["command"] = "echo something nobody read"
+        path.write_text(json.dumps(row), encoding="utf-8")
+
+        answer = _press(client, "approve", params={"ref": proposal_id, "hash": on_the_card}).json()
+        assert answer["status"] == "changed"
+        assert "not the one that was read" in answer["detail"]
+        after = remediation.load(tmp_path, proposal_id)
+        assert after["status"] == "proposed", "left as it is, for somebody who reads it now"
+        assert not after["results"], "nothing ran"
+        listed = client.get("/v1/runs", headers={"Authorization": f"Bearer {TOKEN}"}).json()
+        assert any(r["session_key"] == f"probe:superseded:{proposal_id}" for r in listed), "the refusal reached no chat"
+
+        unnamed = _press(client, "approve", params={"ref": proposal_id}, at=2).json()
+        assert unnamed["status"] == "changed"
+        assert "which version" in unnamed["detail"]
+        assert remediation.load(tmp_path, proposal_id)["status"] == "proposed"
+
+
 def test_an_approve_press_puts_its_actor_on_the_row(tmp_path: Path) -> None:
     """Who approved what, as a field. The card door knew the presser all along
     and wrote them into a free-text note; the row now carries them where a
@@ -784,7 +832,9 @@ def test_an_approve_press_puts_its_actor_on_the_row(tmp_path: Path) -> None:
     try:
         detail = client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()
         pid = detail["meta"]["remediation_proposal"]
-        answer = _press(client, "approve", params={"ref": pid}, actor="ou_ops_lead").json()
+        answer = _press(
+            client, "approve", params={"ref": pid, "hash": read_hash(tmp_path, pid)}, actor="ou_ops_lead"
+        ).json()
         assert answer["status"] == "approved", answer
         for _ in range(400):
             row = remediation.load(tmp_path, pid)
@@ -811,7 +861,12 @@ def test_a_console_approval_says_console_unless_told_a_name(tmp_path: Path) -> N
     try:
         pid = client.get("/v1/runs/probe:inbound:5", headers=AUTH).json()["meta"]["remediation_proposal"]
         assert (
-            client.post(f"/v1/remediations/{pid}/approve", json={"by": "the on-call"}, headers=AUTH).status_code == 200
+            client.post(
+                f"/v1/remediations/{pid}/approve",
+                json={"by": "the on-call", "hash": read_hash(tmp_path, pid)},
+                headers=AUTH,
+            ).status_code
+            == 200
         )
         for _ in range(400):
             row = remediation.load(tmp_path, pid)

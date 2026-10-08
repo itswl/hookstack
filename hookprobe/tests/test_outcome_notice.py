@@ -20,7 +20,7 @@ from hookprobe.engine import EngineResult
 from hookprobe.notify import ReturnDelivery
 from hookprobe.runs import COMPLETED, FAILED, Run, RunStore
 from hookprobe.service import RunService
-from tests.helpers import FakeEngine, make_settings
+from tests.helpers import FakeEngine, approve_as_read, make_settings
 
 REPORT = 'ok\n```remediation\n[{"action":"probe","command":"echo remediated","risk":"low"}]\n```\n'
 KEY = "probe:alerts:99"
@@ -64,7 +64,7 @@ def _executed(tmp_path: Path) -> tuple[RunService, Run, dict[str, Any]]:
         else:
             raise AssertionError("the investigation never finished")
         pid = run.meta["remediation_proposal"]
-        service.approve_remediation(pid, actor="ou_operator")
+        approve_as_read(service, pid, actor="ou_operator")
         for _ in range(300):
             row = remediation.load(tmp_path, pid)
             if row is not None and row["status"] in (remediation.EXECUTED, remediation.FAILED):

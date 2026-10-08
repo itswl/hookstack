@@ -61,6 +61,7 @@ proposal's provenance. (A bash write around that guard still produces only a
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -194,6 +195,36 @@ def load(workdir: Path, proposal_id: str) -> dict[str, Any] | None:
     except (OSError, ValueError):
         return None
     return row if isinstance(row, dict) else None
+
+
+# What an approval binds to: the fields that decide WHAT runs and WHETHER it
+# may run. Never the ones the lifecycle rewrites (status, results, approved_*,
+# resolved_at) — those change under a proposal nobody touched.
+BOUND_FIELDS = ("id", "session_key", "created_at", "steps", "cursor")
+
+
+def content_hash(row: dict[str, Any]) -> str:
+    """The proposal as a person read it, as one sha256 hex digest.
+
+    A press names this digest and `approve` refuses one whose digest is not the
+    proposal's now: the card's button carries it inside the pipe's signed token,
+    minted from the same row as the command the button names, and the console
+    sends the one it drew the steps with. So an approval is an approval of the
+    commands that were on the screen, and the row records which. Without it the
+    press named only an id, and anything that rewrote the file under that id —
+    the module docstring concedes a bash write around the input guard still
+    produces a row — would have run as approved by somebody who never saw it.
+
+    Not only the steps: `created_at` and `cursor` feed the approval window and
+    the freshness check, so a row whose clock or condition was rewritten is a
+    different row too. Canonical JSON (sorted keys, no whitespace), so the
+    digest is a fact about the content, not about how a file happens to be
+    formatted. Decided 2026-10-08,
+    `.agents/notes/implemented/2026-10-08-an-approval-names-what-was-read.md`.
+    """
+    bound = {key: row.get(key) for key in BOUND_FIELDS}
+    canonical = json.dumps(bound, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def list_all(workdir: Path, limit: int = 100) -> list[dict[str, Any]]:
@@ -434,6 +465,19 @@ class Moved(ValueError):
     """
 
 
+class Changed(ValueError):
+    """The press does not name the proposal as it stands: it names another
+    version of it, or none.
+
+    Nothing runs and the row is left exactly as it is — not retired the way a
+    moved condition retires it, because nothing about the condition is known to
+    have changed; what is known is that this press approved something else. The
+    proposal stays approvable by somebody who reads it as it now is. A
+    ValueError for the doors that answer 409; a subclass so the card door can
+    carry the refusal back to the chat, where the press was made.
+    """
+
+
 def cursor(run: Any) -> dict[str, Any]:
     """What was true about the condition when these steps were chosen.
 
@@ -644,6 +688,7 @@ def approve(
     high_risk_allowlist: Path | None = None,
     note: str = "",
     actor: str = "",
+    read_hash: str = "",
     at: dict[str, Any] | None = None,
     cooldown: int = COOLDOWN_SECONDS,
 ) -> dict[str, Any]:
@@ -671,12 +716,33 @@ def approve(
     to travel only inside `note`, a free-text line, which is why the one
     question an approval record exists to answer — who approved what — could
     not be asked of the row (pilot zero, 2026-09-28).
+
+    `read_hash` is WHAT was pressed: the `content_hash` of the proposal as the
+    presser was shown it. Required, and checked before anything else about the
+    proposal is believed — the window and the cursor are both read from the row,
+    and a rewritten row would answer them about itself. A press that names no
+    version, or another one, is refused and the row left untouched (`Changed`).
+    The approved digest goes on the row, so the record says which commands were
+    approved and not only that something under this id was.
     """
     row = load(workdir, proposal_id)
     if row is None:
         raise LookupError("no such proposal")
     if row.get("status") != "proposed":
         raise ValueError(f"proposal is {row.get('status')}, not proposed")
+    wanted = content_hash(row)
+    named = str(read_hash or "").strip().lower()
+    if not named:
+        raise Changed(
+            "this press does not say which version of the proposal it approves. Nothing ran. "
+            "Approve it where its steps are shown: the console, or the card it came on."
+        )
+    if named != wanted:
+        logger.warning("remediation approval refused, not the proposal that was read: %s", proposal_id)
+        raise Changed(
+            "this proposal is not the one that was read: its steps or their context changed after it was shown. "
+            "Nothing ran. Read it again as it is now before approving it."
+        )
     change = moved(row.get("cursor") or {}, at or {})
     if change:
         row["status"] = "superseded"
@@ -721,6 +787,7 @@ def approve(
     row["approved_at"] = round(time.time(), 3)
     row["approved_note"] = note[:300]
     row["approved_by"] = actor[:120]
+    row["approved_hash"] = wanted
     save(workdir, row)
     automation.record(workdir, "remediation", proposal_id, "approved", actor=actor[:120])
     return row

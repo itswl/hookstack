@@ -18,7 +18,7 @@ from hookprobe import remediation, work
 from hookprobe.app import create_app
 from hookprobe.runs import COMPLETED, FAILED, RUNNING, Run, RunStore
 from hookprobe.service import RunService
-from tests.helpers import FakeEngine, make_settings
+from tests.helpers import FakeEngine, make_settings, read_hash
 
 TOKEN = "secret-token"
 
@@ -304,9 +304,12 @@ def test_a_proposal_past_its_window_cannot_be_approved_and_stops_asking(tmp_path
 
     # The gate refuses, and says why in words an operator can act on.
     with pytest.raises(ValueError, match="past the 24h window"):
-        remediation.approve(workdir, old_id, allowlist=allow)
+        remediation.approve(workdir, old_id, allowlist=allow, read_hash=read_hash(workdir, old_id))
     assert remediation.load(workdir, old_id)["status"] == "proposed", "refused, not silently resolved"
-    assert remediation.approve(workdir, fresh_id, allowlist=allow)["status"] == "running"
+    assert (
+        remediation.approve(workdir, fresh_id, allowlist=allow, read_hash=read_hash(workdir, fresh_id))["status"]
+        == "running"
+    )
 
     # And the board stops offering it, so `blocked` keeps meaning "somebody can
     # clear this now".

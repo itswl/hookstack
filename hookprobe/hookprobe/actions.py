@@ -139,8 +139,16 @@ def declare(
             }
         )
     for row in _open_proposals(run, workdir, cooldown=cooldown):
+        # The digest rides in the pipe's signed token beside the ref, taken from
+        # the same row as the command the button names: the press approves that
+        # version of the proposal and no other (remediation.content_hash).
         declared.append(
-            {"kind": "approve", "text": _approve_text(row.get("steps") or []), "ref": str(row.get("id") or "")}
+            {
+                "kind": "approve",
+                "text": _approve_text(row.get("steps") or []),
+                "ref": str(row.get("id") or ""),
+                "hash": remediation.content_hash(row),
+            }
         )
     # One per memory line this run proposed that is still waiting. Only this
     # run's, and only while open — the same rule as `approve`, for the same

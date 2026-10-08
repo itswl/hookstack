@@ -13,6 +13,19 @@ from hookprobe.engine import EngineResult
 from hookprobe.settings import Settings
 
 
+def read_hash(workdir: Path, proposal_id: str) -> str:
+    """The digest a person reading this proposal presses with (remediation.content_hash)."""
+    row = remediation.load(workdir, proposal_id)
+    return remediation.content_hash(row) if row else ""
+
+
+def approve_as_read(service: Any, proposal_id: str, **kwargs: Any) -> dict[str, Any]:
+    """The operator's click the way a person makes it: naming the version they read."""
+    digest = read_hash(service._settings.workdir, proposal_id)
+    approved: dict[str, Any] = service.approve_remediation(proposal_id, read_hash=digest, **kwargs)
+    return approved
+
+
 def make_settings(tmp_path: Path, **overrides: object) -> Settings:
     defaults: dict[str, object] = {
         "token": "secret-token",

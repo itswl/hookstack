@@ -186,8 +186,9 @@ always reach. Two things about the word *default*, before the layers:
   credential mounted into that node, which the posture check records as the
   blast radius. Nothing reaches such a node on its own: a plan arrives through
   `POST /v1/runs/{key}/handoff` behind a signed card click, and a proposed
-  remediation runs only after `POST /v1/remediations/{id}/approve`, each step
-  gate-checked against an allowlist and executed as an argv, never through a
+  remediation runs only after `POST /v1/remediations/{id}/approve` names
+  the version that was read (its `hash`), each step gate-checked against an
+  allowlist and executed as an argv, never through a
   shell (a command that needs a shell is refused instead) — and a target
   another procedure acted on inside the cooldown
   (`HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS`, 15 minutes, 0 disables) is held

@@ -89,8 +89,7 @@ should be driven that way, on purpose.
 - `deploy/work.yaml` carried a stale orphan comment ("No card_actions") above
   the actual `card_actions` block; replaced with the truth and the console
   pointer.
-- Still open, each recorded rather than silently dropped: the hash binding of
-  an approval to what was read (the porting table's step-3 row); every step
+- Still open, each recorded rather than silently dropped: every step
   listed on a proposal card (the button stays one line by design); a
   card-borne approve for the write node (needs the hookrelay kind split); the
   per-plan ephemeral worker ("after step 3"). And the first press itself —

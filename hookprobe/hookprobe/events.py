@@ -523,10 +523,21 @@ def _approve(service: RunService, params: dict[str, Any], *, actor: str, correla
     if not ref:
         raise HTTPException(status_code=400, detail="approve needs params.ref naming the proposal")
     note = f"card press by {actor or 'an unnamed operator'} ({correlation_id or 'no correlation id'})"
+    read_hash = str(params.get("hash") or "").strip()[:64]
     try:
-        row = service.approve_remediation(ref, note=note, actor=actor)
+        row = service.approve_remediation(ref, note=note, actor=actor, read_hash=read_hash)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="no such proposal") from exc
+    except remediation.Changed as exc:
+        # The press names a version of the proposal that is not the one on
+        # disk, or none (a button minted before presses named one). Same hole
+        # as `Moved` below and answered the same way: the bridge has already
+        # repainted the card "accepted and passed on" and stripped its buttons,
+        # so the refusal goes back to the chat as a report saying what the
+        # proposal says NOW. The row is untouched and still approvable by
+        # somebody who reads it as it is.
+        service.report_superseded(ref, str(exc))
+        return {"status": "changed", "kind": "approve", "ref": ref, "detail": str(exc)}
     except remediation.Cooling as exc:
         # The target cooldown: another procedure acted on this same target
         # recently, and two changes to one machine inside the window with nobody

@@ -15,7 +15,7 @@ from hookprobe.engine import EngineResult
 from hookprobe.runs import COMPLETED, Run, RunStore
 from hookprobe.service import RunService
 from hookprobe.wire import sign_timestamped, verify_timestamped
-from tests.helpers import FakeEngine, GatedEngine, make_settings
+from tests.helpers import FakeEngine, GatedEngine, make_settings, read_hash
 
 TOKEN = "secret-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -807,7 +807,12 @@ def test_a_refire_at_the_door_is_evidence_against_the_procedure_that_ran(tmp_pat
         first = client.post("/hooks/event", json=EVENT).json()
         detail = _drain(client, first["sessionKey"])
         pid = detail["meta"]["remediation_proposal"]
-        assert client.post(f"/v1/remediations/{pid}/approve", json={"by": "me"}, headers=AUTH).status_code == 200
+        assert (
+            client.post(
+                f"/v1/remediations/{pid}/approve", json={"by": "me", "hash": read_hash(tmp_path, pid)}, headers=AUTH
+            ).status_code
+            == 200
+        )
         for _ in range(400):
             row = remediation.load(tmp_path, pid)
             if row["status"] in (remediation.EXECUTED, remediation.FAILED):
