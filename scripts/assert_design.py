@@ -148,6 +148,7 @@ HEAD_MUST_NOT = ('status-bar-style" content="default"',)
 PAGE_MUST = (
     "--safe-top: env(safe-area-inset-top)",
     "padding-top: var(--safe-top)",
+    "calc(18px + var(--safe-top))",
     "var(--safe-bottom)",
     "applySafeInsets",
 )

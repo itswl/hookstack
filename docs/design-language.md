@@ -137,7 +137,12 @@ paddings are one decision, not two — and the paddings read four variables,
 never `env()` directly, because an installed app can draw under the bar and
 report every inset as zero; the install block measures them and, where it
 must, assumes the bar's height from the screen — only ever more than `env()`
-says, never less — and the settings drawer prints what the phone was given. On a phone every field
+says, never less — and the settings drawer prints what the phone was given.
+The drawers run edge to edge the same way: the head grows by the inset above
+and draws under the bar in its own colour, the body scrolls on under the home
+indicator; dialogs and toasts keep clear of both. The phone's own habits are
+undone too: no grey flash over a tapped control, no text enlarged when the
+phone is turned. On a phone every field
 types at 16px: iOS zooms the page
 in to a smaller one when it takes focus, and does not zoom back.
 
