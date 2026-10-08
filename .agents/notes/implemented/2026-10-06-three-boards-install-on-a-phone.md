@@ -126,3 +126,12 @@ as zero; where it does, the bar's height is assumed from the screen's shape
 (44pt and 34pt on a tall phone, 20pt and none on an older one), once per size
 change. `--statusbar` is gone; `scripts/assert_design.py` asks for the
 variables and the measurement instead.
+
+The screenshot after that showed the header beneath the clock, nothing to tap:
+the measured inset had come out zero and the script had written that zero over
+a CSS `env()` that, the earlier band proved, works on this phone. So the
+measurement only ever adds — a probe that reads nothing leaves the stylesheet's
+`env()` alone — it runs again at load, on return and on a size change, the
+assumed height is by the screen's size where the phone is known (48pt on the
+operator's) and by its shape otherwise, and the settings drawer prints what the
+phone was given, measured or assumed, so the next screenshot carries numbers.
