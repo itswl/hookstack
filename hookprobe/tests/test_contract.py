@@ -607,6 +607,10 @@ def test_the_console_installs_on_a_phone_under_the_nodes_own_name(tmp_path) -> N
         # The shell and nothing else: no data path is even named in it.
         assert "/v1/" not in worker.text and "/sessions" not in worker.text
         page = client.get("/ui").text
-        assert page.count('<meta name="theme-color"') == 2 and 'content="black-translucent"' not in page
+        assert page.count('<meta name="theme-color"') == 2
+        # An installed iOS app reads its status bar once, at launch: the bar is
+        # translucent there and the page paints the strip under the clock itself.
+        assert 'content="black-translucent"' in page and "viewport-fit=cover" in page
+        assert "env(safe-area-inset-top)" in page
         assert 'name="apple-mobile-web-app-capable"' in page
         assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page

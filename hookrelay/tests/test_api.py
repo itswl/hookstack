@@ -159,7 +159,11 @@ async def test_the_board_installs_on_a_phone(client):
     code = worker.text.replace("/status or /live", "")
     assert "/status" not in code and "/live" not in code
     page = (await client.get("/")).text
-    assert page.count('<meta name="theme-color"') == 2 and 'content="black-translucent"' not in page
+    assert page.count('<meta name="theme-color"') == 2
+    # An installed iOS app reads its status bar once, at launch: the bar is
+    # translucent there and the page paints the strip under the clock itself.
+    assert 'content="black-translucent"' in page and "viewport-fit=cover" in page
+    assert "env(safe-area-inset-top)" in page
     assert 'name="apple-mobile-web-app-capable"' in page
     assert 'BASE + "/static/manifest.webmanifest"' in page and 'BASE + "/sw.js?page="' in page
 

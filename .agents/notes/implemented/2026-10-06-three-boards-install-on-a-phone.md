@@ -90,3 +90,23 @@ after, at 375px too, in both languages; no element on any tab spills past
 its card. The pipe's board was surveyed the same way and has nothing of
 this class. The rendering recipe is an operator-side script, not a gate
 step: it needs a desktop Chrome and a running stack.
+
+## The status bar, corrected two days later
+
+The `default` style turned out to follow the device's appearance, not the
+page's, and an installed iOS app reads its status bar once, at launch, and
+ignores `theme-color` rewrites after — so the fix above held the launch state
+and nothing else: a board switched to the other theme kept the old bar until
+relaunch (operator, 2026-10-08). The bar is translucent now and the header
+paints the strip under the clock itself, growing by the safe-area inset; the
+drawer, which covers the header when open, does the same; `viewport-fit=cover`
+pairs with the `env(safe-area-inset-*)` paddings on the sides, the bottom, the
+composer and the toasts. iOS draws the clock white over a translucent bar
+whatever the page shows, so the light theme's strip is the dark surface — the
+operator chose this over keeping a launch-only bar and over giving up the
+home-screen app for Safari, whose own bar tints live. The rule above, "default
+and never black-translucent", is withdrawn; `scripts/assert_design.py` now
+requires the opposite and the CSS half that goes with it.
+
+The same day, every field types at 16px on a phone: iOS zooms the page in to a
+field whose text is smaller when it takes focus, and does not zoom back out.

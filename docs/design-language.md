@@ -120,14 +120,20 @@ drawer carries the install row: the browser's prompt where there is one, the
 Share → Add to Home Screen hint where there is not, and a plain sentence over
 http, where no browser installs anything. The investigator's manifest is named
 for its node: a deployment runs several, and three icons all called
-"hookprobe" tell nobody which is which. The status bar follows the theme the
+"hookprobe" tell nobody which is which. A browser's own bar follows the theme the
 page shows, not only the system's: two `theme-color` metas split by the
 system's preference stand in before any script runs, and the install block
 rewrites both to the shown theme's surface colour, because a media query
-cannot see a pick — the first phone screenshots had a light page under a
-black status bar and a dark page under a white one. The iOS status-bar style
-is `default`: `black-translucent` paints white text over a light header, and
-it is read once, at launch.
+cannot see a pick. An installed iOS app is the exception: it reads its status
+bar once, at launch, ignores `theme-color` afterwards, and the `default` style
+follows the device's appearance rather than the page's — a board switched to
+the other theme kept the old bar until relaunch. So there the bar is
+translucent and the header paints the strip under the clock itself, growing
+by the safe-area inset; `viewport-fit=cover` and the `env(safe-area-inset-*)`
+paddings are one decision, not two. iOS draws the clock white over a
+translucent bar whatever the page shows, so the light theme's strip is the
+dark surface. And on a phone every field types at 16px: iOS zooms the page
+in to a smaller one when it takes focus, and does not zoom back.
 
 Before this the same palette sat under three idioms — tabs, a help link that
 unfolded a section, a row of eight buttons — and then, once the palette and the
