@@ -339,3 +339,55 @@ def test_an_answer_that_is_the_sessions_own_summary_is_asked_again_once(tmp_path
     assert "<analysis>" not in run.text, "the summary is not what was asked, so it is not the report"
     offered = [a["kind"] for a in actions.declare(run, tmp_path / "2", hands_off=True)]
     assert "handoff" not in offered, "a failed plan is not handed to the node that writes"
+
+
+class _SessionFirst(FakeEngine):
+    """A turn that names its engine session at once, as the real one does mid-turn."""
+
+    async def run(self, *, message: str, session_key: str, resume: str | None = None, on_event=None):
+        if on_event is not None:
+            on_event({"type": "session", "id": "sdk-session-1"})
+        return await super().run(message=message, session_key=session_key, resume=resume, on_event=on_event)
+
+
+def test_a_deploy_leaves_a_turn_in_flight_for_the_next_boot_to_continue(tmp_path) -> None:
+    """A recreate used to settle every turn in flight as failed "cancelled during
+    shutdown", and the next boot's sweep skips a finished run, so a restart
+    continued a run only after a crash. Three runs were lost that way in one
+    week. Now a deploy leaves the run the way a crash does, and the next boot
+    continues the same engine session."""
+
+    async def first_boot() -> None:
+        service = RunService(make_settings(tmp_path), _SessionFirst(delay=30.0), RunStore(tmp_path / "results"))
+        service.start({"message": "investigate", "sessionKey": "probe:inbound:31"})
+        await asyncio.sleep(0.05)
+        await service.shutdown(grace_seconds=5.0)
+
+    asyncio.run(first_boot())
+    left = RunStore(tmp_path / "results").get("probe:inbound:31")
+    assert left is not None and not left.finished and left.engine_session_id == "sdk-session-1"
+
+    async def next_boot() -> None:
+        engine = FakeEngine()
+        service = RunService(make_settings(tmp_path), engine, RunStore(tmp_path / "results"))
+        assert service.recover_orphans() == (1, 0)
+        run = await _settled(service)
+        assert engine.resumes == ["sdk-session-1"] and run.status == "completed"
+        assert [t["error"] for t in run.turns] == ["interrupted by a restart", None]
+
+    asyncio.run(next_boot())
+
+
+def test_a_deploy_still_settles_a_turn_with_nothing_to_continue(tmp_path) -> None:
+    """Cut off before the engine named a session, there is nothing to resume:
+    it settles at once, as a failure that reports itself."""
+
+    async def first_boot() -> None:
+        service = RunService(make_settings(tmp_path), FakeEngine(delay=30.0), RunStore(tmp_path / "results"))
+        service.start({"message": "investigate", "sessionKey": "probe:inbound:31"})
+        await asyncio.sleep(0.05)
+        await service.shutdown(grace_seconds=5.0)
+        run = service.get("probe:inbound:31")
+        assert run is not None and run.finished and run.error == "cancelled during shutdown"
+
+    asyncio.run(first_boot())

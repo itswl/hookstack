@@ -668,7 +668,15 @@ _NODE_WIDE: tuple[tuple[tuple[str, ...], str], ...] = (
         ("connection error", "connection refused", "connection reset", "name or service not known", "dns"),
         "the gateway is unreachable from this node",
     ),
-    (("404",), "the gateway answers, but not at the endpoint or model this node asks for"),
+    # The second marker is the agent CLI's own sentence for a model the gateway
+    # does not serve, which carries no status code at all: "There's an issue with
+    # the selected model (…). It may not exist or you may not have access to it."
+    # It arrived as the turn's ANSWER, so for a week of 2026-09 sixteen runs read
+    # "engine reported success after producing an answer" and none paged.
+    (
+        ("404", "issue with the selected model"),
+        "the gateway answers, but not at the endpoint or model this node asks for",
+    ),
 )
 
 
@@ -695,7 +703,15 @@ def unreachable(error: str) -> str | None:
 
 # How an engine's own error line opens. Checked against the head of the text,
 # because a provider error is a line and an answer is prose or JSON.
-_ERROR_LINE_MARKERS = ("api error", "error:", "http error", "connection", "parseerror", "exception")
+_ERROR_LINE_MARKERS = (
+    "api error",
+    "error:",
+    "http error",
+    "connection",
+    "parseerror",
+    "exception",
+    "issue with the selected model",
+)
 
 
 def _looks_like_an_error_line(detail: str) -> bool:

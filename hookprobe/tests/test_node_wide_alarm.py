@@ -10,13 +10,20 @@ runs are the dense signal — they fail the moment the thing breaks.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
-from hookprobe.engine import EngineResult, unreachable
+from hookprobe.engine import EngineResult, engine_error, unreachable
 from hookprobe.runs import RunStore
 from hookprobe.service import RunService
 from tests.helpers import FakeEngine, make_settings
+
+# The agent CLI's own sentence for a model the gateway does not serve, as the
+# watcher's transcripts recorded it in 2026-09: no status code anywhere in it.
+MODEL_GONE = (
+    "There's an issue with the selected model (gpt-5.6-luna). It may not exist or you may not have access to it."
+)
 
 
 @pytest.mark.parametrize(
@@ -27,6 +34,7 @@ from tests.helpers import FakeEngine, make_settings
         ("API Error: 402 Insufficient Balance", "cannot pay"),
         ("connection error: dial tcp 10.0.0.1:443", "unreachable from this node"),
         ("API Error: 404 page not found", "not at the endpoint or model"),
+        (MODEL_GONE, "not at the endpoint or model"),
     ],
 )
 def test_the_shapes_that_mean_every_run_here_would_fail(error: str, expected: str) -> None:
@@ -98,3 +106,15 @@ def test_an_ordinary_failure_pages_nobody(tmp_path) -> None:
     run, sent = _run_failing_with(tmp_path, "context window exceeded")
     assert "node_wide_failure" not in run.meta and "alarm" not in run.meta
     assert sent == []
+
+
+def test_the_clis_own_model_sentence_is_the_reason_and_it_pages(tmp_path) -> None:
+    """It arrives as the turn's answer, on a result the SDK labelled "success".
+    Sixteen runs in one week of 2026-09 read "engine reported success after
+    producing an answer", the 404 shape never saw a 404, and nothing paged:
+    the exact shape of the 33-hour outage, still silent per run."""
+    reason = engine_error(SimpleNamespace(is_error=True, subtype="success"), MODEL_GONE)
+    assert reason == MODEL_GONE, "the sentence is the error, quoted, not a finished answer wearing 'failed'"
+    run, sent = _run_failing_with(tmp_path, reason)
+    assert run.meta["node_wide_failure"] == "the gateway answers, but not at the endpoint or model this node asks for"
+    assert run.meta["alarm"] == "sent" and len(sent) == 1
