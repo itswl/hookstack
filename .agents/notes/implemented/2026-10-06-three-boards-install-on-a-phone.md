@@ -64,3 +64,29 @@ wider than the phone and the page scrolled sideways.
 - The judge's weight ceiling is unchanged; its board shell cost sixteen lines.
 - `docs/design-language.md`, `docs/deployments.md` and the front pages no
   longer say the other two boards are not apps.
+
+## The flight recorder on a phone, two days later
+
+The next real screenshot (2026-10-08) was the investigator's Audit tab: the
+rows ran out of their card, the page had zoomed out to fit them, and the
+last column was one character to a line. The table is four columns of
+monospace and three of them do not break — time, session, tool — and
+together those three are wider than a phone. A table cannot shrink below its
+unbreakable cells, so it took the page with it; the fourth column, allowed
+to break anywhere, was squeezed to nothing. iOS then shrinks the layout to
+fit the widest thing, which is why the header looked narrow too.
+
+Decision: at phone width each call is a small block — time and session on
+one line, the tool on the next, the detail wrapped under them — written as
+page-local rules on the audit table, not in the shared components block,
+because the other two pages have no such table. Two cheaper fixes were
+rejected: a sideways scroller inside the card keeps the border honest but
+hides the detail column, which is the one a reader opened the tab for; and
+lifting the no-wrap alone leaves four cramped columns on a 375px screen.
+
+Measured headless with device emulation against the live watcher with its
+real audit data: the page was 625px wide at a 414px viewport before, 414px
+after, at 375px too, in both languages; no element on any tab spills past
+its card. The pipe's board was surveyed the same way and has nothing of
+this class. The rendering recipe is an operator-side script, not a gate
+step: it needs a desktop Chrome and a running stack.

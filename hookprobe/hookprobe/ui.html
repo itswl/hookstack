@@ -531,6 +531,22 @@
   .audit-t td.a-tool { color: var(--warn); white-space: nowrap; }
   .audit-t tr.err td.a-tool { color: var(--bad); }
   .audit-t td.a-session { color: var(--accent); white-space: nowrap; }
+  /* The flight recorder is four columns of monospace and three of them do not
+     break (time, session, tool); together they are wider than a phone. A table
+     cannot shrink below its unbreakable cells, so it ran out of its card and
+     the page zoomed out to fit it, the detail column one character to a line
+     (2026-10-08). On a phone each call is a small block instead: time and
+     session on one line, the tool on the next, the detail wrapped under them.
+     Here and not in the shared block: the other two pages have no such table. */
+  @media (max-width: 640px) {
+    .audit-t, .audit-t tbody { display: block; }
+    .audit-t tr { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; row-gap: 2px; padding: 8px 2px; border-bottom: 1px solid var(--border-soft); }
+    .audit-t tr:last-child { border-bottom: 0; }
+    .audit-t td { display: block; min-width: 0; padding: 0; border-bottom: 0; }
+    .audit-t td.a-session, .audit-t td.a-tool { white-space: normal; overflow-wrap: anywhere; }
+    .audit-t td.a-tool, .audit-t td.a-tool + td { grid-column: 1 / -1; }
+    .audit-t td.a-tool + td:empty { display: none; }
+  }
 
   @media (max-width: 860px) {
     .split { grid-template-columns: 1fr; height: auto; min-height: 0; }
