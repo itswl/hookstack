@@ -150,3 +150,17 @@ the investigator's change together; measured headless on all three — the
 judge from a scratch instance — as an installed app whose insets read zero and
 as one whose insets are reported, both themes, with a drawer open: the header
 clears the bar, no control is left under it, nothing overflows.
+
+Then the pipe's board was right and the investigator's was not: under the
+investigator's console a light, opaque status bar stayed light when the page
+went dark, and the drawer read "top 0px, measured". The two pages serve the
+same head byte for byte. The difference was the icons: iOS keeps the status-bar
+style an icon was ADDED with, whatever the page says later, and the console's
+icon dated from the day the head said `default`; the pipe's had been added
+again since. Nothing a page does reaches that bar. So the install block now
+recognises it — installed, portrait on a phone, nothing reported above the
+page and the page shorter than the screen — and the settings drawer says what
+only the reader can do: remove the icon and add it again from Safari. Measured
+headless in the three states: an icon with an opaque bar (the hint, no extra
+padding), a translucent one reporting nothing (48px assumed, no hint), and a
+browser tab (the install button).

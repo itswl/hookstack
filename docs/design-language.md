@@ -142,7 +142,9 @@ The drawers run edge to edge the same way: the head grows by the inset above
 and draws under the bar in its own colour, the body scrolls on under the home
 indicator; dialogs and toasts keep clear of both. The phone's own habits are
 undone too: no grey flash over a tapped control, no text enlarged when the
-phone is turned. On a phone every field
+phone is turned. iOS keeps the status-bar style an icon was added with, so a
+change to it reaches a phone only when the icon is added again; the settings
+drawer says so when it sees an installed board under an opaque bar. On a phone every field
 types at 16px: iOS zooms the page
 in to a smaller one when it takes focus, and does not zoom back.
 
