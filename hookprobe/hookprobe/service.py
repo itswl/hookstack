@@ -929,12 +929,14 @@ class RunService:
         step 1 and step 3 leaves a half-applied change and a row still saying
         `running`, which no operator action can move.
 
-        A turn in flight is cancelled outright rather than waited for: _execute
-        settles it as a failure that reports itself, which beats both the next
-        boot's sweep and holding the container's stop timeout open for a
-        thirty-minute investigation. The grace period is for the work with no
-        such recovery — the procedure mid-sequence, and the deliveries those
-        settlements just queued.
+        A turn in flight is interrupted rather than waited for, which would hold
+        the container's stop timeout open for a thirty-minute investigation, and
+        _execute leaves it for the next boot to continue (`recover_orphans`), the
+        way a crash leaves it. One that cannot be continued (no engine session
+        yet, its one resume spent, the budget out, or resuming switched off)
+        settles as a failure that reports itself. The grace period is for the
+        work with no such recovery — the procedure mid-sequence, and the
+        deliveries those settlements just queued.
         """
         # Interrupt the turns in flight rather than killing them. This path runs
         # on every deploy, so it was the most frequent of the three that threw a
@@ -1387,7 +1389,17 @@ class RunService:
                 self._stop_requested.discard(run.session_key)
                 self._fail(run, "stopped by operator")
                 return
-            self._fail(run, "cancelled during shutdown")
+            if self._can_resume(run):
+                # A restart continues the run: left as a crash leaves it, for
+                # the next boot's recover_orphans. Settled here, every deploy
+                # finished it as failed and the boot's sweep skipped a finished
+                # run, so "a restart continues" held only for crashes; three
+                # runs were lost that way in one week of 2026-09, one of them
+                # the only real piece of work on the board.
+                self._store.checkpoint(run)
+                logger.info("run left for the next boot to continue session=%s", run.session_key)
+            else:
+                self._fail(run, "cancelled during shutdown")
             raise
         except Exception as exc:  # noqa: BLE001 — the run must always reach a final state
             logger.exception("run crashed session=%s", run.session_key)

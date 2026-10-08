@@ -1,7 +1,10 @@
 # The WORK deployment: the operator's own attention pipe, on their own machine.
 #
-#   docker compose -p hookstack-work --env-file .env \
+#   scripts/work_drain.sh && docker compose -p hookstack-work --env-file .env \
 #     -f deploy/docker-compose.work.yml up -d --build
+#
+# The drain waits for runs in flight. Without it a recreate still loses nothing:
+# a stopped turn is continued at the next boot, at the price of a resume.
 #
 # Three containers and a timer. probe-watch reads chat on a schedule and posts
 # one signal per finding; the pipe routes each on its own level and kind;

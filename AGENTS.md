@@ -23,8 +23,9 @@ There is no deploy host since 2026-09-23: the production alert deployment was
 retired, and its host runs only the alerting platform now
 ([docs/deployments.md](docs/deployments.md)). The one running deployment is the
 work stack on the operator's machine, recreated with `docker compose -p
-hookstack-work`. What follows is what a deploy host needs the day there is one
-again.
+hookstack-work`. Run `scripts/work_drain.sh` before the recreate: it waits for
+runs in flight. A recreate no longer loses one, but continuing it costs a resume.
+What follows is what a deploy host needs the day there is one again.
 
 Only via `scripts/deploy.sh` on the deploy host. It holds the knowledge that
 failed twice from memory: compose resolves `.env` relative to the compose

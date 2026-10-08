@@ -206,6 +206,12 @@ by hand, paying for the whole investigation twice. At startup the service now
 **continues** such a run in its own engine session, so everything the
 interrupted attempt gathered comes with it.
 
+Until 2026-10-08 that held for a crash and not for a redeploy. A graceful stop
+settled the turn in flight as failed, and the boot's sweep skips a finished run.
+Now the stop leaves a turn it can continue exactly as a crash would, and settles
+only one it cannot. `scripts/work_drain.sh` waits for runs in flight before the
+work stack is recreated, so a planned deploy does not pay for the resume.
+
 Four bounds, because this is the one path that spends money with nobody asking:
 
 | bound | what it stops |
