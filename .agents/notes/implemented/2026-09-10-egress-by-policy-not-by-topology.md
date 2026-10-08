@@ -26,7 +26,7 @@ preference.** The one external destination production needs resolves to
 Cloudflare:
 
 ```
-model-gateway.example -> 2606:4700:3035::ac43:8164, 2606:4700:3037::6815:2a4
+the model gateway's host -> 2606:4700:3035::ac43:8164, 2606:4700:3037::6815:2a4
 ```
 
 An IP allowlist for a Cloudflare-fronted host admits everything else behind

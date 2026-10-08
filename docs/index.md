@@ -67,6 +67,5 @@ The same pipe also carries an operator's own work signals to a planner and, on a
 *   [hookprobe reference](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md)
 *   [Running all of hookstack](https://github.com/itswl/hookstack/blob/main/STACK.md)
 *   [Containment](containment.md) — the security boundaries
-*   [WebhookWise](https://github.com/itswl/WebhookWise) — the self-hosted alerting platform these grew out of
 
 MIT licensed.

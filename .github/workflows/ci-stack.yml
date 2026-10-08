@@ -85,13 +85,20 @@ jobs:
         run: python3 scripts/assert_agent_notes.py
       # ESTATE_GUARD_REQUIRED makes a missing list a failure: an unset secret
       # writes a zero-byte file, which would otherwise read as "clean".
+      # A pull request from a fork gets no secrets at all, so there the list
+      # cannot exist: the next step says so instead of failing every outside
+      # contribution, and the push that merges it runs the guard with the list.
       - name: estate identifiers
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           ESTATE_IDENTIFIERS: ${{ secrets.ESTATE_IDENTIFIERS }}
           ESTATE_GUARD_REQUIRED: "1"
         run: |
           printf '%s' "$ESTATE_IDENTIFIERS" > .estate-identifiers
           python3 scripts/assert_no_estate_identifiers.py
+      - name: estate identifiers (not on a fork's pull request)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: echo "A fork's pull request gets no secrets, so the estate list is not here; the guard runs on the merge to main."
       # Not a dependency resolve — that would need a network round trip per
       # service and minutes per run, so it would end up scheduled and skipped.
       # This reads the two files and asks whether they still agree, which is
