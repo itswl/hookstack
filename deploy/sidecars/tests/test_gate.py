@@ -16,6 +16,7 @@ the server that would have run the tool.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
 import threading
@@ -54,6 +55,8 @@ class Upstream(BaseHTTPRequestHandler):
                 "body": body.decode() if body else "",
                 "auth": self.headers.get("Authorization"),
                 "upstream_header": self.headers.get("X-Chat-Key"),
+                "path": self.path,
+                "headers": {name.lower(): value for name, value in self.headers.items()},
             }
         )
         self.send_response(200)
@@ -86,6 +89,7 @@ def stack(tmp_path):
     threading.Thread(target=upstream.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
     gate_module.Gate.upstream = f"http://127.0.0.1:{upstream.server_port}/mcp/"
     gate_module.Gate.upstream_headers = {"X-Chat-Key": "the-credential"}
+    gate_module.Gate.routes = {}
     gate_module.Gate.clients = [
         gate_module.Client("watch", WATCH_TOKEN, ("chat.list_*", "chat.search_chat_records")),
         gate_module.Client("plan", PLAN_TOKEN, ("chat.list_mentions",)),
@@ -146,6 +150,7 @@ def test_a_listed_tool_is_forwarded_and_the_credential_is_the_gates(stack):
     sent = Upstream.seen[0]
     assert sent["upstream_header"] == "the-credential"
     assert sent["auth"] is None, "the client's token stops here and never reaches the chat server"
+    assert sent["headers"]["user-agent"] == "mcp-gate", "not urllib's own, which Cloudflare refuses (error 1010)"
     forwarded = [r for r in rows() if r["event"] == "call.forwarded"]
     assert forwarded and forwarded[0]["tool"] == "chat.list_chat_folders" and forwarded[0]["status"] == 200
 
@@ -334,3 +339,177 @@ def test_the_ledger_records_both_halves(tmp_path):
     assert all(isinstance(r["ts"], float) for r in rows_)
     # A ledger that cannot be written never stops a call.
     gate_module.Ledger(str(tmp_path / "calls.jsonl" / "nope")).write(event="call.forwarded")
+
+
+# ── several MCP servers on one port ─────────────────────────────────────────
+
+
+class ChatUpstream(Upstream):
+    seen: list[dict] = []  # noqa: RUF012
+
+
+class JiraUpstream(Upstream):
+    seen: list[dict] = []  # noqa: RUF012
+
+
+@pytest.fixture
+def routed(tmp_path):
+    """One gate, two recording MCP servers behind it, each on its own path with
+    its own credential. The watcher may use both; the planner only the chat."""
+    servers = []
+    for upstream in (ChatUpstream, JiraUpstream):
+        upstream.seen = []
+        upstream.answer = b'{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'
+        upstream.content_type = "application/json"
+        upstream.truncate = False
+        server = ThreadingHTTPServer(("127.0.0.1", 0), upstream)
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+        servers.append(server)
+    chat, jira = (f"http://127.0.0.1:{server.server_port}/mcp/" for server in servers)
+    gate_module.Gate.routes = {
+        "chat": gate_module.Route("chat", chat, {"X-Chat-Key": "chat-credential"}),
+        "jira": gate_module.Route("jira", jira, {"Authorization": "Bearer jira-credential", "User-Agent": "jira-says"}),
+    }
+    gate_module.Gate.clients = [
+        gate_module.Client("watch", WATCH_TOKEN, {"chat": ("chat.list_*",), "jira": ("jira.get_issue",)}),
+        gate_module.Client("plan", PLAN_TOKEN, {"chat": ("chat.list_mentions",)}),
+    ]
+    gate_module.Gate.ledger = gate_module.Ledger(str(tmp_path / "calls.jsonl"))
+    gate = ThreadingHTTPServer(("127.0.0.1", 0), gate_module.Gate)
+    threading.Thread(target=gate.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{gate.server_port}/"
+    finally:
+        gate_module.Gate.routes = {}
+        gate.shutdown()
+        for server in servers:
+            server.shutdown()
+
+
+def _names(upstream: type[Upstream]) -> list[str]:
+    return [json.loads(seen["body"])["params"]["name"] for seen in upstream.seen]
+
+
+def test_one_port_reaches_each_mcp_server_by_its_path_with_its_own_credential(routed):
+    assert call(routed + "chat/", _tool("chat.list_mentions"))[1]["result"] == {"ok": True}
+    assert call(routed + "jira", _tool("jira.get_issue"))[1]["result"] == {"ok": True}
+    assert _names(ChatUpstream) == ["chat.list_mentions"] and _names(JiraUpstream) == ["jira.get_issue"]
+    chat, jira = ChatUpstream.seen[0]["headers"], JiraUpstream.seen[0]["headers"]
+    assert chat.get("x-chat-key") == "chat-credential" and "authorization" not in chat
+    assert jira.get("authorization") == "Bearer jira-credential", "the route's credential, never the client's token"
+    assert "x-chat-key" not in jira, "one server's credential never reaches another"
+    assert [(r["event"], r["route"]) for r in rows()] == [("call.forwarded", "chat"), ("call.forwarded", "jira")]
+
+
+def test_a_tool_listed_on_one_route_is_refused_on_another(routed):
+    status, body, _ = call(routed + "jira/", _tool("chat.list_mentions"))
+    assert status == 200 and body["error"]["code"] == -32602
+    assert ChatUpstream.seen == [] and JiraUpstream.seen == []
+    refused = rows()[-1]
+    assert (refused["event"], refused["route"], refused["tool"]) == ("call.refused", "jira", "chat.list_mentions")
+
+
+def test_a_token_with_nothing_on_a_route_cannot_even_shake_hands_there(routed):
+    hello = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+    assert call(routed + "jira/", hello, token=PLAN_TOKEN)[0] == 403
+    assert call(routed + "jira/", None, token=PLAN_TOKEN, method="DELETE")[0] == 403
+    assert JiraUpstream.seen == []
+    assert [(r["event"], r["known"]) for r in rows()] == [("route.refused", True)] * 2
+    assert call(routed + "chat/", hello, token=PLAN_TOKEN)[0] == 200, "its own route still answers"
+
+
+def test_a_path_that_names_no_route_reaches_nothing(routed):
+    for path in ("", "mcp/", "nope/", "chatx/", "healthzz/"):
+        assert call(routed + path, _tool("chat.list_mentions"))[0] == 404, path
+    assert call(routed + "nope/", _tool("chat.list_mentions"), token="")[0] == 401, "the token is asked for first"
+    assert ChatUpstream.seen == [] and JiraUpstream.seen == []
+
+
+def test_the_rest_of_the_path_never_reaches_the_server(routed):
+    """The path picks a route and stops there: each route reaches exactly the
+    address it was configured with, so a caller cannot walk the server's tree."""
+    call(routed + "chat/../../admin/tools?drop=1", _tool("chat.list_mentions"))
+    assert [seen["path"] for seen in ChatUpstream.seen] == ["/mcp/"]
+
+
+def test_a_listing_on_a_route_shows_only_what_that_route_permits(routed):
+    tools = [{"name": "jira.get_issue"}, {"name": "jira.create_issue"}, {"name": "chat.list_mentions"}]
+    JiraUpstream.answer = json.dumps({"jsonrpc": "2.0", "id": 7, "result": {"tools": tools}}).encode()
+    _, body, _ = call(routed + "jira/", {"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
+    assert [tool["name"] for tool in body["result"]["tools"]] == ["jira.get_issue"]
+
+
+def test_a_routes_own_user_agent_wins_and_the_default_is_the_gates(routed):
+    call(routed + "chat/", _tool("chat.list_mentions"))
+    call(routed + "jira/", _tool("jira.get_issue"))
+    assert ChatUpstream.seen[0]["headers"]["user-agent"] == "mcp-gate"
+    assert JiraUpstream.seen[0]["headers"]["user-agent"] == "jira-says"
+
+
+@pytest.mark.parametrize(
+    ("environ", "why"),
+    [
+        ({"MCPGATE_ROUTE_JIRA_SERVER": "http://j/"}, "a name the variable cannot carry unambiguously"),
+        ({"MCPGATE_ROUTE_HEALTHZ": "http://j/"}, "the gate's own path"),
+        ({"MCPGATE_ROUTE_JIRA": "ftp://j/"}, "not an MCP server's URL"),
+        (
+            {"MCPGATE_ROUTE_JIRA": "http://j/", "MCPGATE_ROUTE_JIRO_HEADER_Authorization": "Bearer k"},
+            "a credential for a route that is not there",
+        ),
+    ],
+)
+def test_a_route_config_that_could_misroute_stops_the_gate(environ, why):
+    with pytest.raises(SystemExit):
+        gate_module.load_routes(environ)
+
+
+@pytest.mark.parametrize(
+    ("tools", "why"),
+    [
+        ("chat.list_mentions", "a bare name, which could be meant for either server"),
+        ("jira:", "a route with no tool"),
+        ("jirra:jira.get_issue", "a route that is not configured"),
+    ],
+)
+def test_with_several_routes_every_listed_tool_names_its_route(tools, why):
+    routes = gate_module.load_routes({"MCPGATE_ROUTE_CHAT": "http://c/", "MCPGATE_ROUTE_JIRA": "http://j/"})
+    with pytest.raises(SystemExit):
+        gate_module.load_clients(
+            {"MCPGATE_CLIENT_WATCH_TOKEN": WATCH_TOKEN, "MCPGATE_CLIENT_WATCH_TOOLS": tools},
+            routes,
+        )
+
+
+def test_routes_and_their_lists_come_from_the_environment(monkeypatch, tmp_path):
+    for key in [key for key in os.environ if key.startswith("MCPGATE_")]:
+        monkeypatch.delenv(key)
+    for key, value in {
+        "MCPGATE_PORT": "0",
+        "MCPGATE_LEDGER": str(tmp_path / "calls.jsonl"),
+        "MCPGATE_ROUTE_CHAT": "http://host.docker.internal:52222/mcp/",
+        "MCPGATE_ROUTE_WIKI": "https://wiki.example/mcp",
+        "MCPGATE_ROUTE_WIKI_HEADER_Authorization": "Bearer wiki-key",
+        "MCPGATE_CLIENT_WATCH_TOKEN": WATCH_TOKEN,
+        "MCPGATE_CLIENT_WATCH_TOOLS": "chat:chat.list_*, wiki:wiki.search",
+    }.items():
+        monkeypatch.setenv(key, value)
+    server = gate_module.build()
+    try:
+        routes = gate_module.Gate.routes
+        assert sorted(routes) == ["chat", "wiki"]
+        assert routes["wiki"].headers == {"Authorization": "Bearer wiki-key"} and routes["chat"].headers == {}
+        assert gate_module.Gate.clients[0].tools == {"chat": ("chat.list_*",), "wiki": ("wiki.search",)}
+    finally:
+        server.server_close()
+        gate_module.Gate.routes = {}
+
+
+def test_one_upstream_and_several_do_not_mix(monkeypatch):
+    for key in [key for key in os.environ if key.startswith("MCPGATE_")]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv("MCPGATE_UPSTREAM", "http://c/")
+    monkeypatch.setenv("MCPGATE_ROUTE_JIRA", "http://j/")
+    monkeypatch.setenv("MCPGATE_CLIENT_WATCH_TOKEN", WATCH_TOKEN)
+    monkeypatch.setenv("MCPGATE_CLIENT_WATCH_TOOLS", "jira:jira.get_issue")
+    with pytest.raises(SystemExit):
+        gate_module.build()

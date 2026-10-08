@@ -210,6 +210,10 @@ services:
       EGRESS_ALLOW: >-
         ${EGRESS_ALLOW:-open.larksuite.com,api.anthropic.com,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
       MCPGATE_UPSTREAM: ${WATCH_CHAT_MCP_URL:-http://host.docker.internal:52222/mcp/}
+      # A second MCP server shares this port as a route: replace the line above
+      # with one MCPGATE_ROUTE_<NAME>=<url> per server, write each node's list
+      # as <route>:<tool>, and point its mcp.json at http://mcp-gate:8097/<route>/
+      # (deploy/sidecars/gate.py says what a route refuses).
       # A credential for the chat server itself, the day its port takes one:
       # MCPGATE_UPSTREAM_HEADER_<Name_With_Underscores> is sent as the header
       # <Name-With-Dashes> on every relayed call, over a client's own copy.
