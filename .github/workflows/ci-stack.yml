@@ -146,6 +146,19 @@ jobs:
           pip install "$(grep -E '^ruff==' hookrelay/requirements.txt)"
           ruff check deploy/lark-bridge
           ruff format --check deploy/lark-bridge
+      # The sidecars (egress proxy, MCP gate, watch signer, ingress), the watch
+      # wrapper and the bridge each sit in the path of something an agent does,
+      # outside every component gate. scripts/gate.sh ran their tests and this
+      # did not, so a change to the MCP gate went green here on 2026-10-09
+      # without one of its tests having run. Same commands as the gate.
+      - name: the sidecars, the watch wrapper and the bridge pass their tests
+        run: |
+          pip install "$(grep -E '^pytest==' hookrelay/requirements.lock)" "$(grep -E '^ruff==' hookrelay/requirements.txt)"
+          python3 -m compileall -q deploy/sidecars deploy/watch
+          ruff check deploy/sidecars deploy/watch
+          ruff format --check deploy/sidecars deploy/watch
+          python3 -m pytest -q deploy/sidecars/tests deploy/watch/tests
+          python3 -m pytest -q deploy/lark-bridge/tests
 
   stack:
     runs-on: ubuntu-latest
