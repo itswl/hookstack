@@ -333,3 +333,126 @@ def test_the_work_shapes_approval_is_a_kind_a_deployment_can_offer():
         }
     )
     assert cfg.card_actions["handoff"].forward_to == "to-plan-action"
+
+
+# ── one kind, several nodes: routed by the door the card came through ────────
+
+
+def _cfg_by_source() -> Config:
+    """Two nodes return cards through their own doors; `approve` follows each
+    card back to the node that parked the proposal, and only the work node's
+    door is wired for it."""
+    return Config.from_dict(
+        {
+            "sources": [
+                {"name": "plan-notify", "secret": "", "title": "{meta.alert_name}"},
+                {"name": "work-notify", "secret": "", "title": "{meta.alert_name}"},
+            ],
+            "channels": [
+                {"name": "ops-feishu", "type": "bridge", "url": "https://feishu.example/hook"},
+                {"name": "to-plan-action", "type": "generic", "url": "https://plan.example/hooks/action"},
+                {"name": "to-work-action", "type": "generic", "url": "https://work.example/hooks/action"},
+            ],
+            "routes": [{"name": "all", "source": "*", "send_to": ["ops-feishu"]}],
+            "card_actions": {
+                "handoff": {"forward_to": "to-plan-action"},
+                "approve": {"forward_by_source": {"work-notify": "to-work-action"}},
+            },
+        }
+    )
+
+
+def test_a_kind_routed_by_source_is_checked_at_boot() -> None:
+    """The doors and the channels it names are real, and it is one routing or
+    the other: a kind that could go two ways is a press nobody can predict."""
+    from hookrelay.config import ConfigError
+
+    cfg = _cfg_by_source()
+    approve = cfg.card_actions["approve"]
+    assert approve.channel_for("work-notify") == "to-work-action"
+    assert approve.channel_for("plan-notify") == "", "no channel for that door, no button"
+    assert cfg.card_actions["handoff"].channel_for("anything") == "to-plan-action"
+
+    base = {
+        "sources": [{"name": "work-notify", "secret": "", "title": "{t}"}],
+        "channels": [{"name": "c", "type": "generic", "url": "https://example.invalid/x"}],
+        "routes": [{"name": "r", "source": "*", "send_to": ["c"]}],
+    }
+    with pytest.raises(ConfigError, match="not a source"):
+        Config.from_dict({**base, "card_actions": {"approve": {"forward_by_source": {"nowhere": "c"}}}})
+    with pytest.raises(ConfigError, match="not a configured channel"):
+        Config.from_dict({**base, "card_actions": {"approve": {"forward_by_source": {"work-notify": "gone"}}}})
+    with pytest.raises(ConfigError, match="not both"):
+        Config.from_dict(
+            {**base, "card_actions": {"approve": {"forward_to": "c", "forward_by_source": {"work-notify": "c"}}}}
+        )
+
+
+def test_a_card_offers_a_routed_kind_only_from_a_door_it_can_reach(settings) -> None:
+    """The planner parks proposals too, but nothing executes on it: a button on
+    its card would be a press that cannot work. The work node's card gets it."""
+    from hookrelay.delivery import _mint_card_actions
+
+    wired = replace(settings, action_secret="card-s3cret")
+    declared = [
+        {"kind": "approve", "text": "Approve: df -h /data", "ref": "p-1", "hash": "ab" * 32},
+        {"kind": "handoff", "text": "Act on this plan", "ref": "probe:watch:1"},
+    ]
+    kinds = {}
+    for door in ("work-notify", "plan-notify"):
+        message = {"event_id": 7, "source": door, "payload": {"meta": {}, "actions": [dict(a) for a in declared]}}
+        _mint_card_actions(message, _cfg_by_source(), wired, now=1000.0)
+        kinds[door] = [
+            actions.verify("card-s3cret", b["value"]["hookrelay_action"], now=1000.0)["k"]
+            for b in message["payload"]["actions"]
+        ]
+    assert kinds["work-notify"] == ["approve", "handoff"]
+    assert kinds["plan-notify"] == ["handoff"], "approve is not offered on a card from a door it has no channel for"
+
+
+def _extracted(title: str) -> dict:
+    return {"title": title, "body": "", "level": "info", "fields": {}}
+
+
+@pytest.fixture
+async def routed_client(settings, tmp_path):
+    import dataclasses
+
+    import httpx as _httpx
+
+    from hookrelay.app import create_app
+
+    wired = dataclasses.replace(settings, action_secret="card-s3cret", db_path=str(tmp_path / "routed.db"))
+    app = create_app(settings=wired, cfg=_cfg_by_source())
+    async with (
+        _httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        _httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        client.app = app  # type: ignore[attr-defined]
+        yield client
+
+
+async def test_a_press_goes_back_to_the_node_whose_card_it_was(routed_client):
+    """The press follows its card: a work node's card forwards to the work
+    node's action door. A token for a card from a door this kind has no channel
+    for is refused before it is spent, and nothing is forwarded."""
+    store = routed_client.app.state.store
+    work_card = await store.insert_event("work-notify", "fp-work", _extracted("disk"), "{}", time.time())
+    plan_card = await store.insert_event("plan-notify", "fp-plan", _extracted("plan"), "{}", time.time())
+
+    pressed = await _press(
+        routed_client, _mint_now("approve", event_id=work_card, correlation_id="hr-9", params={"ref": "p-1"})
+    )
+    assert pressed.status_code == 200
+    assert pressed.json()["outcome"] == "forwarded approve to to-work-action"
+
+    refused = await _press(
+        routed_client, _mint_now("approve", event_id=plan_card, correlation_id="hr-8", params={"ref": "p-2"})
+    )
+    assert refused.status_code == 409
+    assert "not offered for this card" in refused.json()["detail"]
+    assert len(await store.recent_actions()) == 1, "the refused press spent no token and left no row"
+
+    cursor = await store.db.execute("SELECT d.channel FROM deliveries d")
+    assert [r["channel"] for r in await cursor.fetchall()] == ["to-work-action"]

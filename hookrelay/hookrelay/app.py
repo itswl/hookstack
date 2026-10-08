@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from hookrelay import actions, channels, metrics, registry
 from hookrelay.alarm import SelfAlarm
 from hookrelay.breaker import CircuitBreaker
-from hookrelay.config import CardAction, Config, ConfigError, Source, _warn_posture_mix
+from hookrelay.config import Config, ConfigError, Source, _warn_posture_mix
 from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
 from hookrelay.live import Live
@@ -609,6 +609,13 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
         correlation_id = str(claims.get("c") or "")
         event_id = int(claims.get("e") or 0) or None
+        # Where the press goes, decided BEFORE the token is spent: a kind routed
+        # by source follows the card back to the door it came through, and a
+        # card whose door has no channel any more is refused, not swallowed.
+        source = await app.state.store.event_source(event_id) if event_id and configured.forward_by_source else ""
+        target = configured.channel_for(source)
+        if kind != "silence" and not target:
+            raise HTTPException(status_code=409, detail=f"action {kind!r} is not offered for this card")
         actor = str(payload.get("actor") or _im_actor(payload))
         if not await app.state.store.spend_action(
             str(claims["j"]),
@@ -621,13 +628,13 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             # Not an error: the human pressed twice, or the platform retried.
             return JSONResponse({"outcome": "already_done", "kind": kind}, status_code=200)
 
-        outcome = await _dispatch_action(kind, configured, claims, correlation_id, event_id, actor, now)
+        outcome = await _dispatch_action(kind, target, claims, correlation_id, event_id, actor, now)
         await app.state.store.record_action_outcome(str(claims["j"]), outcome)
         return JSONResponse({"outcome": outcome, "kind": kind, "correlation_id": correlation_id})
 
     async def _dispatch_action(
         kind: str,
-        configured: CardAction,
+        target: str,
         claims: dict[str, Any],
         correlation_id: str,
         event_id: int | None,
@@ -673,7 +680,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             now,
             correlation_id=correlation_id or None,
         )
-        channels = [configured.forward_to]
+        channels = [target]
         touch_to = app.state.config.touch_forward_to
         if touch_to and extracted["reference"]:
             channels.append(touch_to)
@@ -691,7 +698,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             channels,
             [{"gate": "card-action", "kind": kind, "forwarded_to": channels}],
         )
-        return f"forwarded {kind} to {configured.forward_to}"
+        return f"forwarded {kind} to {target}"
 
     # ── read side ─────────────────────────────────────────────────────────
 

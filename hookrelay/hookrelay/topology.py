@@ -82,9 +82,9 @@ def render(config: Config) -> dict[str, Any]:
     # event, and a reader deciding whether a lane is live needs to know which.
     pressed_by: dict[str, list[str]] = {name: [] for name in config.channels}
     for kind, action in config.card_actions.items():
-        target = getattr(action, "forward_to", "") or ""
-        if target in pressed_by:
-            pressed_by[target].append(kind)
+        for target in {getattr(action, "forward_to", "") or "", *getattr(action, "forward_by_source", {}).values()}:
+            if target in pressed_by:
+                pressed_by[target].append(kind)
 
     doors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []

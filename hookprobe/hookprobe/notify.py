@@ -32,7 +32,7 @@ import logging
 import time
 import urllib.request
 
-from hookprobe import actions, audit
+from hookprobe import actions, audit, remediation
 from hookprobe.reports import folded, report_summary, verdict, with_fold_note, with_recovery_note
 from hookprobe.runs import Run, RunStore
 from hookprobe.settings import Settings
@@ -172,6 +172,7 @@ class ReturnDelivery:
                     self._settings.workdir,
                     cooldown=self._settings.remediation_cooldown_seconds,
                     hands_off=bool(self._settings.handoff_url),
+                    armed=bool(remediation.allowlist_patterns(self._settings.remediation_allowlist)),
                 ),
             },
             ensure_ascii=False,

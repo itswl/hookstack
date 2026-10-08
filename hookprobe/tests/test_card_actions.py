@@ -214,6 +214,40 @@ def test_the_returned_report_carries_its_actions(tmp_path: Path) -> None:
     assert payload["meta"]["event_id"] == 5, "the id the press comes home on"
 
 
+def test_a_node_with_no_allowlist_puts_no_approve_on_its_card(tmp_path: Path) -> None:
+    """A press on a node with no allowlist is always refused ("no allowlist
+    configured"), so the card does not offer one: the same report with a parked
+    procedure carries `approve` only once the node's allowlist has a rule."""
+
+    async def delivered(allow: Path | None) -> list[str]:
+        workdir = tmp_path / ("armed" if allow else "unarmed")
+        settings = make_settings(workdir, return_url="http://pipe.invalid/probe-notify", remediation_allowlist=allow)
+        store = RunStore(workdir / "results")
+        run = Run(
+            session_key="probe:inbound:5",
+            run_id="r1",
+            status=COMPLETED,
+            text="the pool is exhausted",
+            engine_session_id="sdk-1",
+            origin="relay",
+        )
+        run.meta = {"title": "Payment gateway 5xx", "level": "high", "source": "inbound", "event_id": 5}
+        store.create(run)
+        remediation.propose(
+            settings.workdir,
+            run.session_key,
+            [{"action": "look", "command": "df -h /data", "risk": "low", "rollback": ""}],
+        )
+        recorder = _Recorder(settings, store)
+        await recorder.deliver(run, (0.0,))
+        return [action["kind"] for action in json.loads(recorder.bodies[0])["actions"]]
+
+    allow = tmp_path / "allow.txt"
+    allow.write_text("df -h .*\n", encoding="utf-8")
+    assert asyncio.run(delivered(None)) == ["followup", "useful", "useless"]
+    assert asyncio.run(delivered(allow)) == ["followup", "approve", "useful", "useless"]
+
+
 # -- the door ----------------------------------------------------------------
 
 

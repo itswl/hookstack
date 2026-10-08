@@ -276,11 +276,21 @@ class CardAction:
     other outbound message, so it inherits the retry, the rate limit and the
     ledger row instead of becoming a second delivery mechanism. `silence` is the
     exception — the pipe owns silences, so it needs no channel to reach.
+
+    forward_by_source instead routes by the door the card's event came in
+    through (2026-10-08). One `approve` kind serves nodes whose proposals live in
+    their own workdirs, so a press must go back to the node that sent the card;
+    a card from a door with no entry gets no button.
     """
 
     kind: str
     forward_to: str = ""
     params: dict[str, Any] = field(default_factory=dict)
+    forward_by_source: dict[str, str] = field(default_factory=dict)
+
+    def channel_for(self, source: str) -> str:
+        """Where a press on a card from `source` goes; empty means not offered there."""
+        return self.forward_by_source.get(source, "") if self.forward_by_source else self.forward_to
 
 
 @dataclass(frozen=True, slots=True)
@@ -570,13 +580,22 @@ class Config:
                 raise ConfigError(f"card_actions: unknown kind {name!r} (known: {', '.join(actions.KINDS)})")
             spec = spec or {}
             forward_to = str(spec.get("forward_to") or "")
-            if forward_to and forward_to not in channels:
-                raise ConfigError(f"card_actions.{name}: forward_to {forward_to!r} is not a configured channel")
-            if not forward_to and name != "silence":
+            by_source = {str(k): str(v) for k, v in (spec.get("forward_by_source") or {}).items()}
+            for target in [forward_to, *by_source.values()]:
+                if target and target not in channels:
+                    raise ConfigError(f"card_actions.{name}: forward_to {target!r} is not a configured channel")
+            for door in by_source:
+                if door not in sources:
+                    raise ConfigError(f"card_actions.{name}: forward_by_source names {door!r}, which is not a source")
+            if forward_to and by_source:
+                raise ConfigError(f"card_actions.{name}: forward_to or forward_by_source, not both")
+            if not forward_to and not by_source and name != "silence":
                 raise ConfigError(
                     f"card_actions.{name}: needs forward_to — only 'silence' is something the pipe can do itself"
                 )
-            card_actions[name] = CardAction(kind=name, forward_to=forward_to, params=dict(spec.get("params") or {}))
+            card_actions[name] = CardAction(
+                kind=name, forward_to=forward_to, params=dict(spec.get("params") or {}), forward_by_source=by_source
+            )
         touch_forward_to = str((raw.get("touch") or {}).get("forward_to") or "")
         if touch_forward_to and touch_forward_to not in channels:
             raise ConfigError(f"touch: forward_to {touch_forward_to!r} is not a configured channel")

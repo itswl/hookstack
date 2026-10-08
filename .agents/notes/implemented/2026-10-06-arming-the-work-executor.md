@@ -90,8 +90,7 @@ should be driven that way, on purpose.
   the actual `card_actions` block; replaced with the truth and the console
   pointer.
 - Still open, each recorded rather than silently dropped: every step
-  listed on a proposal card (the button stays one line by design); a
-  card-borne approve for the write node (needs the hookrelay kind split); the
+  listed on a proposal card (the button stays one line by design); the
   per-plan ephemeral worker ("after step 3"). And the first press itself —
   until it happens the gate is armed and unexercised, which is the state this
   note exists to make visible rather than let pass for done.
@@ -99,3 +98,14 @@ should be driven that way, on purpose.
 Related: [[execution-success-is-not-recovery]],
 [[three-gaps-before-the-execution-door-opens]],
 [[one-pending-proposal-per-procedure]].
+
+## The card's approve, 2026-10-08
+
+The kind split this note waited for landed: a card action may be routed by the
+door its card came in through (`forward_by_source`), and the work deployment
+routes `approve` from `work-notify` to a new `to-work-action` channel, the
+runner's action door, signed with the runner's own secret. A planner card gets
+no approve, because nothing executes on the planner. And the investigator
+declares `approve` only on a node whose allowlist has a rule — a press anywhere
+else is always refused — so the runner's cards will carry the button from the
+first allowlisted line on, and not before. The console stays the other press.

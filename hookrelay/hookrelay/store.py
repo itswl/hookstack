@@ -567,6 +567,11 @@ class Store:
         )
         return [dict(row) for row in await cursor.fetchall()]
 
+    async def event_source(self, event_id: int) -> str:
+        cursor = await self.read.execute("SELECT source FROM events WHERE id = ?", (event_id,))
+        row = await cursor.fetchone()
+        return str(row["source"] or "") if row is not None else ""
+
     async def event_reference(self, event_id: int) -> str:
         cursor = await self.read.execute("SELECT reference FROM events WHERE id = ?", (event_id,))
         row = await cursor.fetchone()

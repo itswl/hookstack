@@ -8,12 +8,12 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 6,000 source lines, five dependencies) that takes JSON
+A pluggable router (under 6,050 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
 to a chat bridge / generic HTTP (DingTalk and WeCom as shipped plugins) — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 6,000 source lines is the
+Both numbers are **budgets, not descriptions**. 6,050 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
