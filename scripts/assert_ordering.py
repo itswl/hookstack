@@ -66,6 +66,14 @@ SANCTIONED: dict[str, str] = {
         "the record is a JSONL consumed by stats() in chronological order; the "
         "reader-facing view is review(), which is per-class, not these rows"
     ),
+    # The fold stage's reads of the pipe's own ledger (2026-10-08). The gaps
+    # between a condition's cards decide how wide its window is, and the FIRST
+    # firing held after a recovery card is the one that settles. Chronology is
+    # the computation here, not a presentation; no page lists these rows.
+    "hookrelay/hookrelay/store.py:oldest first": (
+        "the fold stage measures the gaps between a condition's cards and settles the "
+        "first held firing; both need arrival order, and no person reads these rows"
+    ),
 }
 
 # Files that talk about ordering for reasons unrelated to a reader: a sort key in

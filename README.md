@@ -73,6 +73,6 @@ The same pipe also carries an operator's own work signals to a planner and, on a
 
 ## Developing
 
-`bash scripts/gate.sh` runs every service's gate plus the stack checks. Read its verdict before you commit. The pipe caps itself at 6,050 source lines and the judge at 3,400; the investigator is uncapped.
+`bash scripts/gate.sh` runs every service's gate plus the stack checks. Read its verdict before you commit. The pipe caps itself at 6,300 source lines and the judge at 3,400; the investigator is uncapped.
 
 MIT licensed.

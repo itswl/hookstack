@@ -164,7 +164,13 @@ def card_model_for(channel: Channel, message: dict[str, Any]) -> dict[str, Any]:
     """
     processed = _processed(channel, message)
     if processed is not None:
-        return processed.card_model()
+        card = processed.card_model()
+        # The pipe's one line on a brain's card: the repeats the fold stage held
+        # back since the last card went (`fields.folded`), under the details.
+        folded = str((message.get("fields") or {}).get("folded") or "").strip()
+        if folded:
+            card["details"] = "\n".join(part for part in (str(card.get("details") or ""), folded) if part)
+        return card
     if _prebuilt(channel, message) is not None:
         raise ValueError(
             f"channel {channel.name}: payload: raw is a finished platform payload; a card model is built here"

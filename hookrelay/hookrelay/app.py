@@ -35,7 +35,7 @@ from hookrelay.config import Config, ConfigError, Source, _warn_posture_mix
 from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
 from hookrelay.live import Live
-from hookrelay.pipeline import handle_hook, record_storm_suppressed
+from hookrelay.pipeline import handle_hook, record_storm_suppressed, settle_folds
 from hookrelay.security import token_ok, verify_signature
 from hookrelay.settings import Settings
 from hookrelay.store import Store, button_labels, now_ts
@@ -206,7 +206,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
     store.on_change = live.changed
 
     async def _worker_loop(client: httpx.AsyncClient) -> None:
-        next_purge = 0.0
+        next_purge = next_settle = 0.0
         while True:
             try:
                 now = now_ts()
@@ -230,6 +230,12 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 # same kind of sweep — something the ledger can see only by
                 # being asked, on a clock.
                 await _alarm_absent(now)
+                # A folded firing that stayed after a recovery card: the one
+                # repeat a person must not miss (processors.FoldProcessor).
+                # Once a minute is plenty against a window of an hour.
+                if now >= next_settle:
+                    next_settle = now + 60
+                    await settle_folds(store, app.state.config, now, settings=app_settings, client=client)
                 # Retention rides the same loop, hourly: once ALL traffic
                 # passes through this ledger it must not grow forever.
                 if app_settings.retention_days > 0 and now >= next_purge:
