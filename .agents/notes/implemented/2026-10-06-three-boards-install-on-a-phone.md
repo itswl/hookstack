@@ -164,3 +164,24 @@ only the reader can do: remove the icon and add it again from Safari. Measured
 headless in the three states: an icon with an opaque bar (the hint, no extra
 padding), a translucent one reporting nothing (48px assumed, no hint), and a
 browser tab (the install button).
+
+## The tab strip on a phone
+
+The strip slid sideways on a phone: the pipe's six tabs ran 131px past a 414px
+screen, the console's thirteen cells 511px with eight of them off it, and the
+operator found the sliding ugly. Now, in the shared tab shell, a phone gets one
+row of equal cells with the icon over the name, the count as a badge on the
+icon. The console's groups collapse to one cell each that opens the group's
+first page (the label carries that page and an icon), and the group of the page
+on screen unfolds its pages as a second row, a segmented control drawn from two
+new tokens valued per theme, because no pair of the existing ones keeps the
+selected segment lighter than its track in both. Rejected: two rows of six for
+the console's eleven pages (every page pays for a launcher grid at the top) and
+a tab bar fixed at the bottom (a fixed bar fights the composer and the
+keyboard, and the operator's other installed board took its own out).
+
+Measured headless at 375 and 414 in both languages, both themes: no cell off
+the screen, nothing overflowing, no name cut, one row on the pipe's and the
+judge's boards and on the console's top-level pages, two when a group is open.
+At desk width the probe's page is pixel-identical below the header before and
+after.

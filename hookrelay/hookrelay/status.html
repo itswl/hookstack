@@ -37,6 +37,7 @@
     --ok: #3dd68c; --warn: #f5a524; --bad: #e5484d;
     /* The surfaces between those, and the depth under a drawer or a dialog. */
     --surface-2: #161b25; --hover: #19202c; --code: #080b10; --radius: 12px;
+    --seg-track: #161b25; --seg-pill: #2c3544;
     --border-strong: #2c3544; --ring: #3a4352; --well: #0e1219; --code-text: #c3cad6;
     --topbar: rgba(11, 14, 20, .9); --scrim: rgba(3, 5, 9, .55); --scrim-strong: rgba(3, 5, 9, .62);
     --sheen: rgba(255, 255, 255, .04);
@@ -57,6 +58,7 @@
     --text: #1b2230; --muted: #5b6677; --accent: #2160d6;
     --ok: #137a3e; --warn: #9a5800; --bad: #c9262c;
     --surface-2: #f1f4f8; --hover: #f4f7fb; --code: #f6f8fa;
+    --seg-track: #e7ebf1; --seg-pill: #ffffff;
     --border-strong: #c5cdd9; --ring: #c2cad6; --well: #f7f9fc; --code-text: #243042;
     --topbar: rgba(255, 255, 255, .88); --scrim: rgba(15, 23, 42, .28); --scrim-strong: rgba(15, 23, 42, .36);
     --sheen: rgba(15, 23, 42, .05);
@@ -85,6 +87,42 @@
   .tab-group-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding-right: 6px; }
   .tab .count { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 4px; }
   .tab.active .count { color: var(--accent); }
+  .tab-group-label [data-icon] { display: none; }
+  .tab-group-label[data-view] { cursor: pointer; }
+  /* On a phone the strip is one row of equal cells, the icon over the name: no
+     row sliding sideways under a thumb, which the operator found ugly
+     (2026-10-08). A page with groups shows each group as one cell that opens
+     the group's first page, and the group of the page on screen unfolds its
+     pages as a second row, a segmented control under the first. The line under
+     the first row is a pseudo-element so it stays under the first row. */
+  @media (max-width: 640px) {
+    .wrap > .tabs { flex-wrap: wrap; gap: 0; border-bottom: 0; align-items: stretch; }
+    .wrap > .tabs::after { content: ""; order: 1; flex: 0 0 100%; border-bottom: 1px solid var(--border); }
+    .wrap > .tabs > .tab, .wrap > .tabs .tab-group-label {
+      display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+      position: relative; margin: 0 0 -1px; padding: 9px 2px 7px; color: var(--muted);
+      font-size: clamp(10.5px, 2.9vw, 11.5px); line-height: 1.2; letter-spacing: 0; text-transform: none;
+      border-bottom: 2px solid transparent; }
+    .wrap > .tabs > .tab > [data-t], .wrap > .tabs .tab-group-label > [data-t] {
+      display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wrap > .tabs > .tab svg.i, .wrap > .tabs .tab-group-label svg.i { width: 19px; height: 19px; }
+    .wrap > .tabs > .tab [data-icon], .wrap > .tabs .tab-group-label [data-icon] { display: inline-flex; }
+    .wrap > .tabs > .tab .count { position: absolute; top: 5px; left: calc(50% + 9px); margin: 0; font-size: 10px; line-height: 1; }
+    .wrap > .tabs > .tab.active, .wrap > .tabs .tab-group:has(> .tab.active) > .tab-group-label { color: var(--text); border-bottom-color: var(--accent); }
+    .wrap > .tabs > .tab.active svg.i, .wrap > .tabs .tab-group:has(> .tab.active) > .tab-group-label svg.i { color: var(--accent); }
+    .wrap > .tabs .tab-group { display: contents; }
+    .wrap > .tabs .tab-group > .tab { display: none; }
+    .wrap > .tabs .tab-group:has(> .tab.active) > .tab {
+      display: flex; order: 2; flex: 1 1 0; min-width: 0; justify-content: center; position: relative;
+      margin: 10px 0 0; padding: 7px 4px; border: 0; border-radius: 0;
+      background: var(--seg-track); color: var(--muted); font-size: 12.5px; line-height: 1.2; }
+    .wrap > .tabs .tab-group > .tab:first-of-type { border-radius: 9px 0 0 9px; }
+    .wrap > .tabs .tab-group > .tab:last-of-type { border-radius: 0 9px 9px 0; }
+    .wrap > .tabs .tab-group > .tab [data-icon], .wrap > .tabs .tab-group > .tab .count { display: none; }
+    .wrap > .tabs .tab-group > .tab > [data-t] { position: relative; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wrap > .tabs .tab-group > .tab.active { color: var(--text); font-weight: 600; }
+    .wrap > .tabs .tab-group > .tab.active::before { content: ""; position: absolute; inset: 2px; border-radius: 7px; background: var(--seg-pill); }
+  }
   /* ── end tab shell ──────────────────────────────────────────────────────── */
   /* ── hookstack components · keep this block identical in all three pages ── */
   /* What every board is built from: the top bar, buttons and fields, the
@@ -98,7 +136,7 @@
      lays a grey flash over a tapped control on top of the control's own pressed
      state, which reads as a second, unrelated reaction. */
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-  button, a, summary, .row { -webkit-tap-highlight-color: transparent; }
+  button, a, summary, .row, [role=button] { -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -375,8 +413,6 @@
     .top-in { flex-wrap: wrap; gap: 10px; }
     .search { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
     .top-right { margin-left: auto; }
-    .wrap > .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-    .wrap > .tabs::-webkit-scrollbar { display: none; }
     .stamp, .search kbd { display: none; }
     /* iOS zooms the page in to a field whose text is under 16px when it takes
        focus, and does not zoom back out: on a phone every field types at 16px,
