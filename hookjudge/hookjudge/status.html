@@ -629,6 +629,7 @@
   "st.install.insets": "Safe area · top {top}px · bottom {bottom}px · {how}",
   "st.install.measured": "measured",
   "st.install.assumed": "assumed from the screen",
+  "st.install.stale": "This icon keeps the status bar it was added with, so the bar does not follow the theme. Remove the icon from the home screen, then add it again from Safari: Share, then Add to Home Screen.",
   "st.install.http": "A browser installs an app only over https. Serve the board over https (a tailnet, a tunnel) and open it there.",
   "st.clear_title": "Forget the token?",
   "st.clear_body": "This browser keeps it only here. Afterwards it asks for it again before it can show anything.",
@@ -825,6 +826,7 @@
   "st.install.insets": "安全区 · 顶部 {top}px · 底部 {bottom}px · {how}",
   "st.install.measured": "实测",
   "st.install.assumed": "按屏幕推定",
+  "st.install.stale": "这个图标沿用的是添加时的状态栏，所以状态栏不会跟着主题变。从主屏幕删掉这个图标，再在 Safari 里点分享，然后「添加到主屏幕」。",
   "st.install.http": "浏览器只在 https 下安装应用。把看板放到 https 后面（tailnet、隧道）再从那里打开。",
   "st.clear_title": "清除口令？",
   "st.clear_body": "口令只存在这个浏览器里。清除以后，要重新输入才能查看。",
@@ -1973,7 +1975,7 @@
     var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
     var page = location.pathname.slice(BASE.length + 1).replace(/\/$/, "");
     var prompt = null;
-    var safeArea = { top: 0, bottom: 0, assumed: false };
+    var safeArea = { top: 0, bottom: 0, assumed: false, stale: false };
     function render() {
       var box = $("#stInstall");
       if (!box) return;
@@ -1981,6 +1983,7 @@
       if (standalone) {
         box.appendChild(muted(t("st.install.done")));
         box.appendChild(muted(t("st.install.insets", { top: safeArea.top, bottom: safeArea.bottom, how: t(safeArea.assumed ? "st.install.assumed" : "st.install.measured") })));
+        if (safeArea.stale) { var stale = muted(t("st.install.stale")); stale.style.color = "var(--warn)"; box.appendChild(stale); }
         return;
       }
       if (!window.isSecureContext) { box.appendChild(muted(t("st.install.http"))); return; }
@@ -2040,7 +2043,16 @@
       var long = Math.max(screen.width, screen.height), short = Math.min(screen.width, screen.height);
       var portrait = window.innerHeight >= window.innerWidth, tall = long / short >= 1.9;
       var covers = standalone && portrait && window.innerHeight >= long - 1;
-      safeArea = { top: env.top, bottom: env.bottom, assumed: false };
+      // iOS keeps the status-bar style an icon was ADDED with, whatever the page
+      // says later: an icon added while the head said `default` keeps an opaque
+      // bar in the device's colours, which no theme switch reaches (2026-10-08).
+      // That bar shows as a page shorter than the screen with nothing reported
+      // above it; then the only remedy is the reader's — add the icon again — so
+      // the drawer says so. Phones only (an iPad window may be any height), and
+      // not re-judged while a field has focus.
+      var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || "");
+      var stale = typing ? safeArea.stale : standalone && portrait && long / short >= 1.7 && !env.top && window.innerHeight < long - 1;
+      safeArea = { top: env.top, bottom: env.bottom, assumed: false, stale: stale };
       if (covers && !env.top) { safeArea.top = BAR_HEIGHT[long + "x" + short] || (tall ? 44 : 20); safeArea.assumed = true; }
       if (covers && !env.bottom && tall) { safeArea.bottom = 34; safeArea.assumed = true; }
       if (safeArea.assumed) { root.setProperty("--safe-top", safeArea.top + "px"); root.setProperty("--safe-bottom", safeArea.bottom + "px"); }
