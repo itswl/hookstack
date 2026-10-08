@@ -425,6 +425,14 @@
     .stats { grid-template-columns: 1fr; }
     .kv { grid-template-columns: 1fr; gap: 2px; }
     .kv .v { margin-bottom: 8px; }
+    /* A table on a phone is as wide as its longest header or status pill, and
+       pushed its card off the screen (2026-10-08). Headers may wrap, cells sit
+       closer, a pill in a cell may take two lines; a table with too many
+       columns even so is reflowed by the page that draws it. */
+    .tbl th { white-space: normal; }
+    .tbl th, .tbl td { padding-left: 6px; padding-right: 6px; }
+    .hp th, .hp td { padding: 6px 7px; overflow-wrap: anywhere; }
+    .tbl td .pill, .hp td .pill { white-space: normal; height: auto; min-height: 22px; padding: 2px 9px 2px 8px; line-height: 1.35; border-radius: 11px; }
     #tokenbar.show { grid-template-columns: 1fr; }
     .headline-sub, .hero-actions { margin-left: 0; }
   }

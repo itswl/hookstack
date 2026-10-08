@@ -423,6 +423,14 @@
     .stats { grid-template-columns: 1fr; }
     .kv { grid-template-columns: 1fr; gap: 2px; }
     .kv .v { margin-bottom: 8px; }
+    /* A table on a phone is as wide as its longest header or status pill, and
+       pushed its card off the screen (2026-10-08). Headers may wrap, cells sit
+       closer, a pill in a cell may take two lines; a table with too many
+       columns even so is reflowed by the page that draws it. */
+    .tbl th { white-space: normal; }
+    .tbl th, .tbl td { padding-left: 6px; padding-right: 6px; }
+    .hp th, .hp td { padding: 6px 7px; overflow-wrap: anywhere; }
+    .tbl td .pill, .hp td .pill { white-space: normal; height: auto; min-height: 22px; padding: 2px 9px 2px 8px; line-height: 1.35; border-radius: 11px; }
     #tokenbar.show { grid-template-columns: 1fr; }
     .headline-sub, .hero-actions { margin-left: 0; }
   }
@@ -474,6 +482,31 @@
   .ds.sent { color: var(--ok); } .ds.queued { color: var(--warn); } .ds.dead { color: var(--bad); }
   .lg { border-bottom: 1px solid var(--border-soft); }
   .lg:last-child { border-bottom: 0; }
+  /* Deliveries on a phone (2026-10-08): six columns do not fit beside each
+     other on a phone even with wrapping headers, so each channel and each dead
+     letter becomes a small block. A channel: its name with its state beside
+     it, then the four numbers in a row, each under its column's name. A dead
+     letter: the message, then the channel and the tries, the error, and when
+     with the buttons. The column names come from data-label, set by the
+     renderer from the same words as the header row the phone hides. */
+  @media (max-width: 640px) {
+    .ch-t, .ch-t tbody, .dl-t, .dl-t tbody { display: block; }
+    .ch-t tr:first-child, .dl-t tr:first-child { display: none; }
+    .ch-t tr, .dl-t tr { display: grid; column-gap: 10px; row-gap: 6px; padding: 10px 2px; border-bottom: 1px solid var(--border-soft); }
+    .ch-t tr:last-child, .dl-t tr:last-child { border-bottom: 0; }
+    .ch-t td, .dl-t td, .ch-t td.num { display: block; padding: 0; border: 0; min-width: 0; text-align: left; }
+    .ch-t td[data-label]::before, .dl-t td[data-label]::before { content: attr(data-label); display: block; color: var(--muted); font: var(--ui); font-size: 11px; line-height: 1.3; margin-bottom: 2px; }
+    .ch-t tr { grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.5fr); }
+    .ch-t td.ch-name { grid-column: 1 / 3; grid-row: 1; align-self: center; font-weight: 600; overflow-wrap: anywhere; }
+    .ch-t td.ch-state { grid-column: 3 / 5; grid-row: 1; justify-self: end; align-self: center; }
+    .dl-t tr { grid-template-columns: minmax(0, 1fr) auto; }
+    .dl-t td.dl-msg { grid-row: 1; grid-column: 1 / -1; }
+    .dl-t td.dl-ch { grid-row: 2; grid-column: 1; align-self: end; overflow-wrap: anywhere; }
+    .dl-t td.dl-tries, .dl-t td.num.dl-tries { grid-row: 2; grid-column: 2; text-align: right; }
+    .dl-t td.dl-status { grid-row: 3; grid-column: 1 / -1; }
+    .dl-t td.dl-when { grid-row: 4; grid-column: 1; align-self: center; color: var(--muted); }
+    .dl-t td.dl-act { grid-row: 4; grid-column: 2; }
+  }
   .lg > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 112px 132px minmax(0, 1fr) minmax(0, auto) auto; gap: 12px; align-items: center; padding: 10px 16px; font-size: 13px; }
   .lg > summary::-webkit-details-marker { display: none; }
   .lg > summary:hover { background: var(--hover); }
@@ -2846,19 +2879,19 @@
     Object.keys(breakers).forEach(function (name) { if (!ch[name]) ch[name] = { sent: 0, queued: 0, dead: 0, last: 0 }; });
     var names = Object.keys(ch).sort();
     html += '<div class="card"><h3>' + icon("send") + esc(t("dv.channels")) + '</h3><p class="desc">' + esc(t("dv.window", { n: rows.length })) + "</p>" +
-      (names.length ? '<table class="tbl"><tr><th>' + esc(t("dv.col.channel")) + '</th><th class="num">' + esc(t("dv.col.sent")) + '</th><th class="num">' + esc(t("dv.col.queued")) + '</th><th class="num">' + esc(t("dv.col.dead")) + "</th><th>" + esc(t("dv.col.last")) + "</th><th>" + esc(t("dv.col.state")) + "</th></tr>" +
+      (names.length ? '<table class="tbl ch-t"><tr><th>' + esc(t("dv.col.channel")) + '</th><th class="num">' + esc(t("dv.col.sent")) + '</th><th class="num">' + esc(t("dv.col.queued")) + '</th><th class="num">' + esc(t("dv.col.dead")) + "</th><th>" + esc(t("dv.col.last")) + "</th><th>" + esc(t("dv.col.state")) + "</th></tr>" +
         names.map(function (name) {
           var c = ch[name], state = breakers[name];
           var stateHtml = state === "open" ? '<span class="pill bad">' + esc(t("dv.state.open")) + "</span>" : state === "half-open" ? '<span class="pill warn">' + esc(t("dv.state.half")) + "</span>" : '<span class="pill ok">' + esc(t("dv.state.ok")) + "</span>";
-          return '<tr><td class="mono">' + esc(name) + '</td><td class="num">' + c.sent + '</td><td class="num">' + (c.queued ? '<span class="warn-t">' + c.queued + "</span>" : 0) + '</td><td class="num">' + (c.dead ? '<span class="bad-t">' + c.dead + "</span>" : 0) + '</td><td class="mono">' + (c.last ? esc(stamp(c.last)) : "—") + "</td><td>" + stateHtml + "</td></tr>";
+          return '<tr><td class="mono ch-name">' + esc(name) + '</td><td class="num" data-label="' + esc(t("dv.col.sent")) + '">' + c.sent + '</td><td class="num" data-label="' + esc(t("dv.col.queued")) + '">' + (c.queued ? '<span class="warn-t">' + c.queued + "</span>" : 0) + '</td><td class="num" data-label="' + esc(t("dv.col.dead")) + '">' + (c.dead ? '<span class="bad-t">' + c.dead + "</span>" : 0) + '</td><td class="mono ch-last" data-label="' + esc(t("dv.col.last")) + '">' + (c.last ? esc(stamp(c.last)) : "—") + '</td><td class="ch-state">' + stateHtml + "</td></tr>";
         }).join("") + "</table>" : '<p class="muted">' + esc(t("common.none")) + "</p>") + "</div>";
     var dead = [];
     rows.forEach(function (e) { (e.deliveries || []).forEach(function (d) { if (d.status === "dead") dead.push({ e: e, d: d }); }); });
     html += '<div class="card"><h3>' + icon("alert") + esc(t("dv.deadletters")) + "</h3>" +
-      (dead.length ? '<table class="tbl"><tr><th>' + esc(t("dl.when")) + "</th><th>" + esc(t("dl.message")) + "</th><th>" + esc(t("dl.channel")) + "</th><th>" + esc(t("dl.status")) + '</th><th class="num">' + esc(t("dl.attempts")) + "</th><th></th></tr>" +
+      (dead.length ? '<table class="tbl dl-t"><tr><th>' + esc(t("dl.when")) + "</th><th>" + esc(t("dl.message")) + "</th><th>" + esc(t("dl.channel")) + "</th><th>" + esc(t("dl.status")) + '</th><th class="num">' + esc(t("dl.attempts")) + "</th><th></th></tr>" +
         dead.map(function (x) {
-          return '<tr><td class="mono">' + esc(stamp(x.e.received_at)) + "</td><td><b>" + esc(x.e.title || t("common.untitled")) + '</b><div class="muted mono">' + esc(x.e.source) + " · #" + esc(x.e.id) + '</div></td><td class="mono">' + esc(x.d.channel) + '</td><td><span class="ds dead">' + esc(statusWord("dead")) + '</span><div class="muted">' + esc(String(x.d.last_error || "").slice(0, 160)) + '</div></td><td class="num">' + esc(x.d.attempts || 0) + "</td>" +
-            '<td><div class="bar-actions" style="margin:0"><button class="btn xs" type="button" data-retry="' + esc(x.d.id) + '">' + icon("retry") + esc(t("dl.retry")) + '</button><button class="btn xs ghost" type="button" data-open="' + esc(x.e.id) + '">' + icon("eye") + "</button></div></td></tr>";
+          return '<tr><td class="mono dl-when">' + esc(stamp(x.e.received_at)) + '</td><td class="dl-msg"><b>' + esc(x.e.title || t("common.untitled")) + '</b><div class="muted mono">' + esc(x.e.source) + " · #" + esc(x.e.id) + '</div></td><td class="mono dl-ch">' + esc(x.d.channel) + '</td><td class="dl-status"><span class="ds dead">' + esc(statusWord("dead")) + '</span><div class="muted">' + esc(String(x.d.last_error || "").slice(0, 160)) + '</div></td><td class="num dl-tries" data-label="' + esc(t("dl.attempts")) + '">' + esc(x.d.attempts || 0) + "</td>" +
+            '<td class="dl-act"><div class="bar-actions" style="margin:0"><button class="btn xs" type="button" data-retry="' + esc(x.d.id) + '">' + icon("retry") + esc(t("dl.retry")) + '</button><button class="btn xs ghost" type="button" data-open="' + esc(x.e.id) + '">' + icon("eye") + "</button></div></td></tr>";
         }).join("") + "</table>" : '<p class="muted">' + esc(t("dv.deadletters.none")) + "</p>") + "</div>";
     var U = S.unseen;
     html += '<div class="card"><h3>' + icon("eye") + esc(t("dv.unseen")) + '</h3><p class="desc">' + esc(t("dv.unseen.hint")) + "</p>" +
