@@ -108,7 +108,10 @@ console opens what it holds in the tab itself instead of a drawer — a runbook,
 a role, a session — because those are worked in, not glanced at: a crumb leads
 back, and the sessions keep their list beside the open conversation, which on
 a phone becomes one pane at a time, like a mail app. Its only drawer is the
-settings.
+settings. On a phone the strip itself never slides sideways: it is one row of
+equal cells, the icon over the name, and the console's two groups are one
+cell each, opening the group's first page, while the group of the page on
+screen unfolds its pages as a segmented control under the row.
 
 All three boards install on a phone (the pipe's since 2026-10-05, the judge's
 and the investigator's since 2026-10-06): a web manifest, icons drawn from
