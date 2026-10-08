@@ -48,7 +48,6 @@ EN_TAIL = """## Read more
 *   [hookprobe reference]({repo}/blob/main/hookprobe/README.md)
 *   [Running all of hookstack]({repo}/blob/main/STACK.md)
 *   [Containment](containment.md) — the security boundaries
-*   [WebhookWise](https://github.com/{owner}/WebhookWise) — the self-hosted alerting platform these grew out of
 
 MIT licensed.
 """
@@ -58,7 +57,6 @@ ZH_TAIL = """## 继续读
 *   [hookprobe 参考文档]({repo}/blob/main/hookprobe/README.md)（英文）
 *   [把三件套一起跑起来（STACK.md）]({repo}/blob/main/STACK.md)（英文）
 *   [安全边界（containment）](../containment.md)（英文）
-*   [WebhookWise](https://{owner}.github.io/WebhookWise/zh/) —— 这几个服务生长出来的那个自托管告警平台
 
 MIT 协议。
 """

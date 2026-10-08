@@ -67,6 +67,5 @@ bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts
 *   [hookprobe 参考文档](https://github.com/itswl/hookstack/blob/main/hookprobe/README.md)（英文）
 *   [把三件套一起跑起来（STACK.md）](https://github.com/itswl/hookstack/blob/main/STACK.md)（英文）
 *   [安全边界（containment）](../containment.md)（英文）
-*   [WebhookWise](https://itswl.github.io/WebhookWise/zh/) —— 这几个服务生长出来的那个自托管告警平台
 
 MIT 协议。

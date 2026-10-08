@@ -76,7 +76,7 @@ services:
       # The in-network names are listed too, so a NO_PROXY that misses one
       # degrades to "carried and allowed" rather than "refused".
       EGRESS_ALLOW: >-
-        ${EGRESS_ALLOW:-open.larksuite.com,model-gateway.example,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,hookjudge,hookprobe,webhook-receiver,webhookwise-observability-alloy-1}
+        ${EGRESS_ALLOW:-open.larksuite.com,api.anthropic.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,hookjudge,hookprobe,webhook-receiver,webhookwise-observability-alloy-1}
 
   hookprobe:
     build:

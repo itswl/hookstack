@@ -208,7 +208,7 @@ services:
       - ../work-data/mcp-gate:/data
     environment:
       EGRESS_ALLOW: >-
-        ${EGRESS_ALLOW:-open.larksuite.com,model-gateway.example,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
+        ${EGRESS_ALLOW:-open.larksuite.com,api.anthropic.com,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
       MCPGATE_UPSTREAM: ${WATCH_CHAT_MCP_URL:-http://host.docker.internal:52222/mcp/}
       # A credential for the chat server itself, the day its port takes one:
       # MCPGATE_UPSTREAM_HEADER_<Name_With_Underscores> is sent as the header
