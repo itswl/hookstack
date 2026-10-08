@@ -94,6 +94,11 @@
      kinds of row, a window.confirm on one page and a modal on another. */
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: var(--ui); -webkit-font-smoothing: antialiased; }
+  /* A phone's own habits, undone: iOS enlarges text when the phone is turned, and
+     lays a grey flash over a tapped control on top of the control's own pressed
+     state, which reads as a second, unrelated reaction. */
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  button, a, summary, .row { -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -255,20 +260,24 @@
   /* ── drawers: one item's whole story, and the settings ── */
   .scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 30; }
   .scrim.on { opacity: 1; pointer-events: auto; }
-  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(840px, 100vw); padding: var(--safe-top) 0 var(--safe-bottom); background: var(--bg); border-left: 1px solid var(--border); transform: translateX(104%); transition: transform .22s ease; z-index: 31; display: flex; flex-direction: column; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(840px, 100vw); background: var(--bg); border-left: 1px solid var(--border); transform: translateX(104%); transition: transform .22s ease; z-index: 31; display: flex; flex-direction: column; }
   /* The shadow only while open: parked off-screen, it would still fall across the
      page's right edge, invisible on dark and a grey band on white. */
   .drawer.on { transform: none; box-shadow: var(--shadow-drawer); }
   .drawer.narrow { width: min(440px, 100vw); z-index: 33; }
-  .dr-head { padding: 18px 22px 0; border-bottom: 1px solid var(--border); background: var(--surface); }
+  /* The drawer runs edge to edge like the page: its head grows by the inset above
+     and draws under the status bar in its own colour, its body scrolls on under the
+     home indicator and pads its end clear of it. The insets go on the parts, not on
+     the drawer, or the strips between them show the drawer's own background. */
+  .dr-head { padding: calc(18px + var(--safe-top)) calc(22px + var(--safe-right)) 0 22px; border-bottom: 1px solid var(--border); background: var(--surface); }
   .dr-top { display: flex; align-items: flex-start; gap: 12px; }
   .dr-top .pill { margin-top: 3px; }
   .dr-title { font-size: 17px; font-weight: 650; line-height: 1.45; flex: 1 1 auto; overflow-wrap: anywhere; }
   .dr-meta { color: var(--muted); font-size: 12.5px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
   .dr-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 12px; }
   .dr-head .tabs { border-bottom: 0; }
-  .dr-body { flex: 1 1 auto; overflow: auto; padding: 20px 22px 60px; }
-  .settings-body { padding: 18px 22px 40px; overflow: auto; flex: 1 1 auto; }
+  .dr-body { flex: 1 1 auto; overflow: auto; padding: 20px calc(22px + var(--safe-right)) calc(60px + var(--safe-bottom)) 22px; }
+  .settings-body { padding: 18px calc(22px + var(--safe-right)) calc(40px + var(--safe-bottom)) 22px; overflow: auto; flex: 1 1 auto; }
   .field { display: grid; gap: 6px; margin-bottom: 18px; }
   .field > label { font-size: 12.5px; color: var(--muted); font-weight: 500; }
   .field .inline { display: flex; gap: 8px; }
@@ -331,14 +340,14 @@
   body.zh [data-only="en"], body:not(.zh) [data-only="zh"] { display: none !important; }
 
   /* ── dialogs and toasts ── */
-  .modal { position: fixed; inset: 0; display: none; place-items: center; z-index: 40; background: var(--scrim-strong); }
+  .modal { position: fixed; inset: 0; display: none; place-items: center; z-index: 40; background: var(--scrim-strong); padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left); }
   .modal.on { display: grid; }
-  .modal-card { width: min(460px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-card); padding: 20px; }
+  .modal-card { width: min(460px, calc(100vw - 32px)); max-height: 100%; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-card); padding: 20px; }
   .modal-card h3 { margin: 0 0 8px; font-size: 16px; }
   .modal-card .body { color: var(--muted); font-size: 13.5px; line-height: 1.6; }
   .modal-card .body p { margin: 0 0 8px; }
   .modal-card .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-  .toasts { position: fixed; right: 20px; bottom: calc(20px + var(--safe-bottom)); display: grid; gap: 8px; z-index: 50; }
+  .toasts { position: fixed; right: max(20px, var(--safe-right)); bottom: calc(20px + var(--safe-bottom)); display: grid; gap: 8px; z-index: 50; }
   .toast { display: flex; align-items: center; gap: 10px; min-width: 240px; max-width: 440px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); box-shadow: var(--shadow-toast); font-size: 13px; cursor: pointer; animation: toast-life 5s ease forwards; }
   .toast.ok svg.i { color: var(--ok); } .toast.bad svg.i { color: var(--bad); }
   @keyframes toast-life { 0% { opacity: 0; transform: translateY(8px); } 6% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; transform: translateY(4px); } }

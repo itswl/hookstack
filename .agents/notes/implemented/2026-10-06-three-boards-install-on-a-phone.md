@@ -135,3 +135,18 @@ measurement only ever adds — a probe that reads nothing leaves the stylesheet'
 assumed height is by the screen's size where the phone is known (48pt on the
 operator's) and by its shape otherwise, and the settings drawer prints what the
 phone was given, measured or assumed, so the next screenshot carries numbers.
+
+The header rule did not reach the rest of the edge. The drawers took the inset
+as their own padding, so the strip under the clock was the drawer's background
+above a head of another colour, and the settings drawer's body ended above the
+home indicator instead of scrolling under it; the dialog and the toasts kept
+clear of nothing. Now the insets go on the parts: the drawer head grows by the
+top inset in its own colour, the bodies pad their end by the bottom one, the
+dialog is padded by all four and scrolls inside itself, the toasts clear the
+indicator and the notch. And the two habits the operator's other installed
+board undoes: the grey flash over a tapped control, and text enlarged when the
+phone is turned. All in the shared blocks, so the pipe's board, the judge's and
+the investigator's change together; measured headless on all three — the
+judge from a scratch instance — as an installed app whose insets read zero and
+as one whose insets are reported, both themes, with a drawer open: the header
+clears the bar, no control is left under it, nothing overflows.
