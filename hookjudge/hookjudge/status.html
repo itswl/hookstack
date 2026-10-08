@@ -116,6 +116,8 @@
      install block measures and overwrites the top and the bottom where an
      installed app draws under the bar and reports nothing. */
   :root { --safe-top: env(safe-area-inset-top); --safe-right: env(safe-area-inset-right); --safe-bottom: env(safe-area-inset-bottom); --safe-left: env(safe-area-inset-left); }
+  /* Read by the install block: env() is a CSS value, and a padding is the way to a number in script. */
+  .safe-probe { position: fixed; top: 0; left: 0; visibility: hidden; pointer-events: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
   .top { position: sticky; top: 0; z-index: 20; padding-top: var(--safe-top); background: var(--topbar); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
   .top-in { max-width: 1280px; margin: 0 auto; padding: 10px max(24px, var(--safe-right)) 10px max(24px, var(--safe-left)); display: flex; align-items: center; gap: 18px; }
   .brand { display: flex; align-items: center; gap: 10px; color: var(--text); white-space: nowrap; }
@@ -615,6 +617,9 @@
   "st.install.add": "Add to the home screen",
   "st.install.hint": "In Safari or Chrome: Share, then Add to Home Screen. The app keeps the tokens of this browser and nothing else; offline it shows the page and says the judge is out of reach.",
   "st.install.done": "Installed. This is the app.",
+  "st.install.insets": "Safe area · top {top}px · bottom {bottom}px · {how}",
+  "st.install.measured": "measured",
+  "st.install.assumed": "assumed from the screen",
   "st.install.http": "A browser installs an app only over https. Serve the board over https (a tailnet, a tunnel) and open it there.",
   "st.clear_title": "Forget the token?",
   "st.clear_body": "This browser keeps it only here. Afterwards it asks for it again before it can show anything.",
@@ -808,6 +813,9 @@
   "st.install.add": "添加到主屏幕",
   "st.install.hint": "在 Safari 或 Chrome 里：分享，然后「添加到主屏幕」。应用只保留这个浏览器里的口令；离线时显示页面，并告诉你连不上判官。",
   "st.install.done": "已安装。这就是应用。",
+  "st.install.insets": "安全区 · 顶部 {top}px · 底部 {bottom}px · {how}",
+  "st.install.measured": "实测",
+  "st.install.assumed": "按屏幕推定",
   "st.install.http": "浏览器只在 https 下安装应用。把看板放到 https 后面（tailnet、隧道）再从那里打开。",
   "st.clear_title": "清除口令？",
   "st.clear_body": "口令只存在这个浏览器里。清除以后，要重新输入才能查看。",
@@ -1956,11 +1964,16 @@
     var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
     var page = location.pathname.slice(BASE.length + 1).replace(/\/$/, "");
     var prompt = null;
+    var safeArea = { top: 0, bottom: 0, assumed: false };
     function render() {
       var box = $("#stInstall");
       if (!box) return;
       box.textContent = "";
-      if (standalone) { box.appendChild(muted(t("st.install.done"))); return; }
+      if (standalone) {
+        box.appendChild(muted(t("st.install.done")));
+        box.appendChild(muted(t("st.install.insets", { top: safeArea.top, bottom: safeArea.bottom, how: t(safeArea.assumed ? "st.install.assumed" : "st.install.measured") })));
+        return;
+      }
       if (!window.isSecureContext) { box.appendChild(muted(t("st.install.http"))); return; }
       if (!prompt) { box.appendChild(muted(t("st.install.hint"))); return; }
       var btn = document.createElement("button");
@@ -1997,32 +2010,37 @@
     // the header sits beneath the clock with nothing to tap. There the page is as
     // tall as the whole screen while something is drawn over it, which is what
     // this detects; the bar's height has to be assumed, since nothing reports it:
-    // a screen nearly twice as tall as it is wide is one of the tall phones (a
-    // 44pt bar, a 34pt indicator), anything else an older one (20pt, none). Once
-    // per size change, never while scrolling: a static padding cannot oscillate
-    // with the system the way a correction applied to the scroll position did.
+    // by the screen's size where the phone is known, else by its shape (a screen
+    // nearly twice as tall as wide is a tall phone: a 44pt bar, a 34pt indicator;
+    // anything else an older one: 20pt, none). Only ever MORE than env() says —
+    // a probe that reads nothing must not zero an inset that works — and again
+    // at load, on return and on a size change, never while scrolling. The settings
+    // drawer shows the numbers, so a phone can say what it was given.
     function safeInsets() {
       var probe = document.createElement("div");
-      probe.style.cssText = "position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
+      probe.className = "safe-probe";
       document.body.appendChild(probe);
       var cs = getComputedStyle(probe), px = function (v) { return Math.round(parseFloat(v) || 0); };
       var out = { top: px(cs.paddingTop), right: px(cs.paddingRight), bottom: px(cs.paddingBottom), left: px(cs.paddingLeft) };
       probe.remove();
       return out;
     }
+    var BAR_HEIGHT = { "896x414": 48, "812x375": 44, "844x390": 47, "926x428": 47, "852x393": 59, "932x430": 59, "874x402": 62, "956x440": 62 };
     function applySafeInsets() {
-      var env = safeInsets(), top = env.top, bottom = env.bottom;
-      var portrait = window.innerHeight >= window.innerWidth;
-      var screenHeight = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
-      if (standalone && window.innerHeight >= screenHeight - 1 && !top) {
-        var tall = Math.max(screen.width, screen.height) / Math.min(screen.width, screen.height) >= 1.9;
-        top = tall ? 44 : 20;
-        if (!bottom && tall) bottom = 34;
-      }
-      document.documentElement.style.setProperty("--safe-top", top + "px");
-      document.documentElement.style.setProperty("--safe-bottom", bottom + "px");
+      var env = safeInsets(), root = document.documentElement.style;
+      var long = Math.max(screen.width, screen.height), short = Math.min(screen.width, screen.height);
+      var portrait = window.innerHeight >= window.innerWidth, tall = long / short >= 1.9;
+      var covers = standalone && portrait && window.innerHeight >= long - 1;
+      safeArea = { top: env.top, bottom: env.bottom, assumed: false };
+      if (covers && !env.top) { safeArea.top = BAR_HEIGHT[long + "x" + short] || (tall ? 44 : 20); safeArea.assumed = true; }
+      if (covers && !env.bottom && tall) { safeArea.bottom = 34; safeArea.assumed = true; }
+      if (safeArea.assumed) { root.setProperty("--safe-top", safeArea.top + "px"); root.setProperty("--safe-bottom", safeArea.bottom + "px"); }
+      else { root.removeProperty("--safe-top"); root.removeProperty("--safe-bottom"); }
+      render();
     }
     applySafeInsets();
+    window.addEventListener("load", applySafeInsets);
+    window.addEventListener("pageshow", applySafeInsets);
     window.addEventListener("resize", applySafeInsets);
     window.addEventListener("orientationchange", applySafeInsets);
     paint();
