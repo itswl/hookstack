@@ -661,6 +661,13 @@ class Store:
         )
         return [dict(row) for row in await cursor.fetchall()]
 
+    async def sent_since(self, since: float) -> list[dict[str, Any]]:
+        """Every delivery that went out since `since`: which channel, and when."""
+        cursor = await self.read.execute(
+            "SELECT channel, sent_at FROM deliveries WHERE status = 'sent' AND sent_at >= ?", (since,)
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
     async def event_source(self, event_id: int) -> str:
         cursor = await self.read.execute("SELECT source FROM events WHERE id = ?", (event_id,))
         row = await cursor.fetchone()

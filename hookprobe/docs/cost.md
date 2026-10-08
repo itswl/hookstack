@@ -148,6 +148,17 @@ investigator billed, how many re-fires a runbook answered for $0, what people
 ruled and what they have not, the budget, and the pipe's priced chains and
 incidents.
 
+Since 2026-10-08 the attention section opens with the two numbers step 4 of the
+90-day plan has to move, read from the pipe's own ledger through
+`GET /attention`. **Reached a person** counts the cards sent on a bridge
+channel, the one a person reads, and how many went between 23:00 and 07:00 in
+the operator's zone (`--utc-offset`; `weekly_page.sh` passes the host's).
+**Pressed by a person** counts card presses by kind and how many distinct
+people made them, never who. Both print beside pilot zero's five weeks: 138, 13,
+167, 354 and 59 cards with about a third at night, and nine presses in the
+first week, then none. The pipe serves times and kinds; the page does the
+arithmetic.
+
 Since 2026-09-15 it arrives by itself: `scripts/weekly_page.sh` runs the report
 from inside the compose network on a timer (the pipe publishes no host port, so
 a host-side run always printed the pipe section as unread), writes a dated page
