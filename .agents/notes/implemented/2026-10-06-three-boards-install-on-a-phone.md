@@ -185,3 +185,20 @@ the screen, nothing overflowing, no name cut, one row on the pipe's and the
 judge's boards and on the console's top-level pages, two when a group is open.
 At desk width the probe's page is pixel-identical below the header before and
 after.
+
+## Every view, both languages
+
+A sweep of every view and drawer of the three boards at 375px in both
+languages found two more overflows, both in the pipe's English: the channel
+table on Deliveries (116px past its card: six headers that never wrap) and a
+help table whose first column holds status pills (36px). Fixed in two layers.
+The shared components let a table's headers and the pills in its cells wrap on
+a phone and pull its cells closer, which is enough for the help table and is a
+floor for every other table on the three boards. The channel table and the
+dead-letter table are six columns a phone cannot hold even then, so on a phone
+the pipe draws each row as a small block, the column names carried by
+data-label from the same words as the header row it hides. The dead-letter
+table had no rows to measure, so the check rewrote the status response to
+carry one dead letter and one open breaker. Afterwards the sweep — 62
+measurements — is clean, and at desk width the Deliveries view is
+pixel-identical before and after.
