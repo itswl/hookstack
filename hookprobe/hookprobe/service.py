@@ -1606,7 +1606,9 @@ class RunService:
         """
         return suggestions.resolve(self._settings.workdir, suggestion_id, accept=True)
 
-    def approve_remediation(self, proposal_id: str, note: str = "", actor: str = "") -> dict[str, Any]:
+    def approve_remediation(
+        self, proposal_id: str, note: str = "", actor: str = "", read_hash: str = ""
+    ) -> dict[str, Any]:
         """The operator's click, and the only path that runs anything. The gate
         checks and the execution are hookprobe.remediation's; what belongs here
         is the task the sequence runs in, because shutdown has to wait for it.
@@ -1623,6 +1625,7 @@ class RunService:
             high_risk_allowlist=self._settings.remediation_high_risk_allowlist,
             note=note,
             actor=actor,
+            read_hash=read_hash,
             at=self.proposal_cursor(proposal_id),
             cooldown=self._settings.remediation_cooldown_seconds,
         )

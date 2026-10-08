@@ -2774,7 +2774,7 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
       const parts = [viewHead(t("appr.title"), t("appr.hint"))];
       if (proposals.length) {
         parts.push(`<div class="card"><h3>${icon("zap")}${esc(t("appr.procedures"))} <span class="count">${proposals.length}</span></h3>` + proposals.map((r) => `
-          <div class="card" style="background:var(--bg);margin:10px 0 0" data-rem="${attr(r.id)}">
+          <div class="card" style="background:var(--bg);margin:10px 0 0" data-rem="${attr(r.id)}" data-hash="${attr(r.hash || "")}">
             <div class="crumb" style="margin:0 0 6px"><span class="pill warn">${esc(t("appr.proposed"))}</span><span class="mono muted" style="font-size:12px">${esc(r.session_key)}</span><span class="spacer"></span><span class="muted mono" style="font-size:12px">${esc(stamp(r.created_at))}</span></div>
             ${(r.steps || []).map((s) => `<div class="cmd">$ ${esc(s.command)}</div>`).join("")}
             ${r.cooling ? `<div class="muted" style="font-size:12px">${esc(t("appr.held", { why: r.cooling }))}</div>` : ""}
@@ -2801,14 +2801,20 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
     btn.disabled = true;
     try {
       let r;
-      if (rem) r = await api(`/v1/remediations/${encodeURIComponent(rem.dataset.rem)}/${act}`, { method: "POST", body: JSON.stringify({ by: "console" }) });
+      // The press names the version it approves: the digest this page drew the
+      // steps with. A proposal that changed since answers 409 and nothing runs.
+      if (rem) r = await api(`/v1/remediations/${encodeURIComponent(rem.dataset.rem)}/${act}`, { method: "POST", body: JSON.stringify({ by: "console", hash: rem.dataset.hash || "" }) });
       else if (mem) r = await api(`/v1/memory/suggestions/${encodeURIComponent(mem.dataset.mem)}/${act}`, { method: "POST" });
       else r = await api(`/v1/runs/${encodeURIComponent(run.dataset.run)}/ruling`, { method: "POST", body: JSON.stringify({ ruling: act, by: "console" }) });
       if (!r.ok) throw new Error(await detailOf(r));
       toast(t("common.done"), "ok");
       await openApprovals();
       await refreshBoardCounts();
-    } catch (e) { btn.disabled = false; toast(e.message, "bad"); }
+    } catch (e) {
+      // Redrawn on a refusal, for the same reason as the actions page: a
+      // proposal that changed under this page must be read again as it is.
+      btn.disabled = false; toast(e.message, "bad"); if (rem) openApprovals();
+    }
   }
   // The two tab badges, on every tab, because "is anything waiting on me" is
   // not a question you should have to navigate to.
@@ -3154,7 +3160,7 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
         // word for is printed as the service wrote it, never as "proposed".
         const status = r.status === "proposed" && r.expired ? "expired" : r.status;
         const foot = status === "proposed"
-          ? `<div class="bar-actions"><button class="btn primary sm" type="button" data-rem-act="approve" data-id="${attr(r.id)}">${esc(t("appr.approve_run"))}</button><button class="btn danger sm" type="button" data-rem-act="reject" data-id="${attr(r.id)}">${esc(t("appr.reject"))}</button></div>`
+          ? `<div class="bar-actions"><button class="btn primary sm" type="button" data-rem-act="approve" data-id="${attr(r.id)}" data-hash="${attr(r.hash || "")}">${esc(t("appr.approve_run"))}</button><button class="btn danger sm" type="button" data-rem-act="reject" data-id="${attr(r.id)}">${esc(t("appr.reject"))}</button></div>`
           : `<p class="muted" style="font-size:12.5px;margin:10px 0 0">${esc([r.outcome ? r.outcome + (r.outcome_reason ? " — " + r.outcome_reason : "") : "", r.approved_by ? t("act.approved_by", { who: r.approved_by }) : ""].filter(Boolean).join(" · "))}</p>`;
         return `<div class="card"><div class="crumb" style="margin:0"><span class="pill ${cls[status] || ""}">${esc(ACT_STATUSES.indexOf(status) >= 0 ? t("act.status." + status) : status)}</span>` +
           `<a class="mono" style="font-size:12.5px" href="#/sessions?open=${attr(encodeURIComponent(r.session_key))}">${esc(r.session_key)}</a><span class="spacer"></span><span class="muted mono" style="font-size:12px">${esc(stamp(r.created_at))}</span></div>` + steps + foot + "</div>";
@@ -3166,11 +3172,15 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
     if (act === "approve" && !(await confirmDialog(t("appr.confirm_title"), t("appr.confirm_body"), t("appr.approve_run"), true))) return;
     btn.disabled = true;
     try {
-      const r = await api(`/v1/remediations/${encodeURIComponent(id)}/${act}`, { method: "POST", body: JSON.stringify({ by: "console" }) });
+      const r = await api(`/v1/remediations/${encodeURIComponent(id)}/${act}`, { method: "POST", body: JSON.stringify({ by: "console", hash: btn.dataset.hash || "" }) });
       if (!r.ok) throw new Error(await detailOf(r));
       toast(t("common.done"), "ok");
       openActions(); refreshBoardCounts();
-    } catch (e) { btn.disabled = false; toast(e.message, "bad"); }
+    } catch (e) {
+      // Redrawn on a refusal: if the proposal changed under the page, what is
+      // on the screen is no longer what would run, and the reader must see it.
+      btn.disabled = false; toast(e.message, "bad"); openActions();
+    }
   }
 
   // ── audit: the flight recorder, filterable, following while open ──

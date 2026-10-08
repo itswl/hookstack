@@ -40,7 +40,8 @@ SRE teams" was read against the archive of the retired production deployment
    the write node carries the executor's gate knobs and the operator's file
    mount, and the approve press is its console. What remains is host-side and
    additive — one allowlisted line, a credential scoped to the job, and the
-   first approved procedure; the porting table's hash-binding row stays open.
+   first approved procedure. The porting table's hash-binding row was done on
+   2026-10-08 ([[an-approval-names-what-was-read]]).
 4. *Thirty days on the operator's own alert feed*, the weekly page read every
    Monday, with the two attention numbers below required to move the right
    way before anyone outside is asked to run it.
@@ -61,7 +62,7 @@ scratch and is the source of patches, not the successor (operator, 09-24).
 | --- | --- | --- |
 | the report's full text follows the card into the chat thread; a proposal card lists every step; a console link only when the console is reachable | `notify.py`, the bridge | step 2 (the phone is the console) |
 | the approver's identity on the approval record | `remediation.approve` gets an `actor` field; the console press carries the bearer's name | step 3 |
-| the approval binds to the version and hash of what was read | proposal supersession already exists; add the hash to the card and the check to the door | step 3 |
+| the approval binds to the version and hash of what was read | proposal supersession already exists; add the hash to the card and the check to the door | step 3 — done 2026-10-08 ([[an-approval-names-what-was-read]]) |
 | a gate in front of the chat MCP's writable credential (`mcpgate`) | the work stack's compose | step 3 |
 | the watcher's signing key out of the agent's reach | `post_watch_signal.py` | step 3 |
 | the launcher's per-plan ephemeral worker with only that profile's credentials | not built. The door first opened on 2026-09-30, with an administrator profile far wider than its job; that is what the blast radius argument is worth | after step 3 |

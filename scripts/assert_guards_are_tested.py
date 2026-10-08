@@ -119,6 +119,13 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
         ("tests/test_remediation.py",),
     ),
     (
+        "an approval no longer has to name the version it read",
+        "hookprobe/hookprobe/remediation.py",
+        '    named = str(read_hash or "").strip().lower()',
+        "    named = wanted",
+        ("tests/test_remediation.py", "tests/test_card_actions.py"),
+    ),
+    (
         "the approval window never expires",
         "hookprobe/hookprobe/remediation.py",
         "APPROVAL_WINDOW_SECONDS = 24 * 3600",

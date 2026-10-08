@@ -953,6 +953,9 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         now = time.time()
         rows = remediation.list_all(settings.workdir)
         for row in rows:
+            # What a press from this page names: the digest of the row exactly
+            # as it is listed, so the approval is of the steps the console drew.
+            row["hash"] = remediation.content_hash(row)
             row["expired"] = row.get("status") == "proposed" and remediation.stale(row, now)
             # And the other refusal a reader cannot derive from the row itself:
             # the cooldown lives in the OTHER rows. Reported for the same reason
@@ -980,11 +983,19 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         row says "console", which is honest about a click behind a shared
         bearer and is at least not blank. The card door fills the same field
         with the IM user id, so a reader of the row can tell the two apart.
+
+        `{hash: ...}` names WHAT is approved: the proposal's digest as
+        `GET /v1/remediations` gave it with the steps the console drew. Required;
+        a press that names no version or an older one answers 409 and nothing
+        runs (`remediation.Changed`).
         """
         body = payload or {}
         try:
             row = service.approve_remediation(
-                proposal_id, note=str(body.get("note") or ""), actor=str(body.get("by") or "console")[:120]
+                proposal_id,
+                note=str(body.get("note") or ""),
+                actor=str(body.get("by") or "console")[:120],
+                read_hash=str(body.get("hash") or "")[:64],
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
