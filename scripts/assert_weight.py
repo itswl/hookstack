@@ -306,7 +306,17 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # as the dedup fingerprint beside it. The rest of the raise is the docstring
     # that says so; `docs/containment.md` used to read "there is no nonce cache",
     # and every line that changed that sentence lives next to the code that did.
-    "hookrelay": (6400, Path("hookrelay/README.md")),
+    # 6400 -> 6450 on 2026-10-12, in review, for the peek-then-claim split the
+    # first version got wrong: the row is now READ before the pipeline
+    # (`signature_seen`) and CLAIMED only after it answers (`claim_signature`), so
+    # a retry following a 5xx or the fuse's 429 is processed instead of folded —
+    # the up-front claim lost the event while both sides believed it handled.
+    # Split: +~30 source, +~8 code, the rest the docstring saying why a peek and a
+    # claim are two calls. Still the door's business and still no payload read, so
+    # the doctrine answer is the entry above with no new argument; two raises in
+    # one day is the ceiling working, not a formality — each needed a reason
+    # written down, and neither added a judgment about an alert's worth.
+    "hookrelay": (6450, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:
