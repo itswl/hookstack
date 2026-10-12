@@ -99,6 +99,11 @@ python3 scripts/assert_weight.py
 # service because the composes are, and because the same mistake landed in two
 # services on one afternoon.
 python3 scripts/assert_knobs_are_reachable.py
+# Three services build one image tag, and the tag is whichever build ran last.
+# probe-watch's build passed no kubectl version, so from 2026-09-29 the work
+# image had no kubectl and two nodes measured nothing on their cluster side for
+# ten days while every gate was green.
+python3 scripts/assert_shared_images_build_alike.py
 # Cross-service for the same reason again: it compares one helper's body against
 # the copy of it living in another service. `Live.watcher_count` had already gone
 # missing from one of three copies, and verify_signature had stripped its
