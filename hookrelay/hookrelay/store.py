@@ -916,15 +916,34 @@ class Store:
 
     # ── inbound signatures ────────────────────────────────────────────────
 
+    async def signature_seen(self, token: str, window_seconds: int, now: float) -> bool:
+        """Whether this signature was CLAIMED inside the window. A read, no claim.
+
+        Paired with `claim_signature` so the door can ask before the pipeline and
+        record only once the pipeline has answered. Claiming up front looked
+        tidier and lost events: a row written before a 5xx, a client timeout or
+        the fuse's 429 makes the sender's identical RETRY answer as a replay, and
+        both sides then believe the event was handled. The cost of the split is
+        the race between two concurrent identical requests, which degrades to the
+        content dedup — the behaviour before this cache existed, and acceptable.
+
+        The prune lives in `claim_signature`, which runs on every HANDLED
+        request, so this stays a read and the table stays bounded by the window.
+        """
+        cursor = await self.read.execute(
+            "SELECT 1 FROM spent_signatures WHERE token = ? AND seen_at >= ? LIMIT 1",
+            (token, now - window_seconds),
+        )
+        return await cursor.fetchone() is not None
+
     async def claim_signature(self, token: str, window_seconds: int, now: float) -> bool:
         """True the first time this signature is seen inside the window, else False.
 
-        Same shape as spend_action: claim BEFORE the pipeline, let the PRIMARY
-        KEY be the decision rather than a read-then-write with a gap. The prune
-        runs inside the same write lock, so the table is the size of the window
-        and not of uptime. `window_seconds <= 0` is the caller's business, not
-        this method's — a zero window is a refusal to cache, not a claim with
-        nothing to compare against.
+        Same shape as spend_action: the PRIMARY KEY is the decision rather than a
+        read-then-write with a gap. The prune runs inside the same write lock, so
+        the table is the size of the window and not of uptime.
+        `window_seconds <= 0` is the caller's business, not this method's — a zero
+        window is a refusal to cache, not a claim with nothing to compare against.
         """
         async with self._write():
             await self.db.execute("DELETE FROM spent_signatures WHERE seen_at < ?", (now - window_seconds,))

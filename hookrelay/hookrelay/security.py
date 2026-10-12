@@ -113,6 +113,14 @@ def replay_token(source_name: str, signature: str | None) -> str | None:
     scheme this does not know) — and a None means "let it through un-cached", not
     a cache miss. A guard that guessed at a plugin's header would either miss or
     refuse a legitimate retry, and neither is visible from here.
+
+    One consequence worth stating, because it is the case a sender hits: a
+    LEGACY body-only signature is a function of the body alone, so two identical
+    bodies with no timestamp carry the SAME token. A legitimate identical re-send
+    that lands between the content window (120s) and this cache's window (300s) is
+    therefore folded where it used to be processed again. A TIMESTAMPED signature
+    covers the timestamp, so a re-send there is a different token and is not
+    folded — which is one more reason the timestamped form is the preferred one.
     """
     token = (signature or "").strip().lower().removeprefix("sha256=")
     if not source_name or not token:

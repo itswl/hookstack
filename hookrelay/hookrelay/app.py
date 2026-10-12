@@ -424,15 +424,19 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             raise HTTPException(status_code=401, detail="bad signature")
         # A captured request replayed inside the skew is the same signed BYTES,
         # and the content fingerprint cannot see that: it folds a restatement of
-        # the same alert however long ago the content window closed. Claiming the
-        # signature here answers the second copy as a skip — BEFORE the fuse and
-        # the pipeline, so it cannot spend a second verdict. Off when the window
-        # is 0, and a scheme this cannot name (a plugin adapter's own header)
-        # yields no token, which is a refusal to guess rather than a miss.
+        # the same alert however long ago the content window closed. So ask here
+        # and answer the second copy as a skip — but PEEK, do not claim: the row
+        # is written only after the pipeline has answered (below), because a
+        # claim made before it would turn a sender's identical retry after a 5xx,
+        # a timeout or the fuse's 429 into a replay, losing the event while both
+        # sides believed it was handled. Off when the window is 0, and a scheme
+        # this cannot name (a plugin adapter's own header) yields no token, which
+        # is a refusal to guess rather than a miss.
+        replay: str | None = None
         if app_settings.signature_replay_seconds > 0:
-            token = replay_token(source.name, headers.get("x-hook-signature"))
-            if token is not None and not await app.state.store.claim_signature(
-                token, app_settings.signature_replay_seconds, now_ts()
+            replay = replay_token(source.name, headers.get("x-hook-signature"))
+            if replay is not None and await app.state.store.signature_seen(
+                replay, app_settings.signature_replay_seconds, now_ts()
             ):
                 return JSONResponse({"outcome": "skipped", "skip_code": "replayed_signature"})
         try:
@@ -463,6 +467,8 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 source.storm_threshold,
                 extracted=extracted,
             )
+            if replay is not None:
+                await app.state.store.claim_signature(replay, app_settings.signature_replay_seconds, now_ts())
             return JSONResponse({"event_id": event_id, "outcome": "skipped", "skip_code": "storm_suppressed"})
 
         result = await handle_hook(
@@ -475,6 +481,12 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             client=app.state.http_client,
             extracted=extracted,
         )
+        # The pipeline answered, so the event was handled once: remember the
+        # signature now. Anything that raised above — the 400 for a body that is
+        # not JSON, the 429 from the hard fuse, a fault inside handle_hook —
+        # reaches here having claimed nothing, so the sender's retry is processed.
+        if replay is not None:
+            await app.state.store.claim_signature(replay, app_settings.signature_replay_seconds, now_ts())
         return JSONResponse(result)
 
     @app.post("/explain/{source_name}")
