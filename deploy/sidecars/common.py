@@ -139,6 +139,46 @@ class HttpHandler(BaseHTTPRequestHandler):
         with contextlib.suppress(ConnectionResetError, BrokenPipeError):
             super().handle()
 
+    def parse_request(self) -> bool:
+        parsed = super().parse_request()
+        if parsed:
+            self._last_request = {
+                "method": self.command,
+                "path": plain(self.path),
+                "version": self.request_version,
+                "content_length": self.headers.get("Content-Length"),
+                "header_names": sorted(self.headers.keys()),
+            }
+            self._request_count = getattr(self, "_request_count", 0) + 1
+        return parsed
+
+    def log_error(self, fmt: str, *args: Any) -> None:
+        """A timeout names the peer and what the connection had carried.
+
+        The stdlib's line is `Request timed out: TimeoutError('timed out')`
+        and nothing else, which cannot tell a keep-alive connection that idled
+        past `timeout` — an MCP client holds one open per session — from a
+        peer that declared a body and stopped sending it. The count and the
+        last request line say which: nothing seen is a socket that connected
+        and never spoke; a request carrying a Content-Length is the one whose
+        body may not have arrived. One line, at WARNING, so a run of them
+        reads as a peer with a problem rather than as this sidecar's.
+        """
+        if fmt == "Request timed out: %r":
+            peer = self.client_address[0] if self.client_address else "unknown"
+            port = self.client_address[1] if self.client_address else "unknown"
+            logging.getLogger(self.server_version).warning(
+                "request timeout peer=%s:%s timeout=%ss requests_seen=%s last_request=%s cause=%s",
+                peer,
+                port,
+                self.timeout,
+                getattr(self, "_request_count", 0),
+                getattr(self, "_last_request", None) or "none",
+                plain(fmt % args),
+            )
+            return
+        super().log_error(fmt, *args)
+
     def _answer(self, status: int, body: bytes, content_type: str = "application/json", extra: dict | None = None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
