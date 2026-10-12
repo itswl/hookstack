@@ -133,6 +133,11 @@ jobs:
       # in is a comment.
       - name: the pipe and the brain are inside their stated ceilings
         run: python3 scripts/assert_weight.py
+      # Three services build one image tag, and the tag is whichever build ran
+      # last: a build arg one of them does not pass is an image the others did
+      # not mean. The work image shipped without kubectl this way (2026-09-29).
+      - name: services sharing an image tag build it alike
+        run: python3 scripts/assert_shared_images_build_alike.py
       # A live production component on the card-callback path, outside every
       # service package and therefore outside every component gate. It was
       # covered by nothing at all until it was edited and the question was asked.

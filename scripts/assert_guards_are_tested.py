@@ -161,10 +161,17 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
         ("tests/test_selftest.py",),
     ),
     (
+        "a credential nobody could measure passes as recorded",
+        "hookprobe/hookprobe/posture.py",
+        '            return "unmeasurable" if missing else "recorded"',
+        '            return "recorded"',
+        ("tests/test_posture.py",),
+    ),
+    (
         "a writing node's declared blast radius is not checked",
         "hookprobe/hookprobe/posture.py",
-        '        return "wider-than-declared" if beyond(kube, aws, declared) else "within-declared-radius"',
-        '        return "within-declared-radius"',
+        '        if beyond(kube, aws, declared):\n            return "wider-than-declared"\n',
+        '        if False:\n            return "wider-than-declared"\n',
         ("tests/test_posture.py",),
     ),
     (

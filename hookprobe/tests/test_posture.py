@@ -222,3 +222,64 @@ def test_a_declared_writing_node_refuses_to_start_when_it_grew(tmp_path, monkeyp
         "recorded even though it refused — the refusal must be explainable"
     )
     assert record["beyond_declared"] == ["configmaps: patch update"], "the record names the excess, not everything held"
+
+
+def _with_aws_too(tmp_path, monkeypatch) -> None:
+    creds = tmp_path / "aws" / "credentials"
+    creds.parent.mkdir(parents=True, exist_ok=True)
+    creds.write_text("[default]\n")
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(creds))
+
+
+def _pager():
+    pages: list[str] = []
+
+    async def alarm(text: str) -> bool:
+        pages.append(text)
+        return True
+
+    return alarm, pages
+
+
+def test_a_readonly_node_without_kubectl_refuses_and_pages(tmp_path, monkeypatch) -> None:
+    """2026-09-29 to 10-09: the shared work image had no kubectl, both nodes
+    recorded `kubectl: not found` at every boot, nothing refused, nothing paged."""
+    _with_kube(tmp_path, monkeypatch)
+    run = _runner({"kubectl": (127, "", "kubectl: not found")})
+    alarm, pages = _pager()
+    with pytest.raises(posture.PostureViolation, match="kubectl"):
+        asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run, alarm=alarm))
+    record = posture.read(tmp_path)
+    assert record["verdict"] == "unmeasurable" and record["kube"]["tool_missing"] == "kubectl"
+    assert len([a for a in run.calls if a[0] == "kubectl"]) == 1, "one answer is the answer, not four more copies"
+    assert pages and "kubectl" in pages[0], "said on the alarm channel before the refusal loops"
+
+
+def test_a_writing_node_without_kubectl_starts_and_pages(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    run = _runner({"kubectl": (127, "", "kubectl: not found")})
+    alarm, pages = _pager()
+    record = asyncio.run(posture.on_startup(tmp_path, "danger-only", "enforce", run, alarm=alarm))
+    assert record["verdict"] == "unmeasurable", "not `recorded`: an empty radius nobody measured is not a radius"
+    assert pages and "kubectl" in pages[0]
+
+
+def test_warn_starts_a_readonly_node_without_its_tool_and_pages(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    run = _runner({"kubectl": (127, "", "kubectl: not found")})
+    alarm, pages = _pager()
+    record = asyncio.run(posture.on_startup(tmp_path, "readonly", "warn", run, alarm=alarm))
+    assert record["verdict"] == "unmeasurable" and pages
+
+
+def test_a_missing_aws_cli_is_named_and_a_measured_violation_outranks_it(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    _with_aws_too(tmp_path, monkeypatch)
+    run = _runner({"kubectl auth can-i --list": (0, CAN_I_LIST_READONLY, ""), "aws": (127, "", "aws: not found")})
+    with pytest.raises(posture.PostureViolation, match="aws"):
+        asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))
+    assert posture.read(tmp_path)["aws"]["tool_missing"] == "aws"
+    run = _runner({"kubectl auth can-i --list": (0, CAN_I_LIST_ADMIN, ""), "aws": (127, "", "aws: not found")})
+    with pytest.raises(posture.PostureViolation, match=r"\*"):
+        asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))
+    assert posture.read(tmp_path)["verdict"] == "wider-than-declared", "what was measured outranks what could not be"

@@ -491,6 +491,14 @@ services:
       context: ../hookprobe
       args:
         APT_EXTRAS: ${PROBE_PLAN_APT_EXTRAS:-git awscli}
+        # ARG for ARG the planner's build: the three probes share one image tag
+        # and the tag is whichever build ran last. This block passed no kubectl
+        # version until 2026-10-12, so from 2026-09-29 the tag was this
+        # service's kubectl-less build and the planner and the work node started
+        # every day unable to measure their cluster side (posture.py says what
+        # that cost). scripts/assert_shared_images_build_alike.py keeps the
+        # three builds alike.
+        KUBECTL_VERSION: ${PROBE_PLAN_KUBECTL_VERSION:-v1.31.4}
     image: hookprobe:work
     container_name: work-probe-watch
     restart: unless-stopped
@@ -685,7 +693,11 @@ services:
     build:
       context: ../hookprobe
       args:
-        APT_EXTRAS: ${PROBE_WORK_APT_EXTRAS:-git awscli}
+        # The planner's variables, not a PROBE_WORK_ pair: the three probes share
+        # one image tag, so one set of build args is the only honest shape. A
+        # second variable with the same default would let .env fork the image
+        # and leave the tag holding whichever build ran last.
+        APT_EXTRAS: ${PROBE_PLAN_APT_EXTRAS:-git awscli}
         KUBECTL_VERSION: ${PROBE_PLAN_KUBECTL_VERSION:-v1.31.4}
     image: hookprobe:work
     container_name: work-probe-work
