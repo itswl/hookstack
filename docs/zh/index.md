@@ -20,7 +20,16 @@ description: 让 agent 值班，但不把钥匙交出去 —— 管道给每条�
 ## 从这里开始
 
 - **30 秒：**[docs/quickstart.md](../quickstart.md) 开头就讲清了它的形状 —— 三个服务，一张图。
-- **10 分钟，不要 key，不花钱：** 同一页的第二段会在排练上跑完整条闭环：告警被判定，调查经过真实的只读门回放，卡片，按下批准，告警恢复。
+- **10 分钟，不要 key，不花钱：** 管道 + 判官 + 桩模型 + 跑排练的调查员 + 可读的接收端，只要有 Docker。
+
+  ```bash
+  curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
+  docker compose -f docker-compose.quickstart.yml up -d
+  bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
+  ```
+
+  演示会跑完整条闭环：告警被判定，一次录好的调查经过真实的只读门回放，报告变成卡片，按下批准后跑两条允许清单里的命令，告警恢复。[docs/quickstart.md](../quickstart.md)
+  里有其余内容 —— 换成真实模型、三块看板、半天的路径。
 - **半天，真上：**[STACK.md](https://github.com/itswl/hookstack/blob/main/STACK.md) 从源码一步步跑起三个服务；[docs/containment.md](../containment.md) 是指向真实集群**之前**要读的边界地图。
 - **完整功能清单：**[docs/what-you-get.md](../what-you-get.md)（英文）。
 

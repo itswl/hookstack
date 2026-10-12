@@ -14,7 +14,8 @@ registry but the container one.
 The release notes are not a separate document. They are the implemented decision
 records that landed since the last tag — that is what the bucket is for, and a
 second place to write them is the duplicate-source mistake this repository keeps
-finding its way back to.
+finding its way back to. There are **no GitHub Release objects**: the annotated
+tag's own message is the note, which is how 0.5.0 and 0.6.0 shipped.
 
 ## The steps
 
@@ -40,8 +41,6 @@ finding its way back to.
 4. **Re-run the quickstart the way a stranger does** — `curl` the published
    compose, `docker compose up`, `bash scripts/demo.sh`. The file's own comment
    records three releases that were wrong until somebody actually ran it.
-5. **A GitHub Release** whose body is the notes since the last tag, linking the
-   tag. The images already exist; this is the human-facing index of them.
 
 ## A note on tags vs. digests
 

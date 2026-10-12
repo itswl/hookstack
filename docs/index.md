@@ -20,7 +20,18 @@ The investigator is the product. The pipe and the judge are the smallest alertin
 ## Start here
 
 - **30 seconds:** [docs/quickstart.md](quickstart.md) opens with the shape of it — three services, one diagram.
-- **10 minutes, no keys, no bill:** the same page's second section runs the whole loop on a rehearsal: an alert judged, an investigation replayed through the real read-only gate, a card, an approve press, a resolved alert.
+- **10 minutes, no keys, no bill:** pipe + judge + a stub model + the investigator on a rehearsal + a readable sink. Docker is the only prerequisite.
+
+  ```bash
+  curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
+  docker compose -f docker-compose.quickstart.yml up -d
+  bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
+  ```
+
+  The demo runs the whole loop: an alert judged, a recorded investigation replayed
+  through the real read-only gate, the report as a card, an approve press running
+  two allowlisted commands, the alert resolved. [docs/quickstart.md](quickstart.md)
+  has the rest of it — a real model, the boards, the half-day path.
 - **Half a day, for real:** [STACK.md](https://github.com/itswl/hookstack/blob/main/STACK.md) runs all three from source; [docs/containment.md](containment.md) is the boundary map you read *before* pointing it at a cluster.
 - **What it does, in full:** [docs/what-you-get.md](what-you-get.md).
 
