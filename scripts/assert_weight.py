@@ -295,7 +295,28 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # base window later, through the stages after the fold, the walk an
     # arriving event takes. Replayed on the retired deployment's judge ledger it
     # folds 55% of the wake=yes cards where the rule as shipped folded 24%.
-    "hookrelay": (6300, Path("hookrelay/README.md")),
+    # 6300 -> 6400 on 2026-10-12, for the inbound replay cache: a signature the
+    # pipe has already accepted is claimed once (`Store.claim_signature`) and the
+    # second copy is answered as a duplicate before the pipeline, so a capture
+    # replayed inside the timestamp's own freshness window cannot buy a second
+    # verdict. Split, measured: +~55 source, +~30 code, so the doctrine question
+    # applies and has the easy answer — this is the DOOR's business and not a
+    # judgment about an alert: it reads the pipe's own `X-Hook-Signature` header,
+    # keys on the pipe's own source name, and never looks at a payload. Same class
+    # as the dedup fingerprint beside it. The rest of the raise is the docstring
+    # that says so; `docs/containment.md` used to read "there is no nonce cache",
+    # and every line that changed that sentence lives next to the code that did.
+    # 6400 -> 6450 on 2026-10-12, in review, for the peek-then-claim split the
+    # first version got wrong: the row is now READ before the pipeline
+    # (`signature_seen`) and CLAIMED only after it answers (`claim_signature`), so
+    # a retry following a 5xx or the fuse's 429 is processed instead of folded —
+    # the up-front claim lost the event while both sides believed it handled.
+    # Split: +~30 source, +~8 code, the rest the docstring saying why a peek and a
+    # claim are two calls. Still the door's business and still no payload read, so
+    # the doctrine answer is the entry above with no new argument; two raises in
+    # one day is the ceiling working, not a formality — each needed a reason
+    # written down, and neither added a judgment about an alert's worth.
+    "hookrelay": (6450, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:
@@ -420,9 +441,19 @@ def main() -> int:
 
         ceiling, readme = CEILINGS[service]
         headroom = ceiling - source
+        # The heaviest modules ride the PASSING line too, not only the failure
+        # message. A headroom of +4 was invisible until the next feature went red;
+        # showing where the weight already sits is what turns "raise it again" from
+        # a formality into a look at the distribution. It is printed, never capped
+        # — a per-module ceiling would price the pipe's own decomposition, which
+        # .agents/notes/implemented/2026-09-10-the-ceiling-stays-per-service.md
+        # already declined.
+        heaviest_modules = ", ".join(
+            f"{name} {count}" for name, count in sorted(per_module.items(), key=lambda item: -item[1])[:3]
+        )
         lines.append(
             f"  {service:10} {source:>5} source ({source_code} code) · {tests:>5} tests · "
-            f"ceiling {ceiling} ({headroom:+d})"
+            f"ceiling {ceiling} ({headroom:+d}) · heaviest {heaviest_modules}"
         )
 
         if source > ceiling:

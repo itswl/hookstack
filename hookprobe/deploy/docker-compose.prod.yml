@@ -314,7 +314,9 @@ services:
       HOOKPROBE_MAX_TIMEOUT_SECONDS: ${HOOKPROBE_MAX_TIMEOUT_SECONDS:-}
       HOOKPROBE_MAX_TURNS: ${HOOKPROBE_MAX_TURNS:-}
       HOOKPROBE_MEMORY_AUTO_APPLY: ${HOOKPROBE_MEMORY_AUTO_APPLY:-}
-      HOOKPROBE_POSTURE_CHECK: ${HOOKPROBE_POSTURE_CHECK:-}
+      # `enforce` is the code's default; spelled out here so the deploy states
+      # the intent the containment page describes. `off` is the recorded opt-out.
+      HOOKPROBE_POSTURE_CHECK: ${HOOKPROBE_POSTURE_CHECK:-enforce}
       HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS: ${HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS:-}
       # How long an executed procedure waits for the condition to answer before
       # the board calls it held; exit 0 alone verifies nothing. 0 turns it off.

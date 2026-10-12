@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (20)
+## Environment (21)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -17,6 +17,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKRELAY_ADMIN_TOKEN` | *(empty)* | Required for silence management; empty disables those endpoints entirely (403), so an unconfigured instance cannot be muted by a stranger |
 | `HOOKRELAY_READ_TOKEN` | *(empty)* | Empty leaves /status open — single-operator dev mode |
 | `HOOKRELAY_MAX_BODY_BYTES` | `256 * 1024` | Inbound body cap |
+| `HOOKRELAY_SIGNATURE_REPLAY_SECONDS` | `300` | How long an accepted inbound signature is remembered, so the same signed bytes replayed inside the timestamp's freshness window are answered as a duplicate instead of walking the p… |
 | `HOOKRELAY_MAX_ATTEMPTS` | `8` | Attempts per delivery before the row is dead-lettered |
 | `HOOKRELAY_RETENTION_DAYS` | `14` | How long delivered rows are kept; 0 disables purging entirely |
 | `HOOKRELAY_ALARM_URL` | *(empty)* | Self-alarm for dead letters (who watches the watchman) |

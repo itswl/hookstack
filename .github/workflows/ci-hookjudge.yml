@@ -54,7 +54,8 @@ jobs:
           JSON.parse(fs.readFileSync("hookjudge/static/manifest.webmanifest", "utf8"));
           console.log("status.html inline JS, sw.js and the manifest: OK");
           '
-      - run: pytest -q
+      # Coverage floor, matching gate.sh: a regression catch, not a target.
+      - run: pytest -q --cov=hookjudge --cov-fail-under=90
       - run: python -m pip_audit --progress-spinner off
 
   docker:

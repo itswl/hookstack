@@ -53,8 +53,12 @@ step "shell scripts parse"
 find examples scripts -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
 echo "shell: OK"
 
-step "pytest"
-$PY -m pytest -q
+step "pytest (with a coverage floor)"
+# The floor is a REGRESSION catch, not a target: set just below what the suite
+# covers today, so a change that deletes tests or leaves a branch unreached fails
+# the gate instead of quietly lowering the number. hookprobe measured 88% when
+# this step was added; `--cov-fail-under` is the part that must not move.
+$PY -m pytest -q --cov=hookprobe --cov-fail-under=85
 
 step "pip-audit (known-vulnerable dependencies)"
 $PY -m pip_audit --progress-spinner off

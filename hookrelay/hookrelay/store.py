@@ -124,6 +124,27 @@ CREATE TABLE IF NOT EXISTS card_actions (
 );
 CREATE INDEX IF NOT EXISTS ix_card_actions_event ON card_actions (event_id);
 CREATE INDEX IF NOT EXISTS ix_card_actions_correlation ON card_actions (correlation_id);
+
+-- One row per inbound signature this pipe has already accepted, so a capture
+-- replayed inside the skew window is answered like a duplicate instead of being
+-- walked through the pipeline a second time. The window is the signature's own
+-- (`max_skew_seconds`, the same 300s `verify_signature` bounds a captured
+-- request to), and the token carrying the source name keeps two sources that
+-- happen to share a secret from spending each other's rows. Rows are pruned to
+-- the window on every claim, so the table is bounded by the window rather than
+-- by uptime.
+--
+-- Deliberately a SECOND identity beside the content fingerprint
+-- (`recent_duplicate`): that one folds a restatement of the same alert however
+-- it was signed, this one folds the same signed BYTES however long ago the
+-- content window closed. An alert replayed at t=200s is inside the skew but
+-- outside the 120s content window, and without this it would buy a fresh judge
+-- call — which is the whole reason a replay cache exists.
+CREATE TABLE IF NOT EXISTS spent_signatures (
+    token TEXT NOT NULL PRIMARY KEY,
+    seen_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_spent_signatures_seen ON spent_signatures (seen_at);
 """
 
 
@@ -892,6 +913,44 @@ class Store:
         """What the press achieved, for the timeline and for a dispute later."""
         async with self._write():
             await self.db.execute("UPDATE card_actions SET outcome = ? WHERE jti = ?", (outcome[:200], jti))
+
+    # ── inbound signatures ────────────────────────────────────────────────
+
+    async def signature_seen(self, token: str, window_seconds: int, now: float) -> bool:
+        """Whether this signature was CLAIMED inside the window. A read, no claim.
+
+        Paired with `claim_signature` so the door can ask before the pipeline and
+        record only once the pipeline has answered. Claiming up front looked
+        tidier and lost events: a row written before a 5xx, a client timeout or
+        the fuse's 429 makes the sender's identical RETRY answer as a replay, and
+        both sides then believe the event was handled. The cost of the split is
+        the race between two concurrent identical requests, which degrades to the
+        content dedup — the behaviour before this cache existed, and acceptable.
+
+        The prune lives in `claim_signature`, which runs on every HANDLED
+        request, so this stays a read and the table stays bounded by the window.
+        """
+        cursor = await self.read.execute(
+            "SELECT 1 FROM spent_signatures WHERE token = ? AND seen_at >= ? LIMIT 1",
+            (token, now - window_seconds),
+        )
+        return await cursor.fetchone() is not None
+
+    async def claim_signature(self, token: str, window_seconds: int, now: float) -> bool:
+        """True the first time this signature is seen inside the window, else False.
+
+        Same shape as spend_action: the PRIMARY KEY is the decision rather than a
+        read-then-write with a gap. The prune runs inside the same write lock, so
+        the table is the size of the window and not of uptime.
+        `window_seconds <= 0` is the caller's business, not this method's — a zero
+        window is a refusal to cache, not a claim with nothing to compare against.
+        """
+        async with self._write():
+            await self.db.execute("DELETE FROM spent_signatures WHERE seen_at < ?", (now - window_seconds,))
+            cursor = await self.db.execute(
+                "INSERT OR IGNORE INTO spent_signatures (token, seen_at) VALUES (?, ?)", (token, now)
+            )
+            return cursor.rowcount == 1
 
     async def recent_actions(self, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.read.execute(

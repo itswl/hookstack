@@ -92,6 +92,11 @@ python3 scripts/assert_python_pins.py
 # hold its own number, but not the fact that all three are measured the same way
 # and that only two of them are capped.
 python3 scripts/assert_weight.py
+# Every headline number, in one of two classes: reproducible here (run NOW, and
+# fail if it has stopped holding) or measured on the retired deployments and
+# named as such. The venvs the component gates just built are what make the two
+# pytest-backed claims a real run rather than a skip.
+python3 scripts/reproduce_claims.py
 # And whether the settings each service reads can be SET on a deployment. There
 # is no env_file: the compose `environment:` block is the whole of what reaches a
 # container, so a knob no compose names is a default with a docstring — which is

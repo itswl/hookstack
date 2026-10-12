@@ -94,7 +94,8 @@ jobs:
           cfg = Config.from_file("config.example.yaml")
           print(f"{len(cfg.sources)} sources, {len(cfg.channels)} channels, {len(cfg.routes)} routes")
           PYEOF
-      - run: pytest -q
+      # Coverage floor, matching gate.sh: a regression catch, not a target.
+      - run: pytest -q --cov=hookrelay --cov-fail-under=90
       - run: python -m pip_audit --progress-spinner off
 
   docker:

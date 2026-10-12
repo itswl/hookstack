@@ -3,8 +3,9 @@
 Inbound: X-Hook-Signature = hex HMAC-SHA256 with the source's secret
 ("sha256=" prefix tolerated). With X-Hook-Timestamp the signature covers
 "{timestamp}.{body}" and must be FRESH, which BOUNDS how long a captured
-request stays useful rather than preventing replay outright (see
-verify_signature); without it the legacy body-only form is
+request stays useful rather than preventing replay outright; the door pairs it
+with `replay_token` + `Store.claim_signature` to close that window (see
+verify_signature). Without a timestamp the legacy body-only form is
 accepted unless the door sets require_timestamp. A source configured without
 a secret is accepted unsigned — a deliberate, documented decision for trusted
 private networks, not a fallback.
@@ -56,16 +57,26 @@ def verify_signature(
     WHAT THE TIMESTAMP ACTUALLY BUYS, stated exactly, because this used to claim
     it made a captured request "un-replayable" and that is more than it does:
     it BOUNDS the replay window to max_skew seconds. Inside that window the same
-    signature is accepted again — there is no nonce cache, so a capture replayed
-    within five minutes is indistinguishable from the original.
+    signature is accepted again — a capture replayed within five minutes is
+    indistinguishable from the original.
 
-    That is a deliberate position, not an oversight. Closing it needs a store of
-    spent signatures, and the window it would close is already narrower than the
-    dedup window a door carries (120s by default), so a replay landing inside it
-    mostly arrives as a duplicate and is skipped as one. The card-action tokens
-    in hookrelay/actions.py DO get single use, because those spend money and
-    restart services; an inbound alert delivered twice costs a duplicate row.
-    Revisit this if a door ever grows an action whose second execution matters.
+    CLOSED BY THE DOOR, not here (2026-10-12). A pure function has no store to
+    write to, and that is deliberate: `verify_signature` is the one thing both
+    the pipe's doors and any second implementation must agree on, so it stays
+    pure. The door pairs it with `replay_token` and `Store.claim_signature`,
+    which together answer the second copy as a duplicate before the pipeline and
+    keep it from spending a second verdict. The old reasoning — "the window is
+    narrower than the dedup window, so a replay lands as a duplicate anyway" —
+    was true only up to the dedup window: an alert replayed at t=200s is inside
+    the 300s skew, outside the 120s content window, and was a fresh judge call.
+
+    The cache tracks the DEFAULT scheme's `X-Hook-Signature` and only that; a
+    plugin adapter speaking `X-Hub-Signature-256` or Stripe's scheme is not
+    tracked, which `replay_token` says out loud rather than guessing at a header
+    it cannot own. The bridge's inbound door keeps its own skew check and no
+    store, so its window stays bounded and `docs/containment.md` still says so.
+    The card-action tokens in hookrelay/actions.py still get single use for their
+    own reason: those spend money and restart services.
     """
     if not secret:
         return True
@@ -89,6 +100,32 @@ def verify_signature(
         return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return constant_time_eq(expected, provided)
+
+
+def replay_token(source_name: str, signature: str | None) -> str | None:
+    """One value identifying one signed request, or None if it cannot be one.
+
+    Source-scoped so two sources that happen to share a secret cannot spend each
+    other's rows, and normalised exactly the way `verify_signature` normalises
+    (lowercased, `sha256=` prefix stripped) so the two agree about what "the same
+    signature" means. Returns None when there is nothing worth tracking — no
+    source name, or no signature header (a source with no secret, or a plugin
+    scheme this does not know) — and a None means "let it through un-cached", not
+    a cache miss. A guard that guessed at a plugin's header would either miss or
+    refuse a legitimate retry, and neither is visible from here.
+
+    One consequence worth stating, because it is the case a sender hits: a
+    LEGACY body-only signature is a function of the body alone, so two identical
+    bodies with no timestamp carry the SAME token. A legitimate identical re-send
+    that lands between the content window (120s) and this cache's window (300s) is
+    therefore folded where it used to be processed again. A TIMESTAMPED signature
+    covers the timestamp, so a re-send there is a different token and is not
+    folded — which is one more reason the timestamped form is the preferred one.
+    """
+    token = (signature or "").strip().lower().removeprefix("sha256=")
+    if not source_name or not token:
+        return None
+    return f"{source_name}:{token}"
 
 
 def token_ok(configured: str, presented: str | None) -> bool:
