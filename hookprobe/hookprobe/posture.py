@@ -28,11 +28,22 @@ cluster and the account said on the day, not by a variable.
 Unverifiable is a verdict, not an error: a read-only AWS identity often may not
 call SimulatePrincipalPolicy on itself. That is reported as such — loudly — and
 never mistaken for confirmed.
+
+Unmeasurable is the verdict for a credential whose measuring tool is not in the
+image, and it is a different silence: the far side was never asked. It happened.
+The work stack's three probes share one image tag, one of their builds passed no
+kubectl version, and from 2026-09-29 to 10-09 the planner and the work node
+started every day with `kubectl: not found` in their records — the planner
+`unverifiable`, the writer `recorded` with an empty radius — and nothing paged,
+because both verdicts start and the hourly check only asks "wider?". Now a
+readonly node refuses to start under `enforce`, a writing node starts and pages
+through the alarm channel, and the hourly selftest fails until the tool is back.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -74,7 +85,8 @@ Runner = Callable[[list[str]], Awaitable[tuple[int, str, str]]]
 
 
 class PostureViolation(RuntimeError):
-    """The credentials are wider than the declared posture, and the mode is enforce."""
+    """The posture cannot be held as declared under enforce: the credentials are
+    wider than it, or could not be measured at all."""
 
 
 async def run_cli(argv: list[str]) -> tuple[int, str, str]:
@@ -157,6 +169,12 @@ async def check_kube(run: Runner) -> dict[str, Any]:
         return {"present": False}
     record: dict[str, Any] = {"present": True, "kubeconfig": str(path), "mutating": [], "errors": []}
     code, out, err = await run(["kubectl", "auth", "can-i", "--list"])
+    if code == 127:
+        # The binary is not in the image. Four more questions of it would be
+        # four more copies of this line; the verdict needs the one.
+        record["tool_missing"] = "kubectl"
+        record["errors"].append(f"can-i --list: {(err or out).strip()[:200]}")
+        return record
     if code != 0:
         record["errors"].append(f"can-i --list: {(err or out).strip()[:200]}")
     else:
@@ -180,6 +198,8 @@ async def check_aws(run: Runner) -> dict[str, Any]:
     if code != 0:
         record["errors"].append(f"get-caller-identity: {(err or out).strip()[:200]}")
         record["unverifiable"] = True
+        if code == 127:
+            record["tool_missing"] = "aws"
         return record
     try:
         arn = str(json.loads(out).get("Arn") or "")
@@ -243,7 +263,18 @@ def beyond(kube: dict[str, Any], aws: dict[str, Any], declared: set[str] | None)
     return sorted(item for item in measured if item not in declared)
 
 
+def tools_missing(kube: dict[str, Any], aws: dict[str, Any]) -> list[str]:
+    """The measuring tools a mounted credential could not be asked with."""
+    return [
+        str(record["tool_missing"]) for record in (kube, aws) if record.get("present") and record.get("tool_missing")
+    ]
+
+
 def verdict(bash_guard: str, kube: dict[str, Any], aws: dict[str, Any], declared: set[str] | None = None) -> str:
+    # A credential nobody could measure is not a posture of any kind. What WAS
+    # measured still outranks it: a violation found on one credential is a
+    # violation whether or not the other one's tool is installed.
+    missing = tools_missing(kube, aws)
     if bash_guard != "readonly":
         # A writing posture is ALLOWED to write — the question is never "can it"
         # but "is it wider than what somebody agreed to". Undeclared, there is
@@ -251,12 +282,16 @@ def verdict(bash_guard: str, kube: dict[str, Any], aws: dict[str, Any], declared
         # what it was for a year. Declared, `enforce` means the same thing on
         # both postures: the credential may not exceed the declaration.
         if declared is None:
-            return "recorded"
-        return "wider-than-declared" if beyond(kube, aws, declared) else "within-declared-radius"
+            return "unmeasurable" if missing else "recorded"
+        if beyond(kube, aws, declared):
+            return "wider-than-declared"
+        return "unmeasurable" if missing else "within-declared-radius"
     if not kube.get("present") and not aws.get("present"):
         return "no-credentials"
     if kube.get("mutating") or aws.get("allowed"):
         return "wider-than-declared"
+    if missing:
+        return "unmeasurable"
     if kube.get("errors") or aws.get("unverifiable"):
         return "unverifiable"
     return "readonly-confirmed"
@@ -287,11 +322,13 @@ def summary(record: dict[str, Any]) -> str:
         parts.append(
             f"kube mutating={len(kube.get('mutating') or [])}"
             + (f" errors={len(kube['errors'])}" if kube.get("errors") else "")
+            + (f" tool-missing={kube['tool_missing']}" if kube.get("tool_missing") else "")
         )
     if aws.get("present"):
         parts.append(
             f"aws identity={aws.get('identity') or '?'} dangerous-allowed={len(aws.get('allowed') or [])}"
             + (" unverifiable" if aws.get("unverifiable") else "")
+            + (f" tool-missing={aws['tool_missing']}" if aws.get("tool_missing") else "")
         )
     return " · ".join(parts)
 
@@ -314,6 +351,7 @@ async def on_startup(
     mode: str,
     run: Runner = run_cli,
     radius: Path | None = None,
+    alarm: Callable[[str], Awaitable[bool]] | None = None,
 ) -> dict[str, Any] | None:
     """Check, record, announce — and under `enforce`, refuse to start a runner
     whose credentials are wider than it declares.
@@ -322,6 +360,11 @@ async def on_startup(
     `danger-only` runner has always started whatever it held, because "allowed
     to write" left nothing to compare against; with it, `enforce` means the same
     sentence on both postures.
+
+    `alarm` is the node's road around the pipe (`HOOKPROBE_ALARM_URL`). A
+    credential that could not be measured is said there at once, on both
+    postures: the readonly node is about to refuse and loop, and a writing node
+    is about to start with a radius nobody measured.
     """
     if mode not in MODES:
         mode = "enforce"  # a typo in the switch that decides whether to refuse must fail closed
@@ -346,6 +389,18 @@ async def on_startup(
             logger.error("REFUSING TO START — credentials wider than declared posture: %s · %s", line, detail)
             raise PostureViolation(f"credentials wider than declared posture {bash_guard!r}: {detail}")
         logger.warning("credentials wider than declared posture: %s · %s", line, detail)
+    elif record["verdict"] == "unmeasurable":
+        missing = ", ".join(tools_missing(record["kube"], record["aws"]))
+        text = f"posture cannot be measured: {missing} not in this image · {line}"
+        if alarm is not None:
+            with contextlib.suppress(Exception):  # the page is a courtesy; the verdict below is the decision
+                await alarm(f"posture UNMEASURABLE — {text}")
+        if bash_guard == "readonly" and mode == "enforce":
+            logger.error("REFUSING TO START — %s", text)
+            raise PostureViolation(
+                f"posture cannot be measured as declared {bash_guard!r}: {missing} not in this image"
+            )
+        logger.error("%s", text)
     elif record["verdict"] == "unverifiable":
         logger.warning(
             "posture could not be fully verified: %s · %s",

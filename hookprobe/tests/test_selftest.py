@@ -447,3 +447,27 @@ def test_an_undeclared_writing_node_still_passes_the_hourly_check(tmp_path, monk
     result = asyncio.run(selftest.posture_still_holds(settings))
     assert seen["declared"] is None
     assert result["held"] is True
+
+
+def test_the_hourly_check_fails_when_the_measuring_tool_is_gone(tmp_path, monkeypatch) -> None:
+    """The shared work image had no kubectl from 2026-09-29 to 10-09 and this
+    check said held every hour, because `recorded` and `unverifiable` both
+    answer "no wider" and the only question asked was that one."""
+
+    async def fake_check(bash_guard, run=None, declared=None):
+        return {
+            "bash_guard": bash_guard,
+            "verdict": "unmeasurable",
+            "kube": {
+                "present": True,
+                "mutating": [],
+                "errors": ["can-i --list: kubectl: not found"],
+                "tool_missing": "kubectl",
+            },
+            "aws": {"present": False},
+        }
+
+    monkeypatch.setattr(selftest.posture, "check", fake_check)
+    settings = make_settings(tmp_path, workdir=tmp_path, bash_guard="danger-only", blast_radius=None)
+    result = asyncio.run(selftest.posture_still_holds(settings))
+    assert result["held"] is False and "kubectl" in result["detail"]

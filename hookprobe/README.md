@@ -83,7 +83,7 @@ caller ── POST /hooks/agent ───────────────▶
 | `GET /v1/automation` | Each class of automation, its declared ceiling, its record of proposals and the human decisions on them, and the tier the record WOULD support. Counters, never agreement rates. The page an operator reads before deciding a class has earned a step up. |
 | `POST /v1/automation/{class}/{id}/regret` | A sampling review saying an auto-applied action was wrong — the one event that resets a class's argument for its tier, and how an unattended deployment gets its human-in-the-loop back asynchronously. Operator token only; no run can label its own work. |
 | `POST /v1/runs/{key}/ruling` | Rule one run useful/useless (or clear) from the sessions page, and be told what it DID: a useless that withdraws the runbook this run distilled says so. The only ruling surface that needs no chat bridge — the card buttons were the only other one, and a deployment without a bridge has none, which is why the loops that feed on a ruling went unfed. `record_ruling` runs in-process here, so the consequence is reported synchronously rather than enqueued and forgotten. |
-| `GET /v1/posture` | what the credentials could do when this runner started, measured against the declared posture — kube rules that mutate, AWS actions that would be allowed, or `unverifiable` when the identity may not ask; the record behind "this ran read-only" (see `HOOKPROBE_POSTURE_CHECK`) |
+| `GET /v1/posture` | what the credentials could do when this runner started, measured against the declared posture — kube rules that mutate, AWS actions that would be allowed, `unverifiable` when the identity may not ask, or `unmeasurable` when the tool that would ask is not in the image; the record behind "this ran read-only" (see `HOOKPROBE_POSTURE_CHECK`) |
 | `GET /v1/work` | the board: one row per piece of WORK rather than per run, with what is blocked, what is in flight and what closed without anybody stepping in. Its `counts` also answer the two questions an on-call opens a board with — `median_answer_seconds`, how long until the work was any use, and `signals` against the items they became, which is how much noise the door folded. Both are `null` rather than `0` when nothing has answered yet, because those are different facts. Derived on every request from the run records, the proposals and the memory queue — nothing is stored twice ([work.py](hookprobe/work.py)) |
 | `POST /v1/runs/{key}/retry` | human takeover: try a failed investigation again. Continues the engine session when the failure left one — the second attempt starts from what the first gathered — and otherwise re-asks the question the run opened with. Not budget-gated, for the reason `/hooks/agent` is not |
 | `GET /v1/agent` | what this node is: name, role, runtime adapter and model, the policy it runs under (guard, budget, escalation bar, who may speak to it from chat) and its health. Settings this process resolved, answered in one place so a board can name the agent that did the work; no secret values, like `/v1/config` |
@@ -175,7 +175,9 @@ always reach. Two things about the word *default*, before the layers:
   actually do (`kubectl auth can-i --list`, `aws iam simulate-principal-policy`
   over the dangerous actions) and compares the answer with the declaration:
   `readonly-confirmed`, `wider-than-declared` (refuses to start under the
-  default `HOOKPROBE_POSTURE_CHECK=enforce`), `unverifiable`, `recorded`,
+  default `HOOKPROBE_POSTURE_CHECK=enforce`), `unverifiable`, `unmeasurable`
+  (the measuring tool is not in the image: a readonly node refuses to start
+  under `enforce`, a writing node starts and pages), `recorded`,
   `no-credentials`. The verdict is at `GET /v1/posture` and at the top of
   every run's audit, so "read-only" is a measurement with a date rather than
   a sentence in this file.

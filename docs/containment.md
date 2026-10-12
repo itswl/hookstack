@@ -17,7 +17,10 @@ a real model cannot be steered into emitting a harmful one.
 > (`hookprobe/posture.py`): what `kubectl auth can-i` and `iam simulate-principal-policy` say the identity may do, against
 > the posture it declares. Declared `readonly` with credentials that can mutate refuses to start (`HOOKPROBE_POSTURE_CHECK=enforce`);
 > a `danger-only` runner records its blast radius; an identity that cannot be asked is reported *unverifiable*, never confirmed.
-> The measurement is served on `GET /v1/posture` and cited in every run's audit record.
+> A credential whose measuring tool is not in the image is *unmeasurable* (2026-10-12): a readonly runner refuses to start
+> under `enforce`, a writing runner starts and pages, and the hourly selftest fails until the tool is back — ten days of
+> `kubectl: not found` had passed as `unverifiable` and `recorded` before this. The measurement is served on `GET /v1/posture`
+> and cited in every run's audit record.
 
 ## What holds, and what only helps
 

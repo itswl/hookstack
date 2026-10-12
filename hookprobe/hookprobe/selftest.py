@@ -213,9 +213,15 @@ async def posture_still_holds(settings: Settings) -> dict[str, Any]:
     beyond = record.get("beyond_declared") or []
     if verdict == "wider-than-declared" and beyond:
         detail = f"{detail} · beyond: {', '.join(str(item) for item in beyond)}"[:280]
+    if verdict == "unmeasurable":
+        # The tool that would measure it is not in the image. Ten days of
+        # `kubectl: not found` passed this check hourly (2026-09-29 to 10-09)
+        # because the only question asked was "wider?".
+        missing = ", ".join(posture.tools_missing(record.get("kube") or {}, record.get("aws") or {}))
+        detail = f"{detail} · cannot measure: {missing} not in this image"[:280]
     return _check(
         "credentials are no wider than the declared posture",
-        verdict != "wider-than-declared",
+        verdict not in ("wider-than-declared", "unmeasurable"),
         detail,
         "a credential whose far side cannot be asked — `unverifiable` is a verdict, not a pass",
     )
