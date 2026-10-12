@@ -11,17 +11,28 @@ probe-watch 容器（只读挂载在 /data/jira）。一份代码两个调用方
 两边同时生效——这正是把它收进仓库而不是各留一份拷贝的理由。
 
 要查哪个项目、要不要按 handle 匹配评论，都是部署自己的事，所以走环境变量而
-不是写死。ATL_MENTION 为空时只用不含 handle 的那条 JQL——一个个人 handle 不
-该住在一个公开仓库里，这和别的名字是同一条规矩。
+不是写死。一个个人 handle 不该住在一个公开仓库里，这和别的名字是同一条规矩：
+ATL_MENTION 为空时不再跳过这一条件，而是从 Jira 账号自己的邮箱取 @ 前的那段
+（小写），第一次取到后记在状态文件里，之后不再问；邮箱按隐私设置不可见时，
+才退回不含 handle 的那条 JQL。
 
     ATL_PROJECT   要盯的项目 key（默认 SRE）
-    ATL_MENTION   在评论里匹配的 handle；为空则跳过这一条件
+    ATL_MENTION   在评论里匹配的 handle；为空则按上面的办法从账号邮箱推
     ATL_ENV_FILE  凭证文件位置，默认 ~/.atlassian.env
     ATL_STATE_FILE 状态文件位置，默认 ~/.atlassian_watch_state.json
 
 后两个是路径而不是常量，因为跑它的进程不止一个：操作者在自己机器上跑，probe-watch
 容器里跑过，现在 watch_scan.py 在 timer 容器里跑——而 timer 没有挂 HOME 那个卷，
 `~` 底下的写入会直接失败。默认值不变，所以没听说过这两个变量的调用方不受影响。
+
+时区也从账号取。JQL 里不带时区的时间按 Jira 账号设置里的时区解释，写死一个
+常量只在账号恰好在那个时区时才对；账号的时区和 accountId 一起问一次、记在
+状态里，取不到或不认识时退回 UTC+8。
+
+去重的边界，2026-10-09 在另一处跑着这份脚本的部署上测出来：判断「这条变更报
+过没有」必须用「晚于上次报到的时间点」，不能用「不早于」。上次报的最后一条，
+时间正好等于记下的时间点；回看窗又有 40 分钟，于是每条变更都在相邻两轮各报一
+次，那天的每张工单都连报了。见 fresh()。
 """
 
 import base64
@@ -32,9 +43,11 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
-STATE_FILE = os.environ.get("ATL_STATE_FILE") or os.path.expanduser("~/.atlassian_watch_state.json")
-HKT = timezone(timedelta(hours=8))  # Jira 账号时区 Asia/Hong_Kong
+STATE_FILE = Path(os.environ.get("ATL_STATE_FILE") or os.path.expanduser("~/.atlassian_watch_state.json"))
+UTC8 = timezone(timedelta(hours=8))  # 取不到 Jira 账号时区时的退路
 OVERLAP = 120  # 秒，窗口重叠防边界丢事件
 LOOKBACK_MIN = 40 * 60  # 秒，最小回看窗（>= 2 个调度周期）
 REPORTED_TTL = 7 * 86400  # 秒，已汇报记录的保留期
@@ -83,28 +96,69 @@ def adf_text(node):
     return "".join(out)
 
 
+def account_zone(name):
+    """Jira 账号设置里的时区；没有或不认识时退回 UTC+8。
+
+    不认识的名字 ZoneInfo 抛的是 KeyError 的子类，不是 ValueError——只接后者
+    会让一个拼错的时区名把整轮炸掉。
+    """
+    try:
+        return ZoneInfo(name) if name else UTC8
+    except (KeyError, ValueError, OSError):
+        return UTC8
+
+
+def fresh(t, last, cutoff):
+    """这条变更要不要报：在回看窗里，而且晚于这条工单上次报到的时间点。
+
+    必须是「晚于」，不能是「不早于」。上次报的最后一条，时间正好等于记下的时间
+    点；用 >= 它下一轮还在——回看窗有 40 分钟，于是每条变更都报两轮。
+    """
+    return t >= cutoff and (last is None or t > last)
+
+
+def mention_from_email(email):
+    """账号邮箱 @ 前的那段，小写；邮箱不可见（隐私设置）时为空。"""
+    text = str(email or "")
+    return text.split("@")[0].strip().lower() if "@" in text else ""
+
+
+def save_state(state):
+    """先写临时文件再改名。这个文件下一轮要读回来：写了一半的 JSON 读不回来，
+    之后每一轮都会在读状态这一步挂掉，直到有人手动删掉它。watch_scan.py 的
+    scan.json 早就这么写了，这里一直没有跟上。"""
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+    tmp.write_text(json.dumps(state), encoding="utf-8")
+    tmp.replace(STATE_FILE)
+
+
 def main():
     load_env()
     now = time.time()
     state = {}
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, encoding="utf-8") as handle:
-            state = json.load(handle)
-    last = state.get("jira_last_check", now - 6 * 3600)
+    if STATE_FILE.exists():
+        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    last_check = state.get("jira_last_check", now - 6 * 3600)
     # 至少回看 LOOKBACK_MIN 秒：一轮跑丢了（agent 崩溃/超时），下一轮仍能覆盖
     # 这段窗口。可以放宽是因为下面按「已汇报过的变更时间戳」逐条去重，重复
     # 看见不等于重复汇报。
-    cutoff = min(last - OVERLAP, now - LOOKBACK_MIN)
+    cutoff = min(last_check - OVERLAP, now - LOOKBACK_MIN)
     reported = state.get("reported", {})
-    since = datetime.fromtimestamp(cutoff, HKT).strftime("%Y-%m-%d %H:%M")
 
-    me = state.get("my_account_id")
-    if not me:
-        me = req("/rest/api/3/myself")["accountId"]
-        state["my_account_id"] = me
+    # 他是谁、在哪个时区：accountId 用来跳过他自己的操作，handle 用来匹配评论，
+    # 时区用来写 JQL 里的时间。只在第一次问一遍，记在状态里；升级前写下的状态
+    # 文件缺后两项，补问一次。
+    if not state.get("my_account_id") or "mention" not in state or "time_zone" not in state:
+        myself = req("/rest/api/3/myself")
+        state["my_account_id"] = myself["accountId"]
+        state["mention"] = mention_from_email(myself.get("emailAddress"))
+        state["time_zone"] = str(myself.get("timeZone") or "")
+    me = state["my_account_id"]
+    since = datetime.fromtimestamp(cutoff, account_zone(state["time_zone"])).strftime("%Y-%m-%d %H:%M")
 
     project = os.environ.get("ATL_PROJECT", "SRE").strip() or "SRE"
-    mention = os.environ.get("ATL_MENTION", "").strip()
+    mention = os.environ.get("ATL_MENTION", "").strip() or state["mention"]
     jql_safe = f'(project = {project} OR assignee = currentUser()) AND updated >= "{since}" ORDER BY updated ASC'
     # `comment ~` needs an index the account may not have; the original fell back
     # to the safe form on ANY error and that stays. Empty mention skips it
@@ -131,14 +185,16 @@ def main():
         )
         f = i["fields"]
         lines = []
-        # 逐 issue 去重下限：这条工单已经汇报到哪个时间点了
-        floor = max(cutoff, reported.get(key, 0))
-        newest = floor
-        if ts(f["created"]) >= floor and (f.get("reporter") or {}).get("accountId") != me:
+        last = reported.get(key)  # 这条工单已经汇报到哪个时间点了
+        newest = last or 0.0
+        created = ts(f["created"])
+        if fresh(created, last, cutoff) and (f.get("reporter") or {}).get("accountId") != me:
             a = (f.get("assignee") or {}).get("displayName", "未分配")
             lines.append(f"🆕 新建 by {f['reporter']['displayName']}，处理人 {a}")
+            # 新建也要推进时间点，否则一张只有「新建」的工单在回看窗里每轮都是新的
+            newest = max(newest, created)
         for h in (i.get("changelog") or {}).get("histories", []):
-            if ts(h["created"]) < floor or h["author"].get("accountId") == me:
+            if not fresh(ts(h["created"]), last, cutoff) or h["author"].get("accountId") == me:
                 continue
             newest = max(newest, ts(h["created"]))
             for it in h["items"]:
@@ -150,13 +206,13 @@ def main():
                         lines.append(f"🔀 {h['author']['displayName']}: {it['field']} {frm} → {to}")
         for c in (f.get("comment") or {}).get("comments", []):
             c_ts = max(ts(c["created"]), ts(c.get("updated", c["created"])))
-            if c_ts >= floor and c["author"].get("accountId") != me:
+            if fresh(c_ts, last, cutoff) and c["author"].get("accountId") != me:
                 newest = max(newest, c_ts)
                 excerpt = adf_text(c.get("body", {})).strip()[:200]
                 lines.append(f"💬 {c['author']['displayName']}: {excerpt}")
         if lines:
             reports.append((key, f["summary"], f["status"]["name"], lines))
-            reported[key] = max(newest, floor)
+            reported[key] = newest
 
     if reports:
         print("【Jira 变化】")
@@ -169,8 +225,7 @@ def main():
     # 即使这一轮在此之前挂掉，下一轮的回看窗会重新覆盖，且不会重复汇报。
     state["jira_last_check"] = now
     state["reported"] = {k: v for k, v in reported.items() if v > now - REPORTED_TTL}
-    with open(STATE_FILE, "w", encoding="utf-8") as handle:
-        json.dump(state, handle)
+    save_state(state)
 
 
 if __name__ == "__main__":

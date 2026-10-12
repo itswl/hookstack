@@ -144,6 +144,21 @@ def _write(path: Path, data: dict) -> None:
 
 UNREACHABLE_RENOTE_SECONDS = 6 * 3600  # 一个一直够不着的源：说一次，之后每 6 小时提醒一次
 
+# 零宽字符和 BiDi 控制字符：人看不见，模型看得见，一句话因此可以在两边长得不一样。
+INVISIBLE = dict.fromkeys(
+    map(ord, "\u200b\u200c\u200d\u2060\u2062\u2063\u2064\ufeff\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+)
+
+
+def clean(text: str) -> str:
+    """交出去之前把两样东西处理掉：不可见字符删掉，三个反引号换成三个单引号。
+
+    摘要原样拼进这一轮的正文，正文是 markdown——同事消息里的一个 ``` 会把它后面
+    的内容关进（或关出）一个代码块；prescan 失败那条路径更是把整段输出放在一个
+    代码块里。内容一个字不改，只改形状：判断仍归模型。
+    """
+    return text.translate(INVISIBLE).replace("```", "'''")
+
 
 def pick_ref(cands: list[dict], name: str) -> str:
     """重名时该用哪个 opaque_ref。
@@ -481,7 +496,7 @@ def main() -> int:
     if jira_out:
         out.append("## Jira")
         out.append(jira_out)
-    print("\n".join(out).strip())
+    print(clean("\n".join(out).strip()))
     return 0
 
 
