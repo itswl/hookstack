@@ -69,6 +69,13 @@ PAGES = (
     ("README.zh-CN.md", "docs/zh/index.md", "../", "[English](../) · **中文**", "## 延伸阅读", ZH_DESCRIPTION, ZH_TAIL),
 )
 _SERVICE_LINK = re.compile(r"\[(`hook(?:relay|judge|probe)`)\]\(hook(?:relay|judge|probe)\)")
+# A link to a repository-root file the site does NOT serve (OVERVIEW.md,
+# STACK.md, CONTRIBUTING.md…). `docs/` pages keep their handling below; anything
+# else ending in `.md` becomes an absolute repository URL, which is exactly the
+# answer the tail already gives. Without this a body link to STACK.md was a dead
+# relative link on the site page — found by check-docs.py the first time the
+# README linked one above the tail.
+_ROOT_MD = re.compile(r"\]\(((?!docs/|https?://|mailto:|/|#)[^)\s#]+\.md)(#[^)]*)?\)")
 _OWNER = re.compile(r"https://github\.com/([^/\s]+)/hookstack/")
 # The README's own language switch, in either language's form.
 _SWITCH = re.compile(r"^(\*\*English\*\*|\[English\]).*中文")
@@ -92,8 +99,9 @@ def render(readme: str, prefix: str, language_line: str, tail_heading: str, desc
         if not (line.startswith("# ") or line.startswith("[![") or _SWITCH.match(line))
     ]
     text = "\n".join(lines).strip("\n") + "\n"
-    text = text.replace("](docs/", f"]({prefix}")
     text = _SERVICE_LINK.sub(r"\1", text)
+    text = _ROOT_MD.sub(lambda m: f"]({repo}/blob/main/{m.group(1)}{m.group(2) or ''})", text)
+    text = text.replace("](docs/", f"]({prefix}")
     front = f"---\ntitle: hookstack\ndescription: {description}\n---\n\n{language_line}\n\n"
     return front + text + "\n" + tail.format(repo=repo, owner=who)
 

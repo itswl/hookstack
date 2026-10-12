@@ -60,7 +60,8 @@ jobs:
           '
       - name: shell scripts parse
         run: find examples scripts -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
-      - run: pytest -q
+      # Coverage floor, matching gate.sh: a regression catch, not a target.
+      - run: pytest -q --cov=hookprobe --cov-fail-under=85
       - run: python -m pip_audit --progress-spinner off
 
   docker:

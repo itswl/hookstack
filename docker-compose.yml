@@ -28,6 +28,7 @@ services:
       HOOKRELAY_DB: /data/hookrelay.db
       HOOKRELAY_CONFIG: /etc/hookrelay/config.yaml
       HOOKRELAY_WORKER_INTERVAL: "0.5"
+      HOOKRELAY_SIGNATURE_REPLAY_SECONDS: ${HOOKRELAY_SIGNATURE_REPLAY_SECONDS:-300}  # closes the captured-request replay window (0 = bounded only)
       # The shipped example plugins, mounted read-only below: the DingTalk
       # dialect the stack config uses is one of them (chat_markdown_channels.py).
       HOOKRELAY_PLUGINS: /etc/hookrelay/plugins

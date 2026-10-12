@@ -460,7 +460,7 @@ def test_gate_matches_ci():
         "ruff format --check hookrelay tests",
         "mypy hookrelay",
         "bandit -q -r hookrelay",
-        "pytest -q",
+        "pytest -q --cov=hookrelay --cov-fail-under=90",
         "pip_audit --progress-spinner off",
     ):
         assert runs(gate, command), f"gate.sh does not run {command!r}"
@@ -500,6 +500,8 @@ def test_the_stack_gate_matches_its_workflow() -> None:
         "scripts/assert_copies.py",
         "scripts/assert_ordering.py",
         "scripts/assert_docs.py",
+        # Every headline number: reproducible here or named as measured elsewhere.
+        "scripts/reproduce_claims.py",
         # With --check, deliberately. Without it the generator WRITES, so a
         # runner that dropped the flag would rewrite the files it was meant to be
         # verifying and pass every time.

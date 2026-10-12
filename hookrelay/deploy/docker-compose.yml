@@ -30,6 +30,7 @@ services:
       HOOKRELAY_DB: /data/hookrelay.db
       HOOKRELAY_CONFIG: /etc/hookrelay/config.yaml
       HOOKRELAY_WORKER_INTERVAL: "0.5"
+      HOOKRELAY_SIGNATURE_REPLAY_SECONDS: ${HOOKRELAY_SIGNATURE_REPLAY_SECONDS:-300}  # closes the captured-request replay window (0 = bounded only)
       HOOKRELAY_PLUGINS: /data/plugins
     volumes:
       - ${HOOKRELAY_CONFIG_FILE:?path to your config.yaml — sources, routes, channels}:/etc/hookrelay/config.yaml:ro

@@ -485,7 +485,7 @@ def test_gate_matches_ci():
         "ruff format --check hookprobe tests",
         "mypy hookprobe",
         "bandit -q -r hookprobe",
-        "pytest -q",
+        "pytest -q --cov=hookprobe --cov-fail-under=85",
         "pip_audit --progress-spinner off",
     ):
         assert runs(gate, command), f"gate.sh does not run {command!r}"

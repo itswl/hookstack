@@ -36,7 +36,7 @@ from hookrelay.delivery import process_due
 from hookrelay.fuse import StormFuse
 from hookrelay.live import Live
 from hookrelay.pipeline import handle_hook, record_storm_suppressed, settle_folds
-from hookrelay.security import token_ok, verify_signature
+from hookrelay.security import replay_token, token_ok, verify_signature
 from hookrelay.settings import Settings
 from hookrelay.store import Store, button_labels, now_ts
 from hookrelay.timeline import render as render_timeline
@@ -422,6 +422,19 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         headers = {key.lower(): value for key, value in request.headers.items()}
         if not adapter.verify(source, body, headers):
             raise HTTPException(status_code=401, detail="bad signature")
+        # A captured request replayed inside the skew is the same signed BYTES,
+        # and the content fingerprint cannot see that: it folds a restatement of
+        # the same alert however long ago the content window closed. Claiming the
+        # signature here answers the second copy as a skip — BEFORE the fuse and
+        # the pipeline, so it cannot spend a second verdict. Off when the window
+        # is 0, and a scheme this cannot name (a plugin adapter's own header)
+        # yields no token, which is a refusal to guess rather than a miss.
+        if app_settings.signature_replay_seconds > 0:
+            token = replay_token(source.name, headers.get("x-hook-signature"))
+            if token is not None and not await app.state.store.claim_signature(
+                token, app_settings.signature_replay_seconds, now_ts()
+            ):
+                return JSONResponse({"outcome": "skipped", "skip_code": "replayed_signature"})
         try:
             payload = json.loads(body or b"{}")
         except ValueError:

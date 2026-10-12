@@ -3,6 +3,10 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+# Coverage data from `pytest --cov`, which every service's gate now runs.
+.coverage
+.coverage.*
+htmlcov/
 *.db
 .env
 # Rotation backups hold the same credentials as .env.

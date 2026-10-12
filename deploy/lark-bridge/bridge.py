@@ -80,10 +80,17 @@ MAX_BODY = 256 * 1024
 # app. When BRIDGE_INBOUND_SECRET is set, require the pipe's Feishu-style sign:
 # hookrelay's feishu channel, given a channel secret, adds {timestamp, sign} to
 # the body, sign = base64(HMAC-SHA256(key="{ts}\n{secret}", msg="")). Set the
-# same value as the `to-me` channel's secret. Unset = accept everything, which
-# is the previous behaviour, so turning this on is a two-line .env change with no
-# code risk: an unset bridge never rejects a card.
+# same value as the `to-me` channel's secret.
+#
+# FAIL-CLOSED since 2026-10-12. Until then an unset secret accepted every card,
+# and `docs/containment.md` named that — not as a caveat but as the shipped
+# default, "which is why both deployments set it". A boundary that is safe only
+# while an operator remembers is one the next deployment will not have, so an
+# empty secret now refuses to START (main() below). A deployment that genuinely
+# has nobody untrusted on the wire says BRIDGE_ALLOW_UNSIGNED=1 and accepts
+# every card on purpose, out loud.
 INBOUND_SECRET = os.environ.get("BRIDGE_INBOUND_SECRET", "")
+ALLOW_UNSIGNED = os.environ.get("BRIDGE_ALLOW_UNSIGNED", "").strip().lower() in ("1", "true", "yes", "on")
 _SIGN_SKEW_SECONDS = 300
 
 # Preventive reconnect, and the honest name for it is a RECYCLE.
@@ -177,10 +184,11 @@ def is_authentic_protocol(headers: Any, body: bytes) -> bool:
     X-Hook-Timestamp and X-Hook-Signature = hex HMAC-SHA256(secret, "{ts}.{body}")
     — the same scheme this bridge uses when it signs a message for the pipe's
     thread door, so both directions are one function. The body is covered, which
-    the legacy in-body sign below never managed. Unset secret = always True.
+    the legacy in-body sign below never managed. An empty secret answers
+    ALLOW_UNSIGNED, which main() refuses to reach with at startup.
     """
     if not INBOUND_SECRET:
-        return True
+        return ALLOW_UNSIGNED
     timestamp = str(headers.get("x-hook-timestamp") or "")
     provided = str(headers.get("x-hook-signature") or "")
     if not timestamp or not provided:
@@ -198,10 +206,11 @@ def is_authentic(payload: dict) -> bool:
 
     The sign covers the timestamp, not the card body, so a captured card can be
     replayed inside the window — bounded, and the card is not attacker-chosen.
-    Forging a NEW card still needs the secret. Unset secret = always True.
+    Forging a NEW card still needs the secret. An empty secret answers
+    ALLOW_UNSIGNED, which main() refuses to reach with at startup.
     """
     if not INBOUND_SECRET:
-        return True
+        return ALLOW_UNSIGNED
     timestamp = str(payload.get("timestamp") or "")
     provided = str(payload.get("sign") or "")
     if not timestamp or not provided:
@@ -859,6 +868,18 @@ def consume(event_key: str, handler, attach_only: bool = False) -> None:
 
 
 def main() -> None:
+    if not INBOUND_SECRET and not ALLOW_UNSIGNED:
+        raise SystemExit(
+            "bridge: BRIDGE_INBOUND_SECRET is empty. This port shares a container network with the "
+            "platform, so an unsigned card from any neighbour is a card in the operator's chat. Set "
+            "BRIDGE_INBOUND_SECRET to the `to-me` channel's secret, or set BRIDGE_ALLOW_UNSIGNED=1 to "
+            "accept every card on purpose (docs/containment.md)."
+        )
+    if not INBOUND_SECRET:
+        logger.warning(
+            "BRIDGE_ALLOW_UNSIGNED=1: accepting unsigned cards — anyone who can reach port %s can post as the app",
+            LISTEN_PORT,
+        )
     if WEBHOOK_MODE:
         # Nothing to consume: a custom bot has no events. Cards in, webhook out.
         logger.info("bridge up (webhook mode): port=%s", LISTEN_PORT)

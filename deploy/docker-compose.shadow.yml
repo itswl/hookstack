@@ -40,6 +40,7 @@ services:
       HOOKRELAY_DB: /data/hookrelay.db
       HOOKRELAY_CONFIG: /etc/hookrelay/shadow.yaml
       HOOKRELAY_WORKER_INTERVAL: "0.5"
+      HOOKRELAY_SIGNATURE_REPLAY_SECONDS: ${HOOKRELAY_SIGNATURE_REPLAY_SECONDS:-300}  # closes the captured-request replay window (0 = bounded only)
       WW_RELAY_SECRET: ${WW_RELAY_SECRET:?mirror FORWARD_RELAY_SECRET into .env}
       # The platform's report intake (its /v1/deep-analyses/intake), and the
       # secret it verifies — mirror of its DEEP_ANALYSIS_REPORT_INTAKE_SECRET.
@@ -239,10 +240,10 @@ services:
       LARK_CHAT_ID: ${LARK_CHAT_ID:?set LARK_CHAT_ID in .env}
       RELAY_ACTION_URL: http://hookrelay:8100/card-action
       # Inbound card authentication. Same value as hookrelay's LARK_BRIDGE_SECRET
-      # above. Empty (default) = accept any inbound card (previous behaviour);
-      # set both to close the shared-network hole where a neighbour could post a
-      # card into the operator's chat as the app.
-      BRIDGE_INBOUND_SECRET: ${LARK_BRIDGE_SECRET:-}
+      # above. REQUIRED since 2026-10-12: the bridge refuses to start unsigned, so
+      # a neighbour on the shared network cannot post a card into the operator's
+      # chat as the app. `:?` makes compose say so before the container is built.
+      BRIDGE_INBOUND_SECRET: ${LARK_BRIDGE_SECRET:?set LARK_BRIDGE_SECRET in .env (the bridge refuses to start unsigned)}
       # A person's reply under one of the pipe's cards goes to this door, signed
       # with LARK_THREAD_SECRET (the value the door in shadow.yaml verifies).
       # Needs the app to receive group messages (im.message.receive_v1) — see
@@ -266,7 +267,7 @@ services:
     mem_limit: 128m
     environment:
       LARK_WEBHOOK_URL: ${WATCH_FEISHU_WEBHOOK:?set WATCH_FEISHU_WEBHOOK in .env}
-      BRIDGE_INBOUND_SECRET: ${LARK_BRIDGE_SECRET:-}
+      BRIDGE_INBOUND_SECRET: ${LARK_BRIDGE_SECRET:?set LARK_BRIDGE_SECRET in .env (the bridge refuses to start unsigned)}
     depends_on:
       - hookrelay
 

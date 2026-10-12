@@ -124,6 +124,27 @@ CREATE TABLE IF NOT EXISTS card_actions (
 );
 CREATE INDEX IF NOT EXISTS ix_card_actions_event ON card_actions (event_id);
 CREATE INDEX IF NOT EXISTS ix_card_actions_correlation ON card_actions (correlation_id);
+
+-- One row per inbound signature this pipe has already accepted, so a capture
+-- replayed inside the skew window is answered like a duplicate instead of being
+-- walked through the pipeline a second time. The window is the signature's own
+-- (`max_skew_seconds`, the same 300s `verify_signature` bounds a captured
+-- request to), and the token carrying the source name keeps two sources that
+-- happen to share a secret from spending each other's rows. Rows are pruned to
+-- the window on every claim, so the table is bounded by the window rather than
+-- by uptime.
+--
+-- Deliberately a SECOND identity beside the content fingerprint
+-- (`recent_duplicate`): that one folds a restatement of the same alert however
+-- it was signed, this one folds the same signed BYTES however long ago the
+-- content window closed. An alert replayed at t=200s is inside the skew but
+-- outside the 120s content window, and without this it would buy a fresh judge
+-- call — which is the whole reason a replay cache exists.
+CREATE TABLE IF NOT EXISTS spent_signatures (
+    token TEXT NOT NULL PRIMARY KEY,
+    seen_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_spent_signatures_seen ON spent_signatures (seen_at);
 """
 
 
@@ -892,6 +913,25 @@ class Store:
         """What the press achieved, for the timeline and for a dispute later."""
         async with self._write():
             await self.db.execute("UPDATE card_actions SET outcome = ? WHERE jti = ?", (outcome[:200], jti))
+
+    # ── inbound signatures ────────────────────────────────────────────────
+
+    async def claim_signature(self, token: str, window_seconds: int, now: float) -> bool:
+        """True the first time this signature is seen inside the window, else False.
+
+        Same shape as spend_action: claim BEFORE the pipeline, let the PRIMARY
+        KEY be the decision rather than a read-then-write with a gap. The prune
+        runs inside the same write lock, so the table is the size of the window
+        and not of uptime. `window_seconds <= 0` is the caller's business, not
+        this method's — a zero window is a refusal to cache, not a claim with
+        nothing to compare against.
+        """
+        async with self._write():
+            await self.db.execute("DELETE FROM spent_signatures WHERE seen_at < ?", (now - window_seconds,))
+            cursor = await self.db.execute(
+                "INSERT OR IGNORE INTO spent_signatures (token, seen_at) VALUES (?, ?)", (token, now)
+            )
+            return cursor.rowcount == 1
 
     async def recent_actions(self, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.read.execute(

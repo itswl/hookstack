@@ -352,7 +352,7 @@ def test_gate_matches_ci():
         "ruff format --check hookjudge tests scripts",
         "mypy hookjudge",
         "bandit -q -r hookjudge",
-        "pytest -q",
+        "pytest -q --cov=hookjudge --cov-fail-under=90",
         "pip_audit --progress-spinner off",
     ):
         assert runs(gate, command), f"gate.sh does not run {command!r}"

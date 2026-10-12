@@ -50,6 +50,12 @@ class Settings:
     breaker_cooldown_seconds: int
     # Delivery-loop tick, in seconds.
     worker_interval_seconds: float
+    # How long an accepted inbound signature is remembered, so the same signed
+    # bytes replayed inside the timestamp's freshness window are answered as a
+    # duplicate instead of walking the pipeline again. 0 turns the cache off and
+    # leaves the window BOUNDED rather than closed, which is what the pipe did
+    # before 2026-10-12 — see security.verify_signature for what that costs.
+    signature_replay_seconds: int = 300
     # Signs the buttons on a notification card and verifies them on the way
     # back. Empty = no card carries an action and /card-action refuses
     # everything, which is the right default: an unsigned button is a URL
@@ -83,6 +89,7 @@ class Settings:
             admin_token=os.environ.get("HOOKRELAY_ADMIN_TOKEN", ""),
             read_token=os.environ.get("HOOKRELAY_READ_TOKEN", ""),
             max_body_bytes=_int("HOOKRELAY_MAX_BODY_BYTES", 256 * 1024),
+            signature_replay_seconds=_int("HOOKRELAY_SIGNATURE_REPLAY_SECONDS", 300),
             max_attempts=_int("HOOKRELAY_MAX_ATTEMPTS", 8),
             retention_days=_int("HOOKRELAY_RETENTION_DAYS", 14),
             alarm_url=os.environ.get("HOOKRELAY_ALARM_URL", ""),

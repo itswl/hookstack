@@ -78,8 +78,12 @@ cfg = Config.from_file("config.example.yaml")
 print(f"example config: {len(cfg.sources)} sources, {len(cfg.channels)} channels, {len(cfg.routes)} routes")
 PYEOF
 
-step "pytest"
-$PY -m pytest -q
+step "pytest (with a coverage floor)"
+# The floor is a REGRESSION catch, not a target: set just below what the suite
+# covers today, so a change that deletes tests or leaves a branch unreached fails
+# the gate instead of quietly lowering the number. hookrelay measured 93% when
+# this step was added; `--cov-fail-under` is the part that must not move.
+$PY -m pytest -q --cov=hookrelay --cov-fail-under=90
 
 step "pip-audit (known-vulnerable dependencies)"
 $PY -m pip_audit --progress-spinner off

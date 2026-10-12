@@ -14,38 +14,16 @@
 
 调查员是产品本身，管道和判官是给没有告警平台的团队准备的最小前端。一套部署就是一个团队：它不是工作管理平台，不是多租户 SaaS，也不是 agent 框架。
 
+## 从这里开始
+
+- **30 秒：**[docs/quickstart.md](docs/quickstart.md) 开头就讲清了它的形状 —— 三个服务，一张图。
+- **10 分钟，不要 key，不花钱：** 同一页的第二段会在排练上跑完整条闭环：告警被判定，调查经过真实的只读门回放，卡片，按下批准，告警恢复。
+- **半天，真上：**[STACK.md](STACK.md) 从源码一步步跑起三个服务；[docs/containment.md](docs/containment.md) 是指向真实集群**之前**要读的边界地图。
+- **完整功能清单：**[docs/what-you-get.md](docs/what-you-get.md)（英文）。
+
 ![hookprobe 的控制台：一次真实的调查，结论在最前面，查不到的根因明说查不到，下面是这次的花费](docs/img/zh/hookprobe-sessions.png)
 
-## 试一下：十分钟，不要 key，不花钱
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/itswl/hookstack/main/docker-compose.quickstart.yml
-docker compose -f docker-compose.quickstart.yml up -d   # 管道 + 判官 + 桩模型 + 跑排练的调查员 + 可读的接收端
-bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts/demo.sh)
-```
-
-演示会跑完整条闭环：告警被判定，一次录好的调查经过真实的只读门回放，报告变成卡片，按下批准后跑两条允许清单里的命令，告警恢复。要换成真实模型，在 `.env` 里设置 `HOOKPROBE_RUNTIME=claude`、`HOOKPROBE_MODEL` 和模型 key。
-
-## 你能得到什么
-
-- **只做值得做的事。** 告警风暴、重复的同一条件、恢复事件都不会再花第二次判定的钱。在 795 条生产告警上实测，29 条规则里有 28 条每次答案都一样，所以 `rule-reuse` 不调模型就能回答。
-- **一张人可以裁定的卡片。** 每个按钮在卡片发出前就签了名，每次按下都有记录。
-- **修复有人把关。** 批准后的流程逐步对照允许清单执行，以 argv 运行，从不经过 shell。批准的是读到的那个版本：卡片和控制台都会带上流程的摘要，之后变过的流程会被拒绝。人交接的计划由单独的执行节点用它自己的写凭证去做，危险命令会被拒绝；2026-09-30 它第一次真实改动了系统（[经过](docs/deployments.md#the-first-real-write)）。
-- **调查会留下东西。** 跑完的调查会提炼成手册，同一条件下次出现时从手册开始。
-- **关得住的 agent。** 默认只读并在启动时实测，预算用完会明确拒绝，另有一组结构性边界，每一条都写明它**挡不住**什么（[containment](docs/containment.md)）。
-- **装到手机上的看板。** 三个看板都是可以添加到主屏幕的 web 应用，调查员的以节点自己的名字出现；口令只留在那个浏览器里，离线时显示页面并告诉你连不上服务。在手机上，页头延伸到状态栏下方、颜色随主题切换，页签一行放下，宽表格按行变成小块。
-- **每个事件一页审计。** 每一跳、摘要、决策和人的操作，每次工具调用的飞行记录，以及每次运行的耗时瀑布图。
-- **模型和聊天工具由你选。** 调查员接任意 Anthropic 方言的端点，判官接任意 OpenAI 兼容的端点，本地模型也可以。飞书经桥接送达（[协议](docs/bridge-protocol.md)），钉钉和企微有插件，也可以把签名 JSON 发到任意 webhook。
-
-![hookrelay 的看板：一句话说有几件事等你处理，四个数字，每条告警一行，各带七个阶段](docs/img/zh/hookrelay-timeline.png)
-
-![hookjudge 的看板：每条判定走了哪条路径、花了多少](docs/img/zh/hookjudge-status.png)
-
-![hookrelay 的流水：每个事件的决策、投递去向和回流](docs/img/zh/hookrelay-ledger.png)
-
-![三块看板在手机上：管道的待处理入口，调查员那条经有名字的人批准后执行的处置流程，以及判官的看板](docs/img/zh/hookstack-phones.png)
-
-三块看板都能切换中英文，并跟随系统的浅色或深色。截图取自本地真实运行，不是效果图。
+三块看板都能切换中英文，并跟随系统的浅色或深色；[完整介绍](OVERVIEW.md)（英文）里有全部截图，取自本地真实运行，不是效果图。
 
 ## 怎么串起来
 
@@ -62,6 +40,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts
 
 以下文档都是英文。
 
+- [docs/quickstart.md](docs/quickstart.md)：应该从这里读的第一页
+- [docs/what-you-get.md](docs/what-you-get.md)：完整功能清单
 - [OVERVIEW.md](OVERVIEW.md)：完整介绍，含全部截图
 - [STACK.md](STACK.md)：在本地一步步跑起整个栈
 - [hookrelay](hookrelay/README.md)、[hookjudge](hookjudge/README.md)、[hookprobe](hookprobe/README.md)：每个服务的详细说明
@@ -71,6 +51,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/itswl/hookstack/main/scripts
 
 ## 开发
 
-`bash scripts/gate.sh` 会跑每个服务的 gate 和整个栈的检查。提交前读它的结论。管道的源码上限是 6,300 行，判官 3,400 行，调查员不设上限。
+`bash scripts/gate.sh` 会跑每个服务的 gate 和整个栈的检查。提交前读它的结论。管道的源码上限是 6,400 行，判官 3,400 行，调查员不设上限。
 
 MIT 协议。

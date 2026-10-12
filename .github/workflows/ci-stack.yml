@@ -133,6 +133,14 @@ jobs:
       # in is a comment.
       - name: the pipe and the brain are inside their stated ceilings
         run: python3 scripts/assert_weight.py
+      # Every headline number, in the two classes it can be in: reproducible here
+      # (run now, fail if it has stopped holding) or measured on the retired
+      # deployments and named as such. The two pytest-backed claims are UNRUN in
+      # this job (no service venvs) and reported as UNRUN, never as OK; the
+      # whole-repository gate, where the component gates just built the venvs,
+      # runs them for real.
+      - name: every headline number is reproduced here or named as reported
+        run: python3 scripts/reproduce_claims.py
       # Three services build one image tag, and the tag is whichever build ran
       # last: a build arg one of them does not pass is an image the others did
       # not mean. The work image shipped without kubectl this way (2026-09-29).

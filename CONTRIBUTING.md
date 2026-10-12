@@ -80,6 +80,14 @@ Four workflows, and between them nothing at the root is uncovered:
 `ci` (pipe) · `ci-hookjudge` (brain) · `ci-hookprobe` (investigator) ·
 `ci-stack` (the demo pair together, plus the docs and the compose files).
 
+## Evidence and releases
+
+- [docs/evidence.md](docs/evidence.md) and `scripts/reproduce_claims.py`: every
+  headline number, split into one this repository can reproduce (the script runs
+  it) and one measured on the retired deployments and named as such.
+- [docs/releasing.md](docs/releasing.md): a release is one tag and four
+  digest-pinned images, and the notes are the decision records between two tags.
+
 ## The one rule that is not about layout
 
 Run `bash scripts/gate.sh` as its own step and READ the verdict before any
