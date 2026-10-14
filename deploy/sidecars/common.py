@@ -139,7 +139,14 @@ class HttpHandler(BaseHTTPRequestHandler):
         with contextlib.suppress(ConnectionResetError, BrokenPipeError):
             super().handle()
 
+    def handle_one_request(self) -> None:
+        # Waiting for a request line: a timeout from here until one arrives is the
+        # connection idling, not a request going wrong (see log_error)
+        self._between_requests = True
+        super().handle_one_request()
+
     def parse_request(self) -> bool:
+        self._between_requests = False
         parsed = super().parse_request()
         if parsed:
             self._last_request = {
@@ -153,26 +160,43 @@ class HttpHandler(BaseHTTPRequestHandler):
         return parsed
 
     def log_error(self, fmt: str, *args: Any) -> None:
-        """A timeout names the peer and what the connection had carried.
+        """A timeout says which kind it was, the peer, and what the connection
+        had carried.
 
         The stdlib's line is `Request timed out: TimeoutError('timed out')`
         and nothing else, which cannot tell a keep-alive connection that idled
-        past `timeout` — an MCP client holds one open per session — from a
-        peer that declared a body and stopped sending it. The count and the
-        last request line say which: nothing seen is a socket that connected
-        and never spoke; a request carrying a Content-Length is the one whose
-        body may not have arrived. One line, at WARNING, so a run of them
-        reads as a peer with a problem rather than as this sidecar's.
+        past `timeout` from a peer that declared a body and stopped sending it.
+        Where the read was tells them apart. Waiting for the next request line
+        after at least one answer is the idle close: an MCP client holds a
+        connection open for its session and goes quiet between calls, and
+        closing it is the timeout doing its job — at WARNING, those lines were
+        most of the log, and a real failure had to be picked out from among
+        them. So that one goes to DEBUG. Everything else stays one line at
+        WARNING, the count and the last request line saying which it was:
+        nothing seen is a socket that connected and never spoke; a request
+        carrying a Content-Length is the one whose body may not have arrived.
+        A failure on the far side of a sidecar is that sidecar's to log (the
+        gate's upstream failures are), never this line.
         """
         if fmt == "Request timed out: %r":
             peer = self.client_address[0] if self.client_address else "unknown"
             port = self.client_address[1] if self.client_address else "unknown"
+            seen = getattr(self, "_request_count", 0)
+            if getattr(self, "_between_requests", False) and seen:
+                logging.getLogger(self.server_version).debug(
+                    "idle keep-alive closed peer=%s:%s timeout=%ss requests_seen=%s",
+                    peer,
+                    port,
+                    self.timeout,
+                    seen,
+                )
+                return
             logging.getLogger(self.server_version).warning(
                 "request timeout peer=%s:%s timeout=%ss requests_seen=%s last_request=%s cause=%s",
                 peer,
                 port,
                 self.timeout,
-                getattr(self, "_request_count", 0),
+                seen,
                 getattr(self, "_last_request", None) or "none",
                 plain(fmt % args),
             )

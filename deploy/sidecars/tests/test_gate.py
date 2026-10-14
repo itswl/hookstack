@@ -16,10 +16,12 @@ the server that would have run the tool.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -42,6 +44,8 @@ class Upstream(BaseHTTPRequestHandler):
     # Declare a body and send only part of it: the shape of a chat server that
     # died mid-answer.
     truncate = False
+    # Seconds to say nothing before answering: a chat server that hangs.
+    stall = 0.0
 
     def log_message(self, *args) -> None:  # noqa: D102
         pass
@@ -59,6 +63,7 @@ class Upstream(BaseHTTPRequestHandler):
                 "headers": {name.lower(): value for name, value in self.headers.items()},
             }
         )
+        time.sleep(self.stall)
         self.send_response(200)
         self.send_header("Content-Type", self.content_type)
         self.send_header("Content-Length", str(len(self.answer) + (100 if self.truncate else 0)))
@@ -85,6 +90,7 @@ def stack(tmp_path):
     Upstream.answer = b'{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'
     Upstream.content_type = "application/json"
     Upstream.truncate = False
+    Upstream.stall = 0.0
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
     threading.Thread(target=upstream.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
     gate_module.Gate.upstream = f"http://127.0.0.1:{upstream.server_port}/mcp/"
@@ -289,6 +295,22 @@ def test_a_chat_server_that_dies_mid_answer_is_a_502_not_a_dropped_socket(stack)
     Upstream.truncate = True
     assert call(stack, _tool("chat.list_mentions"))[0] == 502
     assert rows()[-1]["event"] == "call.failed"
+
+
+def test_a_chat_server_that_hangs_is_a_502_that_says_it_timed_out(stack, monkeypatch, caplog):
+    """The upstream's timeout, named as one in the ledger and logged at WARNING:
+    the client-side timeouts the handler logs read `timed out` too, and an idle
+    keep-alive closing is routine where a server that never answered is not."""
+    monkeypatch.setattr(gate_module, "UPSTREAM_TIMEOUT", 0.3)
+    Upstream.stall = 1.0
+    caplog.set_level(logging.WARNING)
+    assert call(stack, _tool("chat.list_mentions"))[0] == 502
+    failed = rows()[-1]
+    assert failed["event"] == "call.failed"
+    assert failed["reason"] == "upstream timeout: no answer within 0.3s"
+    lines = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    said = [line for line in lines if "upstream failed" in line and "upstream timeout" in line]
+    assert said and "chat.list_mentions" in said[0], lines
 
 
 def test_a_body_that_cannot_be_a_call_is_refused_before_it_is_read(stack):
