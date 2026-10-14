@@ -53,12 +53,28 @@ def test_a_peer_that_never_speaks_is_logged_as_such(server, caplog):
     assert "requests_seen=0" in record.getMessage() and "last_request=none" in record.getMessage()
 
 
-def test_an_idle_keep_alive_names_the_request_it_carried(server, caplog):
-    caplog.set_level(logging.WARNING)
+def test_an_idle_keep_alive_closes_at_debug_not_as_a_warning(server, caplog):
+    """A client that holds its connection between calls — an MCP client does,
+    for its session — is closed by the timeout doing its job. At WARNING those
+    closes were most of the log, and a peer with a real problem was a line among
+    them."""
+    caplog.set_level(logging.DEBUG)
     with socket.create_connection(server) as sock:
         sock.sendall(b"POST /v1/thing HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}")
         assert sock.recv(4096).startswith(b"HTTP/1.1 200")
+        record = wait_for(caplog, "idle keep-alive closed")
+    assert record.levelno == logging.DEBUG
+    assert "requests_seen=1" in record.getMessage()
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING], "an idle close is not a warning"
+
+
+def test_a_body_that_never_arrives_names_the_request_it_belonged_to(server, caplog):
+    caplog.set_level(logging.WARNING)
+    with socket.create_connection(server) as sock:
+        sock.sendall(b"POST /v1/thing HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\n{}")
         record = wait_for(caplog, "request timeout")
     message = record.getMessage()
+    assert record.levelno == logging.WARNING
     assert "requests_seen=1" in message
     assert "'method': 'POST'" in message and "'path': '/v1/thing'" in message
+    assert "'content_length': '10'" in message

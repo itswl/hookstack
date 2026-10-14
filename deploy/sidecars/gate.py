@@ -461,6 +461,17 @@ class Gate(HttpHandler):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
         def failed(reason: str) -> None:
+            # The upstream's failure, said in the log as well as the ledger, and
+            # said apart from the client-side timeouts the handler logs: an idle
+            # keep-alive closing is routine, a server that did not answer is not
+            logger.warning(
+                "upstream failed client=%s %smethod=%s tools=%s reason=%s",
+                client.name,
+                f"route={route.name} " if route.name else "",
+                method,
+                [c["tool"] for c in calls],
+                reason,
+            )
             self.ledger.write(
                 event="call.failed",
                 client=client.name,
@@ -488,7 +499,7 @@ class Gate(HttpHandler):
         except (OSError, http.client.HTTPException) as exc:
             # HTTPException is not an OSError: a chunked answer cut mid-chunk is
             # this branch, not a crash with no answer and no row.
-            failed(str(exc)[:200])
+            failed(_failure_reason(exc))
             return
         if len(raw) > ANSWER_MAX:
             failed(f"the answer is larger than {ANSWER_MAX} bytes")
@@ -506,6 +517,16 @@ class Gate(HttpHandler):
         for call in calls:
             self.ledger.write(event="call.forwarded", status=status, **call)
         self._answer(status, out, content_type, {"Mcp-Session-Id": session} if session else None)
+
+
+def _failure_reason(exc: BaseException) -> str:
+    """What the ledger and the log say about a relay that got no answer. A
+    timeout says so by name, with the limit it ran into — urllib wraps one that
+    happens on connect in a URLError — rather than as `timed out`, which reads
+    the same as the client-side timeouts the handler logs."""
+    if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+        return f"upstream timeout: no answer within {UPSTREAM_TIMEOUT:g}s"
+    return str(exc)[:200]
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
