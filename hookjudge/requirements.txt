@@ -1,5 +1,5 @@
 # Four runtime dependencies, chosen to stay four.
-fastapi>=0.142.2
+fastapi>=0.143.0
 uvicorn[standard]>=0.54.0
 aiosqlite>=0.22.1
 httpx>=0.28.1
@@ -7,8 +7,8 @@ httpx>=0.28.1
 # Test + lint
 pytest>=9.1.1
 pytest-asyncio>=1.4.0
-pytest-cov>=7.0
-ruff==0.16.10
+pytest-cov>=7.1.0
+ruff==0.17.0
 bandit>=1.9.4
 pip-audit>=2.10.1
 mypy>=2.4.0
