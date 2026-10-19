@@ -41,6 +41,11 @@ tag's own message is the note, which is how 0.5.0 and 0.6.0 shipped.
 4. **Re-run the quickstart the way a stranger does** — `curl` the published
    compose, `docker compose up`, `bash scripts/demo.sh`. The file's own comment
    records three releases that were wrong until somebody actually ran it.
+   **From an empty directory, not the checkout.** Compose reads `./.env` for
+   interpolation, and the checkout's `.env` is a deployment's: run from the
+   repository root on 2026-10-19, the quickstart's investigator took the work
+   stack's `HOOKPROBE_TOKEN` and every `demo.sh` lookup answered 401 — a
+   release that was fine, failing a check that was not testing it.
 
 ## A note on tags vs. digests
 
