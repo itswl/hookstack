@@ -979,6 +979,13 @@ services:
       # `origin` prefix the contract checker splits on.
       CHAT_TOOL_PREFIX: ${WATCH_CHAT_TOOL:?set WATCH_CHAT_TOOL in .env}
       WATCH_SCAN_FILE: /timer-state/scan.json
+      # The round's cursors are STAGED until the node's run for it has finished
+      # (watch_scan.py reconcile, 2026-10-19). The timer writes what the pipe
+      # answered here after each POST; the scanner reads the node's run record
+      # for that event under the read-only /node-state mount below. A round whose
+      # run failed is re-scanned from the old cursors next tick instead of lost.
+      WATCH_ROUND_FILE: /timer-state/round.json
+      WATCH_NODE_RESULTS: /node-state/results
       # 降频名单：这些 feed 的新消息攒 WATCH_BATCH_MINUTES 再一次性端给模型，游标
       # 不动所以一条不丢。名字是内部标识符，只活在 .env。实测依据（2026-09-20，
       # 最近 90 轮）：47 轮的全部内容只来自三个高音量群 feed，其中 71% 整轮
