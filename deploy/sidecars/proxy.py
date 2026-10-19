@@ -10,7 +10,10 @@ So the probe loses its route to the world and gets this instead: a forward
 proxy on an allowlist. Everything the investigator legitimately talks to is a
 name somebody wrote down; everything else is refused and, more importantly,
 LOGGED. A refused connection is the signal — it is the only place that can say
-"this run tried to reach somewhere nobody listed".
+"this run tried to reach somewhere nobody listed". With EGRESS_LEDGER set the
+refusals are also written as JSONL, the way the gate beside this writes its
+calls: a container's log leaves with the container, and the refusal log is the
+product, so it lives on the volume the gate's does.
 
 Deliberately stdlib-only and small enough to read in one sitting, like the
 bridge beside it. A proxy is now in the path of every call the investigator
@@ -64,7 +67,7 @@ import socketserver
 import sys
 import threading
 
-from common import Server, pump
+from common import Ledger, Server, pump
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("egress")
@@ -94,6 +97,10 @@ PORT = int(os.environ.get("EGRESS_PORT", "8888"))
 PORTS = frozenset(int(p) for p in os.environ.get("EGRESS_PORTS", "80,443,8088,8100,8200,4318").split(",") if p.strip())
 IDLE_SECONDS = 300
 CONNECT_TIMEOUT = 20
+# Refusals, one JSON line each, when a path is given; empty keeps them in the
+# container log only. Best-effort like the gate's: a disk that fills must not
+# turn the way out into a wall.
+LEDGER = Ledger(os.environ.get("EGRESS_LEDGER", ""))
 # Where a desktop container runtime maps the host machine, inside a range that
 # is otherwise "this network" and that the stdlib does not call private.
 HOST_MAPPED = ipaddress.ip_network("0.250.250.0/24")
@@ -313,6 +320,7 @@ class Handler(socketserver.StreamRequestHandler):
         # an address nobody wrote down, and that is worth an operator's eye
         # whether it was a mistake, a dependency nobody declared, or worse.
         logger.log(level, "REFUSED %s — %s", target, why)
+        LEDGER.write(event="egress.refused", target=target, code=code, why=why)
         body = f"{why}\n".encode()
         reason = {400: "Bad Request", 403: "Forbidden", 502: "Bad Gateway"}.get(code, "Forbidden")
         try:

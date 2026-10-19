@@ -246,6 +246,16 @@ offered that round, with a level and kind from a closed set, text cut to a
 length and a ceiling per round. The refusals are in
 `work-data/watch-signer/signals.jsonl`.
 
+**The pipe's ledger is a bind mount, and only the container opens it.**
+`work-data/hookrelay/hookrelay.db` runs in WAL (`hookrelay/store.py`) on a
+directory the desktop container runtime shares from the host, and WAL's
+shared-memory file is not coherent across that boundary: a sibling deployment
+on this machine records it as a silent-corruption hazard and runs its databases
+in rollback mode. Nothing on the host opens this one while the pipe runs, and
+that is the rule rather than a habit. Read it with the container stopped and
+the file opened immutably (`?immutable=1`); the integrity check of 2026-10-19
+was clean at 446 events.
+
 **What a review of those two days found, fixed on 2026-10-05.** The timer's
 contract-violation signal had signed from the file the watcher's copy was
 deleted from, so every violation since the redeploy failed to post with one

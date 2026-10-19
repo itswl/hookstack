@@ -240,6 +240,10 @@ services:
       MCPGATE_CLIENT_PLAN_TOKEN: ${PLAN_MCPGATE_TOKEN:?set PLAN_MCPGATE_TOKEN in .env}
       MCPGATE_CLIENT_PLAN_TOOLS: ${PLAN_MCPGATE_TOOLS:?set PLAN_MCPGATE_TOOLS in .env}
       MCPGATE_LEDGER: /data/calls.jsonl
+      # The proxy's refusals, beside the gate's calls: a run that tried to reach
+      # an address nobody listed used to be one WARNING line in a container log
+      # that a recreate throws away.
+      EGRESS_LEDGER: /data/egress.jsonl
       INGRESS_FORWARD: 8088:probe-plan:8088,8089:probe-watch:8088,8090:probe-work:8088
       TZ: ${WATCH_TZ:-Asia/Singapore}
     ports:
@@ -725,7 +729,11 @@ services:
     environment:
       # Who may continue this node's sessions by replying in the chat thread
       # (sender ids, or `*`); empty = nobody.
-      HOOKPROBE_FOLLOW_UP_SENDERS: ${HOOKPROBE_FOLLOW_UP_SENDERS:-}
+      # Its OWN variable, empty by default: the pipe already keeps a reply under
+      # a plan card off the write node by routing (by_work=False), and the node
+      # itself now refuses to continue a session from chat unless somebody is
+      # named HERE — a second lock on the one node that holds a write credential.
+      HOOKPROBE_FOLLOW_UP_SENDERS: ${WORK_FOLLOW_UP_SENDERS:-}
       HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
       # Where this node is reachable from OUTSIDE, if anywhere. Empty on every
       # deployment here — the nodes bind to loopback behind the host firewall —

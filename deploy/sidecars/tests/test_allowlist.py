@@ -17,10 +17,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-def _with(allow: str, ports: str = "80,443", internal: str = ""):
+def _with(allow: str, ports: str = "80,443", internal: str = "", ledger: str = ""):
     os.environ["EGRESS_ALLOW"] = allow
     os.environ["EGRESS_PORTS"] = ports
     os.environ["EGRESS_INTERNAL"] = internal
+    os.environ["EGRESS_LEDGER"] = ledger
     import proxy
 
     return importlib.reload(proxy)
@@ -208,6 +209,29 @@ def test_whitespace_and_stray_commas_do_not_create_a_blank_rule(rule: str) -> No
     p = _with(rule)
     assert p.ALLOW == ("example.com",)
     assert not p.permitted("")
+
+
+def test_a_refusal_is_written_to_the_ledger_when_one_is_named(tmp_path) -> None:
+    """A container's log leaves with the container; the refusal log is the product."""
+    import json
+    import socket
+    import threading
+
+    ledger = tmp_path / "egress.jsonl"
+    proxy = _with("example.com", ledger=str(ledger))
+    gateway = proxy.Server(("127.0.0.1", 0), proxy.Handler)
+    threading.Thread(target=gateway.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+    try:
+        with socket.create_connection(("127.0.0.1", gateway.server_address[1]), timeout=5) as client:
+            client.sendall(b"CONNECT evil.test:443 HTTP/1.1\r\nHost: evil.test\r\n\r\n")
+            first = client.recv(200).decode("latin-1").splitlines()[0]
+    finally:
+        gateway.shutdown()
+        gateway.server_close()
+    assert first.startswith("HTTP/1.1 403")
+    row = json.loads(ledger.read_text(encoding="utf-8").splitlines()[-1])
+    assert row["event"] == "egress.refused" and row["target"] == "evil.test:443" and row["code"] == 403
+    assert "allowlist" in row["why"]
 
 
 def test_bytes_sent_right_behind_the_connect_reach_the_far_side() -> None:
