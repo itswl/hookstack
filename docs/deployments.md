@@ -86,6 +86,19 @@ generic — a prescan that exits quiet skips the round, and one that FAILS fires
 anyway, carrying the failure. A prescan that broke and a prescan that found
 nothing are the same silence from outside, and only one of them is a quiet day.
 
+**The cursor moves when the round is known to have landed (2026-10-19).** The
+scan used to write its new cursors before the model ran, so a round whose run
+failed was never looked at again; a second deployment running a copy of the
+scanner lost two rounds that way in one day. Now a round that fires stages its
+cursors (and Jira's state) and the next tick settles them against the node's own
+run record for the event the pipe numbered, which the timer writes down after
+the POST: `completed` commits, `failed`, never-posted, never-routed or timed
+out puts the cursors back and re-scans with a line saying so, a run still going
+holds the tick rather than offering the same messages twice. After two replays
+and an hour the first lost round's content is skipped, named in the digest
+until a round lands. Jira is not skipped: its lookback re-reports the span, and
+a repeat is a nuisance where a miss is a failure.
+
 Two chats rather than one, which is the whole reason this is not the alert
 shape: a signal ("someone assigned you this") and a plan ("here is how it would
 be done") are read at different moments. One bot would interleave a five-second

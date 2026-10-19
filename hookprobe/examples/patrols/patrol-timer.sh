@@ -213,10 +213,33 @@ open(os.environ["BRIEF_OUT"], "w", encoding="utf-8").write(
     fi
   fi
 
+  posted=0
   if out=$(bash "$HERE/patrol.sh" "$BODY" "$TITLE" 2>&1); then
+    posted=1
     log "fired: $out"
   else
     log "FAILED (rc=$?): $out"
+  fi
+  # What the pipe answered, for the prescan's next tick: the scanner stages the
+  # round's cursors and commits them only once the node's run for THIS event has
+  # finished (watch_scan.py reconcile). Without the event id it cannot ask, and
+  # a round that never posted must read as lost, not as landed.
+  if [ -n "${PATROL_PRESCAN:-}" ] && [ -n "${WATCH_ROUND_FILE:-}" ]; then
+    ROUND_OUT="$out" ROUND_POSTED="$posted" python3 - <<'PY' || log "round record NOT written to $WATCH_ROUND_FILE"
+import json, os, pathlib, time
+out = os.environ.get("ROUND_OUT", "")
+event = outcome = None
+try:
+    answer = json.loads([ln for ln in out.splitlines() if ln.strip()][-1]) if out.strip() else {}
+    event, outcome = answer.get("event_id"), answer.get("outcome")
+except (ValueError, IndexError, AttributeError):
+    pass
+path = pathlib.Path(os.environ["WATCH_ROUND_FILE"])
+tmp = path.with_suffix(".tmp")
+tmp.write_text(json.dumps({"posted": os.environ.get("ROUND_POSTED") == "1", "event_id": event,
+                           "outcome": outcome, "fired_at": time.time()}), encoding="utf-8")
+tmp.replace(path)
+PY
   fi
   [ "$BODY" = "$BRIEF_NOW" ] || rm -f "$BODY"
   [ -z "$BRIEF_RENDERED" ] || rm -f "$BRIEF_RENDERED"

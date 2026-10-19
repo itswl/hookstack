@@ -21,6 +21,18 @@ $0.25–0.95，因为 agent 必须把整个扫描走完才知道没事。
     `feeds`（读到哪了）归这个脚本，写在自己的 cursors.json；`reported`（真的
     告诉过他什么）归节点，由 watch_report.py 在发信号的同一次调用里写。
 
+游标什么时候算数（2026-10-19）
+    交出摘要的那一轮，新游标不直接落进 `feeds`，而是放在 `staged` 里；Jira 的
+    状态同样写在一份暂存副本上。下一轮开头先结算上一轮：timer 在 POST 之后写下
+    管道给的事件号（round.json），节点那边 `probe:watch-due:<事件号>` 的运行记录
+    说它 completed 就转正，failed、没投出去、管道没路由、超时没结果就丢掉暂存，
+    从旧游标重扫，并在摘要里注明。重交两次、离第一次失败满一小时还不行，就只跳过
+    第一次失败那一轮的内容，之后的照常交出，跳过的时段写进摘要直到真正送达。
+    运行还在跑时这一轮不扫（扫了会把同一批消息交两次）。以前新游标在模型跑之前
+    就写死了，模型那轮一失败，这一轮的消息就再也没人看到——另一处跑着这份脚本的
+    部署 2026-10-12 就这样丢了两轮。Jira 不跳过：它的回看窗会把那段再报一遍，
+    重复一条是麻烦，漏一条不是。
+
     分成两个文件不是洁癖。一个文件两个写者，agent 写 reported 的同时这里写
     feeds，读-改-写一重叠就丢数据。而且 timer 把节点状态挂成只读是有理由的
     （判官不改证据，见 docker-compose.work.yml），这个脚本跑在 timer 里，本来
@@ -37,6 +49,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -53,6 +66,18 @@ SCAN = Path(os.environ.get("WATCH_SCAN_FILE") or "/timer-state/scan.json")
 # 只在 scan.json 还不存在时读一次，把老状态文件里的 feeds 接过来。没有它，头一轮
 # 会把 47 个会话的当前时间戳全当成基线重新播种——正确，但白丢一轮的历史。
 SEED = os.environ.get("WATCH_SEED_STATE") or ""
+# timer 在每轮 POST 之后写的记录（patrol-timer.sh）：{"posted": bool, "event_id", "outcome", "fired_at"}。
+# 下一轮据此判断暂存的游标能不能转正。
+ROUND = Path(os.environ.get("WATCH_ROUND_FILE") or str(SCAN.parent / "round.json"))
+# 节点的运行记录目录（只读挂载）：唯一能说「那一轮的运行跑完了、失败了、还是根本没发生」的地方。
+NODE_RESULTS = Path(os.environ.get("WATCH_NODE_RESULTS") or "/node-state/results")
+# 投出去这么久还没有结果就当丢了；节点的运行上限远在这之下。
+RUN_TIMEOUT = float(os.environ.get("WATCH_RUN_TIMEOUT") or 1800)
+MAX_REPLAYS = 2  # 同一批内容最多再交两次
+GIVE_UP_AFTER = 3600.0  # 而且离第一次失败至少满一小时才放弃
+# jira_watch.py 的状态文件（它自己也按这个变量找）；交出摘要的那一轮它写的是暂存副本。
+JIRA_STATE = Path(os.environ.get("ATL_STATE_FILE") or os.path.expanduser("~/.atlassian_watch_state.json"))
+JIRA_STAGED = JIRA_STATE.with_name(JIRA_STATE.stem + ".staged" + JIRA_STATE.suffix)
 WINDOW = os.environ.get("WATCH_WINDOW") or "09:30-19:30"
 DOW = os.environ.get("WATCH_DOW") or "1-5"
 EXCLUDE = [s.strip() for s in (os.environ.get("WATCH_EXCLUDE") or "").split(",") if s.strip()]
@@ -214,8 +239,18 @@ def run_jira(notes: list[str]) -> str:
     """
     if not JIRA:
         return ""
+    # 这一轮读写的是暂存副本：和聊天游标一起转正或丢弃（见 reconcile）。
     try:
-        p = subprocess.run([sys.executable, JIRA], capture_output=True, text=True, timeout=180)
+        if JIRA_STATE.exists():
+            shutil.copyfile(JIRA_STATE, JIRA_STAGED)
+        else:
+            JIRA_STAGED.unlink(missing_ok=True)
+    except OSError as exc:
+        notes.append(f"Jira 取不到：暂存状态写不了 {exc}")
+        return ""
+    env = {**os.environ, "ATL_STATE_FILE": str(JIRA_STAGED)}
+    try:
+        p = subprocess.run([sys.executable, JIRA], capture_output=True, text=True, timeout=180, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         notes.append(f"Jira 取不到：{type(exc).__name__} {str(exc)[:200]}")
         return ""
@@ -224,6 +259,89 @@ def run_jira(notes: list[str]) -> str:
         notes.append(f"Jira 取不到：exit {p.returncode} {' '.join(tail[-2:])[:300]}")
         return ""
     return (p.stdout or "").strip()
+
+
+def run_record(event_id: object) -> dict | None:
+    """节点为管道编号 event_id 的那一轮留下的运行记录，没有就是 None。"""
+    key = f"probe:watch-due:{event_id}"
+    direct = _read(NODE_RESULTS / f"{key}.json")
+    if direct and str(direct.get("session_key") or "") == key:
+        return direct
+    try:
+        for path in NODE_RESULTS.glob("probe:watch-due:*.json"):  # 文件名规则变了也找得到
+            data = _read(path)
+            if data and str(data.get("session_key") or "") == key:
+                return data
+    except OSError:
+        pass
+    return None
+
+
+def round_outcome(staged: dict, now: float) -> str:
+    """上一轮交出去的内容有没有被处理完：done、lost 或 pending（运行还在跑）。"""
+    posted = _read(ROUND) or {}
+    if not posted.get("posted") or float(posted.get("fired_at") or 0) < float(staged.get("staged_at") or 0):
+        return "lost"  # 没投出去，或者 timer 在扫完和投出之间死了
+    if posted.get("outcome") != "routed" or posted.get("event_id") in (None, ""):
+        return "lost"  # 管道收了但没有路由（风暴熔断、门没开）：没有运行会发生
+    status = str((run_record(posted.get("event_id")) or {}).get("status") or "")
+    if status == "completed":
+        return "done"
+    if status == "failed":
+        return "lost"
+    return "pending" if now - float(posted.get("fired_at") or 0) < RUN_TIMEOUT else "lost"
+
+
+def reconcile(scan: dict, now: float) -> tuple[dict, str]:
+    """结算上一轮：运行跑完了就把暂存的游标转正，没跑完就丢掉暂存、从旧游标重来。
+
+    返回 (新的 scan.json 内容, 结论)。结论是 none（没有暂存）、pending（还在跑，
+    这一轮别扫）、done、replay（丢掉暂存，下一轮重扫并注明）或 gave-up（只跳过第
+    一次失败那一轮的内容，记下跳过的时段）。Jira 的暂存副本跟着转正或丢弃。
+    """
+    staged = scan.get("staged")
+    if not isinstance(staged, dict) or not staged:
+        JIRA_STAGED.unlink(missing_ok=True)  # 没有暂存的摘要却有 Jira 暂存：那一轮扫到一半就死了
+        return scan, "none"
+    verdict = round_outcome(staged, now)
+    if verdict == "pending":
+        return scan, "pending"
+    scan = {k: v for k, v in scan.items() if k != "staged"}
+    if verdict == "done":
+        scan["feeds"] = dict(staged.get("feeds") or {})
+        if JIRA_STAGED.exists():
+            JIRA_STAGED.replace(JIRA_STATE)
+        scan.pop("replay", None)
+        scan.pop("skipped", None)  # 真正送达了一轮，之前跳过的时段已经说过
+        return scan, "done"
+    JIRA_STAGED.unlink(missing_ok=True)
+    replays = int(staged.get("replays") or 0) + 1
+    first_at = float(staged.get("first_at") or staged.get("staged_at") or now)
+    first_feeds = dict(staged.get("first_feeds") or staged.get("feeds") or {})
+    if replays > MAX_REPLAYS and now - first_at >= GIVE_UP_AFTER:
+        scan["feeds"] = first_feeds  # 只跳过第一次失败那一轮的内容；之后的消息下一轮照常交出去
+        previous = scan.get("skipped") if isinstance(scan.get("skipped"), dict) else {}
+        scan["skipped"] = {
+            "from": previous.get("from") or scan.get("round_at") or first_at,
+            "to": first_at,
+            "attempts": int(previous.get("attempts") or 0) + replays,
+        }
+        scan.pop("replay", None)
+        return scan, "gave-up"
+    scan["replay"] = {
+        "replays": replays,
+        "failed_at": staged.get("staged_at"),
+        "first_at": first_at,
+        "first_feeds": first_feeds,
+    }
+    return scan, "replay"
+
+
+def _hhmm(ts: object) -> str:
+    try:
+        return time.strftime("%m-%d %H:%M", time.localtime(float(ts)))  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError, OSError):
+        return "?"
 
 
 def scan_chat(
@@ -386,14 +504,24 @@ def trim(
 
 def main() -> int:
     now = time.time()
+    # 先结算上一轮，窗口外也结算：一天最后一轮的失败不该等到第二天早上才处理。
+    scan_file = _read(SCAN)
+    verdict = "none"
+    if scan_file is not None:
+        scan_file, verdict = reconcile(scan_file, now)
+        if verdict != "none":
+            _write(SCAN, scan_file)
     if not in_window(now):
         return 0  # 一个字节都不输出 = 这一轮不烧钱
+    if verdict == "pending":
+        return 0  # 上一轮的运行还在跑：现在扫会把同一批消息交两次
 
     notes: list[str] = []
     jira_out = run_jira(notes)
 
-    scan_file = _read(SCAN)
     cursors: dict[str, float] = dict((scan_file or {}).get("feeds") or {})
+    replay: dict = scan_file.get("replay") if scan_file and isinstance(scan_file.get("replay"), dict) else {}
+    skipped: dict = scan_file.get("skipped") if scan_file and isinstance(scan_file.get("skipped"), dict) else {}
     unreachable: dict[str, dict] = dict((scan_file or {}).get("unreachable") or {})
     pending: dict[str, float] = dict((scan_file or {}).get("pending") or {})
     stats: dict[str, dict] = dict((scan_file or {}).get("stats") or {})
@@ -404,6 +532,7 @@ def main() -> int:
     chat = Chat()
     findings: list[tuple[str, list[tuple[float, str, str]]]] = []
     handed: set[str] = set()
+    committed: dict[str, float] = dict(cursors)  # 转正前 feeds 里仍然是这份
     if cursors:
         findings = scan_chat(chat, cursors, now, notes, handed, unreachable, pending)
     else:
@@ -430,43 +559,72 @@ def main() -> int:
         row["offered"] = int(row.get("offered") or 0) + 1
         row["last"] = now
 
-    _write(
-        SCAN,
-        {
-            "round_at": now,
-            # 上一轮的 offer 和它的时钟，原样留一轮：一次跑过了下一跳的运行（排队、
-            # 慢模型）投递时读到的是这一轮的 offer，而它拿到的是上一轮的。签名器和
-            # watch_report.py 两边都认，各按自己那轮计数。再往前不留：运行上限 30
-            # 分钟，跨不过两跳。
-            "previous": {
-                "round_at": float((scan_file or {}).get("round_at") or 0),
-                "offered": dict((scan_file or {}).get("offered") or {}),
-            },
-            "feeds": cursors,
-            # 够不着的源和上次提醒的时间——让「说一次、6 小时后再提醒」跨轮成立。
-            "unreachable": unreachable,
-            # 这一轮真的端给模型看的会话，以及各自读到哪。契约检查器用它判断
-            # 「报了一个没人给过它的会话」，watch_report.py 用它决定 reported
-            # 写什么值——两者读同一份，所以不会各自算出不同的答案。
-            # offered 是「这一轮交给模型的全部主语」，不只是读成功的群：⚠️ 里点名的
-            # 读不到的会话（模型会原样转述），和 Jira 段里的工单号（模型用
-            # --origin "Jira / KEY" 上报，检查器取 " / " 后半段当主语）。少任何一类，
-            # 检查器就会把一次正确的转述判成「报了没人给过它的会话」——2026-09-07
-            # 上午它就这样每个 tick 都在喊，六条假违约进了盯守群。
-            "offered": offered_now,
-            # 降频攒着还没端出去的内容（feed → 内容最早出现时刻）。放行或清空后
-            # 消失。写在这里是因为它是 scan.json 的形状之一，不是给模型看的。
-            "pending": pending,
-            # 每 feed 的累计出场次数。和 offered 同一轮写、同一个键空间，供
-            # watch_feed_stats.py 和 reported 侧的 counts 拼出「谁在灌水」——
-            # 最近 90 轮里 47 轮的全部内容只来自三个群，这个数该是常设的，
-            # 不该每次都从留存的 brief 里反推。
-            "stats": stats,
+    quiet = not (findings or notes or jira_out)
+    if replay and not quiet:
+        notes.append(
+            f"上一轮（{_hhmm(replay.get('failed_at'))}）交出的内容没有被处理完，这一轮从那之前的位置重新扫了一遍，"
+            f"所以下面可能有之前出现过的消息"
+        )
+    if skipped and not quiet:
+        notes.append(
+            f"{_hhmm(skipped.get('from'))} 到 {_hhmm(skipped.get('to'))} 之间的消息连续 {skipped.get('attempts')} 次"
+            f"都没有处理完，已经跳过，不会再出现；要看就去聊天里翻"
+        )
+    record: dict = {
+        "round_at": now,
+        # 上一轮的 offer 和它的时钟，原样留一轮：一次跑过了下一跳的运行（排队、
+        # 慢模型）投递时读到的是这一轮的 offer，而它拿到的是上一轮的。签名器和
+        # watch_report.py 两边都认，各按自己那轮计数。再往前不留：运行上限 30
+        # 分钟，跨不过两跳。
+        "previous": {
+            "round_at": float((scan_file or {}).get("round_at") or 0),
+            "offered": dict((scan_file or {}).get("offered") or {}),
         },
-    )
-
-    if not (findings or notes or jira_out):
+        # feeds 在下面按这一轮有没有叫模型决定：转正过的，还是直接算数的。
+        # 够不着的源和上次提醒的时间——让「说一次、6 小时后再提醒」跨轮成立。
+        "unreachable": unreachable,
+        # 这一轮真的端给模型看的会话，以及各自读到哪。契约检查器用它判断
+        # 「报了一个没人给过它的会话」，watch_report.py 用它决定 reported
+        # 写什么值——两者读同一份，所以不会各自算出不同的答案。
+        # offered 是「这一轮交给模型的全部主语」，不只是读成功的群：⚠️ 里点名的
+        # 读不到的会话（模型会原样转述），和 Jira 段里的工单号（模型用
+        # --origin "Jira / KEY" 上报，检查器取 " / " 后半段当主语）。少任何一类，
+        # 检查器就会把一次正确的转述判成「报了没人给过它的会话」——2026-09-07
+        # 上午它就这样每个 tick 都在喊，六条假违约进了盯守群。
+        "offered": offered_now,
+        # 降频攒着还没端出去的内容（feed → 内容最早出现时刻）。放行或清空后
+        # 消失。写在这里是因为它是 scan.json 的形状之一，不是给模型看的。
+        "pending": pending,
+        # 每 feed 的累计出场次数。和 offered 同一轮写、同一个键空间，供
+        # watch_feed_stats.py 和 reported 侧的 counts 拼出「谁在灌水」——
+        # 最近 90 轮里 47 轮的全部内容只来自三个群，这个数该是常设的，
+        # 不该每次都从留存的 brief 里反推。
+        "stats": stats,
+    }
+    if quiet:
+        # 没叫模型，没有什么会丢：新游标直接算数，Jira 的暂存副本也直接转正。
+        record["feeds"] = cursors
+        if skipped:
+            record["skipped"] = skipped
+        try:
+            if JIRA_STAGED.exists():
+                JIRA_STAGED.replace(JIRA_STATE)
+        except OSError:
+            pass
+        _write(SCAN, record)
         return 0
+    # 叫了模型：feeds 里仍是转正过的游标，新游标暂存，下一轮结算（见 reconcile）。
+    record["feeds"] = committed
+    if skipped:
+        record["skipped"] = skipped
+    record["staged"] = {
+        "feeds": cursors,
+        "staged_at": now,
+        "replays": int(replay.get("replays") or 0),
+        "first_at": replay.get("first_at") or now,
+        "first_feeds": replay.get("first_feeds") or cursors,
+    }
+    _write(SCAN, record)
 
     # 预算要连 notes 和 Jira 一起算：它们都进同一个正文，而 notes 在坏日子里最长
     # （每个够不着的会话一条），正好是最需要预算的那天。
