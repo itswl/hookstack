@@ -277,6 +277,21 @@ _SECRET_SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("openai-style api key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
     ("slack token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
     ("json web token", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
+    # A chat bot's incoming-webhook URL IS the credential: whoever holds it posts
+    # to that chat as the bot, and this family posts its own cards through
+    # exactly such URLs. A sibling deployment read a function's environment on
+    # 2026-10-12 and its chat webhook went into the transcript, two logs and the
+    # model call; nothing here named the shape until now.
+    (
+        "chat webhook url",
+        re.compile(
+            r"open-apis/bot/v2/hook/[A-Za-z0-9-]{8,}"
+            r"|hooks\.slack\.com/services/[A-Za-z0-9/]{20,}"
+            r"|oapi\.dingtalk\.com/robot/send\?access_token=[A-Za-z0-9]{20,}"
+            r"|qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key=[A-Za-z0-9-]{20,}"
+            r"|discord(?:app)?\.com/api/webhooks/[0-9]{10,}/[A-Za-z0-9_-]{20,}"
+        ),
+    ),
 )
 
 # How much of an answer is examined. Tool output can be a megabyte of logs and

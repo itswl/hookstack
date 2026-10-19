@@ -114,6 +114,15 @@ _PREFIXED: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?<![A-Za-z0-9_-])(AIza)[A-Za-z0-9_-]{30,}"),
     re.compile(r"(?<![A-Za-z0-9_-])(eyJ)[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}"),
     re.compile(r"(?<![A-Za-z0-9])(AKIA|ASIA|AROA|AIDA|AGPA|ANPA|ANVA)[0-9A-Z]{16}(?![0-9A-Z])"),
+    # Chat bots' incoming-webhook URLs. The path up to the secret survives, so
+    # the case file still says WHICH platform was posted to; the token half is
+    # the credential, and a bare `key=` (WeCom's spelling) is otherwise left
+    # alone on purpose above. Discord's id/token pair keeps the id.
+    re.compile(r"(open-apis/bot/v2/hook/)[A-Za-z0-9-]{8,}"),
+    re.compile(r"(hooks\.slack\.com/services/)[A-Za-z0-9/]{20,}"),
+    re.compile(r"(oapi\.dingtalk\.com/robot/send\?access_token=)[A-Za-z0-9]{20,}"),
+    re.compile(r"(qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key=)[A-Za-z0-9-]{20,}"),
+    re.compile(r"(discord(?:app)?\.com/api/webhooks/[0-9]{10,}/)[A-Za-z0-9_-]{20,}"),
 )
 
 # Every rule keeps its leading groups and drops the last thing it matched, which

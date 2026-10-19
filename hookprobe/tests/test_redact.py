@@ -26,6 +26,23 @@ def test_the_shapes_that_carry_a_secret_are_masked() -> None:
         ("kubectl get pods --token=eyJhbGciOiJSUzI1NiJ9.abc", "eyJhbGciOiJSUzI1NiJ9.abc"),
         ("redis-cli -a hunter2 --scan", "hunter2"),
         ("aws s3 ls --secret-access-key wJalrXUtnFEMI0K7MDENGbPxRfiCY", "wJalrXUtnFEMI0K7MDENGbPxRfiCY"),
+        # A chat bot's incoming webhook: the host survives, the token does not.
+        (
+            "curl -X POST https://open.larksuite.com/open-apis/bot/v2/hook/FAKE-HOOK-TOKEN-FOR-A-TEST -d '{}'",
+            "FAKE-HOOK-TOKEN-FOR-A-TEST",
+        ),
+        (
+            "curl https://hooks.slack.com/services/FAKE/FAKE/FAKESLACKTOKENFORATESTONLY",
+            "FAKESLACKTOKENFORATESTONLY",
+        ),
+        (
+            "curl 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=FAKE-WECOM-KEY-FOR-A-TEST-ONLY'",
+            "FAKE-WECOM-KEY",
+        ),
+        (
+            "curl https://discord.com/api/webhooks/1234567890123/FAKE-DISCORD-TOKEN-FOR-A-TEST",
+            "FAKE-DISCORD-TOKEN-FOR-A-TEST",
+        ),
     ]
     for command, secret in cases:
         masked = _tool_detail({"command": command})

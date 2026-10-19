@@ -35,6 +35,20 @@ def test_the_input_guard_allows_reading_a_secret_which_is_the_whole_point(tmp_pa
         ("github token", "GH_TOKEN=ghp_" + "a" * 36),
         ("openai-style api key", "ANTHROPIC_AUTH_TOKEN=sk-" + "b" * 40),
         ("slack token", "SLACK=xoxb-1234567890-abcdefghij"),
+        # A bot's incoming-webhook URL is the credential for posting as the bot.
+        (
+            "chat webhook url",
+            "LARK_HOOK=https://open.larksuite.com/open-apis/bot/v2/hook/FAKE-HOOK-TOKEN-FOR-A-TEST",
+        ),
+        (
+            "chat webhook url",
+            "SLACK_HOOK=https://hooks.slack.com/services/FAKE/FAKE/FAKESLACKTOKENFORATESTONLY",
+        ),
+        (
+            "chat webhook url",
+            "WECOM=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=FAKE-WECOM-KEY-FOR-A-TEST-ONLY",
+        ),
+        ("chat webhook url", "DISCORD=https://discord.com/api/webhooks/1234567890123/FAKE-DISCORD-TOKEN-FOR-A-TEST"),
     ],
 )
 def test_a_credential_in_tool_output_is_named_by_kind(kind: str, output: str) -> None:
@@ -54,6 +68,8 @@ def test_a_credential_in_tool_output_is_named_by_kind(kind: str, output: str) ->
         # guard people learn to ignore — every Kubernetes manifest has them.
         "spec:\n  containers:\n  - env:\n    - name: DB_PASSWORD\n      valueFrom:\n        secretKeyRef:",
         "error: secret 'db-creds' not found",
+        # A webhook HOST without its token is a destination, not a credential.
+        "channel ops-feishu posts to open.larksuite.com (bridge mode)",
         "",
     ],
 )
