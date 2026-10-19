@@ -15,7 +15,7 @@ The release notes are not a separate document. They are the implemented decision
 records that landed since the last tag — that is what the bucket is for, and a
 second place to write them is the duplicate-source mistake this repository keeps
 finding its way back to. There are **no GitHub Release objects**: the annotated
-tag's own message is the note, which is how 0.5.0 and 0.6.0 shipped.
+tag's own message is the note, which is how 0.5.0, 0.6.0 and 0.7.0 shipped.
 
 ## The steps
 
@@ -45,7 +45,10 @@ tag's own message is the note, which is how 0.5.0 and 0.6.0 shipped.
    interpolation, and the checkout's `.env` is a deployment's: run from the
    repository root on 2026-10-19, the quickstart's investigator took the work
    stack's `HOOKPROBE_TOKEN` and every `demo.sh` lookup answered 401 — a
-   release that was fine, failing a check that was not testing it.
+   release that was fine, failing a check that was not testing it. `demo.sh`
+   has read that token the way compose does since then (the shell, then
+   `./.env`, then the default), but the rule stands: the same `.env` also
+   chooses the investigator's runtime and model, and a stranger has neither.
 
 ## A note on tags vs. digests
 

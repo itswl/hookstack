@@ -38,7 +38,14 @@ set -euo pipefail
 base="${HOOKRELAY_URL:-http://127.0.0.1:8100}"
 judge="${HOOKJUDGE_URL:-http://127.0.0.1:8200}"
 probe="${HOOKPROBE_URL:-http://127.0.0.1:8088}"
-ptoken="${HOOKPROBE_TOKEN:-quickstart-token}"
+# The investigator's token the way compose resolved it: the shell first, then
+# `./.env`, then the compose file's default. Asked with any other token, every
+# lookup below answers 401 — which is what a checkout's .env did on 2026-10-19,
+# being a deployment's (docs/releasing.md says to run the stranger's check from
+# an empty directory; this keeps the demo honest when somebody does not).
+dotenv() { [ -f .env ] && sed -nE "s/^(export )?$1=//p" .env | tail -n 1 | sed -E "s/^\"(.*)\"\$/\1/; s/^'(.*)'\$/\1/" || true; }
+ptoken="${HOOKPROBE_TOKEN:-$(dotenv HOOKPROBE_TOKEN)}"
+ptoken="${ptoken:-quickstart-token}"
 
 say() { printf '\n\033[1;34m── %s\033[0m\n' "$1"; }
 post() { curl -sf "$base/hook/inbound" -H "content-type: application/json" -d "$1" | python3 -m json.tool; }
@@ -58,6 +65,7 @@ except Exception: print("")' "$1"; }
 say "health"
 curl -sf "$base/healthz" >/dev/null && echo "pipe is up"
 curl -sf "$probe/healthz" >/dev/null && echo "investigator is up" || echo "investigator is not answering on $probe — the loop steps below will wait for it"
+[ -z "${HOOKPROBE_TOKEN:-}" ] && [ -n "$(dotenv HOOKPROBE_TOKEN)" ] && echo "investigator token: taken from ./.env, as compose did"
 
 say "1. fresh alert → the ai route (stub model, visible tokens, zero cost)"
 post '{"title":"Payment gateway 5xx rate 8.1%","message":"gateway-2 5xx at 8.1% over the last 5 minutes","state":"alerting","env":"prod"}'
