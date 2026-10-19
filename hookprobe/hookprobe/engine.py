@@ -878,6 +878,12 @@ class ClaudeAgentEngine:
         # and all three derive it the same way or the derivation is worthless.
         env.update(agent_credentials(self._settings))
         env.update(trace_environment(session_key))
+        # Where a step's temporary files go: on the volume, inside the scratch
+        # window (retention.prune_scratch), rather than the container's /tmp
+        # where nothing prunes them and nothing can see what a run downloaded.
+        scratch = self._workdir / "scratch"
+        scratch.mkdir(parents=True, exist_ok=True)
+        env["TMPDIR"] = str(scratch)
         return env
 
     def describe_inputs(self, *, resume: str | None = None) -> dict[str, Any]:

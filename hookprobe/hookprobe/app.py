@@ -64,7 +64,7 @@ from hookprobe.distill import slug
 from hookprobe.engine import file_fact
 from hookprobe.files import system_prompt_path
 from hookprobe.live import Live
-from hookprobe.retention import prune
+from hookprobe.retention import prune, prune_scratch
 from hookprobe.runs import INFERRED_BY_PREFIX, RUNNING, Run, turn_cost
 from hookprobe.service import NotResumableError, NoTurnRunningError, RunBusyError, RunService
 from hookprobe.settings import Settings
@@ -240,6 +240,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
         async def retention_loop() -> None:
             while True:
                 await asyncio.to_thread(prune, settings.workdir, Path.home(), settings.retention_days)
+                await asyncio.to_thread(prune_scratch, settings.workdir, Path.home(), settings.scratch_days)
                 await asyncio.sleep(86400)
 
         async def outcome_loop() -> None:
@@ -247,7 +248,8 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
                 await asyncio.sleep(OUTCOME_SWEEP_SECONDS)
                 service.sweep_outcomes()
 
-        pruner = asyncio.create_task(retention_loop()) if settings.retention_days > 0 else None
+        sweeps = settings.retention_days > 0 or settings.scratch_days > 0
+        pruner = asyncio.create_task(retention_loop()) if sweeps else None
         outcomes = asyncio.create_task(outcome_loop())
         # And the boundaries, on a clock. `/v1/selftest` shipped run by nothing,
         # which makes it a claim rather than a check; this is what turns it into

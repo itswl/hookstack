@@ -77,6 +77,10 @@ services:
       # degrades to "carried and allowed" rather than "refused".
       EGRESS_ALLOW: >-
         ${EGRESS_ALLOW:-open.larksuite.com,api.anthropic.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,hookjudge,hookprobe,webhook-receiver,webhookwise-observability-alloy-1}
+      # The in-network names above, named as peers: each must resolve inside the
+      # compose network, where an external name must resolve to a public address
+      # (deploy/sidecars/proxy.py says why the two are held apart).
+      EGRESS_INTERNAL: ${EGRESS_INTERNAL:-hookrelay,hookjudge,hookprobe,webhook-receiver,webhookwise-observability-alloy-1}
 
   hookprobe:
     build:
@@ -204,6 +208,7 @@ services:
       # Case files and transcripts older than this are pruned daily. 0 keeps
       # everything — the case files are the agent's episodic memory.
       HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
+      HOOKPROBE_SCRATCH_DAYS: ${HOOKPROBE_SCRATCH_DAYS:-}
       # Skill layers: "project" (distilled, on the volume) is always on;
       # add "user" to also load a host library mounted at
       # /data/home/.claude/skills. HOOKPROBE_SKILLS pins the session's
