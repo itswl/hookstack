@@ -402,6 +402,7 @@ services:
       # Reachable HERE, not only on production. `assert_knobs_are_reachable.py`
       # asks whether SOME compose passes a knob, and both of these were
       # satisfied by the production compose alone while being unsettable on the
+      HOOKPROBE_SCRATCH_DAYS: ${HOOKPROBE_SCRATCH_DAYS:-}
       # node that actually runs them — measured on this stack 2026-09-12.
       # Empty keeps the documented default either way.
       HOOKPROBE_SELFTEST_EVERY_SECONDS: ${HOOKPROBE_SELFTEST_EVERY_SECONDS:-}

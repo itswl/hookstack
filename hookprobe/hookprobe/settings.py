@@ -441,6 +441,11 @@ class Settings:
     # this are pruned daily. 0 keeps everything — the case files are the
     # agent's episodic memory, so deletion is a choice, never a surprise.
     retention_days: int
+    # Scratch retention (days): the agent subprocess's TMPDIR ({workdir}/scratch)
+    # and the CLI's own transport logs under $HOME/.cache are pruned daily when
+    # older than this, whatever `retention_days` says — downloads and debug
+    # traffic, not the agent's memory. 0 keeps them.
+    scratch_days: int
 
     # Direct self-alarm for report returns that exhaust their retries: the
     # pipe is the broken link at that moment, so this posts straight to a
@@ -552,6 +557,7 @@ class Settings:
             budget_window_hours=max(0.1, _float("HOOKPROBE_BUDGET_WINDOW_HOURS", 24.0)),
             budget_gates_agent_door=_flag("HOOKPROBE_BUDGET_GATES_AGENT_DOOR", False),
             retention_days=max(0, _int("HOOKPROBE_RETENTION_DAYS", 0)),
+            scratch_days=max(0, _int("HOOKPROBE_SCRATCH_DAYS", 7)),
             alarm_url=os.environ.get("HOOKPROBE_ALARM_URL", "").strip(),
             alarm_min_interval_seconds=_int("HOOKPROBE_ALARM_MIN_INTERVAL_SECONDS", 600),
             selftest_every_seconds=max(0, _int("HOOKPROBE_SELFTEST_EVERY_SECONDS", 3600)),

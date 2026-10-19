@@ -208,6 +208,7 @@ services:
       # add "user" to also load a host library mounted at
       # /data/home/.claude/skills. HOOKPROBE_SKILLS pins the session's
       # skill list (comma names or "all") so a big library cannot flood it.
+      HOOKPROBE_SCRATCH_DAYS: ${HOOKPROBE_SCRATCH_DAYS:-}
       HOOKPROBE_SETTING_SOURCES: ${HOOKPROBE_SETTING_SOURCES:-}
       HOOKPROBE_SKILLS: ${HOOKPROBE_SKILLS:-}
       # Operator methodology appended to the system prompt (a file path;

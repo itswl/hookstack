@@ -157,6 +157,8 @@ def test_service_secrets_are_withheld_from_the_agent_subprocess(tmp_path: Path) 
     from tests.helpers import make_settings
 
     env = ClaudeAgentEngine(make_settings(tmp_path, bash_timeout_ms=30000, bash_max_timeout_ms=90000))._subprocess_env()
+    # Temporary files land on the volume, under the scratch window, not in /tmp.
+    assert env["TMPDIR"] == str(tmp_path / "scratch") and (tmp_path / "scratch").is_dir()
     for name in (
         "HOOKPROBE_EVENT_SECRET",
         "HOOKPROBE_RETURN_SECRET",

@@ -38,6 +38,8 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "default_timeout_seconds": 5,
         "max_timeout_seconds": 10,
         "workdir": tmp_path,
+        # Off in the fixture: a test that wants the scratch sweep says so.
+        "scratch_days": 0,
         "mcp_config": None,
         "setting_sources": ("project",),
         "skills": "",

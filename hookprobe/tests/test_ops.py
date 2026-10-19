@@ -44,6 +44,34 @@ def test_prune_removes_only_old_files(tmp_path) -> None:
     # Skills and memory live outside both roots — pruning never sees them.
 
 
+def test_scratch_and_the_cli_logs_have_a_window_of_their_own(tmp_path) -> None:
+    """Downloads and the CLI's transport logs were never the agent's memory, so
+    they are swept on their own window whatever `retention_days` says. A folder
+    something wrote into this week stays whole, however old the folder itself."""
+    from hookprobe.retention import prune_scratch
+
+    workdir, home = tmp_path / "wd", tmp_path / "home"
+    old_job = workdir / "scratch" / "job-old"
+    old_job.mkdir(parents=True)
+    (old_job / "function-config.json").write_text("{}")
+    live_job = workdir / "scratch" / "job-live"
+    live_job.mkdir()
+    (live_job / "partial.bin").write_text("x")
+    old_dump = workdir / "scratch" / "dump.bin"
+    old_dump.write_text("x")
+    log = home / ".cache" / "claude-cli-nodejs" / "-data" / "mcp-logs-chat" / "2026-09-04.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("")
+    stale = time.time() - 10 * 86400
+    for path in (old_job, old_job / "function-config.json", old_dump, log, live_job):
+        os.utime(path, (stale, stale))  # live_job's own mtime is old; its file is fresh
+
+    assert prune_scratch(workdir, home, 0) == 0, "0 keeps everything"
+    assert prune_scratch(workdir, home, 7) == 3
+    assert not old_job.exists() and not old_dump.exists() and not log.exists()
+    assert (live_job / "partial.bin").exists(), "a folder written into this week is left whole"
+
+
 def test_healthz_slot_arithmetic(tmp_path) -> None:
     engine = GatedEngine()
     settings = make_settings(tmp_path, token=TOKEN, max_concurrent=2)
