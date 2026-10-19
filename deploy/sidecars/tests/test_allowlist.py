@@ -17,12 +17,25 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-def _with(allow: str, ports: str = "80,443"):
+def _with(allow: str, ports: str = "80,443", internal: str = ""):
     os.environ["EGRESS_ALLOW"] = allow
     os.environ["EGRESS_PORTS"] = ports
+    os.environ["EGRESS_INTERNAL"] = internal
     import proxy
 
     return importlib.reload(proxy)
+
+
+def _resolving_to(monkeypatch, module, *addresses: str):
+    """A resolver that answers every name with these addresses, and counts."""
+    calls: list[str] = []
+
+    def fake(host, port, *args, **kwargs):
+        calls.append(host)
+        return [(2, 1, 6, "", (a, port)) for a in addresses]
+
+    monkeypatch.setattr(module.socket, "getaddrinfo", fake)
+    return calls
 
 
 def test_a_bare_name_is_exact_and_a_lookalike_is_refused() -> None:
@@ -36,11 +49,131 @@ def test_a_bare_name_is_exact_and_a_lookalike_is_refused() -> None:
 
 
 def test_a_leading_dot_admits_the_tree_and_the_apex() -> None:
-    p = _with(".amazonaws.com")
-    assert p.permitted("ec2.ap-southeast-1.amazonaws.com")
-    assert p.permitted("amazonaws.com")
-    assert not p.permitted("notamazonaws.com")
-    assert not p.permitted("amazonaws.com.evil.net")
+    p = _with(".example.net")
+    assert p.permitted("api.eu.example.net")
+    assert p.permitted("example.net")
+    assert not p.permitted("notexample.net")
+    assert not p.permitted("example.net.evil.net")
+
+
+def test_the_aws_api_shape_admits_service_endpoints_and_nothing_anyone_can_register() -> None:
+    """`.amazonaws.com` admitted every hostname anyone can get under it. The shape
+    admits `<service>[.<region>].amazonaws.com` and refuses the forms whose first
+    label is somebody's: an instance, a load balancer, an API Gateway stage, an
+    EKS cluster — a cluster the operator means goes on the list by name."""
+    p = _with("@aws-api")
+    for host in (
+        "sts.amazonaws.com",
+        "iam.amazonaws.com",
+        "ec2.ap-southeast-1.amazonaws.com",
+        "logs.us-gov-west-1.amazonaws.com",
+        "ssmmessages.eu-central-1.amazonaws.com",
+    ):
+        assert p.permitted(host), host
+    for host in (
+        "amazonaws.com",
+        "notamazonaws.com",
+        "sts.amazonaws.com.evil.net",
+        "ec2-1-2-3-4.ap-southeast-1.compute.amazonaws.com",
+        "my-lb-123456.ap-southeast-1.elb.amazonaws.com",
+        "abc123.execute-api.ap-southeast-1.amazonaws.com",
+        "0123456789abcdef0123456789abcdef.gr7.ap-southeast-1.eks.amazonaws.com",
+        "my-bucket.s3.ap-southeast-1.amazonaws.com",
+    ):
+        assert not p.permitted(host), host
+
+
+def test_the_s3_shape_admits_buckets_in_every_spelling() -> None:
+    p = _with("@aws-s3")
+    for host in (
+        "my-bucket.s3.amazonaws.com",
+        "my.dotted.bucket.s3.ap-southeast-1.amazonaws.com",
+        "my-bucket.s3-ap-southeast-1.amazonaws.com",
+        "my-bucket.s3.dualstack.ap-southeast-1.amazonaws.com",
+    ):
+        assert p.permitted(host), host
+    for host in (
+        "s3.amazonaws.com",
+        "evil.com",
+        "my-bucket.s3.amazonaws.com.evil.net",
+        "ec2.ap-southeast-1.amazonaws.com",
+    ):
+        assert not p.permitted(host), host
+
+
+def test_a_shape_the_proxy_does_not_know_stops_it_at_start() -> None:
+    """A typo in a rule must not become a rule that admits nothing in silence."""
+    with pytest.raises(SystemExit, match="shape"):
+        _with("@aws-apii")
+    _with("example.com")  # and the module imports again afterwards
+
+
+def test_a_listed_name_may_not_resolve_to_a_private_or_host_address(monkeypatch) -> None:
+    """The list is on names and the connection is to an address. A listed name
+    whose answer is loopback, private, link-local or the host machine's mapped
+    address is refused, including an IPv4 answer wrapped in IPv6."""
+    p = _with("example.com")
+    for address in (
+        "127.0.0.1",
+        "10.0.0.5",
+        "172.18.0.9",
+        "192.168.1.2",
+        "169.254.169.254",
+        "0.250.250.254",
+        "::ffff:127.0.0.1",
+        "::1",
+    ):
+        _resolving_to(monkeypatch, p, address)
+        with pytest.raises(p.Refused) as refused:
+            p.decide("example.com", 443)
+        assert refused.value.code == 403 and "non-public" in refused.value.why, address
+    _resolving_to(monkeypatch, p, "93.184.216.34")
+    assert p.decide("example.com", 443)[0][3] == ("93.184.216.34", 443)
+
+
+def test_one_bad_answer_refuses_the_whole_name(monkeypatch) -> None:
+    p = _with("example.com")
+    _resolving_to(monkeypatch, p, "93.184.216.34", "127.0.0.1")
+    with pytest.raises(p.Refused):
+        p.decide("example.com", 443)
+
+
+def test_a_compose_peer_must_resolve_inside_the_compose(monkeypatch) -> None:
+    """A peer name that has fallen through to the host's resolver is not the peer."""
+    p = _with("", internal="hookrelay")
+    _resolving_to(monkeypatch, p, "172.18.0.5")
+    assert p.decide("hookrelay", 443)[0][3] == ("172.18.0.5", 443)
+    _resolving_to(monkeypatch, p, "127.0.0.1")
+    assert p.decide("hookrelay", 443), "loopback is this container itself"
+    for address in ("93.184.216.34", "0.250.250.254"):
+        _resolving_to(monkeypatch, p, address)
+        with pytest.raises(p.Refused) as refused:
+            p.decide("hookrelay", 443)
+        assert refused.value.code == 403 and "compose" in refused.value.why, address
+
+
+def test_the_name_is_checked_before_any_lookup(monkeypatch) -> None:
+    """Otherwise a name is a DNS exfiltration channel: the lookup itself leaves."""
+    p = _with("example.com")
+    calls = _resolving_to(monkeypatch, p, "93.184.216.34")
+    with pytest.raises(p.Refused) as refused:
+        p.decide("evil.example.org", 443)
+    assert refused.value.code == 403 and calls == []
+
+
+def test_a_name_that_does_not_resolve_is_a_502_not_a_refusal(monkeypatch) -> None:
+    """The agent is told 403 means do not retry; a resolver hiccup must not read as that."""
+    import socket as socket_module
+
+    p = _with("example.com")
+
+    def failing(*args, **kwargs):
+        raise socket_module.gaierror(-2, "Name or service not known")
+
+    monkeypatch.setattr(p.socket, "getaddrinfo", failing)
+    with pytest.raises(p.Refused) as refused:
+        p.decide("example.com", 443)
+    assert refused.value.code == 502
 
 
 def test_case_and_a_trailing_dot_do_not_get_around_it() -> None:
@@ -97,7 +230,9 @@ def test_bytes_sent_right_behind_the_connect_reach_the_far_side() -> None:
 
     upstream = socketserver.TCPServer(("127.0.0.1", 0), Echo)
     port = upstream.server_address[1]
-    proxy = _with("127.0.0.1", str(port))
+    # Loopback is where a compose peer may live (this container itself), never
+    # where a listed external name may point.
+    proxy = _with("", str(port), internal="127.0.0.1")
     gateway = proxy.Server(("127.0.0.1", 0), proxy.Handler)
     for server in (upstream, gateway):
         threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()

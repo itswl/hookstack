@@ -208,8 +208,21 @@ services:
       # its old name so the ledger's history stays one file.
       - ../work-data/mcp-gate:/data
     environment:
+      # `@aws-api` is any AWS service API endpoint in any region and `@aws-s3`
+      # is a bucket (deploy/sidecars/proxy.py, SHAPES). They replaced
+      # `.amazonaws.com` on 2026-10-19: that suffix also admitted every hostname
+      # anyone can get under it — an instance's public name, a load balancer, an
+      # API Gateway stage, somebody else's EKS cluster — a destination an
+      # attacker controls, inside the allowlist. A cluster endpoint the planner
+      # is given has an id for its first label, so the shapes do not match it on
+      # purpose: add it to EGRESS_ALLOW in .env by name, next to these.
       EGRESS_ALLOW: >-
-        ${EGRESS_ALLOW:-open.larksuite.com,api.anthropic.com,.amazonaws.com,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
+        ${EGRESS_ALLOW:-open.larksuite.com,api.anthropic.com,@aws-api,@aws-s3,docs.aws.amazon.com,grafana.com,raw.githubusercontent.com,hookrelay,sink}
+      # This compose's own peers reached through the proxy. A listed external
+      # name must resolve to a public address; a peer named here must resolve
+      # inside the compose network — a peer name that has fallen through to the
+      # host's resolver is not the peer, and is refused.
+      EGRESS_INTERNAL: ${EGRESS_INTERNAL:-hookrelay,sink}
       MCPGATE_UPSTREAM: ${WATCH_CHAT_MCP_URL:-http://host.docker.internal:52222/mcp/}
       # A second MCP server shares this port as a route: replace the line above
       # with one MCPGATE_ROUTE_<NAME>=<url> per server, write each node's list
@@ -389,6 +402,7 @@ services:
       HOOKPROBE_PRICE_CACHE_READ_PER_1M: ${HOOKPROBE_PRICE_CACHE_READ_PER_1M:-}
       HOOKPROBE_PRICE_CACHE_WRITE_PER_1M: ${HOOKPROBE_PRICE_CACHE_WRITE_PER_1M:-}
       HOOKPROBE_RETENTION_DAYS: ${HOOKPROBE_RETENTION_DAYS:-}
+      HOOKPROBE_SCRATCH_DAYS: ${HOOKPROBE_SCRATCH_DAYS:-}
       # Operator methodology appended to the system prompt, re-read every run —
       # edit it and the next run uses it, no restart. That file is how this
       # instance becomes a PLANNER with opinions rather than a generic
@@ -402,7 +416,6 @@ services:
       # Reachable HERE, not only on production. `assert_knobs_are_reachable.py`
       # asks whether SOME compose passes a knob, and both of these were
       # satisfied by the production compose alone while being unsettable on the
-      HOOKPROBE_SCRATCH_DAYS: ${HOOKPROBE_SCRATCH_DAYS:-}
       # node that actually runs them — measured on this stack 2026-09-12.
       # Empty keeps the documented default either way.
       HOOKPROBE_SELFTEST_EVERY_SECONDS: ${HOOKPROBE_SELFTEST_EVERY_SECONDS:-}
