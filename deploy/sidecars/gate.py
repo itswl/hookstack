@@ -108,8 +108,11 @@ FORWARDED = ("content-type", "accept", "mcp-session-id", "mcp-protocol-version",
 # How much of a call's arguments the ledger keeps. Enough to see what was asked,
 # short enough that the ledger is not a copy of the chat.
 ARGUMENTS_KEPT = 500
-# Idle, per socket operation — see the module docstring.
-UPSTREAM_TIMEOUT = 60.0
+# Idle, per socket operation — see the module docstring. A knob
+# (MCPGATE_UPSTREAM_TIMEOUT, seconds) so a deployment whose upstream answers in
+# a second can report a silent one as failed sooner than a minute; the default
+# is the minute this file always had.
+UPSTREAM_TIMEOUT = float(os.environ.get("MCPGATE_UPSTREAM_TIMEOUT", "60"))
 # A JSON-RPC request is a few KB and a listing of 34 tools is a few tens; this
 # container has 128 MB, and a body is held about three times over while it is
 # filtered. Past either bound nothing here should buffer it.
