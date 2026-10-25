@@ -464,14 +464,17 @@ def test_a_draft_survives_a_report_that_does_not_quite_parse(tmp_path) -> None:
     assert "无人值守" not in draft["content"]
 
 
-def test_metrics_speak_prometheus_and_need_no_token(tmp_path) -> None:
-    """The platform's alerting is the consumer; a scraper cannot type a token
-    prompt, and nothing here is more sensitive than counts and a dollar figure."""
+def test_metrics_speak_prometheus_and_need_the_read_token(tmp_path) -> None:
+    """The README says the bearer covers every data surface except /healthz and
+    the page shell. /metrics was the exception that made that sentence false;
+    Prometheus carries the token from a file, as its config has no env
+    expansion."""
     with make_client(tmp_path, FakeEngine()) as client:
         client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH)
         poll_until_final(client, TRIGGER_PAYLOAD["sessionKey"])
 
-        response = client.get("/metrics")
+        assert client.get("/metrics").status_code == 401, "spend and run counts are not public"
+        response = client.get("/metrics", headers=AUTH)
 
         assert response.status_code == 200
         assert "text/plain" in response.headers["content-type"]
@@ -516,7 +519,7 @@ def test_a_timed_out_turn_shows_up_as_unpriced_on_metrics(tmp_path) -> None:
         )
         poll_until_final(client, "hook:slow", deadline=6.0)
 
-        body = client.get("/metrics").text
+        body = client.get("/metrics", headers=AUTH).text
         # ZERO, and that is the change worth pinning. The engine is interrupted
         # rather than killed on timeout, so the SDK's final message arrives and
         # the turn is priced — there is nothing left unpriced to count. The

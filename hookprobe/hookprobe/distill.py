@@ -105,6 +105,45 @@ def slug(text: str, fallback: str = "investigation") -> str:
     return name
 
 
+# Control characters are not text a next run should have to read; the two
+# comment delimiters are the seam this module finds cases by, so model prose
+# carrying one must not be able to close or open it.
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _neutral(text: str) -> str:
+    text = _CONTROL.sub(" ", str(text or "")).replace("\r\n", "\n").replace("\r", "\n")
+    return text.replace("<!--", "&lt;!--").replace("-->", "--&gt;")
+
+
+def _one_line(text: str, limit: int) -> str:
+    """A field that is a line in the manifest, whatever the report contained."""
+    return " ".join(_neutral(text).split())[:limit]
+
+
+def _case_text(text: str) -> str:
+    """Model prose inside a case: no heading, no setext rule, no marker.
+
+    A conclusion is the one field written in sentences, so it keeps its
+    paragraphs. What it must not keep is the power to look like a section of
+    the runbook: `## Procedure` at the top of a case is indistinguishable from
+    the operator's own section to the next model that reads the file. The
+    backslashes render the characters literally; they are not a claim that the
+    prose is true, only that it is still inside its case.
+    """
+    lines: list[str] = []
+    for line in _neutral(text).splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#") or stripped in ("---", "***", "___"):
+            line = line[: len(line) - len(stripped)] + "\\" + stripped
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _yaml_quote(text: str) -> str:
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _steps(turns: list[dict[str, Any]]) -> list[str]:
     """The tool sequence, in order, with consecutive repeats collapsed."""
     steps: list[str] = []
@@ -219,7 +258,7 @@ def draft_skill(run: Any, *, unreviewed: bool = False) -> dict[str, str]:
     has been saved automatically and is being read by the next investigation.
     """
     turns = list(getattr(run, "turns", []) or [])
-    headline = _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
+    headline = _one_line(_headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key, 300)
     name = slug(headline)
     steps = _steps(turns)
     conclusion = _conclusion(turns)
@@ -227,7 +266,7 @@ def draft_skill(run: Any, *, unreviewed: bool = False) -> dict[str, str]:
     lines = [
         "---",
         f"name: {name}",
-        f'description: What previous investigations of "{headline[:90]}" checked, and what they found.',
+        f'description: What previous investigations of "{_yaml_quote(headline[:90])}" checked, and what they found.',
         "---",
         "",
         f"# {headline[:120]}",
@@ -281,19 +320,27 @@ _HISTORY_KEEP = 8
 
 
 def case_block(run: Any, *, steps: list[str], conclusion: str, at: float) -> str:
-    """One investigation, delimited so a later trim can find its edges."""
+    """One investigation, delimited so a later trim can find its edges.
+
+    Every field that came from the model is neutralized before it is written:
+    steps and the session key become one line, and the conclusion keeps its
+    paragraphs but loses headings and the comment markers `merge_case` uses.
+    Without this a report could close its own case, open `hookprobe:cases`, or
+    add a `## Procedure` section the next run would read as doctrine.
+    """
     stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(at))
-    session = str(getattr(run, "session_key", "") or "?")
+    session = _one_line(str(getattr(run, "session_key", "") or "?"), 120).replace("`", "'")
     lines = [
         f"<!-- case:start {int(at)} -->",
         f"### {stamp} · session `{session}`",
         "",
     ]
-    if steps:
-        lines += [f"{index}. `{step}`" for index, step in enumerate(steps[:30], 1)]
+    clean_steps = [_one_line(step, 300).replace("`", "'") for step in steps[:30]]
+    if clean_steps:
+        lines += [f"{index}. `{step}`" for index, step in enumerate(clean_steps, 1)]
     else:
         lines.append("_No tools ran — the answer came from the alert alone._")
-    lines += ["", conclusion or "_(the run left no conclusion)_", "", "<!-- case:end -->", ""]
+    lines += ["", _case_text(conclusion) or "_(the run left no conclusion)_", "", "<!-- case:end -->", ""]
     return "\n".join(lines)
 
 
@@ -353,7 +400,7 @@ def auto_write(
     # marker for a caller to remember, which is how the last one got past.
     if not _steps(turns):
         return {"skipped": "run called no tools; nothing to write a procedure from"}
-    headline = _headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key
+    headline = _one_line(_headline(turns, str(getattr(run, "current_message", "") or "")) or run.session_key, 300)
     name = slug(headline)
     adopt_legacy(skills_dir, headline, name)
     target = skills_dir / name

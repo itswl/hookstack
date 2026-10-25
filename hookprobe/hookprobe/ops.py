@@ -321,17 +321,17 @@ def register(
             "ceiling_binds": window["spend_visibility"] != "blind",
         }
 
-    @app.get("/metrics")
+    @app.get("/metrics", dependencies=[Depends(guard)])
     async def metrics() -> Any:
         """Prometheus text format, rendered by hand — three gauges are not a
         client-library dependency.
 
-        Unauthenticated like /healthz, and for the same reason: the scraper is
-        a machine on the private network, and nothing here is more sensitive
-        than counts and a dollar figure. This is how the platform's existing
-        alerting finally sees the investigator — the platform's own deliveries
-        once failed silently for 8 days, and this service had the same blind
-        spot until now.
+        Behind the read token like every other data surface: the README says the
+        bearer covers everything except `/healthz` and the page shell, and this
+        route was the exception that made that sentence false. It is not a
+        credential leak, but it is spend, run counts and runbook counts on a
+        port a sibling container can reach. Prometheus carries the token from a
+        file, as its config has no env expansion.
         """
         running, queued = service.turn_counts()
         lines = [
