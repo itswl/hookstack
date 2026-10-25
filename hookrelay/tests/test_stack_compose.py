@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 COMPOSE = Path(__file__).resolve().parents[2] / "docker-compose.yml"
+STACK_CONFIG = Path(__file__).resolve().parents[2] / "hookrelay" / "examples" / "stack.yaml"
 
 
 def _default(text: str, name: str) -> str:
@@ -28,4 +29,12 @@ def test_the_demo_signs_and_verifies_card_actions_with_the_same_secret() -> None
     assert signed == verified, (
         "the demo pipe signs with one action secret and the investigator verifies with another; "
         "approve will be refused even though the button is drawn"
+    )
+
+
+def test_the_pipe_signs_the_forwarded_press_with_the_door_it_verifies_with() -> None:
+    text = STACK_CONFIG.read_text(encoding="utf-8")
+    block = text.split("name: to-probe-action", 1)[1].split("- name:", 1)[0]
+    assert "secret: ${HOOKPROBE_ACTION_SECRET}" in block, (
+        "to-probe-action is unsigned while the action door requires a signature; every approve press is a 401"
     )

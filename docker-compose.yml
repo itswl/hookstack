@@ -39,6 +39,10 @@ services:
       # Where a press on an investigator's card goes back to — the approve,
       # follow-up and remember buttons the stack config offers forward here.
       HOOKPROBE_ACTION_URL: ${HOOKPROBE_ACTION_URL:-http://hookprobe:8088/hooks/action}
+      # The same value the action door verifies with below. The example config
+      # signs to-probe-action with this; one side without it is a 401 on the
+      # approve press, which the stack smoke catches and a unit test cannot.
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-demo-card-secret}
       # Card actions. A demo value on purpose: without a secret no card carries a
       # button at all, so the whole return leg would be invisible here — and the
       # escalation sweep would disarm itself, which is correct behaviour but not

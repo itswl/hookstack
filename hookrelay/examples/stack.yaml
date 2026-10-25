@@ -113,11 +113,13 @@ channels:
   # Where a press on the investigator's card goes: approve, follow-up and
   # remember all ride this channel back to its action door. `payload: raw` for
   # the same reason as the judge's feedback channel — the envelope IS the
-  # content. Unsigned in this demo (HOOKPROBE_EVENT_SECRET is empty); a real
-  # deployment signs it with the same secret as the event door.
+  # content. Signed with the action door's own secret: an approve that arrives
+  # unsigned is indistinguishable from anyone inside the container shaping one,
+  # so the demo gives both ends the same demo value through compose.
   - name: to-probe-action
     type: generic
     url: ${HOOKPROBE_ACTION_URL}
+    secret: ${HOOKPROBE_ACTION_SECRET}
     options: {payload: raw}
 
   # People. The pipe sends a card MODEL to the chat bridge (docs/bridge-protocol.md);
