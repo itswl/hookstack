@@ -1629,6 +1629,44 @@ async def test_status_carries_the_last_recorded_gate_verdict(app_client, tmp_pat
     assert body["eval_gate"] is None, "a damaged record reads as no record, never as a 500 on the board"
 
 
+async def test_an_exhausted_judge_budget_degrades_to_the_rule_floor(tmp_path):
+    """Opt-in ceiling: past it the event is still judged, by keywords, and the
+    row says why. Refusing to record a verdict would turn a cost brake into a
+    missing alert."""
+    from hookjudge.contract import Incoming, Verdict
+
+    app = create_app(
+        settings=_settings(
+            tmp_path,
+            budget_usd=1.0,
+            ai_base_url="https://ai.example/v1",
+            ai_api_key="key",
+        )
+    )
+    async with (
+        httpx.ASGITransport(app=app) as transport,
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as _client,
+    ):
+        store = app.state.store
+        now = time.time()
+        seed = Incoming.parse({"source": "grafana", "title": "already paid"}, now=now)
+        await store.record(
+            seed,
+            Verdict(summary="s", importance="high", route="ai", model="m", cost=2.0).normalized(),
+            1,
+        )
+
+        event = Incoming.parse({"source": "grafana", "title": "new condition"}, now=now)
+        row_id = await app.state.judge_and_record(Sink(), event)
+
+        row = await store.judgement(row_id)
+        assert row is not None
+        assert row["route"] == "rule"
+        assert "judge budget exhausted" in row["degraded_reason"]
+        assert "$2.0000 of $1.0000" in row["degraded_reason"]
+
+
 async def test_the_board_installs_on_a_phone(app_client):
     """The same shell as the pipe's board: a manifest and icons under /static,
     the worker at the page's own level, and the page linking them with BASE."""

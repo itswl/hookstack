@@ -151,7 +151,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if by_rule is not None:
                     verdict = rule_reuse_verdict(by_rule, event)
                 else:
-                    verdict = await ai_verdict(client, app_settings, event)
+                    # An OPT-IN ceiling on the judge's own bill. The event is
+                    # still judged — by the keyword floor — and the row says why,
+                    # so a spent budget never becomes a missing alert.
+                    spent = (
+                        await store.spent_since(now_ts() - app_settings.budget_window_hours * 3600)
+                        if app_settings.budget_usd > 0
+                        else 0.0
+                    )
+                    if app_settings.budget_usd > 0 and spent >= app_settings.budget_usd:
+                        verdict = rule_verdict(
+                            event,
+                            degraded_reason=(
+                                f"judge budget exhausted: ${spent:.4f} of ${app_settings.budget_usd:.4f} "
+                                f"in {app_settings.budget_window_hours:g}h"
+                            ),
+                        )
+                    else:
+                        verdict = await ai_verdict(client, app_settings, event)
             # A model failure a PERSON must fix (dead key, no credit, hard quota)
             # degrades this verdict AND every one after it to the keyword floor,
             # silently. Alarm on it — rate-limited, so a dead key raises one

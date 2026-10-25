@@ -1383,6 +1383,19 @@ class RunService:
             async with self._semaphore:
                 self._in_slot += 1
                 try:
+                    # The door checked the meter before this run queued; the
+                    # queue is where a burst of accepted runs can outspend it.
+                    # Re-check at the slot, not at the door, because this is
+                    # the moment that spends. Operator-driven runs are exempt:
+                    # a person asking a question is the door's rule, not the
+                    # breaker's.
+                    state = self.budget_state()
+                    if run.origin == "relay" and state is not None and state[0] >= state[1]:
+                        self._fail(
+                            run,
+                            f"budget exhausted while queued ({state[0]:.4f} of {state[1]:.4f})",
+                        )
+                        return
                     # The timeout INTERRUPTS before it cancels, for the same
                     # reason Stop does: wait_for() cancelling the coroutine threw
                     # away the SDK's final message, so the priciest failures —

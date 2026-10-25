@@ -622,6 +622,30 @@ def test_event_door_proceeds_under_budget(tmp_path) -> None:
         assert engine.calls == 1
 
 
+def test_a_run_that_queued_past_the_budget_is_stopped_at_the_slot(tmp_path) -> None:
+    """The door checks the meter before the run queues; a burst can still put
+    the process over between that check and the slot. This is the moment that
+    spends, so it re-checks here rather than trusting the door's snapshot."""
+    store = RunStore(tmp_path / "results")
+    _seed_spend(store, 2.0, time.time(), "old:funded")
+    engine = FakeEngine()
+    settings = make_settings(tmp_path, token=TOKEN, budget_usd=1.0)
+    service = RunService(settings, engine, store)
+
+    async def scenario():
+        run = service.start({"message": "Title: t\ngo", "sessionKey": "queued:1"}, origin="relay")
+        for _ in range(100):
+            if run.finished:
+                break
+            await asyncio.sleep(0.01)
+        return run
+
+    run = asyncio.run(scenario())
+    assert run.finished
+    assert "budget exhausted while queued" in (run.error or "")
+    assert engine.calls == 0, "nothing reached the model"
+
+
 def test_budget_ignores_spend_outside_window(tmp_path) -> None:
     engine = FakeEngine()
     store = RunStore(tmp_path / "results")

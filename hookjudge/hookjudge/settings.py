@@ -103,6 +103,15 @@ class Settings:
     # The cap is a queue, not a drop — the judgement is still recorded, later.
     max_inflight: int = 8
 
+    # An OPT-IN ceiling on what the judge itself may spend in a window. Zero is
+    # off, and that is the default: refusing to judge an alert is a policy, and
+    # a deployment should choose it. When set, an event that would need a paid
+    # call past the ceiling falls to the keyword floor with the reason on the
+    # row — still a verdict, never a dropped alert.
+    budget_usd: float = 0.0
+    # The sliding window the dollar ceiling is measured over.
+    budget_window_hours: float = 24.0
+
     # Where to listen. Read here rather than in __main__ so that "what is this
     # process configured to do" is one object and not one object plus two
     # os.environ calls at the entrypoint — hookprobe's shape, and the better one.
@@ -153,6 +162,8 @@ class Settings:
             ai_structured_output=(os.environ.get("HOOKJUDGE_AI_STRUCTURED_OUTPUT") or "").strip() or "auto",
             burst_window_seconds=_int("HOOKJUDGE_BURST_WINDOW_SECONDS", 600),
             max_inflight=max(1, _int("HOOKJUDGE_MAX_INFLIGHT", 8)),
+            budget_usd=max(0.0, _float("HOOKJUDGE_BUDGET_USD", 0.0)),
+            budget_window_hours=max(1.0, _float("HOOKJUDGE_BUDGET_WINDOW_HOURS", 24.0)),
             host=os.environ.get("HOOKJUDGE_HOST", "127.0.0.1"),
             port=_int("HOOKJUDGE_PORT", 8200),
         )

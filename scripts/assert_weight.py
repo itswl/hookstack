@@ -393,7 +393,11 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # a judgement exists, and a boot replay. Split: +~63 source, +~41 code. The
     # doctrine question: this is the judge's own promise about its own door; no
     # new judgement about an alert, and no new dependency.
-    "hookjudge": (3540, Path("hookjudge/README.md")),
+    # 3540 -> 3600 on 2026-10-25, for the OPT-IN budget: a spent ceiling still
+    # records a verdict (the keyword floor, with the reason on the row) instead
+    # of dropping the alert. Split: +~28 source, +~24 code; default 0 means the
+    # 3,540 behaviour is unchanged until an operator states a dollar figure.
+    "hookjudge": (3600, Path("hookjudge/README.md")),
 }
 UNCAPPED = ("hookprobe",)
 

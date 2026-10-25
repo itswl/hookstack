@@ -154,6 +154,8 @@ services:
       HOOKJUDGE_RETURN_URL: ${SHADOW_RETURN_URL:-none}
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
       HOOKJUDGE_MAX_INFLIGHT: ${HOOKJUDGE_MAX_INFLIGHT:-8}
+      HOOKJUDGE_BUDGET_USD: ${HOOKJUDGE_BUDGET_USD:-0}
+      HOOKJUDGE_BUDGET_WINDOW_HOURS: ${HOOKJUDGE_BUDGET_WINDOW_HOURS:-24}
       HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
       # The investigator's DeepSeek key, on the OpenAI dialect this time. The
       # judge negotiates structured output per model at first use (json_schema

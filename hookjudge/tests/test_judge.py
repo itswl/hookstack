@@ -1013,6 +1013,20 @@ async def test_a_recovery_inherits_a_firing_older_than_the_reuse_window(tmp_path
     await store.close()
 
 
+async def test_spent_since_counts_only_rows_inside_the_window(tmp_path):
+    """The judge's opt-in budget reads this, not the whole ledger: a ceiling is
+    a rate over time, and a month-old verdict must not spend this hour's."""
+    store = await _ledger(tmp_path)
+    old = replace(event(title="old"), received_at=1000.0)
+    new = replace(event(title="new"), received_at=5000.0)
+    await store.record(old, replace(ai_ok(), cost=2.0), 1)
+    await store.record(new, replace(ai_ok(), cost=0.5), 1)
+
+    assert await store.spent_since(4000.0) == 0.5
+    assert await store.spent_since(0.0) == 2.5
+    await store.close()
+
+
 async def test_the_review_queue_does_not_ask_a_human_to_re_rate_a_recovery(tmp_path):
     """A recovery's importance was inherited; it is not a verdict the judge
     expressed. The agreement matrix already excludes it, and a queue that asks

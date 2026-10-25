@@ -292,6 +292,20 @@ class Store:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def spent_since(self, cutoff: float) -> float:
+        """What the judge itself has been billed for rows received after `cutoff`.
+
+        A floor, not an invoice: a provider answering prose still charged and
+        the row carries its cost, but a call that died before a response has no
+        row and no cost. The budget breaker reads this as a brake, not as
+        accounting; `summary` remains the account.
+        """
+        cursor = await self.db.execute(
+            "SELECT coalesce(sum(cost), 0) FROM judgements WHERE received_at >= ?", (cutoff,)
+        )
+        row = await cursor.fetchone()
+        return float(row[0]) if row else 0.0
+
     async def prior_rule_verdict(
         self, rule_key: str, level: str, window_seconds: int, now: float
     ) -> dict[str, Any] | None:
