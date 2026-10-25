@@ -99,6 +99,7 @@ CREATE INDEX IF NOT EXISTS ix_deliveries_event ON deliveries (event_id);
 CREATE TABLE IF NOT EXISTS silences (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,                -- '*' silences everything
+    condition TEXT NOT NULL DEFAULT '',  -- exact title; '' = every condition of that source
     until_ts REAL NOT NULL,
     note TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL
@@ -452,6 +453,12 @@ class Store:
         if "reference" not in columns:
             # The sending platform's own id for the event (Source.reference).
             await db.execute("ALTER TABLE events ADD COLUMN reference TEXT")
+        cursor = await db.execute("PRAGMA table_info(silences)")
+        silence_columns = {str(row["name"]) for row in await cursor.fetchall()}
+        if "condition" not in silence_columns:
+            # A silence used to mean the whole source. The condition is the
+            # title as extracted at the door; '' keeps the old, wider meaning.
+            await db.execute("ALTER TABLE silences ADD COLUMN condition TEXT NOT NULL DEFAULT ''")
 
     async def close(self) -> None:
         if self._read_db is not None:
@@ -726,6 +733,29 @@ class Store:
         row = await cursor.fetchone()
         return str(row["reference"] or "") if row is not None else ""
 
+    async def event_origin(self, event_id: int) -> dict[str, Any] | None:
+        """The front-door event a card's event descends from.
+
+        A card is usually a RETURN: the judge's verdict quotes the alert, and
+        the investigator's report quotes the verdict. Silencing "this alert"
+        has to land on the alert's own source and title, not on the return
+        door's synthetic `judge-notify` row. Walk the same `hr-<id>` /
+        `<id>` quote chain `/trace` walks, bounded like it is.
+        """
+        row = await self._event_row(event_id)
+        for _ in range(8):
+            if row is None:
+                return None
+            quoted = str(row.get("correlation_id") or "")
+            quoted_id = quoted[3:] if quoted.startswith("hr-") else quoted
+            if not quoted_id.isdigit() or int(quoted_id) == int(row["id"]):
+                break
+            parent = await self._event_row(int(quoted_id))
+            if parent is None:
+                break
+            row = parent
+        return row
+
     async def thread_context(self, platform_message_id: str) -> dict[str, Any] | None:
         """What a reply under a card we sent is about: the chain, and the
         investigation session in it, if any.
@@ -989,19 +1019,29 @@ class Store:
 
     # ── silences ──────────────────────────────────────────────────────────
 
-    async def active_silence(self, source: str, now: float) -> dict[str, Any] | None:
+    async def active_silence(self, source: str, now: float, condition: str = "") -> dict[str, Any] | None:
+        """The narrowest live silence covering this event, or none.
+
+        A condition-specific row wins over a source-wide one, so "quiet this
+        alert" is not swallowed by an older maintenance window. `condition=""`
+        asks only for the source-wide rows, which is what a caller that has no
+        title (the admin API's `active_silence` assertions, a synthetic door)
+        means.
+        """
         cursor = await self.read.execute(
-            "SELECT * FROM silences WHERE (source = ? OR source = '*') AND until_ts > ? ORDER BY id DESC LIMIT 1",
-            (source, now),
+            "SELECT * FROM silences WHERE (source = ? OR source = '*') AND until_ts > ?"
+            " AND (condition = '' OR condition = ?)"
+            " ORDER BY (condition = '') ASC, id DESC LIMIT 1",
+            (source, now, condition),
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def add_silence(self, source: str, until_ts: float, note: str, now: float) -> int:
+    async def add_silence(self, source: str, until_ts: float, note: str, now: float, condition: str = "") -> int:
         async with self._write():
             cursor = await self.db.execute(
-                "INSERT INTO silences (source, until_ts, note, created_at) VALUES (?, ?, ?, ?)",
-                (source, until_ts, note, now),
+                "INSERT INTO silences (source, condition, until_ts, note, created_at) VALUES (?, ?, ?, ?, ?)",
+                (source, condition[:200], until_ts, note, now),
             )
             row_id = int(cursor.lastrowid or 0)
         return row_id

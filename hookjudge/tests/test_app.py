@@ -917,12 +917,13 @@ async def test_the_feedback_door_refuses_strangers_and_kinds_it_never_declared(t
         assert (await client.post("/feedback", content=raw, headers=headers)).status_code == 400
 
 
-async def test_status_and_metrics_account_for_attention_not_only_spend(app_client):
+async def test_status_and_metrics_account_for_attention_not_only_spend(app_client, monkeypatch):
     """A condition judged three times interrupted a human three times even though
     two of them were free. The noisiest view is what says where to go turn
     something off; only the capped top of it becomes a Prometheus label, because
     an alert identity as a label value is unbounded cardinality."""
     store = app_client.app.state.store
+    monkeypatch.setattr(app_client.app.state, "client", Sink(text='{"outcome": "routed"}'))
     from hookjudge.contract import Incoming, Verdict
 
     def press(n: int) -> Incoming:
@@ -1163,7 +1164,7 @@ async def test_a_busy_ledger_does_not_hide_the_peers_of_a_burst(app_client, monk
     assert rows["unrelated rule 7"]["burst_id"] == "", "a different origin is not this incident"
 
 
-async def test_a_condition_that_heals_itself_is_visible_without_anyone_pressing(app_client):
+async def test_a_condition_that_heals_itself_is_visible_without_anyone_pressing(app_client, monkeypatch):
     """The signal that needs no human.
 
     `mattered` is empty until somebody presses a button, and on an unattended
@@ -1179,6 +1180,7 @@ async def test_a_condition_that_heals_itself_is_visible_without_anyone_pressing(
     reporting the second as the first would be the ledger claiming somebody spoke.
     """
     store = app_client.app.state.store
+    monkeypatch.setattr(app_client.app.state, "client", Sink(text='{"outcome": "routed"}'))
     from hookjudge.contract import Incoming, Verdict
 
     def event(title: str, at: float, *, recovery: bool) -> Incoming:
@@ -1252,7 +1254,7 @@ async def test_a_condition_that_heals_itself_is_visible_without_anyone_pressing(
     assert row["self_resolved"] * 2 >= row["fired"], "and the arithmetic checks out on the page"
 
 
-async def test_an_ai_ruling_never_lands_in_the_column_that_means_a_person_said_so(tmp_path):
+async def test_an_ai_ruling_never_lands_in_the_column_that_means_a_person_said_so(tmp_path, monkeypatch):
     """The LLM adjudicates the data gate. It does not get to be a human.
 
     `mattered` is the only field in this ledger that means somebody spoke; `ruled`
@@ -1281,6 +1283,7 @@ async def test_an_ai_ruling_never_lands_in_the_column_that_means_a_person_said_s
         httpx.AsyncClient(transport=transport, base_url="http://t") as client,
     ):
         store = app.state.store
+        monkeypatch.setattr(app.state, "client", Sink(text='{"outcome": "routed"}'))
         from hookjudge.contract import Incoming, Verdict
 
         base = time.time() - 3600
@@ -1368,7 +1371,7 @@ async def test_the_ruling_door_is_shut_when_its_secret_is_unset(tmp_path):
     assert "HOOKJUDGE_RULING_SECRET" in answer.json()["detail"], "say which knob opens it"
 
 
-async def test_an_ai_ruling_on_a_condition_outside_the_window_is_not_counted(tmp_path):
+async def test_an_ai_ruling_on_a_condition_outside_the_window_is_not_counted(tmp_path, monkeypatch):
     """`ruled` counts presses inside the window; `ai_ruled` counted every row.
 
     Nothing validates that an identity exists in the ledger, so a ruling on a
@@ -1398,6 +1401,7 @@ async def test_an_ai_ruling_on_a_condition_outside_the_window_is_not_counted(tmp
         httpx.AsyncClient(transport=transport, base_url="http://t") as client,
     ):
         store = app.state.store
+        monkeypatch.setattr(app.state, "client", Sink(text='{"outcome": "routed"}'))
         from hookjudge.contract import Incoming, Verdict
 
         # One condition, twice, inside the window.
@@ -1483,7 +1487,7 @@ async def test_the_second_axis_is_counted_apart_from_importance_and_from_a_perso
     a = body["summary"]["attention"]
     assert (a["wake_yes"], a["wake_no"], a["wake_answered"]) == (1, 1, 2)
     # The unanswered one is neither, and must not be read as a quiet night.
-    assert a["interruptions"] == 3 and a["wake_answered"] == 2
+    assert a["judged"] == 3 and a["wake_answered"] == 2
 
     # And it has not leaked into either neighbour.
     assert a["ruled"] == 0 and a["mattered"] == 0, "a model answering is not a person answering"

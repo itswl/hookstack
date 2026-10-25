@@ -113,10 +113,17 @@ class DedupProcessor:
 @registry.processor("silence")
 class SilenceProcessor:
     async def run(self, rt: Runtime, ctx: EventContext, options: dict[str, Any]) -> Verdict:
-        silence = await rt.store.active_silence(ctx.source.name, ctx.now)
+        condition = str(ctx.extracted.get("title") or "")
+        silence = await rt.store.active_silence(ctx.source.name, ctx.now, condition)
         if silence is not None:
             ctx.steps.append(
-                {"gate": "silence", "result": "silenced", "silence_id": silence["id"], "note": silence["note"]}
+                {
+                    "gate": "silence",
+                    "result": "silenced",
+                    "silence_id": silence["id"],
+                    "condition": silence.get("condition") or "",
+                    "note": silence["note"],
+                }
             )
             return ("skip", "silenced")
         ctx.steps.append({"gate": "silence", "result": "pass"})

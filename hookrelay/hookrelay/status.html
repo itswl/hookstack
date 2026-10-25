@@ -1114,10 +1114,12 @@
   "sl.hint": "Silenced events still land in the ledger; only their delivery stops.",
   "sl.none": "Nothing is silenced.",
   "sl.col.source": "Source",
+  "sl.col.condition": "Condition",
   "sl.col.until": "Until",
   "sl.col.left": "Left",
   "sl.col.note": "Note",
   "sl.everything": "everything",
+  "sl.any_condition": "every condition",
   "sl.lift": "Lift",
   "sl.lift.title": "Lift this silence?",
   "sl.lift.body": "Events from {source} will be delivered again from now on.",
@@ -1125,6 +1127,8 @@
   "sl.new": "New silence",
   "sl.source": "Source",
   "sl.source.all": "Every source (*)",
+  "sl.condition": "Condition (optional)",
+  "sl.condition.hint": "Exact alert title; empty = every condition from this source",
   "sl.all.title": "Silence every source?",
   "sl.all.body": "Nothing from any door will be delivered for {d}. Events still land in the ledger.",
   "sl.duration": "For",
@@ -1137,6 +1141,8 @@
   "sl.create": "Silence",
   "sl.created": "{source} is silenced until {until}",
   "sl.dialog.title": "Silence {source}",
+  "sl.dialog.title.condition": "Silence {condition}",
+  "sl.dialog.whole": "Whole source instead",
   "sl.dialog.body": "Its events will still be recorded, but nothing will be delivered until the silence ends.",
   "rt.title": "How events flow",
   "rt.hint": "Doors take events in, gates decide, exits deliver. Read from the config the pipe is running.",
@@ -1547,10 +1553,12 @@
   "sl.hint": "被静默的事件仍会记账，只是不再投递。",
   "sl.none": "目前没有静默。",
   "sl.col.source": "来源",
+  "sl.col.condition": "条件",
   "sl.col.until": "到期",
   "sl.col.left": "剩余",
   "sl.col.note": "备注",
   "sl.everything": "全部来源",
+  "sl.any_condition": "该来源的所有条件",
   "sl.lift": "解除",
   "sl.lift.title": "解除这个静默？",
   "sl.lift.body": "从现在起，{source} 的事件会照常投递。",
@@ -1558,6 +1566,8 @@
   "sl.new": "新建静默",
   "sl.source": "来源",
   "sl.source.all": "所有来源（*）",
+  "sl.condition": "条件（可选）",
+  "sl.condition.hint": "精确的告警标题；留空表示该来源的所有条件",
   "sl.all.title": "静默所有来源？",
   "sl.all.body": "接下来 {d}内，任何入口的事件都不会投递，只会记账。",
   "sl.duration": "时长",
@@ -1570,6 +1580,8 @@
   "sl.create": "开始静默",
   "sl.created": "{source} 已静默到 {until}",
   "sl.dialog.title": "静默 {source}",
+  "sl.dialog.title.condition": "静默 {condition}",
+  "sl.dialog.whole": "改为整个来源",
   "sl.dialog.body": "它的事件仍会记账，但在静默结束前不会投递。",
   "rt.title": "事件怎么流转",
   "rt.hint": "入口接收事件，闸门做决定，出口负责投递。内容来自正在运行的配置。",
@@ -2728,23 +2740,25 @@
       items.map(function (x) { return "<tr>" + x.html + "</tr>"; }).join("") + "</table>" +
       '<p class="note" style="text-align:left">' + esc(t("audit.note")) + ' · <a href="' + esc(BASE) + "/audit/" + esc(rec.operation) + '" target="_blank" rel="noopener">JSON</a></p>';
   }
-  function silenceDialog(source) {
+  function silenceDialog(source, condition) {
     var opts = [15, 60, 240, 1440];
     return openModal({
-      title: t("sl.dialog.title", { source: source }),
+      title: condition ? t("sl.dialog.title.condition", { condition: condition }) : t("sl.dialog.title", { source: source }),
       html: "<p>" + esc(t("sl.dialog.body")) + '</p><div class="field"><label>' + esc(t("sl.duration")) + '</label><div class="seg" id="mdDur">' +
         opts.map(function (m) { return '<button type="button" data-min="' + m + '"' + (m === 60 ? ' class="on"' : "") + ">" + esc(t("sl.dur." + m)) + "</button>"; }).join("") +
-        '</div></div><div class="field"><label>' + esc(t("sl.note")) + '</label><input class="inp" id="mdNote"></div>',
+        '</div></div><div class="field"><label>' + esc(t("sl.note")) + '</label><input class="inp" id="mdNote"></div>' +
+        (condition ? '<label class="check"><input type="checkbox" id="mdAll"> ' + esc(t("sl.dialog.whole")) + "</label>" : ""),
       actions: [{ label: t("common.cancel"), value: "cancel" }, { label: t("sl.create"), value: "ok", kind: "primary" }],
       onClick: function (e) { var btn = e.target.closest("#mdDur [data-min]"); if (btn) { $$("#mdDur [data-min]").forEach(function (x) { x.classList.toggle("on", x === btn); }); return true; } return false; },
     }).then(function (v) {
       if (v !== "ok") return;
       var on = $("#mdDur .on"), minutes = on ? Number(on.getAttribute("data-min")) : 60, note = ($("#mdNote") || {}).value || "";
-      return createSilence(source, minutes, note);
+      var whole = $("#mdAll") && $("#mdAll").checked;
+      return createSilence(source, minutes, note, whole ? "" : condition || "");
     });
   }
-  function createSilence(source, minutes, note) {
-    return adminApi("/silences", { method: "POST", json: { source: source, minutes: minutes, note: note } }).then(function (r) {
+  function createSilence(source, minutes, note, condition) {
+    return adminApi("/silences", { method: "POST", json: { source: source, minutes: minutes, note: note, condition: condition || "" } }).then(function (r) {
       if (r.cancelled) return;
       if (!r.ok) { toast(failText(r), "bad"); return false; }
       toast(t("sl.created", { source: source === "*" ? t("sl.everything") : source, until: stamp(r.data.until_ts) }), "ok");
@@ -2922,9 +2936,9 @@
     if (!$("#slList")) box.innerHTML = '<div id="slHead"></div><div id="slList"></div><div id="slForm"></div>';
     $("#slHead").innerHTML = head;
     var sil = S.core.status.silences || [], now = Date.now() / 1000;
-    $("#slList").innerHTML = '<div class="card">' + (sil.length ? '<table class="tbl"><tr><th>' + esc(t("sl.col.source")) + "</th><th>" + esc(t("sl.col.until")) + "</th><th>" + esc(t("sl.col.left")) + "</th><th>" + esc(t("sl.col.note")) + "</th><th></th></tr>" +
+    $("#slList").innerHTML = '<div class="card">' + (sil.length ? '<table class="tbl"><tr><th>' + esc(t("sl.col.source")) + "</th><th>" + esc(t("sl.col.condition")) + "</th><th>" + esc(t("sl.col.until")) + "</th><th>" + esc(t("sl.col.left")) + "</th><th>" + esc(t("sl.col.note")) + "</th><th></th></tr>" +
       sil.map(function (s) {
-        return '<tr><td class="mono">' + esc(s.source === "*" ? t("sl.everything") + " (*)" : s.source) + '</td><td class="mono nw">' + esc(stamp(s.until_ts)) + '</td><td class="mono nw">' + esc(dur(Number(s.until_ts) - now)) + "</td><td>" + esc(s.note || "") + "</td>" +
+        return '<tr><td class="mono">' + esc(s.source === "*" ? t("sl.everything") + " (*)" : s.source) + '</td><td class="mono">' + esc(s.condition || t("sl.any_condition")) + '</td><td class="mono nw">' + esc(stamp(s.until_ts)) + '</td><td class="mono nw">' + esc(dur(Number(s.until_ts) - now)) + "</td><td>" + esc(s.note || "") + "</td>" +
           '<td><button class="btn xs danger" type="button" data-lift="' + esc(s.id) + '" data-lift-source="' + esc(s.source) + '">' + esc(t("sl.lift")) + "</button></td></tr>";
       }).join("") + "</table>" : '<p class="muted" style="margin:0">' + esc(t("sl.none")) + "</p>") + "</div>";
     // The form is drawn again only when its words or its doors change: a live
@@ -2938,6 +2952,7 @@
       '<div class="field"><label>' + esc(t("sl.source")) + '</label><select class="sel" id="slSource">' +
         sources.map(function (s) { return '<option value="' + esc(s) + '"' + (s === S.sil.source ? " selected" : "") + ">" + esc(s) + "</option>"; }).join("") +
         '<option value="*"' + (S.sil.source === "*" ? " selected" : "") + ">" + esc(t("sl.source.all")) + "</option></select></div>" +
+      '<div class="field" style="flex:1 1 220px"><label>' + esc(t("sl.condition")) + '</label><input class="inp" id="slCondition" placeholder="' + esc(t("sl.condition.hint")) + '"></div>' +
       '<div class="field"><label>' + esc(t("sl.duration")) + '</label><div class="seg" id="slDur">' + opts.map(function (m) { return '<button type="button" data-min="' + m + '"' + (S.sil.minutes === m ? ' class="on"' : "") + ">" + esc(t("sl.dur." + m)) + "</button>"; }).join("") + "</div></div>" +
       '<div class="field"><label>' + esc(t("sl.dur.custom")) + '</label><input class="inp mono" id="slMinutes" type="number" min="1" max="10080" value="' + esc(S.sil.minutes) + '" style="width:96px"></div>' +
       '<div class="field" style="flex:1 1 220px"><label>' + esc(t("sl.note")) + '</label><input class="inp" id="slNote" value="' + esc(S.sil.note || "") + '"></div>' +
@@ -3093,7 +3108,7 @@
     if ((el = e.target.closest("[data-act]"))) {
       var trip = S.drawer.trip, origin = (trip || {}).origin || {};
       if (el.getAttribute("data-act") === "copy") copyText(location.href.split("#")[0] + "#/alert/" + encodeURIComponent(origin.id)).then(function (ok) { toast(ok ? t("drawer.copied") : t("common.failed", { why: "clipboard" }), ok ? "ok" : "bad"); });
-      else if (el.getAttribute("data-act") === "silence") silenceDialog(origin.source);
+      else if (el.getAttribute("data-act") === "silence") silenceDialog(origin.source, origin.title);
       return;
     }
     if ((el = e.target.closest("[data-copy]"))) { var pre = el.parentNode.querySelector("pre"); copyText(pre ? pre.textContent : "").then(function (ok) { toast(ok ? t("raw.copied") : t("common.failed", { why: "clipboard" }), ok ? "ok" : "bad"); }); return; }
@@ -3114,10 +3129,10 @@
     }
     if ((el = e.target.closest("#slDur [data-min]"))) { S.sil.minutes = Number(el.getAttribute("data-min")); $$("#slDur [data-min]").forEach(function (x) { x.classList.toggle("on", x === el); }); $("#slMinutes").value = S.sil.minutes; return; }
     if ((el = e.target.closest("#slCreate"))) {
-      var minutes = Math.max(1, Math.min(10080, Number($("#slMinutes").value) || 60)), src = $("#slSource").value || "*", note = $("#slNote").value.trim();
+      var minutes = Math.max(1, Math.min(10080, Number($("#slMinutes").value) || 60)), src = $("#slSource").value || "*", note = $("#slNote").value.trim(), condition = $("#slCondition").value.trim();
       (src === "*" ? confirmDialog(t("sl.all.title"), t("sl.all.body", { d: dur(minutes * 60) }), t("sl.create"), true) : Promise.resolve(true))
-        .then(function (ok) { return ok && createSilence(src, minutes, note); })
-        .then(function (done) { if (done) { S.sil.note = ""; var n = $("#slNote"); if (n) n.value = ""; } });
+        .then(function (ok) { return ok && createSilence(src, minutes, note, condition); })
+        .then(function (done) { if (done) { S.sil.note = ""; var n = $("#slNote"); if (n) n.value = ""; var c = $("#slCondition"); if (c) c.value = ""; } });
       return;
     }
     if ((el = e.target.closest("[data-admin-prompt]"))) { askAdminToken().then(function (ok) { if (ok) loadRouting(true); }); return; }

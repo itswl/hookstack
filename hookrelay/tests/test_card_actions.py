@@ -29,6 +29,8 @@ PROCESSED = {
     ],
 }
 
+EVENT_TITLE = "Payment gateway 5xx rate 8.1%"
+
 
 def _cfg_with_actions() -> Config:
     """A pipe that offers silence and followup, but never approve.
@@ -201,6 +203,16 @@ async def action_client(settings, tmp_path):
         _httpx.AsyncClient(transport=transport, base_url="http://t") as client,
     ):
         client.app = app  # type: ignore[attr-defined]
+        # The card a press arrives on quotes an alert; event id 1 is that alert.
+        # A silence has to resolve it to scope the press to the condition, not
+        # to the synthetic return door that carried the card.
+        await app.state.store.insert_event(
+            "judge-notify",
+            "fp-card-action",
+            {"title": EVENT_TITLE, "body": "gateway-2 5xx", "level": "high", "fields": {}},
+            "{}",
+            time.time(),
+        )
         yield client
 
 
@@ -216,16 +228,22 @@ async def _press(client, token: str, **extra):
     return await client.post("/card-action", content=json.dumps(body).encode())
 
 
-async def test_a_press_silences_the_source_once(action_client):
-    """The whole point, end to end: a human reading a card in chat quiets the
-    alert without opening a board, and a second press changes nothing."""
+async def test_a_press_silences_the_condition_once(action_client):
+    """A card press quiets the alert the person is reading, not its whole door.
+
+    The old default was the entire source (and, with no source param, `*`), so
+    one "Silence 15m" muted everything from that door. The card's origin event
+    supplies both the source and the exact condition.
+    """
     store = action_client.app.state.store
     token = _mint_now("silence", event_id=1, correlation_id="hr-1", params={"minutes": 30})
 
     first = await _press(action_client, token, open_id="ou_abc")
     assert first.status_code == 200
     assert first.json()["outcome"].startswith("silenced")
-    assert await store.active_silence("judge-notify", time.time()) is not None, "the alert is actually quiet now"
+    assert await store.active_silence("judge-notify", time.time(), EVENT_TITLE) is not None
+    assert await store.active_silence("judge-notify", time.time(), "a different alert") is None
+    assert await store.active_silence("judge-notify", time.time()) is None, "not the whole source"
 
     # Pressed twice, or the platform retried: the ledger refuses by identity.
     again = await _press(action_client, token, open_id="ou_abc")
@@ -234,6 +252,19 @@ async def test_a_press_silences_the_source_once(action_client):
     pressed = await store.recent_actions()
     assert len(pressed) == 1, "one row per press that was actually honoured"
     assert pressed[0]["kind"] == "silence" and pressed[0]["actor"] == "ou_abc"
+
+
+async def test_a_card_can_ask_for_the_whole_source_deliberately(action_client):
+    store = action_client.app.state.store
+    token = _mint_now(
+        "silence",
+        event_id=1,
+        correlation_id="hr-1",
+        params={"minutes": 30, "scope": "source"},
+    )
+
+    assert (await _press(action_client, token)).status_code == 200
+    assert await store.active_silence("judge-notify", time.time(), "any condition at all") is not None
 
 
 async def test_a_silence_for_a_removed_source_is_refused_not_widened(action_client):
@@ -317,7 +348,7 @@ async def test_the_link_only_asks_and_the_post_acts(action_client):
     # body to put it in.
     confirmed = await action_client.post(f"/card-action?t={token}")
     assert confirmed.status_code == 200 and confirmed.json()["outcome"].startswith("silenced")
-    assert await store.active_silence("judge-notify", time.time()) is not None
+    assert await store.active_silence("judge-notify", time.time(), EVENT_TITLE) is not None
 
     # Still single use: the link works once, as the page says.
     assert (await action_client.post(f"/card-action?t={token}")).json()["outcome"] == "already_done"

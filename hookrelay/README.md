@@ -8,12 +8,12 @@ workflow are its own.
 
 Receive webhooks. Decide. Fan out to channels. Nothing else.
 
-A pluggable router (under 6,550 source lines, five dependencies) that takes JSON
+A pluggable router (under 6,650 source lines, five dependencies) that takes JSON
 webhooks in at one door, walks each event through three named gates, and delivers
 to a chat bridge / generic HTTP (DingTalk and WeCom as shipped plugins) — with retries, per-channel rate
 limits, and a dead-letter queue you can see.
 
-Both numbers are **budgets, not descriptions**. 6,550 source lines is the
+Both numbers are **budgets, not descriptions**. 6,650 source lines is the
 ceiling and five dependencies is the count; `scripts/assert_weight.py` enforces
 the first alongside the other stack checks, and crossing it is meant to cost a
 conversation rather than a commit. Tests are counted and printed but never capped
@@ -211,8 +211,11 @@ Four pillars — the product itself:
 Pipe *protections* — kept, but named for what they are:
 
 - **silence is a VALVE**, not noise reduction: the emergency shutoff an
-  operator pulls when the thing behind the pipe is melting. Source-scoped or
-  global, always with expiry.
+  operator pulls when the thing behind the pipe is melting. Condition, source
+  or global, always with expiry. A card's silence press is the narrow one — it
+  resolves the alert behind the card and silences that exact title; widening it
+  to the source is a deliberate `scope: source`, and the board's form can name
+  a condition or leave it empty for the whole source.
 - **the STORM FUSE is volume protection**: per-door arrival limits
   (`storm_threshold`), catching the high-cardinality flood that content dedup
   structurally cannot. Soft stage keeps the account, hard stage (10×) protects
@@ -269,7 +272,7 @@ with defaults: **[docs/reference.md](docs/reference.md)**, generated from
 |---|---|---|
 | POST | `/hook/{source}` | per-source HMAC (`X-Hook-Signature`) |
 | GET | `/status` | `X-Read-Token` (open if unset — dev mode) |
-| POST | `/silences` `{source:"*"|name, minutes, note}` | `X-Admin-Token` (endpoint disabled if unset) |
+| POST | `/silences` `{source:"*"|name, minutes, note, condition?}` | `X-Admin-Token` (endpoint disabled if unset); `condition` is an exact title, empty keeps the source-wide meaning |
 | DELETE | `/silences/{id}` | `X-Admin-Token` |
 | GET | `/healthz` | none |
 

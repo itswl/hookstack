@@ -51,7 +51,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | POST | `/hook/{source_name}` | The front door: one source's webhook, walked through the gate pipeline and routed |
 | GET | `/live` | The ledger's wake-up line: one changed per write, a ping through the quiet |
 | GET | `/metrics` | Prometheus text: events by door and outcome, deliveries, outbox, breaker state |
-| POST | `/silences` | Admin: quiet one source for a window; every silenced event still lands in the ledger |
+| POST | `/silences` | Admin: quiet a source, or one exact condition of it, for a window |
 | DELETE | `/silences/{silence_id}` | Admin: lift a silence before its window ends |
 | GET | `/status` | The board's data: recent events, deliveries, breaker and silence state as JSON |
 | GET | `/sw.js` | The board's service worker: the shell offline, never the data (static/sw.js) |

@@ -53,6 +53,29 @@ async def test_silence_stops_routing_but_still_records(store, cfg):
     assert recent[0]["skip_code"] == "silenced"
 
 
+async def test_a_condition_silence_only_covers_that_title(store, cfg):
+    """The missing noise lever: quiet the recurring condition, not its door.
+
+    A source-wide silence is still available (empty condition), but a press on
+    a card names one alert's title and must not mute its neighbours.
+    """
+    await store.add_silence("grafana", until_ts=2000.0, note="this one", now=900.0, condition="db down")
+
+    same = await handle_hook(store, cfg, cfg.sources["grafana"], PAYLOAD, now=1000.0)
+    assert same["skip_code"] == "silenced"
+    assert same["steps"][2]["condition"] == "db down"
+
+    other = await handle_hook(
+        store,
+        cfg,
+        cfg.sources["grafana"],
+        {"title": "cpu hot", "message": "load 40", "state": "alerting"},
+        now=1001.0,
+    )
+    assert other["outcome"] == "routed", "the condition next door still reaches a person"
+    assert await store.active_silence("grafana", 1001.0, "cpu hot") is None
+
+
 async def test_global_silence_covers_every_source(store, cfg):
     await store.add_silence("*", until_ts=2000.0, note="", now=900.0)
     result = await handle_hook(store, cfg, cfg.sources["ci"], {"job": "build", "detail": "x"}, now=1000.0)

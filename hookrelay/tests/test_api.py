@@ -124,6 +124,23 @@ async def test_silence_lifecycle_via_admin_api(client):
     assert hooked2.json()["outcome"] == "routed"
 
 
+async def test_a_condition_silence_leaves_its_neighbours_alone(client):
+    created = await client.post(
+        "/silences",
+        json={"source": "grafana", "minutes": 30, "condition": "db down", "note": "recurring"},
+        headers={"X-Admin-Token": "admin-t"},
+    )
+    assert created.status_code == 200 and created.json()["condition"] == "db down"
+
+    body = json.dumps(PAYLOAD).encode()
+    same = await client.post("/hook/grafana", content=body, headers={"X-Hook-Signature": _sig("s3cret", body)})
+    assert same.json()["skip_code"] == "silenced"
+
+    other = json.dumps(dict(PAYLOAD, title="cpu hot")).encode()
+    routed = await client.post("/hook/grafana", content=other, headers={"X-Hook-Signature": _sig("s3cret", other)})
+    assert routed.json()["outcome"] == "routed"
+
+
 async def test_admin_endpoints_refuse_without_token(client):
     assert (await client.post("/silences", json={"minutes": 5})).status_code == 403
     assert (await client.delete("/silences/1")).status_code == 403

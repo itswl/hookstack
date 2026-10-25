@@ -73,9 +73,16 @@ approve. That path, step by step:
    [hookrelay](../hookrelay/README.md) ·
    [hookjudge](../hookjudge/README.md) ·
    [hookprobe](../hookprobe/README.md).
+5. **Before trusting a card, run the doctor.** `python3 scripts/doctor.py`
+   reads your `.env`, the deployed pipe config and (optionally) the running
+   services, and names the locks that stop a person pressing anything: no
+   `approve` in `card_actions`, no reachable console link, an empty allowlist,
+   an unsigned action door. It prints a fix per line; exit 1 means a must-fix.
 
 ## If something looks wrong
 
+- Start with `python3 scripts/doctor.py` — it names configuration problems the
+  three service pages each see only a corner of.
 - The gate: `bash scripts/gate.sh` runs every service's gate plus the stack
   checks. Run it as its own step and read the verdict — see
   [CONTRIBUTING.md](../CONTRIBUTING.md).

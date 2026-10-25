@@ -705,7 +705,16 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         if kind == "silence":
             minutes = int(params.get("minutes") or 60)
             minutes = max(1, min(minutes, 7 * 24 * 60))
-            source = str(params.get("source") or "*")
+            # The alert a card is about, not the synthetic return door that
+            # carried it: a verdict quotes the alert, a report quotes the
+            # verdict. A press means "quiet THIS", so resolve the origin.
+            origin = await app.state.store.event_origin(event_id) if event_id else None
+            source = str(params.get("source") or (origin or {}).get("source") or "")
+            if not source:
+                raise HTTPException(
+                    status_code=409,
+                    detail="cannot resolve the alert this press belongs to; refusing to widen the silence",
+                )
             if source != "*" and source not in app.state.config.sources:
                 # A card minted before the config changed still names its door.
                 # Widening that to "*" turned "quiet this one alert" into a
@@ -714,10 +723,20 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                     status_code=409,
                     detail=f"source {source!r} is no longer configured; refusing to silence every door instead",
                 )
+            # Default is the condition the person is looking at. `scope: source`
+            # is the deliberate wider action; a title-less alert falls back to
+            # the source because there is no narrower thing to name.
+            condition = ""
+            if str(params.get("scope") or "condition").lower() != "source":
+                condition = str((origin or {}).get("title") or "")[:200]
             await app.state.store.add_silence(
-                source, now + minutes * 60, f"silenced from a card by {actor or 'an operator'}", now
+                source,
+                now + minutes * 60,
+                f"silenced from a card by {actor or 'an operator'}",
+                now,
+                condition,
             )
-            return f"silenced {source} for {minutes}m"
+            return f"silenced {source}{' · ' + condition if condition else ''} for {minutes}m"
 
         # An action press becomes an EVENT and a delivery, so forwarding it
         # inherits the retry, the rate limit, the dead letter and the ledger row
@@ -1007,7 +1026,11 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
 
     @app.post("/silences")
     async def create_silence(request: Request, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-        """Admin: quiet one source for a window; every silenced event still lands in the ledger."""
+        """Admin: quiet a source, or one exact condition of it, for a window.
+
+        Every silenced event still lands in the ledger. `condition` is the
+        extracted title; omitted or empty keeps the old source-wide meaning.
+        """
         _admin_guard(x_admin_token)
         data = await request.json()
         source = str(data.get("source", "*"))
@@ -1016,9 +1039,17 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         minutes = int(data.get("minutes", 60))
         if minutes < 1 or minutes > 7 * 24 * 60:
             raise HTTPException(status_code=400, detail="minutes out of range (1..10080)")
+        condition = str(data.get("condition") or "").strip()[:200]
         now = now_ts()
-        silence_id = await app.state.store.add_silence(source, now + minutes * 60, str(data.get("note", "")), now)
-        return {"id": silence_id, "source": source, "until_ts": now + minutes * 60}
+        silence_id = await app.state.store.add_silence(
+            source, now + minutes * 60, str(data.get("note", "")), now, condition
+        )
+        return {
+            "id": silence_id,
+            "source": source,
+            "condition": condition,
+            "until_ts": now + minutes * 60,
+        }
 
     # ── admin: config (the FILE stays the source of truth) ───────────────
     # The page is an editor for config.yaml, not a second config store:

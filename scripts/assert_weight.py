@@ -325,7 +325,14 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # +~69 source, +~30 code. The doctrine question is easy — all four are
     # properties of the pipe's own door/ledger/config, none reads an alert's
     # meaning. The rest is the docstrings saying which promise was broken.
-    "hookrelay": (6550, Path("hookrelay/README.md")),
+    # 6550 -> 6650 the same day, for condition-scoped silence: a silence row
+    # carries the exact condition (empty still means the whole source), the card
+    # press resolves its origin alert instead of defaulting to '*', and the
+    # board can create, show and lift the narrower row. Split: +~78 source,
+    # +~49 code. The doctrine question: this is the pipe's own noise valve, not
+    # a judgement about an alert; the content it reads is the title it already
+    # extracted for routing.
+    "hookrelay": (6650, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:
