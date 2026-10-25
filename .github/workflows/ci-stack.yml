@@ -241,12 +241,15 @@ jobs:
           log = Path("/tmp/stack-smoke.log").read_text(encoding="utf-8", errors="replace")
           def escape(text: str) -> str:
               return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          reason = [
-              line for line in log.splitlines()
-              if re.search(r"STACK RED|Traceback|AssertionError|::error|refused|does not|no .* carried|failed", line, re.I)
-          ][-12:]
+          lines = log.splitlines()
+          reason = []
+          for index, line in enumerate(lines):
+              if "STACK RED" in line or "::error" in line:
+                  reason = lines[max(0, index - 2):index + 5]
+          if not reason:
+              reason = [line for line in lines if re.search(r"Traceback|AssertionError|::error|refused|does not|no .* carried", line, re.I)][-12:]
           print(f"::error title=stack smoke reason::{escape(chr(10).join(reason)[-3000:])}")
-          print(f"::error title=stack smoke tail::{escape(log[-6000:])}")
+          print(f"::error title=stack smoke tail::{escape(log[-3000:])}")
           PY
           fi
           exit "$status"
