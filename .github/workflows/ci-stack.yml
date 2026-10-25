@@ -249,6 +249,11 @@ jobs:
           if not reason:
               reason = [line for line in lines if re.search(r"Traceback|AssertionError|::error|refused|does not|no .* carried", line, re.I)][-12:]
           print(f"::error title=stack smoke reason::{escape(chr(10).join(reason)[-3000:])}")
+          action = [
+              line for line in lines
+              if re.search(r"/hooks/action|remediation|proposal|approve|denied|superseded|cooling|permission", line, re.I)
+          ][-30:]
+          print(f"::error title=stack smoke action::{escape(chr(10).join(action)[-5000:])}")
           print(f"::error title=stack smoke tail::{escape(log[-3000:])}")
           PY
           fi
