@@ -55,6 +55,7 @@ services:
       # Wire the event door / report return to your own pipe if you have one:
       HOOKPROBE_RETURN_URL: ${HOOKPROBE_RETURN_URL:-}
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
       # Window spend >= budget refuses new escalations (report card says why):
       HOOKPROBE_BUDGET_USD: ${HOOKPROBE_BUDGET_USD:-}

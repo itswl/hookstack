@@ -82,6 +82,7 @@ services:
       # One outbound address, and it is the pipe. Fan-out is not its business.
       HOOKJUDGE_RETURN_URL: http://hookrelay:8100/hook/judge-notify
       HOOKJUDGE_WORKER_INTERVAL: "0.5"
+      HOOKJUDGE_MAX_INFLIGHT: ${HOOKJUDGE_MAX_INFLIGHT:-8}
       HOOKJUDGE_REUSE_WINDOW_SECONDS: ${HOOKJUDGE_REUSE_WINDOW_SECONDS:-3600}
       HOOKJUDGE_AI_BASE_URL: ${HOOKJUDGE_AI_BASE_URL:-}
       HOOKJUDGE_AI_API_KEY: ${HOOKJUDGE_AI_API_KEY:-}
@@ -189,6 +190,7 @@ services:
       # unsigned doors — fine on this file's own private network, wrong on a
       # shared one. Each is one line of .env; set both when in doubt.
       HOOKPROBE_EVENT_SECRET: ${HOOKPROBE_EVENT_SECRET:-}
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-}
       HOOKPROBE_RETURN_SECRET: ${HOOKPROBE_RETURN_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}

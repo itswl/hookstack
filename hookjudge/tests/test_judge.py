@@ -1030,6 +1030,22 @@ async def test_the_review_queue_does_not_ask_a_human_to_re_rate_a_recovery(tmp_p
     await store.close()
 
 
+async def test_the_return_worker_tries_the_longest_waiting_attempt_first(tmp_path):
+    """Fifty queued rows still inside their backoff must not hide a newer row
+    that is due. The old ordering was by id, so the worker kept skipping the
+    same front page and never reached the rows behind it."""
+    store = await _ledger(tmp_path)
+    first = await store.record(event(title="a"), ai_ok(), 1)
+    second = await store.record(event(title="b"), ai_ok(), 1)
+    third = await store.record(event(title="c"), ai_ok(), 1)
+    for row_id, at in ((first, 300.0), (second, 100.0), (third, 200.0)):
+        await store.mark_return(row_id, "queued", 1, None, attempted_at=at)
+
+    rows = await store.pending_returns(2)
+    assert [row["id"] for row in rows] == [second, third]
+    await store.close()
+
+
 async def test_an_accepted_event_waits_durably_until_it_is_judged(tmp_path):
     """The 202 is a promise, so the event is on disk before the door answers.
 

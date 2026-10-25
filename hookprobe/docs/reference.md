@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (80)
+## Environment (81)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_BLAST_RADIUS` | *(empty)* | The blast radius a WRITING node declares about itself: one measured line per entry, exactly as /v1/posture reports it |
 | `HOOKPROBE_REMEDIATION_HIGH_RISK_ALLOWLIST` | *(empty)* | The second gate, for steps the report itself called high risk: a high step must full-match a pattern in BOTH files |
 | `HOOKPROBE_EVENT_SECRET` | *(empty)* | The hookstack loop |
+| `HOOKPROBE_ACTION_SECRET` | *(empty)* | The card-action door's own secret |
 | `HOOKPROBE_PRICE_IN_PER_1M` | `0.0` | What a token costs on THIS gateway, per million, as the operator states it |
 | `HOOKPROBE_PRICE_CACHE_READ_PER_1M` | `0.0` | Tokens read back from the prompt cache — a tenth of fresh input here, so pricing them as input over-states a cached turn tenfold |
 | `HOOKPROBE_PRICE_CACHE_WRITE_PER_1M` | `_float('HOOKPROBE_PRICE_IN_PER_1M', 0.0)` | Tokens written INTO the cache |

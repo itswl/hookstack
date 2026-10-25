@@ -68,6 +68,10 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "remediation_verify_seconds": remediation.VERIFY_SECONDS,
         "coalesce_window_seconds": 1800,
         "event_secret": "",
+        # The card door's own credential, so a press is signed in the tests the
+        # way the pipe signs one. A test that wants the unsigned configuration
+        # overrides it to "" and asserts the refusal.
+        "action_secret": "action-secret",
         "return_url": "",
         "relay_ui_url": "",
         # Empty like every deployment: a node here has no reachable address.

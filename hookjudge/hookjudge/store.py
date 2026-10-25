@@ -437,11 +437,12 @@ class Store:
         return dict(row) if row else None
 
     async def set_label(self, judgement_id: int, importance: str, source: str, now: float) -> bool:
-        cursor = await self.db.execute(
-            "UPDATE judgements SET label_importance = ?, label_source = ?, labeled_at = ? WHERE id = ?",
-            (importance, source, now, judgement_id),
-        )
-        await self.db.commit()
+        async with self._write:
+            cursor = await self.db.execute(
+                "UPDATE judgements SET label_importance = ?, label_source = ?, labeled_at = ? WHERE id = ?",
+                (importance, source, now, judgement_id),
+            )
+            await self.db.commit()
         self._announce()
         return cursor.rowcount > 0
 
@@ -490,19 +491,20 @@ class Store:
         their mind must not have the first press reinstated by a retry that
         arrived late.
         """
-        row = await self._by_correlation(correlation_id, event_id)
-        if row is None:
-            return None
-        row_id = int(row["id"])
-        standing = str(row["mattered"] or "")
-        stood_at = None if row["mattered_at"] is None else float(row["mattered_at"])
-        if stood_at is not None and (at < stood_at or (at == stood_at and standing == mattered)):
-            return {"id": row_id, "mattered": standing, "applied": False}
-        await self.db.execute(
-            "UPDATE judgements SET mattered = ?, mattered_at = ?, mattered_actor = ? WHERE id = ?",
-            (mattered, at, actor[:120], row_id),
-        )
-        await self.db.commit()
+        async with self._write:
+            row = await self._by_correlation(correlation_id, event_id)
+            if row is None:
+                return None
+            row_id = int(row["id"])
+            standing = str(row["mattered"] or "")
+            stood_at = None if row["mattered_at"] is None else float(row["mattered_at"])
+            if stood_at is not None and (at < stood_at or (at == stood_at and standing == mattered)):
+                return {"id": row_id, "mattered": standing, "applied": False}
+            await self.db.execute(
+                "UPDATE judgements SET mattered = ?, mattered_at = ?, mattered_actor = ? WHERE id = ?",
+                (mattered, at, actor[:120], row_id),
+            )
+            await self.db.commit()
         self._announce()
         return {"id": row_id, "mattered": mattered, "applied": True}
 
@@ -530,8 +532,17 @@ class Store:
         return [dict(row) for row in await cursor.fetchall()]
 
     async def pending_returns(self, limit: int = 50) -> list[dict[str, Any]]:
+        """The next return attempts, oldest attempt first.
+
+        `ORDER BY id` put the fifty oldest queued rows in front of the worker;
+        when all fifty were still inside their backoff it skipped every one and
+        never looked at the newer rows that were due. The attempt clock is the
+        right key: a row that has waited longest is the one to try next.
+        """
         cursor = await self.db.execute(
-            "SELECT * FROM judgements WHERE return_status = 'queued' ORDER BY id LIMIT ?", (limit,)
+            "SELECT * FROM judgements WHERE return_status = 'queued'"
+            " ORDER BY coalesce(return_attempted_at, received_at) ASC, id ASC LIMIT ?",
+            (limit,),
         )
         return [dict(row) for row in await cursor.fetchall()]
 
@@ -557,12 +568,13 @@ class Store:
         this now" and a stale clock would make the worker wait out a delay for an
         attempt that no longer happened.
         """
-        await self.db.execute(
-            "UPDATE judgements SET return_status = ?, return_attempts = ?, return_error = ?,"
-            " return_attempted_at = ? WHERE id = ?",
-            (status, attempts, (error or "")[:400] or None, attempted_at, row_id),
-        )
-        await self.db.commit()
+        async with self._write:
+            await self.db.execute(
+                "UPDATE judgements SET return_status = ?, return_attempts = ?, return_error = ?,"
+                " return_attempted_at = ? WHERE id = ?",
+                (status, attempts, (error or "")[:400] or None, attempted_at, row_id),
+            )
+            await self.db.commit()
         self._announce()
 
     RETURN_STATUSES = ("sent", "queued", "dead", "skipped")
@@ -620,13 +632,14 @@ class Store:
             raise ValueError(f"verdict must be one of {self.AI_VERDICTS}, not {verdict!r}")
         if not why.strip():
             raise ValueError("an AI ruling without a reason is an opinion; say why")
-        await self.db.execute(
-            "INSERT INTO ai_rulings (identity, verdict, why, model, at) VALUES (?, ?, ?, ?, ?)"
-            " ON CONFLICT(identity) DO UPDATE SET verdict = excluded.verdict, why = excluded.why,"
-            " model = excluded.model, at = excluded.at",
-            (identity, verdict, why.strip()[:600], model[:80], at),
-        )
-        await self.db.commit()
+        async with self._write:
+            await self.db.execute(
+                "INSERT INTO ai_rulings (identity, verdict, why, model, at) VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT(identity) DO UPDATE SET verdict = excluded.verdict, why = excluded.why,"
+                " model = excluded.model, at = excluded.at",
+                (identity, verdict, why.strip()[:600], model[:80], at),
+            )
+            await self.db.commit()
         return {"identity": identity, "verdict": verdict}
 
     async def ai_rulings(self, since: float | None = None) -> dict[str, dict[str, Any]]:
@@ -963,10 +976,11 @@ class Store:
         }
 
     async def purge_older_than(self, cutoff: float) -> int:
-        cursor = await self.db.execute(
-            "DELETE FROM judgements WHERE received_at < ? AND return_status != 'queued'", (cutoff,)
-        )
-        await self.db.commit()
+        async with self._write:
+            cursor = await self.db.execute(
+                "DELETE FROM judgements WHERE received_at < ? AND return_status != 'queued'", (cutoff,)
+            )
+            await self.db.commit()
         return int(cursor.rowcount or 0)
 
 

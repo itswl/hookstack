@@ -899,13 +899,28 @@ def register(app: FastAPI, settings: Settings, service: RunService) -> None:
     async def action_door(request: Request) -> JSONResponse:
         """A card press forwarded by the pipe: accept a memory line, rule a run
         useful or useless — signed, idempotent, and answered with what changed."""
-        body = await _signed_object(request, settings.event_secret, _ACTION_MAX_BYTES)
+        # Its own secret when one is configured, the event secret otherwise. The
+        # fallback keeps an existing deployment on one credential; the point of
+        # the split is that a deployment can hold the action door to a key the
+        # watcher/planner (which reads attacker-influenced text) never carries.
+        action_secret = settings.action_secret or settings.event_secret
+        body = await _signed_object(request, action_secret, _ACTION_MAX_BYTES)
         action = body.get("action")
         if not isinstance(action, dict):
             raise HTTPException(status_code=400, detail="action must be an object")
         kind = str(action.get("kind") or "").strip().lower()[:_KIND_MAX]
         if kind not in actions.KINDS:
             raise HTTPException(status_code=400, detail=f"unknown action kind {kind or '(empty)'}")
+        # `approve` runs commands against a live target. With no secret at all,
+        # an unsigned POST from inside the container — where a run can read the
+        # proposal file and its hash — is indistinguishable from a person's
+        # press. Refuse the one kind that executes rather than pretending the
+        # door is closed for the rest.
+        if kind == "approve" and not action_secret:
+            raise HTTPException(
+                status_code=503,
+                detail=("approve needs HOOKPROBE_ACTION_SECRET or HOOKPROBE_EVENT_SECRET; refusing an unsigned press"),
+            )
         raw_params = action.get("params")
         params = raw_params if isinstance(raw_params, dict) else {}
         correlation_id = str(body.get("correlation_id") or "")[:_CORRELATION_MAX]

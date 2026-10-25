@@ -357,13 +357,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # reuses. Locks are refcounted away so the map cannot grow with alert
     # cardinality.
     identity_locks: dict[str, tuple[asyncio.Lock, int]] = {}
+    # The identity lock serializes a storm of ONE condition; this caps the
+    # process when a storm is a thousand DIFFERENT conditions, each entitled to
+    # its own paid call. The rest wait here rather than at the provider, and the
+    # return leg still records every verdict.
+    inflight = asyncio.Semaphore(app_settings.max_inflight)
 
     async def _judge_serialized(client: httpx.AsyncClient, event: Incoming, intake_id: int = 0) -> None:
         lock, holders = identity_locks.get(event.identity, (asyncio.Lock(), 0))
         identity_locks[event.identity] = (lock, holders + 1)
         try:
             async with lock:
-                row_id = await _judge_and_record(client, event)
+                async with inflight:
+                    row_id = await _judge_and_record(client, event)
                 if row_id and intake_id:
                     # Only after a judgement row exists. A failure here replays
                     # the alert at boot: a duplicate verdict is cheaper than a

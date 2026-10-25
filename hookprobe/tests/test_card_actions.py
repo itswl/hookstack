@@ -30,6 +30,9 @@ from tests.helpers import FakeEngine, GatedEngine, make_settings, read_hash
 
 TOKEN = "secret-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
+# The helper's Settings gives the card door its own credential; a press signs
+# with it unless a test is deliberately testing the unsigned refusal.
+ACTION_SECRET = "action-secret"
 
 EVENT = {
     "title": "Payment gateway 5xx rate 8.1%",
@@ -84,7 +87,7 @@ def _press(
     event_id: Any = 5,
     actor: str = "ou_operator",
     at: Any = 1786037727,
-    secret: str = "",
+    secret: str = ACTION_SECRET,
     sign: bool = True,
 ) -> Any:
     """One button press, delivered the way hookrelay delivers it."""
@@ -252,11 +255,31 @@ def test_a_node_with_no_allowlist_puts_no_approve_on_its_card(tmp_path: Path) ->
 
 
 def test_the_action_door_needs_the_pipes_signature(tmp_path: Path) -> None:
-    client, _ = _investigated(tmp_path, event_secret="pipe-secret")
+    client, _ = _investigated(tmp_path, event_secret="pipe-secret", action_secret="pipe-secret")
     with client:
         assert _press(client, "useful", sign=False).status_code == 401
         assert _press(client, "useful", secret="wrong-secret").status_code == 401
         assert _press(client, "useful", secret="pipe-secret").status_code == 202
+
+
+def test_an_unsigned_approve_is_refused(tmp_path: Path) -> None:
+    """With no secret at all, a run inside the container can reach this door and
+    read the proposal file and its hash. `approve` is the one kind that runs
+    commands, so it refuses rather than treating the run as a person."""
+    allow = tmp_path / "allow.txt"
+    allow.write_text("kubectl rollout restart .*\n", encoding="utf-8")
+    client, _ = _investigated(tmp_path, remediation_allowlist=allow, action_secret="")
+    with client:
+        run = _drain(client, "probe:inbound:5")
+        proposal_id = run["meta"]["remediation_proposal"]
+        answer = _press(
+            client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}, sign=False
+        )
+        assert answer.status_code == 503
+        assert "needs HOOKPROBE_ACTION_SECRET" in answer.json()["detail"]
+    row = remediation.load(tmp_path, proposal_id)
+    assert row["status"] == "proposed"
+    assert not row["results"], "nothing ran"
 
 
 def test_an_unknown_kind_is_refused_before_anything_is_claimed(tmp_path: Path) -> None:

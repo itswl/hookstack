@@ -360,6 +360,7 @@ services:
       # Verifies what the pipe delivers to /hooks/event — the other half of
       # work.yaml's PLAN_EVENT_SECRET, and the same value.
       HOOKPROBE_EVENT_SECRET: ${PLAN_EVENT_SECRET:-}
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-}
       # Where the finished plan goes back in. This is the second `hookrelay` in
       # the operator's diagram; without it a report reaches a JSON file on the
       # volume and stops, which is exactly how the shadow's patrol reports were
@@ -557,6 +558,7 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       HOOKPROBE_EVENT_SECRET: ${WATCH_EVENT_SECRET:-}
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-}
       # NO return url, deliberately. Its product is the signals it posts during
       # the run, not a summary afterwards — see the to-watcher channel's comment
       # in work.yaml. The round's own text stays in the case file, which is what
@@ -761,6 +763,7 @@ services:
       # `:?` and not `:-`. This is the door that starts runs which change
       # things; unsigned, any process on this laptop could start one.
       HOOKPROBE_EVENT_SECRET: ${WORK_EVENT_SECRET:?set WORK_EVENT_SECRET in .env}
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/work-notify
       HOOKPROBE_RETURN_SECRET: ${WORK_RETURN_SECRET:?set WORK_RETURN_SECRET in .env}
       # The whole reason this container exists as a separate service.

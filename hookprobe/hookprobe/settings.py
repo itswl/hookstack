@@ -275,6 +275,11 @@ class Settings:
     # makes about whether an event deserves a paid investigation — the pipe
     # stays content-blind on purpose.
     event_secret: str
+    # The card-action door's own secret. Falls back to event_secret when empty,
+    # so an existing deployment keeps one credential; when BOTH are empty the
+    # door is unsigned, and `approve` is refused rather than left as the one
+    # path by which a compromised run could execute an allowlisted procedure.
+    action_secret: str
     # The one door findings go back to.
     return_url: str
     # Where the pipe's board is, as a BROWSER reaches it (not as this container
@@ -524,6 +529,7 @@ class Settings:
             remediation_cooldown_seconds=max(0, _int("HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS", _cooldown_default())),
             remediation_verify_seconds=max(0, _int("HOOKPROBE_REMEDIATION_VERIFY_SECONDS", _verify_default())),
             event_secret=os.environ.get("HOOKPROBE_EVENT_SECRET", ""),
+            action_secret=os.environ.get("HOOKPROBE_ACTION_SECRET", ""),
             return_url=os.environ.get("HOOKPROBE_RETURN_URL", "").strip(),
             relay_ui_url=os.environ.get("HOOKPROBE_RELAY_UI_URL", "").strip().rstrip("/"),
             public_url=os.environ.get("HOOKPROBE_PUBLIC_URL", "").strip().rstrip("/"),

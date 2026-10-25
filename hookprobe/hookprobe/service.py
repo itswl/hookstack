@@ -71,6 +71,24 @@ def _inferred_actor(session_key: str) -> str:
     return f"{INFERRED_BY_PREFIX}{session_key}"
 
 
+_UNSAFE_KEY = re.compile(r"[^A-Za-z0-9._:-]")
+
+
+def _patch_name(session_key: str) -> str:
+    """A patch filename that cannot leave the patches directory.
+
+    `RunStore` sanitizes the result file's name; the patch artifact was still
+    built from the raw caller-supplied key, so a session key containing `../`
+    wrote the diff outside the directory it is served from. A key that needed
+    rewriting carries a digest of the whole key, so two keys that sanitize to
+    the same prefix do not overwrite each other.
+    """
+    safe = _UNSAFE_KEY.sub("_", session_key)
+    if safe != session_key or len(safe) > 180:
+        safe = f"{safe[:160]}-{hashlib.sha256(session_key.encode('utf-8')).hexdigest()[:12]}"
+    return f"{safe}.patch"
+
+
 # One automatic retry per turn, and five seconds before it. A provider blip is
 # over in seconds; a second failure means it was not a blip, and a third attempt
 # is a bill rather than a diagnosis.
@@ -1511,7 +1529,7 @@ class RunService:
             try:
                 patch_dir = self._settings.workdir / "patches"
                 patch_dir.mkdir(parents=True, exist_ok=True)
-                (patch_dir / f"{run.session_key}.patch").write_text(patch + "\n", encoding="utf-8")
+                (patch_dir / _patch_name(run.session_key)).write_text(patch + "\n", encoding="utf-8")
                 run.meta["patch"] = patches.counts(patch)
                 # The clone the diff claims to describe is mounted here, so the
                 # claim is checked, not stored: commits carrying this run's key

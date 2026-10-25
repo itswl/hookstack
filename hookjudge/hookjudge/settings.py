@@ -97,6 +97,12 @@ class Settings:
     # a deploy.
     burst_window_seconds: int = 600
 
+    # How many model calls this process will have in flight at once. One alert
+    # storm of distinct conditions used to become one concurrent call each: the
+    # per-identity lock serializes restatements, not a thousand different rules.
+    # The cap is a queue, not a drop — the judgement is still recorded, later.
+    max_inflight: int = 8
+
     # Where to listen. Read here rather than in __main__ so that "what is this
     # process configured to do" is one object and not one object plus two
     # os.environ calls at the entrypoint — hookprobe's shape, and the better one.
@@ -146,6 +152,7 @@ class Settings:
             # it for every knob rather than this one.
             ai_structured_output=(os.environ.get("HOOKJUDGE_AI_STRUCTURED_OUTPUT") or "").strip() or "auto",
             burst_window_seconds=_int("HOOKJUDGE_BURST_WINDOW_SECONDS", 600),
+            max_inflight=max(1, _int("HOOKJUDGE_MAX_INFLIGHT", 8)),
             host=os.environ.get("HOOKJUDGE_HOST", "127.0.0.1"),
             port=_int("HOOKJUDGE_PORT", 8200),
         )

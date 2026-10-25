@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (27)
+## Environment (28)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -36,6 +36,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKJUDGE_BURST_WINDOW_SECONDS` | `600` | A burst is different rules from one origin inside one window |
 | `HOOKJUDGE_HOST` | `127.0.0.1` | Where to listen |
 | `HOOKJUDGE_PORT` | `8200` | Port the service listens on |
+| `HOOKJUDGE_MAX_INFLIGHT` | `8` | How many model calls this process will have in flight at once |
 | `HOOKJUDGE_AI_MODEL` | *(empty)* | Model name sent to that base |
 | `HOOKJUDGE_AI_STRUCTURED_OUTPUT` | *(empty)* | schema \| tools \| object to pin one, anything else (default "auto") to negotiate downwards from the strongest the provider will accept |
 

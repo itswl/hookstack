@@ -71,6 +71,21 @@ def test_the_service_lifts_a_patch_onto_the_run_and_disk(tmp_path):
     assert stored.startswith("diff --git")
 
 
+def test_a_session_key_cannot_walk_out_of_the_patch_directory() -> None:
+    """The patch artifact used the raw caller-supplied key while the result file
+    was sanitized, so a key with `../` wrote the diff outside patches/."""
+    from pathlib import PurePath
+
+    from hookprobe.service import _patch_name
+
+    name = _patch_name("../../etc/cron.d/evil")
+    assert PurePath(name).name == name
+    assert "/" not in name and "\\" not in name
+    assert name.endswith(".patch")
+    # A normal key stays readable, which is what the board links to.
+    assert _patch_name("probe:plan-approved:1") == "probe:plan-approved:1.patch"
+
+
 def test_the_board_offers_the_patch_as_an_artifact() -> None:
     """The name is the size because that is what a board row can use; the text
     is a route away and the clone's history is the ground truth beside it."""

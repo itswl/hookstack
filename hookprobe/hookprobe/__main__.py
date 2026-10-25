@@ -60,6 +60,13 @@ def _warn_open_doors(settings: Settings) -> None:
             "token does not cover it: set the secret to the value hookrelay signs its to-probe "
             "channel with."
         )
+    if not (settings.action_secret or settings.event_secret):
+        logger.warning(
+            "HOOKPROBE_ACTION_SECRET and HOOKPROBE_EVENT_SECRET are both empty — POST /hooks/action "
+            "accepts unsigned presses from anyone who can reach this port. `approve` refuses in "
+            "this configuration (it is the kind that runs commands); set an action secret so a "
+            "person's press can be told from a run's."
+        )
 
 
 def main() -> None:
