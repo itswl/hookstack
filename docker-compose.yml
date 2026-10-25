@@ -166,6 +166,11 @@ services:
     container_name: hs-hookprobe
     environment:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-}
+      # The pipe signs every card button with HOOKRELAY_ACTION_SECRET; the
+      # investigator must verify with the same value. Leaving this unset made
+      # approve answer 503 while the pipe still drew the button — the stack
+      # smoke's press then failed with a service that looked healthy.
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-demo-card-secret}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
       # The pipe's board as your browser reaches it; a run links to its chain there.
       HOOKPROBE_RELAY_UI_URL: ${HOOKPROBE_RELAY_UI_URL:-http://127.0.0.1:8100}
