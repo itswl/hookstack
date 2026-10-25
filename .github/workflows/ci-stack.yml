@@ -236,10 +236,17 @@ jobs:
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             python3 - <<'PY'
+          import re
           from pathlib import Path
-          text = Path("/tmp/stack-smoke.log").read_text(encoding="utf-8", errors="replace")[-6000:]
-          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::error title=stack smoke failed::{text}")
+          log = Path("/tmp/stack-smoke.log").read_text(encoding="utf-8", errors="replace")
+          def escape(text: str) -> str:
+              return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          reason = [
+              line for line in log.splitlines()
+              if re.search(r"STACK RED|Traceback|AssertionError|::error|refused|does not|no .* carried|failed", line, re.I)
+          ][-12:]
+          print(f"::error title=stack smoke reason::{escape(chr(10).join(reason)[-3000:])}")
+          print(f"::error title=stack smoke tail::{escape(log[-6000:])}")
           PY
           fi
           exit "$status"
