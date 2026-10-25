@@ -1108,47 +1108,76 @@ async def test_a_running_ledger_gains_the_attention_columns(tmp_path):
     await store.open()
     cursor = await store.db.execute("PRAGMA table_info(judgements)")
     columns = {row[1] for row in await cursor.fetchall()}
-    assert {"mattered", "mattered_at", "mattered_actor"} <= columns
+    assert {"mattered", "mattered_at", "mattered_actor", "delivered", "suppressed"} <= columns
     attention = await store.attention(0.0)
-    assert attention["interruptions"] == 1, "the row that predates the columns still counts as an interruption"
+    assert attention["judged"] == 1
+    assert attention["interruptions"] == 0, "a row with no pipe reply is unconfirmed, not a delivered card"
+    assert attention["unconfirmed"] == 1
     assert attention["mattered"] == 0 and attention["ruled"] == 0
     await store.close()
 
 
-async def test_the_ledger_counts_the_interruptions_a_storms_cost_hides(tmp_path):
-    """Twelve restatements of one condition interrupted a human twelve times.
+async def test_the_ledger_counts_only_cards_the_pipe_routed(tmp_path):
+    """Twelve restatements of one condition are twelve verdicts, but only the
+    ones the pipe actually drew cards for are interruptions. Eleven took the
+    free `reuse` route, so the spend figure says nothing about the rest — which
+    is the whole complaint: reuse saves money, not attention.
 
-    Eleven of them took the free `reuse` route, so the spend figure says nothing
-    about it at all — which is the whole complaint: reuse saves money, not
-    attention. `interruptions` is deliberately the same number as `judged`,
-    because that identity is the finding: every judgement becomes a card.
+    The judge cannot infer this; the pipe's reply says it. This test sets the
+    delivered bit the return leg would set from `{"outcome":"routed"}`.
     """
     store = await _ledger(tmp_path)
     reused = replace(ai_ok(), route=ROUTE_REUSE, cost=0.0)
-    await store.record(event(title="checkout 5xx", correlation_id="hr-1"), replace(ai_ok(), cost=0.004), 900)
+    ids = [await store.record(event(title="checkout 5xx", correlation_id="hr-1"), replace(ai_ok(), cost=0.004), 900)]
     for n in range(11):
-        await store.record(event(title="checkout 5xx", correlation_id=f"hr-r{n}"), reused, 2)
-    await store.record(event(title="disk full on db-1", correlation_id="hr-2"), replace(ai_ok(), cost=0.004), 800)
+        ids.append(await store.record(event(title="checkout 5xx", correlation_id=f"hr-r{n}"), reused, 2))
+    ids.append(
+        await store.record(event(title="disk full on db-1", correlation_id="hr-2"), replace(ai_ok(), cost=0.004), 800)
+    )
+    for row_id in ids:
+        await store.mark_return(row_id, "sent", 1, None, delivered=True)
 
     summary = await store.summary(0.0)
     attention = summary["attention"]
-    assert attention["interruptions"] == summary["judged"] == 13
+    assert attention["judged"] == summary["judged"] == 13
+    assert attention["interruptions"] == 13, "the pipe routed each of these"
     assert attention["conditions"] == 2
     assert attention["repeats"] == 11, "cards that restated something the operator had already been told"
     assert summary["cost"] == 0.008, "and the money says two events happened, not thirteen"
     await store.close()
 
 
+async def test_a_verdict_the_pipe_dropped_is_judged_but_not_an_interruption(tmp_path):
+    """The distinction the board was missing: judged is throughput, delivered is
+    the bill. A wake=no card produces a verdict and no interruption."""
+    store = await _ledger(tmp_path)
+    routed = await store.record(event(title="checkout 5xx"), ai_ok(), 5)
+    dropped = await store.record(event(title="disk full"), ai_ok(), 5)
+    await store.record(event(title="cert expiring"), ai_ok(), 5)
+    await store.mark_return(routed, "sent", 1, None, delivered=True)
+    await store.mark_return(dropped, "sent", 1, None, delivered=False, suppressed="wake_no")
+
+    attention = await store.attention(0.0)
+    assert attention["judged"] == 3
+    assert attention["interruptions"] == 1
+    assert attention["unconfirmed"] == 1, "the third row's pipe never answered"
+    assert attention["quiet_regrets"] == 0
+    await store.close()
+
+
 async def test_the_noisiest_view_names_where_to_go_turn_something_off(tmp_path):
-    """Identity, how many interruptions, how many were ruled useful — the one
+    """Identity, how many delivered cards, how many were ruled useful — the one
     view an operator can act on. A condition that interrupted once is not noise,
     so it is not padded into the list."""
     store = await _ledger(tmp_path)
+    ids = []
     for n in range(4):
-        await store.record(event(title="cert expiring in 29 days", correlation_id=f"hr-c{n}"), ai_ok(), 5)
+        ids.append(await store.record(event(title="cert expiring in 29 days", correlation_id=f"hr-c{n}"), ai_ok(), 5))
     for n in range(2):
-        await store.record(event(title="checkout 5xx", correlation_id=f"hr-p{n}"), ai_ok(), 5)
-    await store.record(event(title="one-off deploy notice", correlation_id="hr-once"), ai_ok(), 5)
+        ids.append(await store.record(event(title="checkout 5xx", correlation_id=f"hr-p{n}"), ai_ok(), 5))
+    ids.append(await store.record(event(title="one-off deploy notice", correlation_id="hr-once"), ai_ok(), 5))
+    for row_id in ids:
+        await store.mark_return(row_id, "sent", 1, None, delivered=True)
 
     await store.record_mattered("hr-p0", mattered="yes", at=100.0)
     await store.record_mattered("hr-c0", mattered="no", at=100.0)

@@ -21,7 +21,7 @@ hookjudge has exactly one outbound address: the pipe. Fan-out is not its
 business, so it cannot grow a second downstream by accident.
 
 It is the smallest service in the stack, and that is a **budget, not an
-observation**: 3,600 source lines is the ceiling, four runtime dependencies is
+observation**: 3,700 source lines is the ceiling, four runtime dependencies is
 the count, and `scripts/assert_weight.py` holds the first to what this file says.
 Raised from 2,900 on 2026-08-21, and the reason is the point of the budget rather
 than an exception to it: `importance` came back `high` for 210 of 216 alerts on
@@ -154,21 +154,22 @@ deletes a queued return.
 ### It accounts for attention, not only spend
 
 The operator's complaint is not "this cost too much", it is "I was interrupted
-40 times last week and 3 mattered". Every judgement is returned to the pipe and
-becomes a card, so **`judged` has always BEEN the number of times somebody was
-interrupted** — it was only ever read as throughput. A condition judged twelve
-times inside an hour interrupted a human twelve times, and because eleven of
-those took the free `reuse` route the spend figure says nothing at all about it.
-`/status` and `/metrics` now say it out loud, under `summary.attention`:
+40 times last week and 3 mattered". The two numbers are not the same: every
+judgement is returned to the pipe, but the pipe drops `wake=no` and folds repeats
+before a card exists. Its reply to the return leg says which happened, and the
+ledger records it. `/status` and `/metrics` now separate the throughput from the
+interruptions, under `summary.attention`:
 
 | key                       | what it says                                          |
 | ------------------------- | ----------------------------------------------------- |
-| `interruptions`           | cards a human received in the window (= `judged`)     |
-| `conditions`              | distinct conditions behind them                       |
-| `repeats`                 | interruptions that restated something already reported |
+| `judged`                  | verdicts recorded in the window (throughput)          |
+| `interruptions`           | cards the pipe ROUTED to a channel in the window      |
+| `conditions`              | distinct conditions behind those delivered cards      |
+| `repeats`                 | delivered cards that restated something already reported |
+| `unconfirmed`             | rows whose pipe reply did not say routed or suppressed — not a zero, and not assumed |
 | `mattered` / `did_not_matter` | rulings from `POST /feedback`                     |
 | `mattered_pct`            | of the **ruled** ones — an unruled card is not evidence |
-| `noisiest`                | conditions that interrupted more than once, with how many were paid for and how many anyone ruled useful |
+| `noisiest`                | delivered conditions that interrupted more than once, with how many were paid for and how many anyone ruled useful |
 
 Three of those keys need a person, and stayed empty for a week. So three more
 answer the same question without one. They are separate keys on purpose: a board

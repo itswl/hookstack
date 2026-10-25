@@ -397,7 +397,12 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # records a verdict (the keyword floor, with the reason on the row) instead
     # of dropping the alert. Split: +~28 source, +~24 code; default 0 means the
     # 3,540 behaviour is unchanged until an operator states a dollar figure.
-    "hookjudge": (3600, Path("hookjudge/README.md")),
+    # 3600 -> 3700 the same day, for attention truth: the pipe's reply now
+    # records delivered/suppressed, attention counts routed cards instead of
+    # verdicts, and the board separates judged / delivered / unconfirmed. Split:
+    # +~65 source, +~76 code; the doctrine question is the ledger's own bill,
+    # not a new judgement about an alert.
+    "hookjudge": (3700, Path("hookjudge/README.md")),
 }
 UNCAPPED = ("hookprobe",)
 

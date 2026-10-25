@@ -207,6 +207,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 int(row["return_attempts"]),
                 "returns disabled (ledger-only deployment)",
                 attempted_at=now,
+                delivered=False,
             )
             return
         if not app_settings.return_url:
@@ -216,6 +217,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 int(row["return_attempts"]),
                 "HOOKJUDGE_RETURN_URL is not configured",
                 attempted_at=now,
+                delivered=False,
             )
             await alarm.dead_return(
                 client, title=str(row["title"]), error="HOOKJUDGE_RETURN_URL is not configured", now=now
@@ -285,10 +287,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # them the network broke when sqlite did costs them the afternoon.
             error = f"{exc.__class__.__name__}: {exc}"[:200]
         if error is None:
-            await store.mark_return(int(row["id"]), "sent", attempts, None, attempted_at=now)
+            # The pipe answers with the decision trace, and that is the only
+            # place the judge can learn what happened AFTER its verdict: routed,
+            # or dropped by wake=no / folded / no_route. Marking every 2xx as a
+            # delivered card is what made `interruptions` a judgement count.
+            delivered: bool | None = None
+            suppressed = ""
+            try:
+                reply = json.loads(response.text or "{}")
+            except ValueError:
+                reply = None
+            if isinstance(reply, dict):
+                outcome = str(reply.get("outcome") or "").strip().lower()
+                if outcome == "routed":
+                    delivered = True
+                elif outcome:
+                    delivered = False
+                    suppressed = str(reply.get("skip_code") or outcome)
+            await store.mark_return(
+                int(row["id"]),
+                "sent",
+                attempts,
+                None,
+                attempted_at=now,
+                delivered=delivered,
+                suppressed=suppressed,
+            )
             return
         status = "queued" if attempts < app_settings.return_max_attempts else "dead"
-        await store.mark_return(int(row["id"]), status, attempts, error, attempted_at=now)
+        await store.mark_return(
+            int(row["id"]),
+            status,
+            attempts,
+            error,
+            attempted_at=now,
+            # A failed return reached no pipe, so it reached no card. It stays
+            # unknown while queued (a later attempt may still deliver) and is
+            # known-undelivered only once dead.
+            delivered=False if status == "dead" else None,
+        )
         if status == "dead":
             await alarm.dead_return(client, title=str(row["title"]), error=error, now=now)
 
@@ -855,12 +892,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             lines.append(f'hookjudge_returns{{status="{name}"}} {count}')
         attention = data["attention"]
         lines += [
-            "# HELP hookjudge_interruptions Cards a human received in the last 24h — every judgement becomes one.",
+            "# HELP hookjudge_judged Verdicts recorded in the last 24h, whatever the pipe did with them.",
+            "# TYPE hookjudge_judged gauge",
+            f"hookjudge_judged {attention['judged']}",
+            "# HELP hookjudge_interruptions Cards the pipe ROUTED to a channel in the last 24h.",
             "# TYPE hookjudge_interruptions gauge",
             f"hookjudge_interruptions {attention['interruptions']}",
-            "# HELP hookjudge_conditions Distinct conditions behind those interruptions.",
+            "# HELP hookjudge_conditions Distinct conditions behind those delivered cards.",
             "# TYPE hookjudge_conditions gauge",
             f"hookjudge_conditions {attention['conditions']}",
+            "# HELP hookjudge_unconfirmed Return rows whose pipe reply did not say routed or suppressed.",
+            "# TYPE hookjudge_unconfirmed gauge",
+            f"hookjudge_unconfirmed {attention['unconfirmed']}",
             "# HELP hookjudge_repeat_interruptions Interruptions restating a condition already reported.",
             # The unattended signal, beside the one that needs a human. When
             # `attention_rulings` stays flat at zero — the normal case on a

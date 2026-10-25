@@ -52,7 +52,13 @@ CREATE TABLE IF NOT EXISTS judgements (
     -- not a delivered judgement, and the ledger must not pretend otherwise.
     return_status TEXT NOT NULL DEFAULT 'queued',
     return_attempts INTEGER NOT NULL DEFAULT 0,
-    return_error TEXT
+    return_error TEXT,
+    -- What the PIPE did with the verdict: 1 routed to at least one channel,
+    -- 0 suppressed or unrouted, NULL not reported (legacy row, malformed
+    -- reply, or a return disabled before any pipe spoke). Attention counts a
+    -- card only at 1; the unconfirmed remainder is shown, never assumed.
+    delivered INTEGER,
+    suppressed TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ix_identity_time ON judgements (identity, received_at);
 CREATE INDEX IF NOT EXISTS ix_return ON judgements (return_status, id);
@@ -97,6 +103,7 @@ CREATE TABLE IF NOT EXISTS intake (
 # own database.
 _INDEXES = """
 CREATE INDEX IF NOT EXISTS ix_burst ON judgements (origin, received_at);
+CREATE INDEX IF NOT EXISTS ix_delivered ON judgements (delivered, received_at);
 """
 
 
@@ -213,6 +220,10 @@ class Store:
             # arrived. NULL on rows queued before this column existed, and the
             # worker falls back to received_at for those.
             "return_attempted_at": "REAL",
+            # What the pipe said it did with the verdict. NULL is honest and
+            # means "not reported"; it is not the same as 0 ("suppressed").
+            "delivered": "INTEGER",
+            "suppressed": "TEXT NOT NULL DEFAULT ''",
         }
         for column, ddl in typed.items():
             if column not in have:
@@ -570,7 +581,15 @@ class Store:
             self.on_change()
 
     async def mark_return(
-        self, row_id: int, status: str, attempts: int, error: str | None, *, attempted_at: float | None = None
+        self,
+        row_id: int,
+        status: str,
+        attempts: int,
+        error: str | None,
+        *,
+        attempted_at: float | None = None,
+        delivered: bool | None = None,
+        suppressed: str = "",
     ) -> None:
         """The return leg's state after one attempt, attempt clock included.
 
@@ -581,12 +600,24 @@ class Store:
         because a caller putting a row back to `queued` by hand is saying "try
         this now" and a stale clock would make the worker wait out a delay for an
         attempt that no longer happened.
+
+        `delivered` is the pipe's answer, not ours: 1 routed, 0 suppressed,
+        None not reported. A failure on the way there keeps it unknown; only a
+        reply from the pipe can say what the far end did.
         """
         async with self._write:
             await self.db.execute(
                 "UPDATE judgements SET return_status = ?, return_attempts = ?, return_error = ?,"
-                " return_attempted_at = ? WHERE id = ?",
-                (status, attempts, (error or "")[:400] or None, attempted_at, row_id),
+                " return_attempted_at = ?, delivered = ?, suppressed = ? WHERE id = ?",
+                (
+                    status,
+                    attempts,
+                    (error or "")[:400] or None,
+                    attempted_at,
+                    None if delivered is None else int(bool(delivered)),
+                    suppressed[:80],
+                    row_id,
+                ),
             )
             await self.db.commit()
         self._announce()
@@ -762,15 +793,19 @@ class Store:
     async def attention(self, since: float, *, limit: int | None = None) -> dict[str, Any]:
         """The bill the cost figures cannot show: how often a human was INTERRUPTED.
 
-        `interruptions` is the same number as `judged`, and that identity is the
-        finding rather than a redundancy. Every judgement is returned to the pipe
-        and becomes a card, so the ledger's headline count has always BEEN the
-        number of times somebody was interrupted; it was only ever read as
-        throughput. A condition judged twelve times inside an hour interrupted a
-        human twelve times, and "$0.004 spend" — eleven of those twelve being
-        free `reuse` routes — says nothing whatsoever about that. `repeats` is
-        the part that was invisible: cards that restated a condition the operator
-        had already been told about in this window.
+        `interruptions` is what the PIPE ROUTED, not what the judge decided. The
+        two were conflated for the service's whole life: every verdict was called
+        an interruption, while the pipe drops `wake=no` and folds repeats before
+        any card exists. The pipe's return reply says which happened, and the
+        return leg records it (`delivered`: 1 routed, 0 suppressed, NULL not
+        reported). `judged` keeps the throughput number beside it, and
+        `unconfirmed` names the rows where the pipe never said — an honest third
+        state, not a zero.
+
+        A condition judged twelve times inside an hour interrupted a human only
+        as often as the pipe drew a card for it. `repeats` is the part that was
+        invisible: delivered cards that restated a condition the operator had
+        already been told about in this window.
 
         Nothing here changes what is returned. Who owns noise when a verdict is
         reused is deliberately still open (the proposed note of 2026-08-12), and
@@ -788,8 +823,20 @@ class Store:
             (since,),
         )
         totals = await cursor.fetchone()
-        interruptions = int(totals["n"]) if totals else 0
-        conditions = int(totals["conditions"]) if totals else 0
+        cursor = await self.db.execute(
+            "SELECT"
+            " (SELECT count(*) FROM judgements WHERE received_at >= ? AND delivered = 1) AS n,"
+            " (SELECT count(DISTINCT identity) FROM judgements WHERE received_at >= ? AND delivered = 1)"
+            "   AS conditions,"
+            " (SELECT count(*) FROM judgements WHERE received_at >= ? AND delivered IS NULL)"
+            "   AS unconfirmed",
+            (since, since, since),
+        )
+        delivered = await cursor.fetchone()
+        judged = int(totals["n"]) if totals else 0
+        interruptions = int(delivered["n"]) if delivered else 0
+        conditions = int(delivered["conditions"]) if delivered else 0
+        unconfirmed = int(delivered["unconfirmed"]) if delivered else 0
         mattered = int(totals["mattered"]) if totals else 0
         did_not_matter = int(totals["did_not_matter"]) if totals else 0
         ruled = mattered + did_not_matter
@@ -827,7 +874,8 @@ class Store:
             " coalesce(sum(route = 'ai'), 0) AS paid,"
             " coalesce(sum(mattered = 'yes'), 0) AS mattered,"
             " coalesce(sum(mattered = 'no'), 0) AS did_not_matter"
-            " FROM judgements WHERE received_at >= ? GROUP BY identity HAVING count(*) > 1"
+            " FROM judgements WHERE received_at >= ? AND delivered = 1"
+            " GROUP BY identity HAVING count(*) > 1"
             " ORDER BY n DESC, last_id DESC LIMIT ?",
             (since, max(1, min(50, limit or self.NOISIEST_LIMIT))),
         )
@@ -869,9 +917,14 @@ class Store:
             for row in await cursor.fetchall()
         ]
         return {
+            # `judged` is throughput; `interruptions` is delivered cards. They
+            # were the same number until the pipe's reply was recorded, and the
+            # difference is the noise the board was hiding.
+            "judged": judged,
             "interruptions": interruptions,
             "conditions": conditions,
             "repeats": interruptions - conditions,
+            "unconfirmed": unconfirmed,
             "mattered": mattered,
             "did_not_matter": did_not_matter,
             "ruled": ruled,

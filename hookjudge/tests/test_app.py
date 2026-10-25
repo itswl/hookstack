@@ -33,8 +33,9 @@ EVENT = {
 class Sink:
     """The pipe's return door."""
 
-    def __init__(self, status: int = 200) -> None:
+    def __init__(self, status: int = 200, text: str = "{}") -> None:
         self.status = status
+        self.text = text
         self.received: list[dict[str, Any]] = []
 
     async def post(self, url: str, **kwargs: Any) -> Any:
@@ -43,7 +44,7 @@ class Sink:
 
         class _R:
             status_code = self.status
-            text = "{}"
+            text = self.text
 
         return _R()
 
@@ -142,6 +143,42 @@ async def test_the_judgement_is_handed_back_signed_and_correlated(app_client, mo
 
     rows = await app_client.app.state.store.recent(1)
     assert rows[0]["return_status"] == "sent"
+
+
+async def test_the_pipe_saying_suppressed_records_no_interruption(app_client, monkeypatch):
+    """The pipe drops wake=no before a card exists. Its reply is the only place
+    the judge can learn that, and the attention bill must not count the verdict."""
+    sink = Sink(text='{"outcome": "skipped", "skip_code": "wake_no"}')
+    monkeypatch.setattr(app_client.app.state, "client", sink)
+    await app_client.post("/events", json=EVENT)
+    await _settle(app_client)
+    for _ in range(80):
+        await asyncio.sleep(0.01)
+        if (await app_client.app.state.store.recent(1))[0]["return_status"] == "sent":
+            break
+    row = (await app_client.app.state.store.recent(1))[0]
+    assert row["return_status"] == "sent"
+    assert row["delivered"] == 0 and row["suppressed"] == "wake_no"
+
+    attention = (await app_client.app.state.store.summary(0.0))["attention"]
+    assert attention["judged"] == 1 and attention["interruptions"] == 0
+    assert attention["unconfirmed"] == 0
+
+
+async def test_the_pipe_saying_routed_records_one_interruption(app_client, monkeypatch):
+    sink = Sink(text='{"outcome": "routed", "channels": ["to-me"]}')
+    monkeypatch.setattr(app_client.app.state, "client", sink)
+    await app_client.post("/events", json=EVENT)
+    await _settle(app_client)
+    for _ in range(80):
+        await asyncio.sleep(0.01)
+        if (await app_client.app.state.store.recent(1))[0]["return_status"] == "sent":
+            break
+    row = (await app_client.app.state.store.recent(1))[0]
+    assert row["delivered"] == 1
+
+    attention = (await app_client.app.state.store.summary(0.0))["attention"]
+    assert attention["judged"] == 1 and attention["interruptions"] == 1
 
 
 async def test_a_refusing_pipe_is_retried_then_dead_lettered(app_client, monkeypatch):
@@ -762,11 +799,16 @@ async def test_a_returned_recovery_offers_nothing_to_silence(app_client, monkeyp
     assert payload["actions"] == [], "nothing to silence, and no ruling to ask for on a resolution notice"
 
 
-async def test_a_press_is_recorded_against_the_judgement_that_interrupted_someone(app_client):
+async def test_a_press_is_recorded_against_the_judgement_that_interrupted_someone(app_client, monkeypatch):
     """The half the cost figures cannot show. `useful` says being woken was worth
     it; the ledger already knew how many times it woke somebody."""
+    monkeypatch.setattr(app_client.app.state, "client", Sink(text='{"outcome": "routed"}'))
     await app_client.post("/events", json=EVENT)
     await _settle(app_client)
+    for _ in range(80):
+        await asyncio.sleep(0.01)
+        if (await app_client.app.state.store.recent(1))[0]["delivered"] == 1:
+            break
 
     pressed = await app_client.post(
         "/feedback",
@@ -893,6 +935,8 @@ async def test_status_and_metrics_account_for_attention_not_only_spend(app_clien
     await store.record(press(1), Verdict(summary="s", importance="low", route="ai", model="m").normalized(), 900)
     for n in (2, 3):
         await store.record(press(n), Verdict(summary="s", importance="low", route="reuse").normalized(), 3)
+    for row in await store.recent(10):
+        await store.mark_return(int(row["id"]), "sent", 1, None, delivered=True)
 
     await app_client.post("/feedback", json={"action": {"kind": "useless"}, "correlation_id": "hr-2", "at": 100.0})
 
@@ -1018,12 +1062,27 @@ async def test_a_row_that_cannot_be_marked_does_not_starve_the_queue_behind_it(a
     real_mark = store.mark_return
 
     async def flaky(
-        row_id: int, status: str, attempts: int, error: str | None, *, attempted_at: float | None = None
+        row_id: int,
+        status: str,
+        attempts: int,
+        error: str | None,
+        *,
+        attempted_at: float | None = None,
+        delivered: bool | None = None,
+        suppressed: str = "",
     ) -> None:
         # A fresh ledger per test, so the first judgement is id 1.
         if row_id == 1:
             raise sqlite3.OperationalError("database is locked")
-        await real_mark(row_id, status, attempts, error, attempted_at=attempted_at)
+        await real_mark(
+            row_id,
+            status,
+            attempts,
+            error,
+            attempted_at=attempted_at,
+            delivered=delivered,
+            suppressed=suppressed,
+        )
 
     monkeypatch.setattr(store, "mark_return", flaky)
 
@@ -1135,7 +1194,10 @@ async def test_a_condition_that_heals_itself_is_visible_without_anyone_pressing(
         )
 
     async def record(title: str, at: float, *, recovery: bool = False) -> None:
-        await store.record(event(title, at, recovery=recovery), Verdict(summary="s", importance="high").normalized(), 1)
+        row_id = await store.record(
+            event(title, at, recovery=recovery), Verdict(summary="s", importance="high").normalized(), 1
+        )
+        await store.mark_return(row_id, "sent", 1, None, delivered=True)
 
     base = time.time() - 3600
     # Flapping: fires and heals in three minutes, twice.
@@ -1223,7 +1285,7 @@ async def test_an_ai_ruling_never_lands_in_the_column_that_means_a_person_said_s
 
         base = time.time() - 3600
         for index in range(4):
-            await store.record(
+            row_id = await store.record(
                 Incoming(
                     source="grafana",
                     title="Topup over 500",
@@ -1237,6 +1299,7 @@ async def test_an_ai_ruling_never_lands_in_the_column_that_means_a_person_said_s
                 Verdict(summary="s", importance="high").normalized(),
                 1,
             )
+            await store.mark_return(row_id, "sent", 1, None, delivered=True)
 
         good = {
             "identity": "grafana|Topup over 500",
@@ -1339,7 +1402,7 @@ async def test_an_ai_ruling_on_a_condition_outside_the_window_is_not_counted(tmp
 
         # One condition, twice, inside the window.
         for index in range(2):
-            await store.record(
+            row_id = await store.record(
                 Incoming(
                     source="grafana",
                     title="Inside the window",
@@ -1353,6 +1416,7 @@ async def test_an_ai_ruling_on_a_condition_outside_the_window_is_not_counted(tmp
                 Verdict(summary="s", importance="high").normalized(),
                 1,
             )
+            await store.mark_return(row_id, "sent", 1, None, delivered=True)
 
         for identity in ("grafana|Inside the window", "grafana|Never seen here"):
             body, headers = sign(
@@ -1397,7 +1461,7 @@ async def test_the_second_axis_is_counted_apart_from_importance_and_from_a_perso
         base = time.time() - 600
         # Same importance on all three; the second axis disagrees with it twice.
         for index, wake in enumerate(("yes", "no", "")):
-            await store.record(
+            row_id = await store.record(
                 Incoming(
                     source="grafana",
                     title=f"示例条件 {index}",
@@ -1411,6 +1475,7 @@ async def test_the_second_axis_is_counted_apart_from_importance_and_from_a_perso
                 Verdict(summary="s", importance="high", wake_someone=wake).normalized(),
                 1,
             )
+            await store.mark_return(row_id, "sent", 1, None, delivered=True)
 
         body = (await client.get("/status", headers={"X-Read-Token": "read-t"})).json()
         metrics = (await client.get("/metrics", headers={"X-Read-Token": "read-t"})).text

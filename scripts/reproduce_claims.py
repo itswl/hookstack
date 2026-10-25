@@ -75,7 +75,7 @@ REPRODUCIBLE: tuple[tuple[str, str, object], ...] = (
         lambda: _run([sys.executable, "scripts/assert_weight.py"]),
     ),
     (
-        "hookjudge stays at or under 3,600 source lines",
+        "hookjudge stays at or under 3,700 source lines",
         "hookjudge/README.md",
         lambda: _run([sys.executable, "scripts/assert_weight.py"]),
     ),
