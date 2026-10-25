@@ -564,6 +564,33 @@ class Store:
         async with self.transaction() as tx:
             return await tx.insert_event(source, fp, extracted, payload_json, now, correlation_id)
 
+    async def record_event(
+        self,
+        source: str,
+        fp: str,
+        extracted: dict[str, Any],
+        payload_json: str,
+        now: float,
+        *,
+        outcome: str,
+        skip_code: str | None,
+        channels: list[str],
+        steps: list[dict[str, Any]],
+        correlation_id: str | None = None,
+    ) -> int:
+        """The event, its one decision, and every delivery row — or nothing.
+
+        The three were separate transactions, so a crash in the gaps left a
+        `routed` event the ledger said went to four places with two delivery
+        rows and no retry path. Transaction() exists for this unit; this is the
+        call site that uses it, for the front door and for card actions alike.
+        """
+        async with self.transaction() as tx:
+            event_id = await tx.insert_event(source, fp, extracted, payload_json, now, correlation_id)
+            await tx.insert_decision(event_id, outcome, skip_code, channels, steps)
+            await tx.enqueue_deliveries(event_id, channels, now)
+            return event_id
+
     def _announce(self) -> None:
         """Say that the ledger moved; the boards decide what to refetch."""
         if self.on_change is not None:

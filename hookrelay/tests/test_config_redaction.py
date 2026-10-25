@@ -67,3 +67,24 @@ def test_a_credential_bearing_url_is_NOT_masked() -> None:
     so it masks neither. The docstring says so and points at ${REF}; /topology is
     the view that prints host only."""
     assert "URL-CARRIED-TOKEN" in _redact_secrets(CONFIG)
+
+
+def test_a_block_scalar_secret_is_masked_with_its_body() -> None:
+    """The inline pattern only saw the `|`, so the indented credential came back
+    verbatim on an endpoint whose docstring promised redaction. The body is
+    removed and the next key at the same indent is left alone."""
+    config = """sources:
+  - name: legacy
+    secret: |
+      hunter2-the-block-value
+      and-the-second-line
+    title: "{meta.alert_name}"
+  - name: signed
+    secret: ${REAL_SECRET}
+"""
+    out = _redact_secrets(config)
+    assert "hunter2-the-block-value" not in out
+    assert "and-the-second-line" not in out
+    assert "secret: <redacted>" in out
+    assert 'title: "{meta.alert_name}"' in out, "the next key survived"
+    assert "secret: ${REAL_SECRET}" in out, "a reference still shows its name"

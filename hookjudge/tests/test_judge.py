@@ -296,6 +296,11 @@ def test_recovery_is_read_not_asked(title: str, expected: bool):
         "未恢复: 数据库仍然不可用",
         "Payment probe not OK for 5m",  # "OK" mid-sentence is not a recovery
         "status != OK for 10m",  # nor is an inequality against OK
+        "Payment probe not OK",  # the trailing token is still denied by the word before it
+        "status != OK",  # and so is an inequality with nothing after it
+        "OK but payments failing",  # a leading OK is a verdict, not a marker
+        "Resolved deadlocks climbing on db-1",  # "Resolved" is the verb here
+        "DNS resolved to 10.0.0.1",  # resolved-to, not resolved
         "自动恢复失败",  # the recovery FAILED — the opposite of a recovery
     ],
 )
@@ -304,6 +309,21 @@ def test_a_live_incident_is_never_read_as_its_own_recovery(title: str):
     a false positive here reports a firing incident as resolved. Each of these
     read as a recovery under plain containment."""
     assert event(title=title, body="").is_recovery is False
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Payment gateway recovered at 09:00",
+        "Disk cleared by the cleanup job",
+        "status: resolved",
+        "Disk alert 已恢复",
+    ],
+)
+def test_a_real_recovery_assertion_still_counts(title: str):
+    """The fix must not swing the other way. A subject that states the ending —
+    at an edge, after a separator, or with a time/agent — is still a recovery."""
+    assert event(title=title, body="").is_recovery is True
 
 
 def test_recovery_words_in_body_prose_do_not_trigger_recovery():
@@ -976,6 +996,60 @@ async def test_agreement_compares_platform_level_with_judge_importance(tmp_path)
     assert agreement["matrix"]["high"] == {"high": 1, "medium": 1}
     rows = agreement["recent_disagreements"]
     assert len(rows) == 1 and rows[0]["title"] == "b"
+    await store.close()
+
+
+async def test_a_recovery_inherits_a_firing_older_than_the_reuse_window(tmp_path):
+    """A long incident's recovery arrives after the reuse window. Bounding the
+    inheritance by that window is how a "high" firing ended with a rule-floor
+    recovery an hour later — the contradiction this route exists to prevent."""
+    store = await _ledger(tmp_path)
+    firing = replace(event(title="gateway 5xx"), received_at=1000.0)
+    await store.record(firing, ai_ok(importance="high"), 1)
+
+    assert await store.prior_verdict(firing.identity, 60, 5000.0, any_route=True) is None
+    inherited = await store.prior_verdict(firing.identity, None, 5000.0, any_route=True)
+    assert inherited is not None and inherited["importance"] == "high"
+    await store.close()
+
+
+async def test_the_review_queue_does_not_ask_a_human_to_re_rate_a_recovery(tmp_path):
+    """A recovery's importance was inherited; it is not a verdict the judge
+    expressed. The agreement matrix already excludes it, and a queue that asks
+    a person to adjudicate it is asking them to rule on nobody's decision."""
+    store = await _ledger(tmp_path)
+    await store.record(event(title="gateway 5xx", level="high"), ai_ok(importance="medium"), 1)
+    resolved = Incoming.parse(
+        {"source": "grafana", "title": "[RESOLVED] gateway 5xx", "level": "high", "is_recovery": True},
+        now=2000.0,
+    )
+    await store.record(resolved, ai_ok(importance="critical"), 1)
+
+    rows = await store.disagreements()
+    assert [row["title"] for row in rows] == ["gateway 5xx"], "only the firing is a review"
+    await store.close()
+
+
+async def test_an_accepted_event_waits_durably_until_it_is_judged(tmp_path):
+    """The 202 is a promise, so the event is on disk before the door answers.
+
+    A process killed between accepting and judging used to lose the alert with
+    no judgement row, no dead letter and nothing for /status to show. The intake
+    row is the copy boot replays; it goes only once a judgement exists.
+    """
+    store = await _ledger(tmp_path)
+    firing = event(title="gateway 5xx", correlation_id="hr-intake")
+    intake_id = await store.accept(firing)
+    assert intake_id > 0
+
+    pending = await store.pending_intake()
+    assert [row["id"] for row in pending] == [intake_id]
+    replayed = Incoming(**json.loads(pending[0]["event_json"]))
+    assert replayed.identity == firing.identity
+    assert replayed.correlation_id == "hr-intake"
+
+    await store.drop_intake(intake_id)
+    assert await store.pending_intake() == []
     await store.close()
 
 

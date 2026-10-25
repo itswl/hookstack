@@ -21,8 +21,8 @@ run.
 
 | claim | stated in | artefact that backs it | class |
 | --- | --- | --- | --- |
-| hookrelay stays at or under 6,400 source lines | `hookrelay/README.md` | `scripts/assert_weight.py` | Reproducible |
-| hookjudge stays at or under 3,400 source lines | `hookjudge/README.md` | `scripts/assert_weight.py` | Reproducible |
+| hookrelay stays at or under 6,550 source lines | `hookrelay/README.md` | `scripts/assert_weight.py` | Reproducible |
+| hookjudge stays at or under 3,540 source lines | `hookjudge/README.md` | `scripts/assert_weight.py` | Reproducible |
 | every route, knob and containment row is written up or named as deliberately not | `docs/containment.md`, `*/docs/reference.md` | `scripts/assert_docs.py` | Reproducible |
 | the three boards share one design language | the service pages | `scripts/assert_design.py` | Reproducible |
 | a replayed signed request cannot buy a second verdict | `docs/containment.md` | `hookrelay/tests/test_signature_replay.py` | Reproducible |

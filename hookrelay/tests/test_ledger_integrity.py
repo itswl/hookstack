@@ -30,6 +30,52 @@ async def test_a_delivery_cannot_name_an_event_that_does_not_exist(store) -> Non
         await store.db.commit()
 
 
+async def test_a_routed_event_and_its_deliveries_land_together(store, monkeypatch) -> None:
+    """The unit the ledger promises: one event, one decision, every delivery —
+    or nothing. The transaction existed while the front door wrote the three in
+    separate transactions, so a crash in a gap left a routed event with fewer
+    delivery rows than channels and no retry path."""
+    from hookrelay.store import Transaction
+
+    async def boom(self, event_id, channels, now):  # noqa: ANN001, ARG001
+        raise RuntimeError("the disk filled between the decision and the outbox")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Transaction, "enqueue_deliveries", boom)
+        with pytest.raises(RuntimeError):
+            await store.record_event(
+                "s",
+                "fp-atomic",
+                _event(),
+                "{}",
+                100.0,
+                outcome="routed",
+                skip_code=None,
+                channels=["a", "b"],
+                steps=[],
+            )
+    assert await store.recent_events(50) == [], "the event did not survive its deliveries"
+    for table in ("decisions", "deliveries"):
+        cursor = await store.read.execute(f"SELECT count(*) FROM {table}")
+        assert (await cursor.fetchone())[0] == 0, f"{table} survived a rolled-back unit"
+
+    event_id = await store.record_event(
+        "s",
+        "fp-atomic",
+        _event(),
+        "{}",
+        100.0,
+        outcome="routed",
+        skip_code=None,
+        channels=["a", "b"],
+        steps=[],
+    )
+    assert event_id > 0
+    for table, expected in (("decisions", 1), ("deliveries", 2)):
+        cursor = await store.read.execute(f"SELECT count(*) FROM {table}")
+        assert (await cursor.fetchone())[0] == expected, table
+
+
 async def test_a_write_that_returns_a_value_still_announces(store) -> None:
     """The mechanism behind the missing refreshes, and the reason it hit exactly
     the methods it did.

@@ -316,7 +316,16 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # the doctrine answer is the entry above with no new argument; two raises in
     # one day is the ceiling working, not a formality — each needed a reason
     # written down, and neither added a judgment about an alert's worth.
-    "hookrelay": (6450, Path("hookrelay/README.md")),
+    # 6450 -> 6550 on 2026-10-25, for the fixes a review of the ledger and the
+    # config surface forced: the event, its decision and its delivery rows are
+    # written in one `Store.record_event` transaction (the unit the store already
+    # documented and the front door ignored), a block-scalar `secret:` is masked
+    # with its indented body, and `${VAR}` resolves inside a value so the
+    # documented `Bearer ${BRAIN_KEY}` header stops sending its own name. Split:
+    # +~69 source, +~30 code. The doctrine question is easy — all four are
+    # properties of the pipe's own door/ledger/config, none reads an alert's
+    # meaning. The rest is the docstrings saying which promise was broken.
+    "hookrelay": (6550, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:
@@ -370,7 +379,21 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # after two hundred newer verdicts, "Show them" answered "no verdict
     # matches" to the reader it sent to look at three dead returns, and "the
     # platform is right" on a `warning` row was refused by the label door.
-    "hookjudge": (3400, Path("hookjudge/README.md")),
+    # 3400 -> 3450 on 2026-10-25, for the recovery corrections a review found:
+    # a mid-title "Resolved" or a trailing "not OK" no longer becomes a green
+    # recovery card, a recovery inherits its firing's verdict past the reuse
+    # window, and the review queue stops asking a person to re-rate an inherited
+    # verdict. Split: +~50 source, +~22 code. The doctrine answer: this is the
+    # judge's own contract and its own ledger, not a new capability; the lines
+    # are the guards and the tests' assertions in prose.
+    # 3450 -> 3540 on 2026-10-25, for durable intake: /events answered 202
+    # before a row existed, so a kill between the answer and the judgement took
+    # the alert out of the ledger, the dead letters and /status at once. One
+    # small intake table, a synchronous insert before the 202, a drop only after
+    # a judgement exists, and a boot replay. Split: +~63 source, +~41 code. The
+    # doctrine question: this is the judge's own promise about its own door; no
+    # new judgement about an alert, and no new dependency.
+    "hookjudge": (3540, Path("hookjudge/README.md")),
 }
 UNCAPPED = ("hookprobe",)
 

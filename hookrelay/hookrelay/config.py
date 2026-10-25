@@ -25,7 +25,11 @@ import yaml
 from hookrelay import actions, registry
 from hookrelay.templates import ExtractTemplate, TemplateSelector
 
-_ENV_REF = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+# `${NAME}` anywhere in a value, not only when it is the whole value. The
+# documented auth header is `authorization: Bearer ${BRAIN_KEY}`; the anchored
+# form sent that literal string, the brain answered 401, and `on_error: pass`
+# turned the failed call into an unjudged event with no visible symptom.
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 # Doors the PIPE itself speaks through. They have no entry under `sources`
@@ -46,9 +50,7 @@ class ConfigError(ValueError):
 
 def _resolve(value: Any) -> Any:
     if isinstance(value, str):
-        match = _ENV_REF.match(value.strip())
-        if match:
-            return os.environ.get(match.group(1), "")
+        return _ENV_REF.sub(lambda match: os.environ.get(match.group(1), ""), value)
     return value
 
 
@@ -529,6 +531,14 @@ class Config:
             if stage.type == "http":
                 from hookrelay.processors import MAX_INLINE_TIMEOUT_SECONDS
 
+                # The policy is one of two words, and anything else used to
+                # behave as `pass` — a typo silently chose fail-open for a stage
+                # whose whole point may have been fail-closed.
+                on_error = str(stage.options.get("on_error") or "pass")
+                if on_error not in ("pass", "drop"):
+                    raise ConfigError(
+                        f"pipeline stage {stage.name}: on_error must be 'pass' or 'drop', not {on_error!r}"
+                    )
                 requested_timeout = float(stage.options.get("timeout_seconds", 3.0))
                 if requested_timeout > MAX_INLINE_TIMEOUT_SECONDS:
                     raise ConfigError(

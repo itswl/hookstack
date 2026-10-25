@@ -50,9 +50,15 @@ _MARKER_BRACKETED = re.compile(
     r"[\[\(（【]\s*(?:" + "|".join(_RECOVERY_WORDS) + r"|ok)\s*[\]\)）】]",
     re.IGNORECASE,
 )
+# An edge marker must be a MARKER, not a word that happens to start the title:
+# "Resolved deadlocks climbing" and "OK but payments failing" are both live
+# incidents. The word therefore has to stand alone or be followed by the
+# separator monitoring templates use (`:`, `-`), which is also what keeps a
+# trailing `not OK` from being read as `OK` — see _edge_asserts_recovery.
+_EDGE_WORDS = "|".join(_RECOVERY_WORDS) + "|ok"
 _MARKER_EDGE = re.compile(
-    r"(?:^\s*(?:" + "|".join(_RECOVERY_WORDS) + r"|ok)\b\s*[:：\-–·]*\s*)"
-    r"|(?:\s*[:：\-–·]*\s*\b(?:" + "|".join(_RECOVERY_WORDS) + r"|ok)\s*$)",
+    rf"(?:^\s*(?:{_EDGE_WORDS})(?=\s*[:：\-–·]|\s*$)\s*[:：\-–·]?\s*)"
+    rf"|(?:(?:^|\s)[:：\-–·]*\s*(?:{_EDGE_WORDS})\s*$)",
     re.IGNORECASE,
 )
 
@@ -76,13 +82,22 @@ _RECOVERY_MENTION = re.compile(
     "|".join(rf"\b{re.escape(word)}\b" if word.isascii() else re.escape(word) for word in _RECOVERY_WORDS),
     re.IGNORECASE,
 )
-_NEGATED_BEFORE = re.compile(r"(?:not|isn't|is not|hasn't|has not|no longer|未|尚未|没有|无法)\s*\W*$", re.IGNORECASE)
+_NEGATED_BEFORE = re.compile(
+    r"(?:not|isn't|is not|hasn't|has not|no longer|!=|≠|<>|未|尚未|没有|无法)\s*\W*$", re.IGNORECASE
+)
 # 恢复中 / 恢复了一部分 — the condition is still moving.
 _IN_PROGRESS_AFTER = ("中",)
 # 恢复失败 / 恢复失效 — the recovery itself did NOT happen. The word is present,
 # the event is the opposite of a recovery, and reading it as one reports a live
 # incident as resolved.
 _FAILED_AFTER = ("失败", "失效")
+
+
+# A trailing English recovery word is an assertion only when it ends the
+# subject or is followed by a time/agent ("recovered at 09:00", "cleared by the
+# restart"). "resolved to 10.0.0.1" is the DNS verb, and treating it as an
+# assertion turned a live probe into a green recovery card.
+_ASSERTION_AFTER = re.compile(r"^\s+(?:at|after|since|by)\b", re.IGNORECASE)
 
 
 def _asserts_recovery(text: str) -> bool:
@@ -95,6 +110,27 @@ def _asserts_recovery(text: str) -> bool:
         if following.startswith(_IN_PROGRESS_AFTER):
             continue
         if following.startswith(_FAILED_AFTER):
+            continue
+        if (
+            match.group(0).isascii()
+            and following.strip()
+            and not following.lstrip().startswith((":", "：", "-", "–", "·"))
+            and not _ASSERTION_AFTER.match(following)
+        ):
+            continue
+        return True
+    return False
+
+
+def _edge_asserts_recovery(text: str) -> bool:
+    """An edge marker, minus the negations the edge itself cannot see.
+
+    `not OK` and `status != OK` end in a marker-shaped token; the word before
+    it is the only place the denial lives.
+    """
+    for match in _MARKER_EDGE.finditer(text):
+        before = text[max(0, match.start() - 24) : match.start()]
+        if _NEGATED_BEFORE.search(before):
             continue
         return True
     return False
@@ -366,7 +402,7 @@ class Incoming:
         # button-less recovery cards. A pipe that knows the fact sets
         # recovery_flag above; this keyword sniff is only the flagless fallback.
         title = self.title.lower()
-        if _MARKER_BRACKETED.search(title) or _MARKER_EDGE.search(title):
+        if _MARKER_BRACKETED.search(title) or _edge_asserts_recovery(title):
             return True
         fields_text = " ".join(str(value) for value in self.fields.values()).lower()
         return _asserts_recovery(title) or _asserts_recovery(fields_text)

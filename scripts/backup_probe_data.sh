@@ -3,10 +3,12 @@
 #
 # probe-data holds the investigator's accumulated runbooks, memory, case files
 # and audit log; shadow-data (when the shadow run exists) holds the ledgers the
-# whole comparison exercise is for. Everything else (images, config) is a
-# `git pull` away. Both are plain bind mounts precisely so this can be one tar
-# with no docker involvement — a backup that needs the thing it protects to be
-# healthy is not a backup.
+# comparison exercise was for; work-data is the deployment that actually runs
+# today — the pipe's ledger, every node's case files/audit/skills, the MCP gate's
+# refusals and the watch signer's record. Everything else (images, config) is a
+# `git pull` away. All three are plain bind mounts precisely so this can be one
+# tar with no docker involvement — a backup that needs the thing it protects to
+# be healthy is not a backup.
 #
 # Install (host crontab):
 #   15 4 * * * /srv/hookstack/scripts/backup_probe_data.sh
@@ -23,7 +25,7 @@ TARGET="${BACKUP_DIR:-/opt/backups/hookstack}"
 KEEP="${KEEP:-7}"
 
 members=()
-for dir in probe-data shadow-data; do
+for dir in probe-data shadow-data work-data; do
   [ -d "$ROOT/$dir" ] && members+=("$dir")
 done
 # .env is the one part of the deployment a `git pull` cannot rebuild — every

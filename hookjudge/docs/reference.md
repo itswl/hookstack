@@ -45,7 +45,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | --- | --- | --- |
 | GET | `/` | The operator board |
 | GET | `/disagreements` | The review queue: rows where the platform and the judge disagreed |
-| POST | `/events` | The front door: one signed alert in, one verdict recorded — 202 means judged, not queued |
+| POST | `/events` | The front door: one signed alert in, one durable intake row, judged in the background |
 | POST | `/feedback` | A human pressed a button on a card, and the pipe brought the press here |
 | GET | `/healthz` | Liveness only — no dependencies consulted, so a broken ledger cannot hide a live process |
 | GET | `/judgements/{judgement_id}` | One verdict, for a link to it that outlived the board's newest rows |

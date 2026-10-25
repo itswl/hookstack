@@ -21,7 +21,7 @@ hookjudge has exactly one outbound address: the pipe. Fan-out is not its
 business, so it cannot grow a second downstream by accident.
 
 It is the smallest service in the stack, and that is a **budget, not an
-observation**: 3,400 source lines is the ceiling, four runtime dependencies is
+observation**: 3,540 source lines is the ceiling, four runtime dependencies is
 the count, and `scripts/assert_weight.py` holds the first to what this file says.
 Raised from 2,900 on 2026-08-21, and the reason is the point of the budget rather
 than an exception to it: `importance` came back `high` for 210 of 216 alerts on
@@ -242,7 +242,7 @@ a judge that answered `wake=no` on an alert a person then called useful.
 
 | method | path       | notes                                            |
 | ------ | ---------- | ------------------------------------------------ |
-| POST   | `/events`  | the pipe's event. Answers **202** immediately.    |
+| POST   | `/events`  | the pipe's event. Writes a durable intake row, then answers **202**. |
 | POST   | `/feedback`| a human pressed a button. Answers **202**.        |
 | GET    | `/status`  | ledger JSON: routes, cost, attention, returns, recent, `eval_gate` (the last recorded golden-gate verdict, or null); `route`, `q` and `ret` (sent, queued, dead, skipped) narrow the recent rows |
 | GET    | `/judgements/{id}` | one verdict by id, however old — what a copied link to it reads |
@@ -261,6 +261,13 @@ a judge that answered `wake=no` on an alert a person then called useful.
 sender's connection open for that makes it time out and retry, so the same
 alert arrives twice while the first copy is still being analysed. The
 judgement travels back the other way, to a pipe door, once it exists.
+
+**202 means accepted and recoverable, not judged.** The parsed event is inserted
+into an `intake` row before the door answers, and the row is deleted only once a
+judgement row exists. A process killed in between replays the intake at boot,
+so the pipe's 202 is never the last copy of an alert. The cost is a possible
+duplicate judgement after a hard kill; the identity route makes the second
+verdict free, and a duplicate card is cheaper than a disappearance.
 
 `/status`, `/live`, `/disagreements` and `/metrics` are behind
 `HOOKJUDGE_READ_TOKEN` (`X-Read-Token:` or `Authorization: Bearer`) —

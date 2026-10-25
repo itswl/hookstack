@@ -123,7 +123,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             prior = await store.prior_verdict(
                 event.identity,
-                app_settings.reuse_window_seconds,
+                # A recovery is not a reuse-window question: a long incident's
+                # recovery arrives after the window, and bounding the inheritance
+                # by it is how a "high" firing ended with a rule-floor recovery.
+                None if event.is_recovery else app_settings.reuse_window_seconds,
                 now_ts(),
                 # A recovery inherits its firing's verdict whatever route produced
                 # it: the point is not to save a call but to agree with the alert
@@ -320,6 +323,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await store.open()
         client = httpx.AsyncClient()
         app.state.client = client
+        # An alert the previous process accepted but never judged. Replay it
+        # before serving: the row is the only copy left, and the pipe was told
+        # 202 already. A row that cannot be parsed is dropped with a log rather
+        # than failing the boot.
+        for row in await store.pending_intake():
+            try:
+                queued = Incoming(**json.loads(row["event_json"]))
+            except (TypeError, ValueError):
+                logger.exception("intake row %s is unreadable; dropping it", row["id"])
+                await store.drop_intake(int(row["id"]))
+                continue
+            task = asyncio.create_task(_judge_serialized(client, queued, int(row["id"])))
+            app.state.judge_tasks.add(task)
+            task.add_done_callback(_judge_task_done)
         worker = asyncio.create_task(_worker())
         try:
             yield
@@ -341,12 +358,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # cardinality.
     identity_locks: dict[str, tuple[asyncio.Lock, int]] = {}
 
-    async def _judge_serialized(client: httpx.AsyncClient, event: Incoming) -> None:
+    async def _judge_serialized(client: httpx.AsyncClient, event: Incoming, intake_id: int = 0) -> None:
         lock, holders = identity_locks.get(event.identity, (asyncio.Lock(), 0))
         identity_locks[event.identity] = (lock, holders + 1)
         try:
             async with lock:
-                await _judge_and_record(client, event)
+                row_id = await _judge_and_record(client, event)
+                if row_id and intake_id:
+                    # Only after a judgement row exists. A failure here replays
+                    # the alert at boot: a duplicate verdict is cheaper than a
+                    # lost one, and the identity route makes the second free.
+                    try:
+                        await store.drop_intake(intake_id)
+                    except Exception:  # noqa: BLE001 — the judgement is already safe
+                        logger.exception("could not clear intake row %s", intake_id)
         finally:
             lock_again, holders_now = identity_locks[event.identity]
             if holders_now <= 1:
@@ -426,7 +451,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         x_hook_correlation_id: str | None = Header(default=None),
         x_request_id: str | None = Header(default=None),
     ) -> JSONResponse:
-        """The front door: one signed alert in, one verdict recorded — 202 means judged, not queued."""
+        """The front door: one signed alert in, one durable intake row, judged in the background.
+
+        202 means accepted and recoverable, not judged: the verdict takes tens of
+        seconds and the sender must not be held for it, so the event is on disk
+        before this answers and the row survives a kill until a judgement exists.
+        """
         body = await request.body()
         if len(body) > app_settings.max_body_bytes:
             raise HTTPException(status_code=413, detail="body too large")
@@ -446,13 +476,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
         # Judged in the background: the answer takes tens of seconds and the
-        # sender must not be held for it.
-        task = asyncio.create_task(_judge_serialized(app.state.client, event))
+        # sender must not be held for it. Persisted first: the 202 is a promise
+        # the alert is somewhere, and a process killed between the answer and
+        # the judgement used to take it out of both the ledger and the dead
+        # letter. The row is replayed at boot; the task drops it once a
+        # judgement exists.
+        intake_id = await store.accept(event)
+        task = asyncio.create_task(_judge_serialized(app.state.client, event, intake_id))
         # Held, or the garbage collector may cancel a fire-and-forget task
         # mid-judgement — the documented asyncio footgun.
         app.state.judge_tasks.add(task)
         task.add_done_callback(_judge_task_done)
-        return JSONResponse({"accepted": True, "identity": event.identity}, status_code=202)
+        return JSONResponse({"accepted": True, "identity": event.identity, "intake": intake_id}, status_code=202)
 
     @app.post("/feedback")
     async def feedback(

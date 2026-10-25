@@ -60,17 +60,44 @@ _INLINE_SECRET = re.compile(
     r".+?[ \t]*$",
     re.MULTILINE,
 )
+_SECRET_LINE = re.compile(r"^([ \t]*(?:-[ \t]+)?secret:[ \t]*)(.*)$")
+_BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*[ \t]*(?:#.*)?$")
 
 
 def _redact_secrets(text: str) -> str:
-    """Mask inline `secret:` values, leaving the file otherwise byte-identical.
+    """Mask `secret:` values, inline and block, leaving the rest byte-identical.
 
     A regex over the raw text rather than a YAML round-trip on purpose: the
     configs in this family carry their reasoning in comments, and a re-emit
     would drop every one of them to redact a line that is usually `${NAME}`
     anyway.
+
+    Block scalars are handled line by line because the inline pattern only sees
+    the `|` and would hand the indented body back verbatim — a credential in
+    plain sight on an endpoint whose docstring promises redaction.
     """
-    return _INLINE_SECRET.sub(lambda m: f"{m.group(1)}<redacted>", text)
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        bare = line.rstrip("\r\n")
+        match = _SECRET_LINE.match(bare)
+        if match and _BLOCK_SCALAR.match(match.group(2).strip()):
+            out.append(f"{match.group(1)}<redacted>\n")
+            key_indent = len(bare) - len(bare.lstrip(" \t"))
+            index += 1
+            # The body is indented deeper than the key. A blank line belongs to
+            # the block; the next key at the same indent does not.
+            while index < len(lines):
+                body = lines[index]
+                if body.strip() and len(body) - len(body.lstrip(" \t")) <= key_indent:
+                    break
+                index += 1
+            continue
+        out.append(_INLINE_SECRET.sub(lambda m: f"{m.group(1)}<redacted>", line))
+        index += 1
+    return "".join(out)
 
 
 logger = logging.getLogger("hookrelay.app")
@@ -680,7 +707,13 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             minutes = max(1, min(minutes, 7 * 24 * 60))
             source = str(params.get("source") or "*")
             if source != "*" and source not in app.state.config.sources:
-                source = "*"
+                # A card minted before the config changed still names its door.
+                # Widening that to "*" turned "quiet this one alert" into a
+                # deployment-wide mute — the opposite of what the press meant.
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"source {source!r} is no longer configured; refusing to silence every door instead",
+                )
             await app.state.store.add_silence(
                 source, now + minutes * 60, f"silenced from a card by {actor or 'an operator'}", now
             )
@@ -703,31 +736,24 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
             "fields": {"kind": kind, "actor": actor},
             "reference": await app.state.store.event_reference(int(event_id)) if event_id else "",
         }
-        action_event_id = await app.state.store.insert_event(
+        channels = [target]
+        touch_to = app.state.config.touch_forward_to
+        if touch_to and extracted["reference"]:
+            channels.append(touch_to)
+        # The press's event, its decision and its deliveries are one unit, like
+        # the front door's: a crash between them would leave a routed press with
+        # no delivery row and nothing to retry.
+        await app.state.store.record_event(
             _ACTION_SOURCE,
             f"card-action:{claims['j']}",
             extracted,
             json.dumps(envelope, ensure_ascii=False),
             now,
+            outcome="routed",
+            skip_code=None,
+            channels=channels,
+            steps=[{"gate": "card-action", "kind": kind, "forwarded_to": channels}],
             correlation_id=correlation_id or None,
-        )
-        channels = [target]
-        touch_to = app.state.config.touch_forward_to
-        if touch_to and extracted["reference"]:
-            channels.append(touch_to)
-        for channel in channels:
-            await app.state.store.enqueue_delivery(action_event_id, channel, now)
-        # A decision row like every other event's: the press was ROUTED, to
-        # these channels, by the button's configuration. Without it the event
-        # had deliveries and no outcome, and the timeline read the one hop a
-        # person made as "skipped · ?" — the press accounted for everywhere
-        # except where the account is read.
-        await app.state.store.insert_decision(
-            action_event_id,
-            "routed",
-            None,
-            channels,
-            [{"gate": "card-action", "kind": kind, "forwarded_to": channels}],
         )
         return f"forwarded {kind} to {target}"
 

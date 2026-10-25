@@ -12,11 +12,12 @@ import asyncio
 import json
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from typing import Any
 
 import aiosqlite
 
-from hookjudge.contract import COMPARABLE_LEVELS, LEVEL_SYNONYMS, platform_importance
+from hookjudge.contract import COMPARABLE_LEVELS, LEVEL_SYNONYMS, Incoming, platform_importance
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS judgements (
@@ -76,6 +77,17 @@ CREATE TABLE IF NOT EXISTS ai_rulings (
     why TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
     at REAL NOT NULL
+);
+
+-- An event the pipe was told 202 about, waiting to become a judgement. The
+-- accept is synchronous, before the response; judging is not. A process killed
+-- in between used to take the alert with it: the pipe had its answer, no row
+-- existed, and no dead letter could name what never landed. The row is deleted
+-- only after a judgement row exists, and replayed at boot otherwise.
+CREATE TABLE IF NOT EXISTS intake (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    accepted_at REAL NOT NULL,
+    event_json TEXT NOT NULL
 );
 """
 
@@ -219,8 +231,32 @@ class Store:
             raise RuntimeError("Store.open() was not called")
         return self._db
 
+    async def accept(self, event: Incoming) -> int:
+        """Persist the event before the door answers 202.
+
+        One small row, no network, under the same lock as a judgement write.
+        Returns the intake id the background task drops once a judgement exists.
+        """
+        async with self._write:
+            cursor = await self.db.execute(
+                "INSERT INTO intake (accepted_at, event_json) VALUES (?, ?)",
+                (time.time(), json.dumps(asdict(event), ensure_ascii=False)),
+            )
+            await self.db.commit()
+            return int(cursor.lastrowid or 0)
+
+    async def pending_intake(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Rows a previous process accepted but never turned into a judgement."""
+        cursor = await self.db.execute("SELECT id, event_json FROM intake ORDER BY id LIMIT ?", (limit,))
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def drop_intake(self, intake_id: int) -> None:
+        async with self._write:
+            await self.db.execute("DELETE FROM intake WHERE id = ?", (intake_id,))
+            await self.db.commit()
+
     async def prior_verdict(
-        self, identity: str, window_seconds: int, now: float, *, any_route: bool = False
+        self, identity: str, window_seconds: int | None, now: float, *, any_route: bool = False
     ) -> dict[str, Any] | None:
         """The last judgement for this identity inside the window.
 
@@ -233,13 +269,25 @@ class Store:
         firing judged "high" by the rule floor must not end with a "medium"
         recovery card, so the recovery inherits whatever its firing said,
         degraded or not.
+
+        `window_seconds=None` means "no lower bound". The caller uses it for a
+        recovery: a long incident's recovery arrives after the reuse window, and
+        bounding the inheritance by that window is exactly how a "high" firing
+        ended with a rule-floor recovery an hour later. Retention still bounds
+        how far back the ledger can reach.
         """
         route_clause = "" if any_route else " AND route = 'ai'"
-        # `route_clause` is one of two literals; the values are parametrized.
+        where = f" WHERE identity = ?{route_clause}"
+        params: list[Any] = [identity]
+        if window_seconds is not None:
+            where += " AND received_at >= ?"
+            params.append(now - max(1, window_seconds))
+        # `where` is built from two literals and a parameter marker; the values
+        # are parametrized.
         cursor = await self.db.execute(
-            "SELECT summary, importance, event_type, impact_scope, wake_someone, model FROM judgements"  # nosec B608
-            f" WHERE identity = ?{route_clause} AND received_at >= ? ORDER BY id DESC LIMIT 1",
-            (identity, now - max(1, window_seconds)),
+            "SELECT summary, importance, event_type, impact_scope, wake_someone, model FROM judgements"
+            f"{where} ORDER BY id DESC LIMIT 1",  # nosec B608
+            params,
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
@@ -374,7 +422,8 @@ class Store:
         # including the arms', is parametrized.
         cursor = await self.db.execute(
             "SELECT * FROM judgements WHERE label_importance = ''"  # nosec B608
-            f" AND level != '' AND importance != '' AND {level_sql} != importance"
+            " AND level != '' AND importance != '' AND coalesce(is_recovery, 0) = 0"
+            f" AND {level_sql} != importance"
             f" AND level IN ({','.join('?' * len(COMPARABLE_LEVELS))}) ORDER BY id DESC LIMIT ?",
             (*level_params, *COMPARABLE_LEVELS, max(1, min(200, limit))),
         )

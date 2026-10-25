@@ -72,7 +72,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from hookprobe import automation
+from hookprobe import audit, automation
 from hookprobe.files import atomic_write
 
 logger = logging.getLogger("hookprobe.remediation")
@@ -1039,18 +1039,24 @@ def evidence(
 
 
 def _audit(workdir: Path, proposal_id: str, command: str, error: bool, *, tool: str = "Exec") -> None:
-    """Same flight recorder the agent's tools write to — one account."""
+    """Same flight recorder the agent's tools write to — one account.
+
+    Through `audit.append` rather than a raw append: the recorder is hash-chained,
+    and a line written around it is not a missing link the reader can excuse. It
+    is the first line after the chain started that carries no `prev`, so the
+    hourly selftest reported CHAIN BREAKS after the first approved procedure —
+    the one path that executes commands was breaking the record of what ran.
+    """
     try:
-        audit_dir = workdir / "audit"
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        line = {
-            "ts": round(time.time(), 3),
-            "session": f"remediation:{proposal_id}",
-            "tool": tool,
-            "detail": command[:300],
-            "error": error,
-        }
-        with (audit_dir / (time.strftime("%Y-%m-%d") + ".jsonl")).open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+        audit.append(
+            workdir / "audit",
+            {
+                "ts": round(time.time(), 3),
+                "session": f"remediation:{proposal_id}",
+                "tool": tool,
+                "detail": command[:300],
+                "error": error,
+            },
+        )
     except OSError:
         logger.debug("remediation audit write failed", exc_info=True)

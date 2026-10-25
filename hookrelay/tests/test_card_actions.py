@@ -236,6 +236,19 @@ async def test_a_press_silences_the_source_once(action_client):
     assert pressed[0]["kind"] == "silence" and pressed[0]["actor"] == "ou_abc"
 
 
+async def test_a_silence_for_a_removed_source_is_refused_not_widened(action_client):
+    """A card minted before a config change still names its door. Turning that
+    into `*` made "quiet this alert" a deployment-wide mute — the opposite of
+    the press, and undoing it needs an operator who never saw the card."""
+    store = action_client.app.state.store
+    token = _mint_now("silence", event_id=1, correlation_id="hr-1", params={"minutes": 30, "source": "removed-door"})
+
+    response = await _press(action_client, token, open_id="ou_abc")
+    assert response.status_code == 409
+    assert await store.active_silence("removed-door", time.time()) is None
+    assert await store.active_silence("*", time.time()) is None, "nothing was widened to every door"
+
+
 async def test_a_forwarded_press_rides_the_outbox(action_client):
     """followup is not the pipe's job, so it becomes an event and a delivery to
     the configured channel — inheriting the retry, the rate limit and the ledger

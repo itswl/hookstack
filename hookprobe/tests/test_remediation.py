@@ -91,6 +91,27 @@ def test_approval_without_an_allowlist_is_refused(tmp_path):
     assert remediation.load(tmp_path, run.meta["remediation_proposal"])["status"] == "proposed"
 
 
+def test_a_remediation_line_joins_an_existing_audit_chain(tmp_path):
+    """The first approved procedure used to break the chain it was recorded in.
+
+    The agent's recorder is chained; a remediation line appended beside it is an
+    unlinked line after the chain started, which verify_chain reports as a break.
+    The hourly selftest then alarms forever after the first real fix.
+    """
+    from hookprobe import audit
+
+    audit.append(
+        tmp_path / "audit",
+        {"ts": 1.0, "session": "probe:k1", "tool": "Bash", "detail": "kubectl get pods", "error": False},
+    )
+    remediation._audit(tmp_path, "p-1", "echo remediated", False)
+
+    report = audit.verify_chain(tmp_path / "audit")
+    assert report["intact"], report
+    assert report["checked"] == 2, "both lines are linked"
+    assert report["unchained"] == 0
+
+
 def test_an_approved_allowlisted_command_runs_and_is_audited(tmp_path):
     allow = tmp_path / "allow.txt"
     allow.write_text("echo .*\n")
@@ -126,6 +147,14 @@ def test_an_approved_allowlisted_command_runs_and_is_audited(tmp_path):
     assert "remediated" in row["results"][0]["output"]
     audit = list((tmp_path / "audit").glob("*.jsonl"))
     assert audit and "echo remediated" in audit[0].read_text()
+    # The recorder is chained. A remediation line written around audit.append
+    # was the first line after the chain started with no `prev`, so the hourly
+    # selftest said CHAIN BREAKS after the first approved procedure.
+    from hookprobe import audit as recorder
+
+    report = recorder.verify_chain(tmp_path / "audit")
+    assert report["intact"], report
+    assert report["checked"] >= 1
     # Who pressed is a field, not a phrase inside a note (pilot zero: a console
     # click left no trace of a person at all, and a card press left one only
     # inside free text).

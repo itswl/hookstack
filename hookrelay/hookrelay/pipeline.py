@@ -93,8 +93,6 @@ async def handle_hook(
         }
 
     event_id = await _record(store, ctx, "routed", None, ctx.channels)
-    for channel_name in ctx.channels:
-        await store.enqueue_delivery(event_id, channel_name, now)
     return {"event_id": event_id, "outcome": "routed", "channels": ctx.channels, "steps": ctx.steps}
 
 
@@ -137,10 +135,18 @@ async def _record(store: Store, ctx: EventContext, outcome: str, skip_code: str 
     # the ingress body cap (413 at the door), and retention purges old rows.
     payload_json = json.dumps(ctx.payload, ensure_ascii=False)
     fp = ctx.fingerprint or fingerprint(ctx.source, ctx.extracted)
-    event_id = await store.insert_event(
-        ctx.source.name, fp, ctx.extracted, payload_json, ctx.now, correlation_id=ctx.correlation_id
+    event_id = await store.record_event(
+        ctx.source.name,
+        fp,
+        ctx.extracted,
+        payload_json,
+        ctx.now,
+        outcome=outcome,
+        skip_code=skip_code,
+        channels=channels,
+        steps=ctx.steps,
+        correlation_id=ctx.correlation_id,
     )
-    await store.insert_decision(event_id, outcome, skip_code, channels, ctx.steps)
     metrics.record_event(ctx.source.name, skip_code or outcome)
     return event_id
 

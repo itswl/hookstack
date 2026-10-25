@@ -57,8 +57,19 @@ def test_the_flight_recorder_is_refused(workdir: Path) -> None:
 
 def test_scratch_space_stays_writable(workdir: Path) -> None:
     """The agent still needs somewhere to work; the guard is a carve-out, not a wall."""
-    for target in ("notes.md", "results/draft.json", "/tmp/scratch.py", "home/analysis.py"):
+    for target in ("notes.md", "scratch/draft.json", "/tmp/scratch.py", "home/analysis.py"):
         assert deny(target, workdir) is None, target
+
+
+def test_case_files_are_evidence_not_scratch(workdir: Path) -> None:
+    """Every prompt tells a run to open /data/results FIRST as earlier evidence.
+
+    A run that can write there can forge or delete what the next run trusts, so
+    the case files are service-written like the audit log. Scratch space is a
+    different directory.
+    """
+    assert deny("results/run-1.json", workdir) is not None
+    assert deny(str(workdir / "results" / "planted.json"), workdir) is not None
 
 
 def test_a_relative_path_is_resolved_against_the_workdir(workdir: Path) -> None:

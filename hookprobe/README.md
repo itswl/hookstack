@@ -37,13 +37,15 @@ runner failure instead of leaving the caller to wait out its own timeout. A
 poller can write the result on its first confirming read.
 
 **The agent cannot edit what steers the next run.** `.claude/` (skills, roles,
-settings), `CLAUDE.md` and the audit log are closed to it — by a PreToolUse hook
+settings), `CLAUDE.md`, the audit log and the `results/` case files every prompt
+tells the next run to open first are closed to it — by a PreToolUse hook
 that refuses the write, and by a digest of every input file compared before and
 after each run, because the two fail differently. Without this, one injected
 line reaching `.claude/skills/` outlives the run that read it and comes back as
-the operator's own runbook. Read-only is constructed in four layers; this is
-the one about the investigator itself, which turns out to be the only target it can
-always reach. See [Security model](#security-model).
+the operator's own runbook, and one injected line reaching a case file is
+evidence the next investigation treats as its own. Read-only is constructed in
+four layers; this is the one about the investigator itself, which turns out to
+be the only target it can always reach. See [Security model](#security-model).
 
 **Finished runs leave runbooks behind.** A completed investigation distills its
 own record — the question, the tool sequence, the conclusion — into a
@@ -219,14 +221,16 @@ always reach. Two things about the word *default*, before the layers:
    `cap_drop: ALL`; curl and nc cover reachability.) The agent may write
    freely in `/data`, minus the carve-out below.
 4. **Input guard** — the agent may not write what steers the *next* run:
-   `.claude/` (skills, roles, settings), `CLAUDE.md`, `system-prompt.md`, and
-   the `audit/` flight recorder. Without this, one injected line reaching
-   `.claude/skills/` outlives the run that read it and comes back as the
-   operator's own runbook — a single injection made durable. Two mechanisms,
-   because they fail differently: a PreToolUse hook refuses the write and says
-   why, and a digest of every input file is compared before and after each run,
-   which catches a change however it arrived. A run that changed its own inputs
-   says so at the top of its record, unfolded.
+   `.claude/` (skills, roles, settings), `CLAUDE.md`, `system-prompt.md`,
+   the `audit/` flight recorder, and `results/` — the case files the prompt
+   tells every run to open first as earlier evidence. Without this, one
+   injected line reaching `.claude/skills/` outlives the run that read it and
+   comes back as the operator's own runbook — a single injection made durable —
+   and a forged case file is evidence the next run trusts without a tool call.
+   Two mechanisms, because they fail differently: a PreToolUse hook refuses the
+   write and says why, and a digest of every input file is compared before and
+   after each run, which catches a change however it arrived. A run that changed
+   its own inputs says so at the top of its record, unfolded.
 
    This is code rather than a read-only mount because the agent and the service
    share a UID and a process tree: a mount cannot tell `PUT /v1/skills/{name}`

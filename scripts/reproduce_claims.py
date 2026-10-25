@@ -70,12 +70,12 @@ def _pytest_claim(test_path: str, venv_service: str) -> tuple[bool | None, str]:
 # (claim, how to check it, artefact for the reader)
 REPRODUCIBLE: tuple[tuple[str, str, object], ...] = (
     (
-        "hookrelay stays at or under 6,400 source lines",
+        "hookrelay stays at or under 6,550 source lines",
         "hookrelay/README.md",
         lambda: _run([sys.executable, "scripts/assert_weight.py"]),
     ),
     (
-        "hookjudge stays at or under 3,400 source lines",
+        "hookjudge stays at or under 3,540 source lines",
         "hookjudge/README.md",
         lambda: _run([sys.executable, "scripts/assert_weight.py"]),
     ),

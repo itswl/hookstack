@@ -18,6 +18,10 @@
 #                               compose resolves a relative bind source
 #                               against this file's directory, not your cwd
 #   HOOKPROBE_TOKEN=...         the investigator refuses to start without auth
+#   HOOKJUDGE_INGEST_SECRET=... the pipe's signature on /events and /feedback
+#   HOOKJUDGE_RETURN_SECRET=... the judge's signature on its verdicts returning
+#                               to the pipe (must match the pipe's door)
+#   HOOKJUDGE_RULING_SECRET=... optional; the investigator's /rulings/ai door
 #   HOOKJUDGE_AI_*              optional — empty means every event walks the
 #                               free routes down to the rule floor
 #   ANTHROPIC_API_KEY=...       or the Anthropic-dialect trio + model aliases
@@ -62,6 +66,19 @@ services:
       HOOKJUDGE_HOST: 0.0.0.0
       HOOKJUDGE_PORT: 8200
       HOOKJUDGE_DB: /data/hookjudge.db
+      # The four doors the judge actually has. They were absent from this file
+      # while every other deployment shape passed them, so the family stack
+      # brought the judge up with an UNSIGNED /events and /feedback, unsigned
+      # returns, /rulings/ai answering 503, and label writes 403. Required rather
+      # than defaulted: an empty ingest secret is an open front door, and this
+      # compose is the one the docs call the real three-service deployment.
+      HOOKJUDGE_INGEST_SECRET: ${HOOKJUDGE_INGEST_SECRET:?set HOOKJUDGE_INGEST_SECRET in .env}
+      HOOKJUDGE_RETURN_SECRET: ${HOOKJUDGE_RETURN_SECRET:?set HOOKJUDGE_RETURN_SECRET in .env}
+      # The investigator's ruling credential; empty is safe (the door answers
+      # 503) and is what a stack with no investigator should carry.
+      HOOKJUDGE_RULING_SECRET: ${HOOKJUDGE_RULING_SECRET:-}
+      # Reads stay on loopback in this file; set a token if the port is proxied.
+      HOOKJUDGE_READ_TOKEN: ${HOOKJUDGE_READ_TOKEN:-}
       # One outbound address, and it is the pipe. Fan-out is not its business.
       HOOKJUDGE_RETURN_URL: http://hookrelay:8100/hook/judge-notify
       HOOKJUDGE_WORKER_INTERVAL: "0.5"

@@ -51,6 +51,10 @@ from pathlib import Path
 # an action, but it can swallow one — the genuine press would read the forged
 # row, decline to act because the key is taken, and report back whatever that
 # row claimed had happened. A record its own subject can write is not a record.
+# results/: the case files every prompt tells the run to open FIRST as earlier
+# evidence. They are written by the service at the end of a run, never by the
+# run; leaving them writable let one injected run forge or delete the evidence
+# the next one treats as prior knowledge. Scratch space is elsewhere.
 _PROTECTED = (
     ".claude",
     "CLAUDE.md",
@@ -68,6 +72,7 @@ _PROTECTED = (
     # cost — written by the service from what the CLI reported. A run that
     # could edit it could bill itself less; same rule as audit/.
     "telemetry",
+    "results",
 )
 
 # Hashed before and after a run. `audit/` is deliberately absent: the flight
