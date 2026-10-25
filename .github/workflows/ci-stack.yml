@@ -226,4 +226,20 @@ jobs:
       - name: the whole family comes up and judges correctly
         env:
           STACK_PREBUILT: "1"
-        run: bash scripts/stack-smoke.sh
+        # The smoke's own fail() prints the container logs inline, but a failed
+        # step's stdout is only visible to someone who can open the job log.
+        # Put the tail on the check run as an annotation too, so a public run
+        # names its failure without an admin token.
+        run: |
+          set +e
+          bash scripts/stack-smoke.sh 2>&1 | tee /tmp/stack-smoke.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          text = Path("/tmp/stack-smoke.log").read_text(encoding="utf-8", errors="replace")[-6000:]
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=stack smoke failed::{text}")
+          PY
+          fi
+          exit "$status"
