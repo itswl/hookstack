@@ -1,6 +1,6 @@
 # One human identity for this repository. The raw commits made before the
 # identity was pinned still carry the old names; this maps them for every
 # git command that reads authors (log, shortlog, blame, format-patch).
-# Bot commits are deliberately not mapped.
-itswl <imwl@live.com> WeiLai <imwl@live.com>
-itswl <imwl@live.com> imwl <imwl@MacBook.local>
+# The mapping is by email alone, so this file never has to repeat an old
+# name in order to correct it. Bot commits are deliberately not mapped.
+itswl <imwl@live.com> <imwl@live.com>
