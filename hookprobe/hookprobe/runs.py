@@ -325,7 +325,10 @@ class RunStore:
                 continue
 
     def _load(self, session_key: str) -> Run | None:
-        path = self._results_dir / _filename(session_key)
+        base = self._results_dir.resolve()
+        path = (base / _filename(session_key)).resolve()
+        if not path.is_relative_to(base):
+            return None
         if not path.exists():
             # A case file written before _filename learned to keep long keys
             # apart sits under the old truncated name. The disk scan finds it

@@ -537,7 +537,12 @@ def _approve(service: RunService, params: dict[str, Any], *, actor: str, correla
         # proposal says NOW. The row is untouched and still approvable by
         # somebody who reads it as it is.
         service.report_superseded(ref, str(exc))
-        return {"status": "changed", "kind": "approve", "ref": ref, "detail": str(exc)}
+        return {
+            "status": "changed",
+            "kind": "approve",
+            "ref": ref,
+            "detail": "the proposal changed; open it again before approving",
+        }
     except remediation.Cooling as exc:
         # The target cooldown: another procedure acted on this same target
         # recently, and two changes to one machine inside the window with nobody
@@ -548,7 +553,12 @@ def _approve(service: RunService, params: dict[str, Any], *, actor: str, correla
         # `superseded`: this proposal is still good and still approvable, which
         # is what the report it sends back says.
         service.report_cooling(ref, str(exc))
-        return {"status": "cooling", "kind": "approve", "ref": ref, "detail": str(exc)}
+        return {
+            "status": "cooling",
+            "kind": "approve",
+            "ref": ref,
+            "detail": "the target is cooling down; try again later",
+        }
     except remediation.Moved as exc:
         # The freshness cursor: the condition moved between the card being sent
         # and this press. Caught before the ValueError it subclasses, because
@@ -558,15 +568,20 @@ def _approve(service: RunService, params: dict[str, Any], *, actor: str, correla
         # answer goes back as a report through the family loop, and the status
         # is not `stale`: nothing here is unfixable, the fix is a fresh look.
         service.report_superseded(ref, str(exc))
-        return {"status": "superseded", "kind": "approve", "ref": ref, "detail": str(exc)}
-    except ValueError as exc:
+        return {
+            "status": "superseded",
+            "kind": "approve",
+            "ref": ref,
+            "detail": "the condition moved; open a fresh proposal",
+        }
+    except ValueError:
         # Already approved, rejected, or settled by the boot sweep. Not an error
         # the presser can fix, and not a second execution either.
-        return {"status": "stale", "kind": "approve", "ref": ref, "detail": str(exc)}
-    except PermissionError as exc:
+        return {"status": "stale", "kind": "approve", "ref": ref, "detail": "the proposal is no longer open"}
+    except PermissionError:
         # The allowlist gate, doing its job. A press is a click; it is not an
         # allowlist entry, and the honest answer travels back to the chat.
-        return {"status": "denied", "kind": "approve", "ref": ref, "detail": str(exc)}
+        return {"status": "denied", "kind": "approve", "ref": ref, "detail": "the allowlist refused this command"}
     return {"status": "approved", "kind": "approve", "ref": ref, "state": str(row.get("status") or "")}
 
 

@@ -15,8 +15,10 @@ import re
 from pathlib import Path
 
 PAGE = Path(__file__).resolve().parents[1].joinpath("hookrelay", "status.html").read_text(encoding="utf-8")
-STRINGS = json.loads(re.search(r'<script type="application/json" id="strings">([\s\S]*?)</script>', PAGE).group(1))
-SCRIPT = re.search(r"<script>([\s\S]*)</script>", PAGE).group(1)
+STRINGS = json.loads(
+    re.search(r'<script type="application/json" id="strings">([\s\S]*?)</script>', PAGE, re.IGNORECASE).group(1)
+)
+SCRIPT = re.search(r"<script>([\s\S]*)</script>", PAGE, re.IGNORECASE).group(1)
 KEYS = set(STRINGS["en"])
 
 

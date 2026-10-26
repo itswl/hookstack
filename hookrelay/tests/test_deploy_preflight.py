@@ -111,7 +111,8 @@ def test_a_brain_taking_its_vendor_from_a_compose_default_stops_the_deploy(tmp_p
     err = capsys.readouterr().err
     assert "${HOOKJUDGE_AI_MODEL} is missing from .env" in err
     assert "'deepseek-chat'" in err and "a vendor chosen by a file" in err
-    assert "${HOOKJUDGE_AI_BASE_URL} is missing" in err and "api.deepseek.com" in err
+    assert "${HOOKJUDGE_AI_BASE_URL} is missing" in err
+    assert err.count("api.deepseek.com") == 1
     # Not just the judge's spelling. The first version of this rule matched
     # `_AI_MODEL` and so caught the service whose incident prompted it and
     # missed `HOOKPROBE_MODEL`, which is the same hazard on the investigator and

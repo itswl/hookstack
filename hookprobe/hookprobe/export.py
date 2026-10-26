@@ -137,8 +137,8 @@ def bundle(skills_dir: Path) -> dict[str, Any]:
         name = manifest.parent.name
         try:
             text = manifest.read_text(encoding="utf-8")
-        except OSError as exc:
-            omitted.append({"name": name, "reason": f"unreadable: {exc}"})
+        except OSError:
+            omitted.append({"name": name, "reason": "unreadable"})
             continue
         cases = case_count(text)
         if not _is_consolidated(text):

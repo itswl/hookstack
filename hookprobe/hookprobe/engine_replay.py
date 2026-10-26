@@ -69,7 +69,7 @@ REHEARSAL_ALLOWLIST = SCRIPTS_DIR / "rehearsal-allowlist"
 # The event door writes the alert as `Title: …` into the prompt (events.py). A
 # script is chosen on that line and never on the whole prompt, so text in an
 # alert's body cannot pick the script.
-_TITLE = re.compile(r"^Title:\s*(.*)$", re.MULTILINE)
+_TITLE = re.compile(r"^Title:[ \t]*(.*)$", re.MULTILINE)
 # Between steps. Long enough that the board's live feed shows a run happening,
 # short enough that a script is over before a person has finished reading the
 # card that announced it.

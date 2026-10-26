@@ -455,8 +455,8 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             for key in keys:
                 try:
                     service.record_ruling(str(key), "" if ruling == "clear" else ruling, actor=by)
-                except ValueError as exc:
-                    results["rejected"].append({"sessionKey": key, "reason": str(exc)})
+                except ValueError:
+                    results["rejected"].append({"sessionKey": key, "reason": "the ruling was refused"})
                     continue
                 except LookupError:
                     results["unknown"].append(str(key))

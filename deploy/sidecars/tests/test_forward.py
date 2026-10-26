@@ -51,7 +51,7 @@ def test_a_port_that_cannot_be_bound_is_an_error_before_anything_serves():
     served route one on the main thread and bound the rest in daemon threads,
     where a taken port was a traceback in the log and a dark console."""
     taken = socket.socket()
-    taken.bind(("0.0.0.0", 0))  # noqa: S104 — the same wildcard the forwarder binds, so the clash is real
+    taken.bind(("127.0.0.1", 0))  # the same loopback address the forwarder binds, so the clash is real
     taken.listen(1)
     _, port = taken.getsockname()
     try:

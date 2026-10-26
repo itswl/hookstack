@@ -176,8 +176,8 @@ def word_problems(text: str) -> list[str]:
     script builds (`t("route." + name)`) or looks up in a table is the page's own
     tests' to check.
     """
-    block = re.search(r'<script type="application/json" id="strings">([\s\S]*?)</script>', text)
-    script = re.search(r"<script>([\s\S]*)</script>", text)
+    block = re.search(r'<script type="application/json" id="strings">([\s\S]*?)</script>', text, re.IGNORECASE)
+    script = re.search(r"<script>([\s\S]*)</script>", text, re.IGNORECASE)
     if not block or not script:
         return ["a page needs its strings block and its script, and one of them is missing"]
     if block.start() > script.start():
