@@ -70,11 +70,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from common import HttpHandler, Ledger, constant_time_eq, sign_timestamped
+from common import HttpHandler, HttpServer, Ledger, constant_time_eq, sign_timestamped
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("watch-signer")
@@ -291,6 +290,9 @@ class Signer(HttpHandler):
     ledger = Ledger("")
     counter = Counter()
 
+    def unexpected(self, exc: BaseException) -> None:
+        self.ledger.write(event="signal.failed", why=f"unexpected {type(exc).__name__}")
+
     def _say(self, status: int, payload: dict[str, Any]) -> None:
         self._answer(status, json.dumps(payload, ensure_ascii=False).encode())
 
@@ -408,7 +410,7 @@ def main() -> int:
     Signer.counter = Counter()
     port = int(os.environ.get("WATCH_SIGNER_PORT", "8099"))
     logger.info("up on :%d, signing for %s, ceiling %d per round", port, Signer.door, PER_ROUND_MAX)
-    ThreadingHTTPServer(("0.0.0.0", port), Signer).serve_forever()  # noqa: S104 — the container's own network only
+    HttpServer(("0.0.0.0", port), Signer).serve_forever()  # noqa: S104 — the container's own network only
     return 0
 
 

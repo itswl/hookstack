@@ -399,3 +399,15 @@ def test_a_config_that_would_sign_anything_stops_the_container(monkeypatch, env,
         monkeypatch.setenv(name, value)
     with pytest.raises(SystemExit):
         signer_module.main()
+
+
+def test_a_failure_nobody_planned_for_is_answered_and_recorded(stack, monkeypatch):
+    url, _, ledger = stack
+
+    def boom(signal, offer):
+        raise RuntimeError("nobody planned for this")
+
+    monkeypatch.setattr(signer_module, "check", boom)
+    status, body = post(url, a_signal())
+    assert status == 502 and "RuntimeError" in body["error"]
+    assert events(ledger)[-1] == "signal.failed"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import socketserver
 import sys
 import threading
 import time
@@ -78,3 +79,77 @@ def test_a_body_that_never_arrives_names_the_request_it_belonged_to(server, capl
     assert "requests_seen=1" in message
     assert "'method': 'POST'" in message and "'path': '/v1/thing'" in message
     assert "'content_length': '10'" in message
+
+
+class Boom(common.HttpHandler):
+    """A door that raises where nobody planned it, before or after answering."""
+
+    timeout = 0.3
+    seen: list[str] = []  # noqa: RUF012 — test bookkeeping
+
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/late":
+            self._answer(200, b"{}")
+        raise RuntimeError("a path nobody planned for")
+
+    def unexpected(self, exc: BaseException) -> None:
+        Boom.seen.append(type(exc).__name__)
+
+
+@pytest.fixture
+def boom():
+    Boom.seen = []
+    srv = common.HttpServer(("127.0.0.1", 0), Boom)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield srv.server_address
+    srv.shutdown()
+    srv.server_close()
+
+
+def _get(address, path: str) -> bytes:
+    chunks = []
+    with socket.create_connection(address, timeout=5) as sock:
+        sock.sendall(f"GET {path} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+        sock.settimeout(2)
+        try:
+            while chunk := sock.recv(4096):
+                chunks.append(chunk)
+        except TimeoutError:
+            pass
+    return b"".join(chunks)
+
+
+def test_a_door_that_raises_still_answers_records_and_logs(boom, caplog):
+    caplog.set_level(logging.ERROR)
+    answer = _get(boom, "/x")
+    assert answer.startswith(b"HTTP/1.1 502"), answer[:80]
+    assert b"RuntimeError" in answer
+    assert Boom.seen == ["RuntimeError"], "the door's own ledger hook ran"
+    record = wait_for(caplog, "unexpected failure on GET /x")
+    assert record.exc_info, "the traceback travels with the timestamped line"
+
+
+def test_a_door_that_raises_after_answering_sends_nothing_more(boom):
+    answer = _get(boom, "/late")
+    assert answer.startswith(b"HTTP/1.1 200") and b"502" not in answer, answer
+    assert Boom.seen == ["RuntimeError"]
+
+
+def test_an_error_that_escapes_a_handler_is_logged_with_its_peer(caplog):
+    caplog.set_level(logging.ERROR)
+
+    class Raw(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            raise RuntimeError("raw handler")
+
+    srv = common.Server(("127.0.0.1", 0), Raw)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with socket.create_connection(srv.server_address, timeout=5) as sock:
+            sock.sendall(b"x")
+        record = wait_for(caplog, "unhandled error serving")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert record.levelno == logging.ERROR and record.exc_info
+    assert "127.0.0.1" in record.getMessage()

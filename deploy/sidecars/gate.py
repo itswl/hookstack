@@ -78,10 +78,9 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
 from typing import Any
 
-from common import HttpHandler, Ledger, constant_time_eq
+from common import HttpHandler, HttpServer, Ledger, constant_time_eq, plain
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("mcp-gate")
@@ -319,6 +318,14 @@ class Gate(HttpHandler):
     ledger = Ledger("")
 
     # ── who is asking ──
+    def unexpected(self, exc: BaseException) -> None:
+        self.ledger.write(
+            event="call.failed",
+            method=getattr(self, "command", None) or "-",
+            path=plain(getattr(self, "path", "") or "")[:80],
+            reason=f"unexpected {type(exc).__name__}",
+        )
+
     def _caller(self) -> Client | None:
         header = self.headers.get("Authorization", "")
         token = header[7:].strip() if header[:7].lower() == "bearer " else ""
@@ -537,7 +544,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def build() -> ThreadingHTTPServer:
+def build() -> HttpServer:
     """The gate, configured from the environment and bound, not yet serving:
     doors.py runs it beside the proxy and the ingress; main() runs it alone."""
     environ = dict(os.environ)
@@ -564,7 +571,7 @@ def build() -> ThreadingHTTPServer:
         len(Gate.clients),
         ", ".join(f"{c.name}({sum(len(t) for t in c.tools.values())})" for c in Gate.clients),
     )
-    return ThreadingHTTPServer(("0.0.0.0", port), Gate)  # noqa: S104 — the container's own network only
+    return HttpServer(("0.0.0.0", port), Gate)  # noqa: S104 — the container's own network only
 
 
 def main() -> int:
