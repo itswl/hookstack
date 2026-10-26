@@ -8,9 +8,16 @@ consumer do not belong, so this file doubles as the consumer list.
 from __future__ import annotations
 
 import httpx
+import pytest
 
+from hookrelay import alarm as alarm_module
 from hookrelay import metrics
 from hookrelay.alarm import SelfAlarm
+
+
+@pytest.fixture(autouse=True)
+def _no_pause_between_alarm_attempts(monkeypatch):
+    monkeypatch.setattr(alarm_module, "RETRY_DELAY_SECONDS", 0)
 
 
 def test_render_emits_help_type_and_all_consumer_series() -> None:
@@ -91,9 +98,10 @@ async def test_alarm_failure_never_raises_and_permits_a_retry() -> None:
     client = _RecordingClient(fail=True)
 
     await alarm.dead_letter(client, channel="c", event_id=1, error="e", now=1000.0)  # must not raise
-    # A failed alarm does not consume the window — the next dead letter tries again.
+    # A failed alarm does not consume the window — the next dead letter tries again,
+    # and each one tried in place first.
     await alarm.dead_letter(client, channel="c", event_id=2, error="e", now=1001.0)
-    assert len(client.posts) == 2
+    assert len(client.posts) == 2 * (alarm_module.RETRIES + 1)
 
 
 async def test_a_failed_alarm_still_owes_the_count_it_swallowed() -> None:
@@ -115,6 +123,30 @@ async def test_a_failed_alarm_still_owes_the_count_it_swallowed() -> None:
     assert len(working.posts) == 1
     text = working.posts[0]["json"]["content"]["text"]
     assert "4 more dead letters" in text, f"the lost message and its folded count went missing: {text}"
+
+
+class _FlakyClient(_RecordingClient):
+    """A resolver that misses the name for the first `misses` posts."""
+
+    def __init__(self, misses: int) -> None:
+        super().__init__()
+        self.misses = misses
+
+    async def post(self, url: str, *, json: dict, timeout: float) -> object:
+        self.posts.append({"url": url, "json": json})
+        if len(self.posts) <= self.misses:
+            raise httpx.ConnectError("[Errno -2] Name or service not known")
+        return object()
+
+
+async def test_a_connection_that_did_not_happen_is_tried_again_in_place() -> None:
+    alarm = SelfAlarm("https://bot.example/hook", min_interval_seconds=600)
+    client = _FlakyClient(misses=2)
+    await alarm.dead_letter(client, channel="c", event_id=1, error="e", now=1000.0)
+    assert len(client.posts) == 3, "two misses, then the message"
+    # It arrived, so the window is spent: the next dead letter folds.
+    await alarm.dead_letter(client, channel="c", event_id=2, error="e", now=1001.0)
+    assert len(client.posts) == 3
 
 
 async def test_unconfigured_alarm_is_inert() -> None:

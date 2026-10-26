@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 import time
+import urllib.error
 import urllib.request
 
 from hookprobe import actions, audit, remediation
@@ -46,6 +47,15 @@ logger = logging.getLogger("hookprobe.notify")
 # can reply in a thread posts THIS under it, so the phone reads the evidence
 # the card was written from. Pilot zero's cards were read on a phone with no
 # way to reach the console, and the summary was all they ever carried.
+# A connection that did not happen is not the channel refusing. On a desktop
+# container network the embedded resolver misses a name for a moment at a time:
+# a second deployment running copies of these files counted ten such failures
+# in eleven days, every one answered by a resend half a minute later. An alarm
+# has nothing behind it that resends, so it tries again in place first. An HTTP
+# error is the channel answering, and is not tried again. A timeout is: a page
+# that arrives twice costs less than one that never did.
+ALARM_RETRIES = 2
+ALARM_RETRY_DELAY_SECONDS = 2.0
 _DETAIL_MAX = 60_000
 
 
@@ -236,7 +246,17 @@ class ReturnDelivery:
             message += f"\n({held} more folded into this one during the quiet window)"
         body = json.dumps({"msg_type": "text", "content": {"text": message}}, ensure_ascii=False).encode()
         try:
-            await asyncio.to_thread(self._post_alarm, body)
+            for attempt in range(ALARM_RETRIES + 1):
+                try:
+                    await asyncio.to_thread(self._post_alarm, body)
+                    break
+                except urllib.error.HTTPError:
+                    raise  # the channel answered; asking again will not change its mind
+                except OSError as exc:  # URLError included: a name or a connection that did not happen
+                    if attempt == ALARM_RETRIES:
+                        raise
+                    logger.warning("alarm post failed (%s); trying again in %.0fs", exc, ALARM_RETRY_DELAY_SECONDS)
+                    await asyncio.sleep(ALARM_RETRY_DELAY_SECONDS)
         except Exception:  # noqa: BLE001 — an alarm must never raise into its caller
             self._alarm_last_sent = 0.0  # let the next failure try again
             return False

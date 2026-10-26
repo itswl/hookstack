@@ -11,11 +11,34 @@ Three disciplines, each learned from the same class of incident:
   - suppressed count folded into the next message, so throttling never hides
     the scale of the problem.
   - never raises: an alarm failure must not become a delivery failure.
+
+And one more: a connection that did not happen is not the channel refusing. A
+desktop container network's resolver misses a name for a moment at a time, and
+an alarm has nothing behind it that resends, so it is tried again in place
+first. Any answer, whatever its status, is the channel speaking. A timeout is
+tried again too: a page that arrives twice costs less than one that never did.
 """
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
+
+RETRIES = 2
+RETRY_DELAY_SECONDS = 2.0
+
+
+async def post_with_retries(client: httpx.AsyncClient, url: str, body: dict) -> None:
+    """One message, tried again in place while the connection does not happen."""
+    for attempt in range(RETRIES + 1):
+        try:
+            await client.post(url, json=body, timeout=5.0)
+            return
+        except httpx.TransportError:
+            if attempt == RETRIES:
+                raise
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
 
 
 class SelfAlarm:
@@ -45,7 +68,7 @@ class SelfAlarm:
             text += f"\n({held} more dead letters folded into this one during the quiet window)"
         # Feishu bot text shape doubles as a readable generic JSON body.
         try:
-            await client.post(self._url, json={"msg_type": "text", "content": {"text": text}}, timeout=5.0)
+            await post_with_retries(client, self._url, {"msg_type": "text", "content": {"text": text}})
         except Exception:  # noqa: BLE001 — an alarm must never raise into delivery
             self._last_sent = 0.0  # let the next dead letter try again
             # The count was cleared on the way in, for a message that never
