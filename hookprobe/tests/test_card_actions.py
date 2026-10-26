@@ -550,7 +550,7 @@ def test_a_card_press_cannot_stand_in_for_the_allowlist(tmp_path: Path) -> None:
         answer = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
 
         assert answer["status"] == "denied"
-        assert "no allowlist configured" in answer["detail"]
+        assert answer["detail"] == "the allowlist refused this command"
     row = remediation.load(tmp_path, proposal_id)
     assert row["status"] == "proposed", "still waiting on a human, exactly as before the press"
     assert not row["results"], "nothing ran"
@@ -619,7 +619,7 @@ def test_a_press_on_a_proposal_somebody_already_settled_is_stale_not_a_rerun(tmp
         answer = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
 
     assert answer["status"] == "stale"
-    assert "rejected" in answer["detail"]
+    assert answer["detail"] == "the proposal is no longer open"
     assert remediation.load(tmp_path, proposal_id)["status"] == "rejected"
 
 
@@ -792,7 +792,7 @@ def test_a_press_against_a_target_something_just_touched_runs_nothing(tmp_path: 
 
         answer = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
         assert answer["status"] == "cooling"
-        assert "inside the 15m cooldown" in answer["detail"]
+        assert answer["detail"] == "the target is cooling down; try again later"
 
         held = remediation.load(tmp_path, proposal_id)
         assert held["status"] == "proposed", "held, not retired — this one is still approvable"
@@ -831,7 +831,7 @@ def test_a_press_that_arrives_after_the_condition_ended_runs_nothing(tmp_path: P
 
         answer = _press(client, "approve", params={"ref": proposal_id, "hash": read_hash(tmp_path, proposal_id)}).json()
         assert answer["status"] == "superseded"
-        assert "the condition ended" in answer["detail"]
+        assert answer["detail"] == "the condition moved; open a fresh proposal"
 
         row = remediation.load(tmp_path, proposal_id)
         assert row["status"] == "superseded"
@@ -866,7 +866,7 @@ def test_a_press_for_a_proposal_rewritten_since_its_card_runs_nothing(tmp_path: 
 
         answer = _press(client, "approve", params={"ref": proposal_id, "hash": on_the_card}).json()
         assert answer["status"] == "changed"
-        assert "not the one that was read" in answer["detail"]
+        assert answer["detail"] == "the proposal changed; open it again before approving"
         after = remediation.load(tmp_path, proposal_id)
         assert after["status"] == "proposed", "left as it is, for somebody who reads it now"
         assert not after["results"], "nothing ran"
