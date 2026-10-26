@@ -875,7 +875,7 @@ def test_a_press_for_a_proposal_rewritten_since_its_card_runs_nothing(tmp_path: 
 
         unnamed = _press(client, "approve", params={"ref": proposal_id}, at=2).json()
         assert unnamed["status"] == "changed"
-        assert "which version" in unnamed["detail"]
+        assert unnamed["detail"] == "the proposal changed; open it again before approving"
         assert remediation.load(tmp_path, proposal_id)["status"] == "proposed"
 
 
