@@ -29,7 +29,7 @@ import socket
 import socketserver
 import threading
 import time
-from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -105,9 +105,25 @@ def pump(a: socket.socket, b: socket.socket, idle_seconds: float) -> None:
         return
 
 
-class Server(socketserver.ThreadingTCPServer):
+class LoggedErrors:
+    """socketserver's own handle_error prints a bare traceback to stderr: no
+    time, no door, no peer. A handler that raised then left a line nobody could
+    place next to the ledger. This sends it through the door's logger instead,
+    which has the time, and names the peer."""
+
+    def handle_error(self, request: Any, client_address: Any) -> None:  # noqa: ARG002 — socketserver's signature
+        handler = getattr(self, "RequestHandlerClass", None)
+        name = getattr(handler, "server_version", "") or getattr(handler, "log_name", "") or "sidecar"
+        logging.getLogger(name).error("unhandled error serving %s", client_address, exc_info=True)
+
+
+class Server(LoggedErrors, socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
+
+
+class HttpServer(LoggedErrors, ThreadingHTTPServer):
+    """The HTTP doors' server (the gate, the signer), with the same error log."""
 
 
 _CONTROL_CHARS = getattr(BaseHTTPRequestHandler, "_control_char_table", None)
@@ -143,7 +159,40 @@ class HttpHandler(BaseHTTPRequestHandler):
         # Waiting for a request line: a timeout from here until one arrives is the
         # connection idling, not a request going wrong (see log_error)
         self._between_requests = True
-        super().handle_one_request()
+        self._answer_started = False
+        try:
+            super().handle_one_request()
+        except (ConnectionResetError, BrokenPipeError):
+            raise  # nobody to answer; handle() lets these go quietly
+        except Exception as exc:  # noqa: BLE001 — a request that fails is still answered and recorded
+            # Anything a door did not plan for used to end the thread: no answer,
+            # so the caller waited out its own timeout, and no ledger line, so the
+            # record of what was asked had a hole exactly where something odd was
+            # asked. A second deployment running copies of these files found it
+            # with a query string carrying raw non-ASCII bytes.
+            self.close_connection = True
+            logging.getLogger(self.server_version).error(
+                "unexpected failure on %s %s",
+                getattr(self, "command", None) or "-",
+                plain(getattr(self, "path", "") or "")[:80],
+                exc_info=True,
+            )
+            with contextlib.suppress(Exception):
+                self.unexpected(exc)
+            if not self._answer_started:
+                with contextlib.suppress(OSError):
+                    body = json.dumps({"error": f"this door failed on the request: {type(exc).__name__}"})
+                    self._answer(502, body.encode())
+                    self.wfile.flush()
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        self._answer_started = True
+        super().send_response(code, message)
+
+    def unexpected(self, exc: BaseException) -> None:
+        """The door's own ledger line for a request that failed in a way nobody
+        planned. A door with a ledger overrides this; the log line is written
+        either way."""
 
     def parse_request(self) -> bool:
         self._between_requests = False

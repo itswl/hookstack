@@ -17,7 +17,14 @@ alarm failure must not become a worker failure.
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
+
+# A connection that did not happen is tried again in place; any answer is the
+# channel speaking. Same reasoning as the pipe's alarm (hookrelay/alarm.py).
+RETRIES = 2
+RETRY_DELAY_SECONDS = 2.0
 
 
 class SelfAlarm:
@@ -85,7 +92,14 @@ class SelfAlarm:
             text += f"\n({held} more folded into this one during the quiet window)"
         # Feishu bot text shape doubles as a readable generic JSON body.
         try:
-            await client.post(self._url, json={"msg_type": "text", "content": {"text": text}}, timeout=5.0)
+            for attempt in range(RETRIES + 1):
+                try:
+                    await client.post(self._url, json={"msg_type": "text", "content": {"text": text}}, timeout=5.0)
+                    break
+                except httpx.TransportError:
+                    if attempt == RETRIES:
+                        raise
+                    await asyncio.sleep(RETRY_DELAY_SECONDS)
         except Exception:  # noqa: BLE001 — an alarm must never raise into the worker
             self._last_sent = 0.0  # let the next dead return try again
             # The count was cleared on the way in, for a message that never

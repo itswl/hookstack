@@ -275,3 +275,73 @@ def test_bytes_sent_right_behind_the_connect_reach_the_far_side() -> None:
         for server in (upstream, gateway):
             server.shutdown()
             server.server_close()
+
+
+def test_a_failure_nobody_planned_for_is_refused_and_recorded(tmp_path, monkeypatch) -> None:
+    """Anything but a Refused used to end the thread: no answer, no ledger line."""
+    import json
+    import socket
+    import threading
+
+    ledger = tmp_path / "egress.jsonl"
+    proxy = _with("example.com", ledger=str(ledger))
+
+    def boom(host, port):
+        raise RuntimeError("nobody planned for this")
+
+    monkeypatch.setattr(proxy, "decide", boom)
+    gateway = proxy.Server(("127.0.0.1", 0), proxy.Handler)
+    threading.Thread(target=gateway.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+    try:
+        with socket.create_connection(("127.0.0.1", gateway.server_address[1]), timeout=5) as client:
+            client.sendall(b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n\r\n")
+            first = client.recv(200).decode("latin-1").splitlines()[0]
+    finally:
+        gateway.shutdown()
+        gateway.server_close()
+    assert first.startswith("HTTP/1.1 502")
+    row = json.loads(ledger.read_text(encoding="utf-8").splitlines()[-1])
+    assert row["event"] == "egress.refused" and row["target"] == "example.com:443" and row["code"] == 502
+    assert "RuntimeError" in row["why"]
+
+
+def test_a_plain_request_line_reaches_the_peer_byte_for_byte() -> None:
+    """The line is read as Latin-1, so it must leave as Latin-1: a client that
+    does not percent-encode sends raw UTF-8, and UTF-8 on the way out doubled it."""
+    import socket
+    import socketserver
+    import threading
+
+    seen: list[bytes] = []
+
+    class Capture(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            self.request.settimeout(5)
+            data = b""
+            while b"\r\n\r\n" not in data:
+                chunk = self.request.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            seen.append(data.split(b"\r\n", 1)[0])
+            self.request.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+
+    upstream = socketserver.TCPServer(("127.0.0.1", 0), Capture)
+    port = upstream.server_address[1]
+    proxy = _with("", str(port), internal="127.0.0.1")
+    gateway = proxy.Server(("127.0.0.1", 0), proxy.Handler)
+    for server in (upstream, gateway):
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+    path = "/trace/告警?q=磁盘".encode()
+    try:
+        with socket.create_connection(("127.0.0.1", gateway.server_address[1]), timeout=5) as client:
+            client.sendall(b"GET http://127.0.0.1:%d%s HTTP/1.1\r\nHost: x\r\n\r\n" % (port, path))
+            answer = b""
+            while chunk := client.recv(4096):
+                answer += chunk
+    finally:
+        for server in (upstream, gateway):
+            server.shutdown()
+            server.server_close()
+    assert answer.startswith(b"HTTP/1.1 200"), answer[:80]
+    assert seen == [b"GET " + path + b" HTTP/1.1"]

@@ -222,11 +222,29 @@ class Handler(socketserver.StreamRequestHandler):
     rbufsize = 0
 
     def handle(self) -> None:
+        self._target = ""
+        self._spliced = False
+        try:
+            self._handle()
+        except (ConnectionResetError, BrokenPipeError):
+            return
+        except Exception as exc:  # noqa: BLE001 — every request leaves a ledger line and gets an answer
+            # Anything but a Refused used to end the thread: no answer, and no
+            # line in the refusal ledger for the one request that did something
+            # odd — a name the resolver cannot even encode, say. Before the
+            # splice it is a refusal like any other; after it, the tunnel was
+            # already the answer, and the log line is what is left to say.
+            logger.error("unexpected failure on %s", self._target or "a request", exc_info=True)
+            if not self._spliced:
+                self._refuse(502, f"unexpected {type(exc).__name__}: {exc}"[:200], self._target or "?")
+
+    def _handle(self) -> None:
         try:
             line = self.rfile.readline(65536).decode("latin-1").strip()
         except OSError:
             return
         parts = line.split()
+        self._target = (parts[1] if len(parts) > 1 else line)[:80]
         if len(parts) < 3:
             self._refuse(400, "not a request line", line[:40])
             return
@@ -263,6 +281,7 @@ class Handler(socketserver.StreamRequestHandler):
             more = self.rfile.readline(65536)
             if more in (b"", b"\r\n", b"\n"):
                 break
+        self._spliced = True
         self.wfile.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
         self.wfile.flush()
         logger.info("allowed %s", target[:80])
@@ -301,7 +320,10 @@ class Handler(socketserver.StreamRequestHandler):
         # head as the client sent it. Connection: close on both sides — this
         # forwards one request per connection rather than tracking keep-alive
         # state, which is the difference between a boundary and a web server.
-        head = [f"{method} /{path if slash else ''} {parts[2]}".encode(), b"Connection: close"]
+        # Latin-1 both ways: the line was read as Latin-1 above, so encoding it
+        # back the same way hands the upstream the bytes the client sent. UTF-8
+        # here turned every raw non-ASCII byte in a path into two.
+        head = [f"{method} /{path if slash else ''} {parts[2]}".encode("latin-1"), b"Connection: close"]
         while True:
             raw = self.rfile.readline(65536)
             if raw in (b"", b"\r\n", b"\n"):
@@ -310,6 +332,7 @@ class Handler(socketserver.StreamRequestHandler):
                 continue
             head.append(raw.rstrip(b"\r\n"))
         logger.info("allowed %s %s:%s", method, host, port)
+        self._spliced = True
         with upstream:
             upstream.sendall(b"\r\n".join(head) + b"\r\n\r\n")
             pump(self.connection, upstream, IDLE_SECONDS)

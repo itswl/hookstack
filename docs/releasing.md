@@ -23,7 +23,9 @@ tag's own message is the note, which is how 0.5.0, 0.6.0 and 0.7.0 shipped.
    the verdict. Never `gate.sh && docker push` — an exit code is not a report
    (`AGENTS.md` has the incident that taught this).
 2. **Tag.** `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`. The release
-   workflow builds and pushes the four images at that tag.
+   workflow builds and pushes the four images at that tag. When the release
+   changes a schema, the message ends with what a rollback does with the rows it
+   wrote (see Rollback).
 3. **Pin the quickstart to the digest, not the tag alone.** A tag can be moved; a
    digest cannot. For each image:
 
@@ -61,4 +63,19 @@ digest.
 
 Images are immutable, so a rollback is re-pinning the quickstart to the previous
 release's digest and re-running it. The ledger drives the behaviour, so state is
-unchanged by a rollback; only the code moves.
+unchanged by a rollback; only the code moves — which means older code reads rows
+newer code wrote, and a release that changes a schema owes its tag note a line on
+what that does.
+
+The pipe and the judge migrate additively (a table, or a column with a default),
+insert with named columns and read every row as a dictionary, so an older image
+opens a newer ledger without an error; what changes is what the older reader
+makes of a field it never knew. The investigator rebuilds a case file field by
+field, so a field a release adds to a run makes the release before it skip that
+file.
+
+Read from the code rather than run, for 0.8.0 back to 0.7.1: nothing fails to
+open. A silence a card scoped to one alert quiets its whole source until it
+expires, because 0.7.1 does not read the condition. An accepted event still
+waiting in the judge's intake table is not replayed until 0.8.0 is back. No
+field was added to a run.

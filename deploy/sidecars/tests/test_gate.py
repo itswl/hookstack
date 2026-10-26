@@ -535,3 +535,16 @@ def test_one_upstream_and_several_do_not_mix(monkeypatch):
     monkeypatch.setenv("MCPGATE_CLIENT_WATCH_TOOLS", "jira:jira.get_issue")
     with pytest.raises(SystemExit):
         gate_module.build()
+
+
+def test_a_failure_nobody_planned_for_is_answered_and_recorded(stack, monkeypatch):
+    def boom(self, tool, route=""):
+        raise RuntimeError("nobody planned for this")
+
+    monkeypatch.setattr(gate_module.Client, "permits", boom)
+    status, body, _ = call(stack, _tool("chat.list_mentions"))
+    assert status == 502 and "RuntimeError" in body["error"]
+    failed = rows()[-1]
+    assert failed["event"] == "call.failed" and failed["reason"] == "unexpected RuntimeError"
+    assert failed["method"] == "POST"
+    assert not Upstream.seen, "nothing reached the chat server"

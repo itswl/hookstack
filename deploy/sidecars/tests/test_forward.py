@@ -50,15 +50,16 @@ def test_a_port_that_cannot_be_bound_is_an_error_before_anything_serves():
     """Every listener is bound in main() before any serves: the first shape
     served route one on the main thread and bound the rest in daemon threads,
     where a taken port was a traceback in the log and a dark console."""
-    taken = socket.socket()
-    taken.bind(("127.0.0.1", 0))  # the same loopback address the forwarder binds, so the clash is real
-    taken.listen(1)
-    _, port = taken.getsockname()
+    # The clash has to be with the forwarder's own kind of bind. The forwarder
+    # binds the wildcard address with SO_REUSEADDR, and on macOS that bind
+    # succeeds beside a socket on 127.0.0.1 — so a loopback-only clash passed on
+    # Linux and failed on a Mac. Two forwarder binds on one port fail on both.
+    held = forward.bind(0, "127.0.0.1", 1)
     try:
         with pytest.raises(OSError):
-            forward.bind(port, "127.0.0.1", 1)
+            forward.bind(held.server_address[1], "127.0.0.1", 1)
     finally:
-        taken.close()
+        held.server_close()
 
 
 def test_bytes_go_both_ways_and_the_far_end_closing_ends_it():

@@ -182,3 +182,53 @@ def test_jira_runs_against_a_staged_copy_of_its_state(state, monkeypatch):
     assert committed == {"jira_last_check": 4}, "the committed state is untouched"
     staged = json.loads((state / "jira.staged.json").read_text())
     assert staged["from"] == 4, "the copy started from the committed state"
+
+
+@pytest.mark.parametrize(
+    "name", ["ops_alert_bot", "CI-bot", "Deploy BOT", "AlertBot", "robot", "监控bot", "告警机器人"]
+)
+def test_a_name_that_says_bot_needs_no_listing(name):
+    assert watch_scan.BOT_NAME.search(name)
+
+
+@pytest.mark.parametrize("name", ["Talbot", "TALBOT", "Abbott", "Botao Wang", "Bottas", "Robert Chen", "Ada Lovelace"])
+def test_bot_inside_a_person_name_is_not_a_bot(name):
+    assert watch_scan.BOT_NAME.search(name) is None
+
+
+class _OneFeed:
+    """A chat service with one group and the messages it answers for it."""
+
+    def __init__(self, messages):
+        self.messages = messages
+
+    def call(self, tool, **args):
+        if tool == "list_folder_feeds":
+            return {
+                "feeds": [
+                    {
+                        "name": "ops room",
+                        "chat_type_label": "group chat",
+                        "last_message_send_at": "2026-10-27T02:05:00Z",
+                    }
+                ]
+            }
+        assert tool == "search_chat_records", tool
+        return {"messages": self.messages}
+
+
+def test_a_bot_that_says_so_in_its_name_never_reaches_the_digest(monkeypatch):
+    monkeypatch.setattr(watch_scan, "BOTS", [])
+    monkeypatch.setattr(watch_scan, "ME", "")
+    chat = _OneFeed(
+        [
+            {"send_at": "2026-10-27T02:04:00Z", "send_name": "ops_alert_bot", "content": "P1 disk at 91% on db-1"},
+            {
+                "send_at": "2026-10-27T02:05:00Z",
+                "send_name": "Talbot",
+                "content": "can someone look at db-1 before lunch?",
+            },
+        ]
+    )
+    found = watch_scan.scan_chat(chat, {}, watch_scan.when("2026-10-27T02:10:00Z"), [])
+    assert [(name, [who for _, who, _ in msgs]) for name, msgs in found] == [("ops room", ["Talbot"])]
