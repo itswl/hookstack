@@ -42,14 +42,16 @@
 # duplicate, and whose investigator measures its posture with the tools its
 # image carries; 0.7.1 is the first whose images ship neither a CA bundle that
 # trusts compromised intermediates nor a trace-header parser one request could
-# keep busy for seconds. This file needs all of it, so it cannot point at an
-# older tag.
+# keep busy for seconds; 0.8.0 is the first whose judge takes the in-flight cap
+# and the opt-in dollar ceiling set below, and whose investigator refuses an
+# unsigned approve, which is why the pipe and the investigator both carry the
+# action secret. This file needs all of it, so it cannot point at an older tag.
 
 name: hookstack
 
 services:
   hookrelay:
-    image: ghcr.io/itswl/hookrelay:0.7.1@sha256:5e3e20c37905d0bf82e4f6086b8eb5d68677461919c78a683028b02ee9861a53
+    image: ghcr.io/itswl/hookrelay:0.8.0@sha256:934d9353508d77033e7d9683f03c5da76adbec5ff155bbdfd6f097ced639e2ff
     container_name: hs-hookrelay
     restart: unless-stopped
     environment:
@@ -68,6 +70,12 @@ services:
       # found by actually running this file rather than reading it. Same demo
       # values as docker-compose.yml, which has always set both.
       HOOKRELAY_ACTION_SECRET: demo-card-secret
+      # The baked config signs the press it forwards to the investigator's action
+      # door with this (`to-probe-action`); the investigator below verifies with
+      # the same variable. Since 0.8.0 an unsigned approve answers 503 while the
+      # button still renders, so one side without it is a demo that stops at
+      # the press.
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-demo-card-secret}
       HOOKRELAY_PUBLIC_URL: ${HOOKRELAY_PUBLIC_URL:-http://127.0.0.1:8100}
       HOOKRELAY_WORKER_INTERVAL: "0.5"
       # A captured request replayed inside the signature's freshness window is
@@ -91,7 +99,7 @@ services:
       - sink
 
   hookjudge:
-    image: ghcr.io/itswl/hookjudge:0.7.1@sha256:d9f617024cbb4b2baee2e318a0ba87ca5d8436163fea4ec450df69f4733927b1
+    image: ghcr.io/itswl/hookjudge:0.8.0@sha256:28f45f38a045da139cf65d970e7b7a9c8efe835dcd327c2afd529bc4b4a7b5da
     container_name: hs-hookjudge
     restart: unless-stopped
     environment:
@@ -124,7 +132,7 @@ services:
   # operator would actually have received. It runs from the pipe's own image
   # because that image now carries it — one fewer thing to pull, and no mount.
   sink:
-    image: ghcr.io/itswl/hookrelay:0.7.1@sha256:5e3e20c37905d0bf82e4f6086b8eb5d68677461919c78a683028b02ee9861a53
+    image: ghcr.io/itswl/hookrelay:0.8.0@sha256:934d9353508d77033e7d9683f03c5da76adbec5ff155bbdfd6f097ced639e2ff
     container_name: hs-sink
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/sink.py"]
@@ -137,7 +145,7 @@ services:
   # exactly the hop a real deployment makes to a custom bot's incoming URL.
   # `ops-feishu` in the baked config is `type: bridge` and points here.
   lark-bridge:
-    image: ghcr.io/itswl/lark-bridge:0.7.1@sha256:a2cb299043a983a59de1f60fb8fb20b2c1769255c9295091b0a555b4505f281f
+    image: ghcr.io/itswl/lark-bridge:0.8.0@sha256:b1a06bd785ed4d0de99d8dbf49d01b2f258ba63267a2f452b1182d559d385b1d
     container_name: hs-lark-bridge
     restart: unless-stopped
     environment:
@@ -155,7 +163,7 @@ services:
   # not a model: it reports itself as `stub-4o-mini`. Point the judge's AI vars
   # at a real provider and this stops being used.
   stub-ai:
-    image: ghcr.io/itswl/hookjudge:0.7.1@sha256:d9f617024cbb4b2baee2e318a0ba87ca5d8436163fea4ec450df69f4733927b1
+    image: ghcr.io/itswl/hookjudge:0.8.0@sha256:28f45f38a045da139cf65d970e7b7a9c8efe835dcd327c2afd529bc4b4a7b5da
     container_name: hs-stub-ai
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/stub_ai.py"]
@@ -167,7 +175,7 @@ services:
   # pipe to the same channels; the disk alert in demo.sh also proposes a
   # two-step procedure the approve button runs against the allowlist below.
   hookprobe:
-    image: ghcr.io/itswl/hookprobe:0.7.1@sha256:9a4f7d26c0457df35f643cb083f325dd1cb5e78ad6035f29b6045fc5ced23ef0
+    image: ghcr.io/itswl/hookprobe:0.8.0@sha256:f49d4fc36cf18c31456403076c203c54e7d12cee93fac130019dda8c10614920
     container_name: hs-hookprobe
     restart: unless-stopped
     # The agent executes arbitrary bash, so the container is bounded even in a
@@ -180,6 +188,9 @@ services:
     environment:
       HOOKPROBE_TOKEN: ${HOOKPROBE_TOKEN:-quickstart-token}
       HOOKPROBE_RETURN_URL: http://hookrelay:8100/hook/probe-notify
+      # Verifies the press the pipe forwards, with the same variable as the pipe
+      # above: an unsigned approve is indistinguishable from a run shaping one.
+      HOOKPROBE_ACTION_SECRET: ${HOOKPROBE_ACTION_SECRET:-demo-card-secret}
       # The rehearsal, and the name its runs carry. Set all three of
       # HOOKPROBE_RUNTIME, HOOKPROBE_MODEL and a key to investigate for real.
       HOOKPROBE_RUNTIME: ${HOOKPROBE_RUNTIME:-replay}

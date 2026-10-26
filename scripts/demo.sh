@@ -198,6 +198,16 @@ for res in row.get("results", []):
     first = (res.get("output") or "").strip().splitlines()[:1]
     print(f"  exit {res['exit']:>2}  {res['command']:<22} {first[0][:66] if first else ''}")
 PY
+# An accepted press that never executes is the loop not closing, and the tour
+# must say so rather than finish as if it had: with the action door unsigned on
+# one side, 0.8.0's investigator refused both presses with a 503 and this script
+# still ended 0. Nothing approved (the cooldown on a second run) is not a failure.
+press_failed=""
+if [ "$approved" = "1" ] && [ "$pstatus" != "executed" ]; then
+  press_failed="the press was accepted but the procedure is '${pstatus:-unknown}', not executed"
+  echo "!! $press_failed. The investigator's log says why: docker logs hs-hookprobe 2>&1 | grep hooks/action"
+  echo "   (a 503 there means the pipe and the investigator do not share HOOKPROBE_ACTION_SECRET)."
+fi
 
 say "9. the condition ends: the recovery verifies the work, and the pipe's audit record holds the chain"
 post '{"title":"Disk /data at 92% on db-1","message":"back to 15% after the slot was dropped","state":"resolved","env":"prod"}' >/dev/null
@@ -224,6 +234,11 @@ for a in rec.get("human_actions") or []:
 print(f"the page: {os.environ['RELAY_URL']}/audit/{rec.get('operation')}")
 print(f"the alert's story, top to bottom: {os.environ['RELAY_URL']}/#/alert/{rec.get('operation')}")
 PY
+
+if [ -n "$press_failed" ]; then
+  printf '\nThe loop did not close: %s.\n' "$press_failed" >&2
+  exit 1
+fi
 
 printf '\nThis was a rehearsal: no model was called, and nothing ran except the two observations a person approved.\n'
 printf 'The boards:  %s  (pipe)   %s  (judge)   %s/ui  (investigator)\n' "$base" "$judge" "$probe"
