@@ -83,6 +83,11 @@ DOW = os.environ.get("WATCH_DOW") or "1-5"
 EXCLUDE = [s.strip() for s in (os.environ.get("WATCH_EXCLUDE") or "").split(",") if s.strip()]
 ME = (os.environ.get("WATCH_ME") or "").strip()
 BOTS = [s.strip() for s in (os.environ.get("WATCH_BOTS") or "").split(",") if s.strip()]
+# 名字自己说了是机器人的，不用登记进 WATCH_BOTS：bot 或 robot 单独成词（前后不挨着字母，
+# 如 ops_alert_bot、CI-bot、Deploy BOT）、驼峰结尾的 Bot（AlertBot），或者名字里带「机器人」。
+# 嵌在人名里的不算（Talbot、Abbott、Botao）。名单只留给名字看不出来的机器人；代价是显示名里
+# bot 单独成词的人也会被剔除。
+BOT_NAME = re.compile(r"(?i:(?<![a-z])(?:ro)?bot(?![a-z]))|(?<=[a-z0-9])Bot(?![a-z])|机器人")
 SKIP_THREADS = (os.environ.get("WATCH_SKIP_THREADS") or "1") != "0"
 JIRA = os.environ.get("WATCH_JIRA_SCRIPT") or ""
 # 60 而不是 12：截断要罕见到算异常。上限是 200，一个 20 分钟的窗口里 60 条已经
@@ -444,7 +449,8 @@ def scan_chat(
             body = str(m.get("content") or "").strip()
             if ME and who == ME:
                 continue  # 他自己说的话不是给他的信号
-            if any(b in who for b in BOTS):
+            # 只认名单时，名单外的告警机器人会混进摘要，被当成一条要回应的消息。
+            if BOT_NAME.search(who) or any(b in who for b in BOTS):
                 continue
             # 一条图片/文件消息的 content 是空的。按碎片丢掉会让它彻底看不见，
             # 所以换成能看出「有东西但不是文字」的占位——判断仍归模型。

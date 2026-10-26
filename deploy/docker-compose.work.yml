@@ -1011,6 +1011,9 @@ services:
       WATCH_DOW: ${WATCH_DOW:-1-5}
       WATCH_EXCLUDE: ${WATCH_EXCLUDE:-}
       WATCH_ME: ${WATCH_ME:-}
+      # Only the bots whose names do not give them away: a sender whose display
+      # name has bot or robot as a word of its own, a CamelCase ...Bot, or 机器人
+      # is dropped without being listed (watch_scan.py, BOT_NAME).
       WATCH_BOTS: ${WATCH_BOTS:-}
       WATCH_JIRA_SCRIPT: /watch/jira_watch.py
       # The digest's byte budget, and it must stay well under
