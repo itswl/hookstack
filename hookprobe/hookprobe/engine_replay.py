@@ -47,7 +47,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -66,10 +65,19 @@ logger = logging.getLogger("hookprobe.engine.replay")
 # allowlist the quickstart arms the rehearsal's procedure with lives there too.
 SCRIPTS_DIR = Path(__file__).resolve().parent / "replays"
 REHEARSAL_ALLOWLIST = SCRIPTS_DIR / "rehearsal-allowlist"
+
+
 # The event door writes the alert as `Title: …` into the prompt (events.py). A
 # script is chosen on that line and never on the whole prompt, so text in an
 # alert's body cannot pick the script.
-_TITLE = re.compile(r"^Title:[ \t]*(.*)$", re.MULTILINE)
+def _title_of(message: str) -> str:
+    """The first `Title:` line's value, without the label; empty when absent."""
+    for line in (message or "").splitlines():
+        if line.startswith("Title:"):
+            return line[len("Title:") :].strip()
+    return ""
+
+
 # Between steps. Long enough that the board's live feed shows a run happening,
 # short enough that a script is over before a person has finished reading the
 # card that announced it.
@@ -107,8 +115,7 @@ def load_scripts(directory: Path = SCRIPTS_DIR) -> list[dict[str, Any]]:
 
 def choose(scripts: list[dict[str, Any]], message: str) -> dict[str, Any]:
     """The script whose keywords appear in the alert's title, else the default."""
-    found = _TITLE.search(message or "")
-    title = (found.group(1) if found else "").lower()
+    title = _title_of(message).lower()
     for script in scripts:
         if not script.get("default") and any(word in title for word in script["match"]):
             return script

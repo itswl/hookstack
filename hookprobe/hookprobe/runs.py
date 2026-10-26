@@ -325,11 +325,12 @@ class RunStore:
                 continue
 
     def _load(self, session_key: str) -> Run | None:
-        base = self._results_dir.resolve()
-        path = (base / _filename(session_key)).resolve()
-        if not path.is_relative_to(base):
-            return None
-        if not path.exists():
+        wanted = _filename(session_key)
+        try:
+            path = next((p for p in self._results_dir.iterdir() if p.name == wanted), None)
+        except OSError:
+            path = None
+        if path is None:
             # A case file written before _filename learned to keep long keys
             # apart sits under the old truncated name. The disk scan finds it
             # by the key recorded inside it, and runs once per process, so a
