@@ -56,6 +56,11 @@ class Settings:
     # leaves the window BOUNDED rather than closed, which is what the pipe did
     # before 2026-10-12 — see security.verify_signature for what that costs.
     signature_replay_seconds: int = 300
+    # How long a request holds its signature's lease while it runs, renewed every
+    # third of it; an identical request meanwhile is answered 503. Long enough for
+    # the slowest pipeline answer, short enough that a crashed holder does not keep
+    # the sender's retry out for long. At least 10.
+    signature_lease_seconds: int = 120
     # Signs the buttons on a notification card and verifies them on the way
     # back. Empty = no card carries an action and /card-action refuses
     # everything, which is the right default: an unsigned button is a URL
@@ -90,6 +95,7 @@ class Settings:
             read_token=os.environ.get("HOOKRELAY_READ_TOKEN", ""),
             max_body_bytes=_int("HOOKRELAY_MAX_BODY_BYTES", 256 * 1024),
             signature_replay_seconds=_int("HOOKRELAY_SIGNATURE_REPLAY_SECONDS", 300),
+            signature_lease_seconds=max(10, _int("HOOKRELAY_SIGNATURE_LEASE_SECONDS", 120)),
             max_attempts=_int("HOOKRELAY_MAX_ATTEMPTS", 8),
             retention_days=_int("HOOKRELAY_RETENTION_DAYS", 14),
             alarm_url=os.environ.get("HOOKRELAY_ALARM_URL", ""),

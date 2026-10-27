@@ -20,7 +20,6 @@ import hmac
 import json
 
 import httpx
-import pytest
 
 import hookrelay.app as app_module
 from hookrelay.app import create_app
@@ -220,27 +219,27 @@ async def test_separate_stores_serialize_signature_acquisition(tmp_path):
         await second.close()
 
 
-async def test_failed_lease_renewal_cancels_processing_and_releases_lease(settings, cfg, monkeypatch):
-    entered = asyncio.Event()
-    real_handle = app_module.handle_hook
-    real_sleep = asyncio.sleep
-    calls = 0
+async def test_a_failed_renewal_lets_the_request_finish(settings, cfg, monkeypatch):
+    """Cancelling on a failed renewal left the sender a dropped connection and
+    the pipeline half-run. The lease is still the request's, so it completes,
+    and the next identical copy is the replay it is."""
+    entered, failed = asyncio.Event(), asyncio.Event()
+    real_handle, real_sleep = app_module.handle_hook, asyncio.sleep
 
     async def fast_heartbeat(delay):
         if delay == 40:
             await entered.wait()
-        else:
-            await real_sleep(delay)
+            await real_sleep(0.01)
+            return
+        await real_sleep(delay)
 
     async def handle(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            entered.set()
-            await asyncio.Event().wait()
+        entered.set()
+        await failed.wait()
         return await real_handle(*args, **kwargs)
 
     async def broken_renew(*args, **kwargs):
+        failed.set()
         raise OSError("database unavailable")
 
     monkeypatch.setattr(app_module.asyncio, "sleep", fast_heartbeat)
@@ -250,12 +249,55 @@ async def test_failed_lease_renewal_cancels_processing_and_releases_lease(settin
     app = create_app(settings=settings, cfg=cfg)
     async with _serve(app) as client:
         monkeypatch.setattr(app.state.store, "renew_signature", broken_renew)
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(client.post("/hook/grafana", content=body, headers=headers), 2)
+        first = await asyncio.wait_for(client.post("/hook/grafana", content=body, headers=headers), 5)
         monkeypatch.setattr(app_module.asyncio, "sleep", real_sleep)
+        again = await client.post("/hook/grafana", content=body, headers=headers)
+    assert first.status_code == 200 and first.json()["outcome"] == "routed"
+    assert again.json()["skip_code"] == "replayed_signature"
+
+
+async def test_a_lease_lost_before_completion_answers_503(settings, cfg, monkeypatch):
+    async def lost(*args, **kwargs):
+        return False
+
+    body = json.dumps(PAYLOAD).encode()
+    headers = {"X-Hook-Signature": _sig("s3cret", body)}
+    app = create_app(settings=settings, cfg=cfg)
+    async with _serve(app) as client:
+        monkeypatch.setattr(app.state.store, "complete_signature", lost)
         response = await client.post("/hook/grafana", content=body, headers=headers)
-        assert response.status_code == 200 and response.json()["outcome"] == "routed"
-    assert calls == 2
+    assert response.status_code == 503 and "lease lost" in response.json()["detail"]
+
+
+async def test_a_replay_of_a_handled_request_takes_no_write_lock(settings, cfg, monkeypatch):
+    """A bulk replay of one capture used to cost a write per copy."""
+    body = json.dumps(PAYLOAD).encode()
+    headers = {"X-Hook-Signature": _sig("s3cret", body)}
+    app = create_app(settings=settings, cfg=cfg)
+    async with _serve(app) as client:
+        assert (await client.post("/hook/grafana", content=body, headers=headers)).json()["outcome"] == "routed"
+        store, writes = app.state.store, []
+        real_write = store._write
+
+        def counting_write():
+            writes.append(1)
+            return real_write()
+
+        monkeypatch.setattr(store, "_write", counting_write)
+        for _ in range(5):
+            again = await client.post("/hook/grafana", content=body, headers=headers)
+            assert again.json()["skip_code"] == "replayed_signature"
+    assert writes == [], "a replay of a handled request wrote to the ledger"
+
+
+def test_the_lease_length_is_a_setting_with_a_floor(monkeypatch):
+    from hookrelay.settings import Settings
+
+    assert Settings.load().signature_lease_seconds == 120
+    monkeypatch.setenv("HOOKRELAY_SIGNATURE_LEASE_SECONDS", "45")
+    assert Settings.load().signature_lease_seconds == 45
+    monkeypatch.setenv("HOOKRELAY_SIGNATURE_LEASE_SECONDS", "3")
+    assert Settings.load().signature_lease_seconds == 10
 
 
 def test_nonfinite_signed_timestamps_are_refused():

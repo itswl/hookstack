@@ -332,7 +332,14 @@ CEILINGS: dict[str, tuple[int, Path]] = {
     # +~49 code. The doctrine question: this is the pipe's own noise valve, not
     # a judgement about an alert; the content it reads is the title it already
     # extracted for routing.
-    "hookrelay": (6650, Path("hookrelay/README.md")),
+    # 6650 -> 6700 on 2026-10-27, for the signature lease's follow-ups (PR #24
+    # landed at exactly 6650 by trading dead methods for restored reasoning): a
+    # replay of a handled request is answered from a read instead of a write per
+    # copy, a failed renewal no longer cancels the request mid-pipeline, and the
+    # lease length is a setting. Split: +~9 source over the line, the rest is
+    # headroom. The doctrine question: the pipe's own door and ledger, not a
+    # judgement about an alert.
+    "hookrelay": (6700, Path("hookrelay/README.md")),
     # 2900 -> 3000 on 2026-08-21, for the judge's second axis (`wake_someone`).
     # Raised rather than trimmed because the thing that pushed it over is the one
     # measurement that says whether this service earns its model calls at all:

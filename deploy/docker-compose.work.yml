@@ -61,6 +61,7 @@ services:
       HOOKRELAY_CONFIG: /etc/hookrelay/work.yaml
       HOOKRELAY_WORKER_INTERVAL: "0.5"
       HOOKRELAY_SIGNATURE_REPLAY_SECONDS: ${HOOKRELAY_SIGNATURE_REPLAY_SECONDS:-300}  # closes the captured-request replay window (0 = bounded only)
+      HOOKRELAY_SIGNATURE_LEASE_SECONDS: ${HOOKRELAY_SIGNATURE_LEASE_SECONDS:-120}  # how long an in-flight signed request holds its signature
       # work.yaml's ${...} refs are expanded by hookrelay from its OWN
       # environment, not by compose — every name used there has to be passed
       # through here or it silently resolves to empty. An empty URL crashes at

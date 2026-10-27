@@ -464,7 +464,7 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         # is a refusal to guess rather than a miss.
         replay: str | None = None
         owner = uuid.uuid4().hex
-        lease_seconds = 120
+        lease_seconds = app_settings.signature_lease_seconds
         heartbeat: asyncio.Task[None] | None = None
         if app_settings.signature_replay_seconds > 0:
             replay = replay_token(source.name, headers.get("x-hook-signature"))
@@ -477,21 +477,18 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 if state == "busy":
                     return JSONResponse({"detail": "identical request is still processing"}, 503, {"Retry-After": "1"})
 
-                processing = asyncio.current_task()
-
                 async def renew() -> None:
+                    # A failed renewal does not stop the request: cancelling it left
+                    # the sender a dropped connection and the pipeline half-run.
+                    # complete_signature decides below, 503 if the lease is gone.
                     while True:
                         await asyncio.sleep(lease_seconds / 3)
                         try:
-                            renewed = await app.state.store.renew_signature(replay, owner, now_ts(), lease_seconds)
+                            if not await app.state.store.renew_signature(replay, owner, now_ts(), lease_seconds):
+                                logger.error("signature processing lease was lost")
+                                return
                         except Exception:
                             logger.exception("signature processing lease renewal failed")
-                            renewed = False
-                        if not renewed:
-                            logger.error("signature processing lease was lost")
-                            if processing is not None:
-                                processing.cancel()
-                            return
 
                 heartbeat = asyncio.create_task(renew())
         try:

@@ -7,7 +7,7 @@ routes and their first sentence from the handlers. Correct it by editing the
 comment beside the field or the handler's docstring — an edit here is lost on
 the next run, and `scripts/gen_reference.py --check` will say so.
 
-## Environment (21)
+## Environment (22)
 
 | variable | default | what it is |
 | --- | --- | --- |
@@ -27,6 +27,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKRELAY_ACTION_SECRET` | *(empty)* | Signs the buttons on a notification card and verifies them on the way back |
 | `HOOKRELAY_ACTION_TTL_SECONDS` | `24 * 3600` | How long a card's buttons stay pressable |
 | `HOOKRELAY_CARD_CALLBACK_SECRET` | *(empty)* | Optional second layer on /card-action: when set, the callback must ALSO carry the family's timestamped signature |
+| `HOOKRELAY_SIGNATURE_LEASE_SECONDS` | `120` | How long a request holds its signature's lease while it runs, renewed every third of it; an identical request meanwhile is answered 503 |
 | `HOOKRELAY_WORKER_INTERVAL` | `1.0` | Delivery-loop tick, in seconds |
 | `HOOKRELAY_PUBLIC_URL` | *(empty)* | Where a card's action LINK should point |
 | `HOOKRELAY_UI_LINKS` | *(empty)* | door=url pairs: where the board that owns a door's sessions lives, as a BROWSER reaches it, so a chain's hop can link to the investigation it names |
