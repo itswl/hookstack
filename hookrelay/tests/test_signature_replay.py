@@ -2,8 +2,8 @@
 
 The timestamp on a signed door bounds how long a capture stays useful; on its
 own it does not close the window, because the same signature inside it is
-accepted again. `replay_token` + the store's `signature_seen`/`claim_signature`
-pair close it at the door. These tests pin three things: the door's observable
+accepted again. `replay_token` + the store's signature lease
+(`acquire_signature` / `complete_signature`) close it at the door. These tests pin three things: the door's observable
 answer, the `None` cases where there is nothing a guard can track without
 guessing, and — the one a first cut got wrong — that the signature is claimed
 only once the pipeline has ANSWERED, so a retry after a 5xx or a 429 is
@@ -284,23 +284,25 @@ def test_replay_token_is_none_when_there_is_nothing_to_track():
     assert replay_token("", "sig") is None
 
 
-async def test_claim_signature_is_true_once_then_false(store):
+async def test_a_completed_signature_is_spent_once(store):
     now = 1_000.0
-    assert await store.claim_signature("grafana:abc", 300, now) is True
-    assert await store.claim_signature("grafana:abc", 300, now + 1) is False
+    assert await store.acquire_signature("grafana:abc", "a", 300, now, 120) == "acquired"
+    assert await store.complete_signature("grafana:abc", "a", 300, now) is True
+    assert await store.acquire_signature("grafana:abc", "b", 300, now + 1, 120) == "completed"
 
 
-async def test_signature_seen_asks_without_claiming(store):
-    """The peek must not have the side effect of the claim, or the door's
-    peek-then-claim split would be a claim wearing two names."""
-    assert await store.signature_seen("grafana:abc", 300, 1_000.0) is False
-    assert await store.signature_seen("grafana:abc", 300, 1_000.0) is False
-    assert await store.claim_signature("grafana:abc", 300, 1_000.0) is True
-    assert await store.signature_seen("grafana:abc", 300, 1_000.0) is True
+async def test_a_held_signature_is_busy_until_its_holder_lets_go(store):
+    """Released after a failure, the next identical request is processed —
+    the property the spent-after-answer order exists for."""
+    assert await store.acquire_signature("grafana:abc", "a", 300, 1_000.0, 120) == "acquired"
+    assert await store.acquire_signature("grafana:abc", "b", 300, 1_000.0, 120) == "busy"
+    await store.release_signature("grafana:abc", "a")
+    assert await store.acquire_signature("grafana:abc", "b", 300, 1_000.0, 120) == "acquired"
 
 
-async def test_claim_signature_forgets_outside_the_window(store):
+async def test_a_spent_signature_is_forgotten_outside_the_window(store):
     """The prune is what keeps the table the size of the window, not of uptime —
     and what lets a genuinely new request with recycled bytes through later."""
-    assert await store.claim_signature("grafana:abc", 300, 1_000.0) is True
-    assert await store.claim_signature("grafana:abc", 300, 1_301.0) is True
+    assert await store.acquire_signature("grafana:abc", "a", 300, 1_000.0, 120) == "acquired"
+    assert await store.complete_signature("grafana:abc", "a", 300, 1_000.0) is True
+    assert await store.acquire_signature("grafana:abc", "b", 300, 1_301.0, 120) == "acquired"

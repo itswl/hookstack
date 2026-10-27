@@ -450,6 +450,18 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         headers = {key.lower(): value for key, value in request.headers.items()}
         if not adapter.verify(source, body, headers):
             raise HTTPException(status_code=401, detail="bad signature")
+        # A captured request replayed inside the skew is the same signed BYTES,
+        # and the content fingerprint cannot see that: it folds a restatement of
+        # the same alert however long ago the content window closed. So the
+        # signature is held while this request runs and marked spent only once
+        # the pipeline has answered (below): spent before it, a sender's identical
+        # retry after a 5xx, a timeout or the fuse's 429 would read as a replay,
+        # losing the event while both sides believed it was handled. The hold is
+        # a renewable lease, so an identical copy arriving meanwhile is told to
+        # retry (503) instead of entering the pipeline beside the first, and a
+        # crashed holder's lease runs out. Off when the window is 0, and a scheme
+        # this cannot name (a plugin adapter's own header) yields no token, which
+        # is a refusal to guess rather than a miss.
         replay: str | None = None
         owner = uuid.uuid4().hex
         lease_seconds = 120
@@ -487,9 +499,19 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 payload = json.loads(body or b"{}")
             except ValueError:
                 raise HTTPException(status_code=400, detail="body is not JSON") from None
+            # ── storm fuse (volume, not content) ──────────────────────────
+            # After verification (an unsigned flood is already 401 and free) and
+            # before the pipeline. Two stages: suppress keeps the account, reject
+            # protects the account itself.
             verdict = app.state.fuse.check(source.name, source.storm_threshold, source.storm_window_seconds, now_ts())
             if verdict == "reject":
                 raise HTTPException(status_code=429, detail="storm fuse open (hard)")
+            # The adapter reads the payload for BOTH paths from here on. A suppressed
+            # event is still recorded, so it must be recorded the way this door
+            # actually reads its senders: the storm path used to re-extract with the
+            # door's templates alone, and a reshaping adapter (SNS hides the alert
+            # inside a JSON-string `Message`) mis-titled every row the storm made.
+            # It sits after the hard reject, which stores nothing and so reads nothing.
             extracted = adapter.parse(source, payload)
             if verdict == "suppress":
                 event_id = await record_storm_suppressed(
@@ -513,6 +535,10 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                     client=app.state.http_client,
                     extracted=extracted,
                 )
+            # The pipeline answered, so the event was handled once: the signature is
+            # spent now. Anything that raised above (the 400 for a body that is not
+            # JSON, the 429 from the hard fuse, a fault inside handle_hook) reaches
+            # `finally` having spent nothing and is released there, so a retry is processed.
             if replay is not None and not await app.state.store.complete_signature(
                 replay, owner, app_settings.signature_replay_seconds, now_ts()
             ):

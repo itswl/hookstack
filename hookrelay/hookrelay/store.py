@@ -979,7 +979,11 @@ class Store:
     # ── inbound signatures ────────────────────────────────────────────────
 
     async def acquire_signature(self, token: str, owner: str, window: int, now: float, lease: int) -> str:
-        """Reserve a signature atomically; a crashed owner's lease can expire."""
+        """`acquired`, `busy` (another request holds the lease) or `completed`
+        (spent inside the window). One write, so two identical requests cannot
+        both acquire; a crashed owner's lease simply expires. Spent rows are
+        pruned in `complete_signature`, so the table is the size of the window.
+        """
         async with self._write():
             await self.db.execute("DELETE FROM pending_signatures WHERE expires_at <= ?", (now,))
             cursor = await self.db.execute(
@@ -1019,36 +1023,6 @@ class Store:
             await self.db.execute("INSERT OR REPLACE INTO spent_signatures(token,seen_at) VALUES (?,?)", (token, now))
             await self.db.execute("DELETE FROM pending_signatures WHERE token = ? AND owner = ?", (token, owner))
             return True
-
-    async def signature_seen(self, token: str, window_seconds: int, now: float) -> bool:
-        """Whether this signature was CLAIMED inside the window. A read, no claim.
-
-        A completed claim is distinct from the recoverable in-flight lease.
-
-        The prune lives in `claim_signature`, which runs on every HANDLED
-        request, so this stays a read and the table stays bounded by the window.
-        """
-        cursor = await self.read.execute(
-            "SELECT 1 FROM spent_signatures WHERE token = ? AND seen_at >= ? LIMIT 1",
-            (token, now - window_seconds),
-        )
-        return await cursor.fetchone() is not None
-
-    async def claim_signature(self, token: str, window_seconds: int, now: float) -> bool:
-        """True the first time this signature is seen inside the window, else False.
-
-        Same shape as spend_action: the PRIMARY KEY is the decision rather than a
-        read-then-write with a gap. The prune runs inside the same write lock, so
-        the table is the size of the window and not of uptime.
-        `window_seconds <= 0` is the caller's business, not this method's — a zero
-        window is a refusal to cache, not a claim with nothing to compare against.
-        """
-        async with self._write():
-            await self.db.execute("DELETE FROM spent_signatures WHERE seen_at < ?", (now - window_seconds,))
-            cursor = await self.db.execute(
-                "INSERT OR IGNORE INTO spent_signatures (token, seen_at) VALUES (?, ?)", (token, now)
-            )
-            return cursor.rowcount == 1
 
     async def recent_actions(self, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self.read.execute(
