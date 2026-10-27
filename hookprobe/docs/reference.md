@@ -66,7 +66,7 @@ the next run, and `scripts/gen_reference.py --check` will say so.
 | `HOOKPROBE_PI_PROVIDER` | *(empty)* | Which provider in that configuration serves this node's model |
 | `HOOKPROBE_SKILLS` | *(empty)* | Directory of skills the engine may load |
 | `HOOKPROBE_RETURN_URL` | *(empty)* | The one door findings go back to |
-| `HOOKPROBE_ALARM_URL` | *(empty)* | Direct self-alarm for report returns that exhaust their retries: the pipe is the broken link at that moment, so this posts straight to a bot/collector URL, touching nothing on the… |
+| `HOOKPROBE_ALARM_URL` | *(empty)* | Direct self-alarm, around the pipe: report returns that exhaust their retries, a run failing in a way every run here would, the hourly selftest, and a transient failure that recurs… |
 | `HOOKPROBE_SETTING_SOURCES` | `project` | Skill layers |
 | `HOOKPROBE_CODEX_BINARY` | *(empty)* | Codex only |
 | `HOOKPROBE_CODEX_PYTHON` | *(empty)* | The interpreter the Codex adapter spawns its tool gate with |

@@ -452,9 +452,10 @@ class Settings:
     # traffic, not the agent's memory. 0 keeps them.
     scratch_days: int
 
-    # Direct self-alarm for report returns that exhaust their retries: the
-    # pipe is the broken link at that moment, so this posts straight to a
-    # bot/collector URL, touching nothing on the path that failed.
+    # Direct self-alarm, around the pipe: report returns that exhaust their
+    # retries, a run failing in a way every run here would, the hourly
+    # selftest, and a transient failure that recurs three runs in a row. It
+    # posts straight to a bot/collector URL, touching nothing that failed.
     alarm_url: str
     # Floor between two alarm sends, so a storm cannot page repeatedly.
     alarm_min_interval_seconds: int

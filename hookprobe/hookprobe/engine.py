@@ -640,10 +640,45 @@ def transient(error: str) -> bool:
     then re-investigating was spending money on a question whose answer had
     stopped mattering. The moment to try again is the moment, not four days on.
     """
+    return transient_kind(error) is not None
+
+
+# The same transient shape, named, so a run of them can be counted as ONE thing:
+# a provider says "429" one time and "rate limit exceeded" the next.
+_TRANSIENT_KINDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("429", "rate limit"), "rate limited"),
+    (("overloaded",), "overloaded"),
+    (
+        (
+            "500",
+            "502",
+            "503",
+            "504",
+            "520",
+            "521",
+            "522",
+            "524",
+            "internal server error",
+            "service unavailable",
+            "temporarily unavailable",
+        ),
+        "a 5xx from the provider",
+    ),
+    (("408",), "a request timeout"),
+    (("connection reset", "connection error"), "the connection dropped"),
+)
+
+
+def transient_kind(error: str) -> str | None:
+    """Which transient shape this failure is, or None when it is not one."""
     lowered = " ".join(str(error or "").split()).lower()
     if not lowered or any(marker in lowered for marker in _PERMANENT_MARKERS):
-        return False
-    return any(marker in lowered for marker in _TRANSIENT_MARKERS)
+        return None
+    if not any(marker in lowered for marker in _TRANSIENT_MARKERS):
+        return None
+    return next(
+        (kind for markers, kind in _TRANSIENT_KINDS if any(marker in lowered for marker in markers)), "transient"
+    )
 
 
 # Failures that are about the NODE, not about this investigation: whatever the

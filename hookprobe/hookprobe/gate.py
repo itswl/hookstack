@@ -181,9 +181,26 @@ def shell_write_target(command: str, roots: tuple[Path, ...], workdir: Path | No
 
 
 def _writes_a_named_file(words: list[str]) -> bool:
-    """Commands that write a path given as an argument rather than a redirect."""
+    """Commands that write, remove or relink a path given as an argument.
+
+    Removing and relinking count (2026-10-27). `rm results/x.json` deleted the
+    evidence the next run is told to read, and `ln -sf /tmp/x .claude/skills/x`
+    planted a skill whose content then lives wherever the run can write — both
+    passed while `cp` and `mv` into the same paths were refused.
+    """
     head = Path(words[0]).name
-    if head in ("cp", "mv", "install", "dd", "truncate", "tee"):
+    if head in ("cp", "mv", "install", "dd", "truncate", "tee", "rm", "rmdir", "unlink", "shred", "ln", "touch"):
+        return True
+    if head == "find" and (
+        "-delete" in words
+        or (
+            any(word in ("-exec", "-execdir", "-ok", "-okdir") for word in words)
+            and any(
+                Path(word).name in ("rm", "mv", "cp", "ln", "unlink", "shred", "truncate", "tee", "dd")
+                for word in words
+            )
+        )
+    ):
         return True
     # `sed` only writes with -i, and BSD's takes a separate suffix argument, so
     # the target is not at a fixed position. Every argument is a candidate.

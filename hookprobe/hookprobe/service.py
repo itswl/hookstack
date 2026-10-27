@@ -47,7 +47,7 @@ from hookprobe import (
     suggestions,
 )
 from hookprobe.distill import CASES_MARKER, slug
-from hookprobe.engine import EngineResult, price_tokens, transient, unreachable
+from hookprobe.engine import EngineResult, price_tokens, transient, transient_kind, unreachable
 from hookprobe.notify import ReturnDelivery
 from hookprobe.reports import (
     budget_report,
@@ -93,6 +93,15 @@ def _patch_name(session_key: str) -> str:
 # over in seconds; a second failure means it was not a blip, and a third attempt
 # is a bill rather than a diagnosis.
 _MAX_AUTO_RETRIES = 1
+# A transient failure that keeps happening is not transient (2026-10-27). A
+# second deployment running copies of these files lost three days of rounds to a
+# provider's rate limit with nobody told: every failure was retried, failed again
+# and was filed as one investigation's bad luck, which is what `transient` means
+# and what it stops meaning when every run hits it. The node-wide shapes page on
+# the first failure; this pages on the third in a row of one kind, once per kind
+# per six hours, and says so again when a run lands.
+_RECURRING_AFTER = 3
+_RECURRING_QUIET_SECONDS = 6 * 3600
 _RETRY_BACKOFF_SECONDS = 5.0
 
 # What a retried turn is told when the runtime kept a session. Without one the
@@ -301,6 +310,8 @@ class RunService:
         self.on_board_change: Callable[[], None] | None = None
         # The family loop's last mile, and the alarm behind it.
         self._returns = ReturnDelivery(settings, store)
+        self._streak: dict[str, Any] = {}
+        self._streak_paged: dict[str, float] = {}
         # Return-retry pacing, an instance attr so tests can collapse it.
         self._return_delays: tuple[float, ...] = (0.0, 2.0, 5.0)
         # The same, for the pause before one more attempt at a provider blip.
@@ -1625,6 +1636,7 @@ class RunService:
             distill_loop.maybe_consolidate(run, self._settings, self._store, self.start)
         self._settle(run)
         self._schedule_return(run)
+        self._note_landed()
         logger.info(
             # `messages`, not `turns`: a turn is an entry in run.turns and there
             # is normally one. This is the SDK message count, and calling it
@@ -2047,6 +2059,7 @@ class RunService:
         self._settle(run)
         self._schedule_return(run)
         self._alarm_if_node_wide(run, reason)
+        self._note_transient_failure(run, reason)
         logger.warning("run failed session=%s reason=%s", run.session_key, reason)
 
     async def _file_rulings(self, run: Run, filed: list[dict[str, Any]]) -> None:
@@ -2129,6 +2142,46 @@ class RunService:
             "every investigation this node runs would fail the same way until this is fixed"
         )
         task = asyncio.create_task(self._alarm_and_record(run, text))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def _note_transient_failure(self, run: Run, reason: str) -> None:
+        """Count a run that failed the same transient way as the one before it."""
+        kind = transient_kind(reason)
+        if kind is None or unreachable(reason):
+            return  # one investigation's failure, or a node-wide one that pages on its own
+        now = time.time()
+        if self._streak.get("kind") != kind:
+            self._streak = {"kind": kind, "count": 0, "since": now, "paged": False}
+        self._streak["count"] += 1
+        count = self._streak["count"]
+        run.meta["failure_streak"] = {"kind": kind, "count": count}
+        if count < _RECURRING_AFTER or now - self._streak_paged.get(kind, 0.0) < _RECURRING_QUIET_SECONDS:
+            return
+        self._streak_paged[kind] = now
+        self._streak["paged"] = True
+        since = time.strftime("%m-%d %H:%M", time.localtime(self._streak["since"]))
+        logger.error("recurring transient failures kind=%s count=%s since=%s", kind, count, since)
+        self._detached_alarm(
+            f"runs keep failing the same transient way: {kind}\n"
+            f"{count} in a row since {since}, each retried before it failed\n"
+            f"last: {run.session_key}: {reason[:200]}\n"
+            "nothing this node starts is landing until it clears"
+        )
+
+    def _note_landed(self) -> None:
+        """A run the engine finished ends any streak, and says so if it paged."""
+        streak, self._streak = self._streak, {}
+        if streak.get("paged"):
+            self._detached_alarm(
+                f"runs are landing again after {streak['count']} transient failures in a row ({streak['kind']})"
+            )
+
+    def _detached_alarm(self, text: str) -> None:
+        async def send() -> None:
+            await self.alarm(text)
+
+        task = asyncio.create_task(send())
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 

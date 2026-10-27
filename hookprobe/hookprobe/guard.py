@@ -75,9 +75,13 @@ _SEG = r"[^|;&\n]*"
 # rule produced — an investigator that may query EKS could not reach the
 # cluster's API at all. Named individually rather than by loosening the verb
 # list, because "update" staying denied everywhere else is the point.
+# `start-query` is the second (2026-10-27): CloudWatch Logs Insights and
+# CloudTrail Lake run a query and hold its rows for `get-query-results`, and
+# nothing in the account changes. Named exactly, so Athena's
+# `start-query-execution`, which writes its results into a bucket, stays denied.
 _AWS_READ = (
-    r"(?<![/:.\w-])(?:describe|get|list|search|head|scan|query|select|lookup|"
-    r"estimate|preview|validate|check|test|ls|update-kubeconfig)[a-z0-9-]*\b"
+    r"(?<![/:.\w-])(?:(?:describe|get|list|search|head|scan|query|select|lookup|"
+    r"estimate|preview|validate|check|test|ls|update-kubeconfig)[a-z0-9-]*\b|start-query(?![\w-]))"
 )
 
 _DENY_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -190,6 +194,22 @@ _ALWAYS_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(rf"\bwget\b{_SEG}--no-proxy\b"), "a wget flag that goes around the egress proxy"),
 )
 
+# Code this guard never sees. Checked under EVERY posture, before the mode
+# branch: a script piped into a shell, or fetched and handed to one, runs verbs
+# no rule here can read, so neither posture can say it is not one of the
+# blocked things. `curl … | sh` is how half the tools on the internet ask to be
+# installed, which makes it exactly the over-eager model's mistake this layer is
+# for. A script saved to a file and then run is two steps and is not caught —
+# the same honesty as the segment rules above.
+_SHELL = r"(?:\S*/)?(?:ba|z|da|k|a)?sh\b(?![\w.-])"
+_UNSEEN_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(rf"\|\s*(?:sudo\s+(?:-\S+\s+)*)?{_SHELL}"), "a pipe into a shell"),
+    (
+        re.compile(rf"(?:{_SHELL}(?:\s+-c)?|\bsource|(?:^|[\s;&|])\.|\beval)\s+[\"']?(?:<\(|\$\(|`)\s*(?:curl|wget)\b"),
+        "a fetched script handed to a shell",
+    ),
+)
+
 READONLY, DANGER_ONLY = "readonly", "danger-only"
 MODES = (READONLY, DANGER_ONLY)
 
@@ -212,6 +232,12 @@ def bash_deny_reason(command: str, mode: str = READONLY) -> str | None:
             return (
                 f"egress guard: {label} is blocked. Outbound calls go through the "
                 f"allowlisting proxy; a destination it refuses is a destination nobody listed"
+            )
+    for pattern, label in _UNSEEN_RULES:
+        if pattern.search(command):
+            return (
+                f"unseen-code guard: {label} is blocked. The guard cannot read a script it never "
+                f"sees; fetch it to a file, read it, and run the commands it holds one by one"
             )
     if mode == DANGER_ONLY:
         for pattern, label in _DANGER_RULES:
