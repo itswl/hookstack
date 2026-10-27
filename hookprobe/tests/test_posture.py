@@ -140,7 +140,6 @@ def test_no_credentials_and_off(tmp_path, monkeypatch) -> None:
         {"AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/example", "AWS_WEB_IDENTITY_TOKEN_FILE": "/tmp/token"},
         {"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "/v2/credentials/example"},
         {"AWS_CONTAINER_CREDENTIALS_FULL_URI": "http://localhost/credentials"},
-        {"AWS_PROFILE": "example"},
     ],
 )
 def test_aws_credential_sources_are_detected(tmp_path, monkeypatch, variables) -> None:
@@ -153,14 +152,91 @@ def test_aws_credential_sources_are_detected(tmp_path, monkeypatch, variables) -
     assert posture.aws_configured()
 
 
-def test_implicit_metadata_is_not_claimed_absent(tmp_path, monkeypatch) -> None:
+def _no_aws_named(tmp_path, monkeypatch) -> None:
     for name in list(os.environ):
         if name.startswith("AWS_"):
             monkeypatch.delenv(name)
     monkeypatch.setenv("HOME", str(tmp_path))
-    aws = asyncio.run(posture.check_aws(_runner({})))
-    assert aws["unverifiable"] is True
-    assert posture.verdict("readonly", {"present": False}, aws) == "unverifiable"
+
+
+def test_a_profile_name_with_no_file_behind_it_is_not_a_credential(tmp_path, monkeypatch) -> None:
+    _no_aws_named(tmp_path, monkeypatch)
+    monkeypatch.setenv("AWS_PROFILE", "example")
+    assert not posture.aws_configured()
+
+
+def test_no_metadata_service_answering_is_no_credential(tmp_path, monkeypatch) -> None:
+    """The laptop and the internal network: nothing at the address, nothing to measure."""
+    _no_aws_named(tmp_path, monkeypatch)
+    run = _runner({})
+    aws = asyncio.run(posture.check_aws(run))
+    assert aws == {"present": False} and run.calls == []
+    assert posture.verdict("readonly", {"present": False}, aws) == "no-credentials"
+
+
+def test_a_metadata_service_that_answers_is_measured_like_any_source(tmp_path, monkeypatch) -> None:
+    _no_aws_named(tmp_path, monkeypatch)
+    monkeypatch.setattr(posture, "metadata_reachable", lambda timeout=1.0: True)
+    denied = [{"EvalActionName": name, "EvalDecision": "implicitDeny"} for name in posture.DANGEROUS_AWS_ACTIONS]
+    run = _runner(
+        {
+            "aws sts": (0, '{"Arn":"arn:aws:sts::1:assumed-role/instance/i-0"}', ""),
+            "aws iam": (0, json.dumps({"EvaluationResults": denied}), ""),
+        }
+    )
+    aws = asyncio.run(posture.check_aws(run))
+    assert aws["present"] is True and aws["unverifiable"] is False and aws["allowed"] == []
+    assert posture.verdict("readonly", {"present": False}, aws) == "readonly-confirmed"
+
+
+def test_an_instance_with_no_role_has_no_credential(tmp_path, monkeypatch) -> None:
+    _no_aws_named(tmp_path, monkeypatch)
+    monkeypatch.setattr(posture, "metadata_reachable", lambda timeout=1.0: True)
+    run = _runner({"aws sts": (253, "", "Unable to locate credentials. You can configure credentials by running")})
+    assert asyncio.run(posture.check_aws(run)) == {"present": False}
+
+
+def test_metadata_disabled_is_not_asked(tmp_path, monkeypatch) -> None:
+    _no_aws_named(tmp_path, monkeypatch)
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+    def asked(timeout=1.0):
+        raise AssertionError("the disabled service was asked")
+
+    monkeypatch.setattr(posture, "metadata_reachable", asked)
+    assert asyncio.run(posture.check_aws(_runner({}))) == {"present": False}
+
+
+def test_the_metadata_question_goes_direct_and_counts_any_answer(monkeypatch, real_metadata_reachable) -> None:
+    """Asked without the proxy: a proxy that refuses the address would otherwise
+    read as a service being there."""
+    import socket
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Metadata(BaseHTTPRequestHandler):
+        def do_PUT(self) -> None:  # noqa: N802
+            self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Metadata)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    try:
+        monkeypatch.setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
+        assert real_metadata_reachable(timeout=2.0) is True
+    finally:
+        server.shutdown()
+        server.server_close()
+    with socket.socket() as closed:
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+    monkeypatch.setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", f"http://127.0.0.1:{port}")
+    assert real_metadata_reachable(timeout=2.0) is False
 
 
 def test_writing_node_refuses_unverifiable_declared_radius(tmp_path, monkeypatch) -> None:

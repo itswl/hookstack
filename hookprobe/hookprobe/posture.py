@@ -48,6 +48,8 @@ import json
 import logging
 import os
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -155,17 +157,17 @@ def kubeconfig_path() -> Path | None:
 
 
 def aws_configured() -> bool:
+    # A profile NAME alone is not a source: it names a section of a file, and
+    # the files are what the loop below looks for. An instance metadata service
+    # is not configured at all — it is asked (see metadata_reachable).
     if any(
         os.environ.get(name)
         for name in (
             "AWS_ACCESS_KEY_ID",
-            "AWS_PROFILE",
-            "AWS_DEFAULT_PROFILE",
             "AWS_ROLE_ARN",
             "AWS_WEB_IDENTITY_TOKEN_FILE",
             "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
             "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-            "AWS_EC2_METADATA_SERVICE_ENDPOINT",
         )
     ):
         return True
@@ -202,17 +204,51 @@ async def check_kube(run: Runner) -> dict[str, Any]:
     return record
 
 
+def metadata_reachable(timeout: float = 1.0) -> bool:
+    """Whether an instance metadata service answers here, asked directly.
+
+    When nothing names a credential, this is the source left: the AWS CLI asks
+    the same address for an instance role. Any HTTP answer counts, a refusal
+    included, because something is there. No proxy, on purpose: the probes'
+    egress proxy answers for addresses it refuses, and the question is whether
+    this container reaches the service at all. On a laptop or on the probes'
+    internal network the address has no route, and that is the common case.
+    """
+    base = os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT") or (
+        "http://[fd00:ec2::254]"
+        if os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE", "").lower() == "ipv6"
+        else "http://169.254.169.254"
+    )
+    request = urllib.request.Request(
+        base.rstrip("/") + "/latest/api/token",
+        method="PUT",
+        headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"},
+    )
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=timeout):  # nosec B310
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 async def check_aws(run: Runner) -> dict[str, Any]:
     if not aws_configured():
+        # Asked, not assumed. Assuming made every laptop and every probe on an
+        # internal network `unverifiable`, and a writing node with a declared
+        # radius refused to start over a service that cannot exist there.
         if os.environ.get("AWS_EC2_METADATA_DISABLED", "").lower() == "true":
             return {"present": False}
-        return {
-            "present": False,
-            "unverifiable": True,
-            "errors": ["implicit EC2 metadata credentials were not checked"],
-        }
+        if not await asyncio.to_thread(metadata_reachable):
+            return {"present": False}
+        # A service answered: its credentials are measured like any other source.
     record: dict[str, Any] = {"present": True, "identity": None, "allowed": [], "errors": [], "unverifiable": False}
     code, out, err = await run(["aws", "sts", "get-caller-identity", "--output", "json"])
+    if code != 0 and "Unable to locate credentials" in (err or out):
+        # The CLI looked everywhere it looks and found nothing: an instance with
+        # no role, say. That is an absence, not a measurement that failed.
+        return {"present": False}
     if code != 0:
         record["errors"].append(f"get-caller-identity: {(err or out).strip()[:200]}")
         record["unverifiable"] = True
@@ -372,8 +408,6 @@ def summary(record: dict[str, Any]) -> str:
             + (" unverifiable" if aws.get("unverifiable") else "")
             + (f" tool-missing={aws['tool_missing']}" if aws.get("tool_missing") else "")
         )
-    elif aws.get("unverifiable"):
-        parts.append("aws ambient credentials unverifiable")
     return " · ".join(parts)
 
 
