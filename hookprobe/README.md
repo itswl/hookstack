@@ -224,7 +224,8 @@ always reach. Two things about the word *default*, before the layers:
 2. **Bash guard** — under `readonly`, a PreToolUse hook denies mutating verbs
    of kubectl, helm, docker/podman, systemctl, terraform, plus ssh/scp and
    `git push`; under `danger-only` it keeps only the estate-wide destroyers
-   listed above. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
+   listed above. Under both, a script piped or handed to a shell (`curl … | sh`)
+   is refused, because its verbs never reach a rule. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
    cloud CLIs are too many to enumerate — scope their credentials instead.
 3. **Container** — non-root, disposable, nothing precious inside, no container
    runtime and no socket (a run cannot start a container, and cannot build a
