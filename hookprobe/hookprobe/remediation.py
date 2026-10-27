@@ -938,7 +938,7 @@ async def execute(
             except TimeoutError:
                 process.kill()
                 await process.wait()
-                output, returncode, truncated = b"(timed out)", -1, False
+                output, returncode, truncated = "(timed out)", -1, False
             except asyncio.CancelledError:
                 if process.returncode is None:
                     process.kill()
@@ -947,14 +947,12 @@ async def execute(
             else:
                 returncode = int(process.returncode or 0)
         except OSError as exc:
-            output, returncode, truncated = str(exc).encode(), -1, False
+            output, returncode, truncated = redact(str(exc)), -1, False
         result = {
             "command": redact(command),
             "exit": returncode,
             "ms": int((time.monotonic() - started) * 1000),
-            "output": (
-                "(output omitted: exceeded 10000 bytes)" if truncated else redact(output.decode("utf-8", "replace"))
-            ),
+            "output": output,
             "output_truncated": truncated,
         }
         row.setdefault("results", []).append(result)
@@ -1066,19 +1064,34 @@ def evidence(
     return stamped
 
 
-async def _read_output(process: asyncio.subprocess.Process) -> tuple[bytes, bool]:
-    """Drain output without buffering more than its last 10,000 bytes."""
+OUTPUT_KEPT = 10_000  # characters of a step's output the record keeps, from the end
+OUTPUT_HELD = 1_000_000  # bytes held so the whole output is redacted before it is cut
+
+
+async def _read_output(process: asyncio.subprocess.Process) -> tuple[str, bool]:
+    """A step's output as the record keeps it, and whether any of it was dropped.
+
+    The whole output is redacted BEFORE it is cut to its last 10,000 characters,
+    so a secret the cut would have split was seen whole by the redactor — and the
+    tail, where a failing command says why, is kept. That needs the whole output
+    in hand: past a megabyte nothing is held, and the output is omitted rather
+    than cut at a point nobody redacted.
+    """
     if process.stdout is None:
         raise RuntimeError("remediation process has no output pipe")
-    tail = bytearray()
+    held = bytearray()
     total = 0
     while chunk := await process.stdout.read(65536):
         total += len(chunk)
-        tail.extend(chunk)
-        if len(tail) > 10000:
-            del tail[:-10000]
+        if total <= OUTPUT_HELD:
+            held.extend(chunk)
+        elif held:
+            held.clear()
     await process.wait()
-    return bytes(tail), total > 10000
+    if total > OUTPUT_HELD:
+        return f"(output omitted: {total} bytes, more than can be redacted whole)", True
+    text = redact(bytes(held).decode("utf-8", "replace"))
+    return text[-OUTPUT_KEPT:], len(text) > OUTPUT_KEPT
 
 
 def _audit(workdir: Path, proposal_id: str, command: str, error: bool, *, tool: str = "Exec") -> None:

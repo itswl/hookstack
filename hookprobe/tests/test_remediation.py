@@ -363,10 +363,23 @@ def test_remediation_output_is_redacted_and_bounded(tmp_path):
     secret = asyncio.run(scenario("echo password=not-a-real-secret"))
     assert "not-a-real-secret" not in secret["output"]
     assert "[redacted]" in secret["output"]
-    large = asyncio.run(scenario(f'{sys.executable} -c "print(chr(120)*20000)"'))
+    # A secret straddling the 10,000-character cut: redacted whole before the cut,
+    # so no piece of it survives, and the tail a failing command writes is kept.
+    script = tmp_path / "straddle.py"
+    script.write_text(
+        'print("A" * 20000 + " sk-ant-" + "Q" * 24 + " " + "B" * 9985)\n',
+        encoding="utf-8",
+    )
+    large = asyncio.run(scenario(f"{sys.executable} {script}"))
     assert large["output_truncated"] is True
-    assert len(large["output"].encode()) <= 10000
-    assert large["output"] == "(output omitted: exceeded 10000 bytes)"
+    assert len(large["output"]) <= 10000
+    assert "QQQQ" not in large["output"]
+    assert large["output"].rstrip().endswith("B" * 9985)
+    flood = tmp_path / "flood.py"
+    flood.write_text('import sys\nsys.stdout.write("x" * 1_100_000)\n', encoding="utf-8")
+    omitted = asyncio.run(scenario(f"{sys.executable} {flood}"))
+    assert omitted["output_truncated"] is True
+    assert omitted["output"].startswith("(output omitted: 1100000 bytes")
 
 
 def test_a_row_that_cannot_be_written_after_execution_is_loud(tmp_path, monkeypatch, caplog):
