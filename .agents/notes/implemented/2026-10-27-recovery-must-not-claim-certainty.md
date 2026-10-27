@@ -8,11 +8,20 @@ scope: stack
 ## Decision
 
 Record remediation step starts and results durably, and classify interrupted
-steps as completed, unknown, or not started. Limit captured output and redact
-known secret patterns. Reserve signed inbound requests with renewable SQLite
-leases, recording completion only after handling. Treat incomplete posture
-measurements and unchecked ambient AWS credentials as unverifiable; a writing
-node with a declared radius refuses an unverified measurement under enforce.
+steps as completed, unknown, or not started. Redact a step's whole output, then
+keep its last 10,000 characters (omit it past a megabyte). Reserve signed
+inbound requests with renewable SQLite leases, recording completion only after
+handling. Treat incomplete posture measurements as unverifiable, and ASK the
+instance metadata service when nothing names an AWS credential: one that
+answers is measured, none answering is no credential. A writing node with a
+declared radius refuses an unverified measurement under enforce.
+
+Amended in review before merge: the first version assumed metadata credentials
+whenever nothing named one, which read every laptop and every probe on an
+internal network as `unverifiable` and stopped a declared writing node from
+starting; it omitted any output past 10,000 bytes, tail included; and it cut
+the pipe's explanatory comments to fit its line ceiling. The pipe's two unused
+signature methods went instead.
 
 ## Why
 
@@ -26,3 +35,5 @@ still processing, and a failed permission check cannot prove a declared radius.
 - A lease can expire after a crash, allowing retries but not exactly-once external effects.
 - Patterns do not catch every secret, and proposals retain executable commands.
 - Declared writing nodes may need corrected tooling or an explicit metadata setting before starting.
+- The pipe gains a `pending_signatures` table. A rollback to an earlier pipe
+  ignores it: nothing fails to open, and a lease left in it simply expires.

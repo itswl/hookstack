@@ -22,14 +22,14 @@ a real model cannot be steered into emitting a harmful one.
 > under `enforce`, as does a writing runner with a declared radius; an undeclared writing runner starts and pages, and the hourly selftest fails until the tool is back — ten days of
 > `kubectl: not found` had passed as `unverifiable` and `recorded` before this. The measurement is served on `GET /v1/posture`
 > and cited in every run's audit record.
-> An unverifiable writing runner with a declared radius also refuses under `enforce`. With no explicit AWS source, EC2
-> metadata credentials are unverifiable unless `AWS_EC2_METADATA_DISABLED=true`; this can change startup behavior.
+> An unverifiable writing runner with a declared radius also refuses under `enforce`. With no explicit AWS source, the
+> instance metadata service is asked directly: one that answers is measured like any other source, none answering is none.
 
 > **Recovery is not exactly-once (2026-10-27).** Concurrent signed hook requests use a durable, renewable processing
 > lease; an in-flight duplicate receives 503 and can retry, while completed signatures are deduplicated. A crash after
 > an external side effect but before the completion record can still cause that effect to repeat. Remediation records
 > each step's start and result; a started step without a durable result is unknown and needs operator reconciliation.
-> Oversized output is omitted and smaller output redacted by pattern, but original proposal commands remain stored and redaction can miss secrets.
+> Output is redacted whole before it is cut to its last 10,000 characters (omitted past a megabyte); redaction is by pattern and can miss secrets, and original proposal commands remain stored.
 
 ## What holds, and what only helps
 

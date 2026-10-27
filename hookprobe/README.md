@@ -185,11 +185,10 @@ always reach. Two things about the word *default*, before the layers:
   every run's audit, so "read-only" is a measurement with a date rather than
   a sentence in this file.
   An unverifiable writing node with a declared radius also refuses under
-  `enforce`. When no explicit AWS credential source is found, implicit EC2
-  metadata credentials are reported as unverifiable unless
-  `AWS_EC2_METADATA_DISABLED=true` is set. Set that only when metadata
-  credentials are intentionally unavailable; this change may prevent a
-  previously running writing node with a declared radius from starting.
+  `enforce`. When nothing names an AWS credential, the instance metadata
+  service is asked directly (one second, no proxy): one that answers is
+  measured like any other source, none answering is no credential, and
+  `AWS_EC2_METADATA_DISABLED=true` skips the question.
 - **Widening is a decision, and it is signed.** Under `danger-only` the guard
   keeps only the rules no credential scope can undo — `rm -rf`, `mkfs`/`dd`
   onto a device, fork bombs, container runtimes, `terraform destroy`,
@@ -207,10 +206,11 @@ always reach. Two things about the word *default*, before the layers:
   in the run's audit with the person's action beside them.
   Execution checkpoints distinguish completed steps, a started step with an
   unknown outcome, and steps not started after an interruption; reconcile an
-  unknown outcome before retrying. Output exceeding 10,000 bytes is omitted to
-  avoid exposing a secret cut in half; common secret patterns in smaller output
-  are redacted, but redaction is not a
-  security boundary and the stored proposal retains its original commands.
+  unknown outcome before retrying. A step's output is redacted whole and then
+  cut to its last 10,000 characters, so a secret the cut would split was seen
+  whole by the redactor; past a megabyte it is omitted instead. Redaction is by
+  pattern, not a security boundary, and the stored proposal retains its
+  original commands.
 
 1. **Credentials** — mount query-only credentials (read-only kubeconfig,
    Prometheus/Loki endpoints, viewer tokens). This is the real boundary;
