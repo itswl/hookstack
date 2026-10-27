@@ -74,6 +74,7 @@ from typing import Any
 
 from hookprobe import audit, automation
 from hookprobe.files import atomic_write
+from hookprobe.redact import redact
 
 logger = logging.getLogger("hookprobe.remediation")
 
@@ -276,6 +277,7 @@ def pending_duplicate(workdir: Path, steps: list[dict[str, Any]], now: float | N
 
 
 def save(workdir: Path, row: dict[str, Any]) -> None:
+    (workdir / DIRNAME).mkdir(parents=True, exist_ok=True)
     _write(workdir / DIRNAME / f"{row['id']}.json", row)
 
 
@@ -284,10 +286,8 @@ def settle_interrupted(workdir: Path) -> list[dict[str, Any]]:
 
     A procedure is written as 1-2-3 and runs stop-on-first-failure, so the fact
     an operator needs before touching the target again is which commands landed.
-    The results list already holds one entry per command that ran, in order —
-    everything past it never started. `failed` is the terminal state for a
-    sequence that did not complete, and unlike `running` it is a state the row
-    can be read in.
+    A started step without a durable result has an unknown outcome. Older
+    rows without a start marker cannot prove whether any remaining step ran.
     """
     settled: list[dict[str, Any]] = []
     for row in list_all(workdir, limit=1000):
@@ -297,7 +297,13 @@ def settle_interrupted(workdir: Path) -> list[dict[str, Any]]:
         ran = len(row.get("results") or [])
         row["status"] = FAILED
         row["executed_at"] = round(time.time(), 3)
-        row["interrupted"] = {"ran": commands[:ran], "not_run": commands[ran:]}
+        if "in_flight" not in row:
+            unknown, not_run = commands[ran:], []
+        elif row["in_flight"] is None:
+            unknown, not_run = [], commands[ran:]
+        else:
+            unknown, not_run = commands[ran : ran + 1], commands[ran + 1 :]
+        row["interrupted"] = {"ran": commands[:ran], "unknown": unknown, "not_run": not_run}
         try:
             save(workdir, row)
         except OSError:
@@ -784,6 +790,7 @@ def approve(
             "target needs now."
         )
     row["status"] = "running"
+    row["in_flight"] = None
     row["approved_at"] = round(time.time(), 3)
     row["approved_note"] = note[:300]
     row["approved_by"] = actor[:120]
@@ -886,7 +893,7 @@ async def execute(
     """
     timeout = max(30.0, (bash_timeout_ms or 120000) / 1000.0)
     failed = False
-    for step in row.get("steps", []):
+    for index, step in enumerate(row.get("steps", [])):
         command = str(step.get("command") or "")
         started = time.monotonic()
         # Second gate. Deny-by-default holds: a file that has since been emptied
@@ -902,13 +909,20 @@ async def execute(
         if argv is None:
             row.setdefault("results", []).append(
                 {
-                    "command": command,
+                    "command": redact(command),
                     "exit": -1,
                     "ms": 0,
-                    "output": f"refused at execution: {refusal}",
+                    "output": redact(f"refused at execution: {refusal}"),
                 }
             )
-            logger.warning("remediation step refused at execution: %s — %s", command, refusal)
+            logger.warning("remediation step refused at execution: %s — %s", redact(command), redact(str(refusal)))
+            failed = True
+            break
+        row["in_flight"] = index
+        try:
+            save(workdir, row)
+        except OSError:
+            logger.exception("remediation %s cannot record step start; nothing further will run", row["id"])
             failed = True
             break
         try:
@@ -920,23 +934,35 @@ async def execute(
                 env=execution_env(),
             )
             try:
-                output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                output, truncated = await asyncio.wait_for(_read_output(process), timeout=timeout)
             except TimeoutError:
                 process.kill()
                 await process.wait()
-                output, returncode = b"(timed out)", -1
+                output, returncode, truncated = "(timed out)", -1, False
+            except asyncio.CancelledError:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+                raise
             else:
                 returncode = int(process.returncode or 0)
         except OSError as exc:
-            output, returncode = str(exc).encode(), -1
+            output, returncode, truncated = redact(str(exc)), -1, False
         result = {
-            "command": command,
+            "command": redact(command),
             "exit": returncode,
             "ms": int((time.monotonic() - started) * 1000),
-            "output": output.decode("utf-8", "replace")[-10000:],
+            "output": output,
+            "output_truncated": truncated,
         }
         row.setdefault("results", []).append(result)
         _audit(workdir, row["id"], command, returncode != 0)
+        row["in_flight"] = None
+        try:
+            save(workdir, row)
+        except OSError:
+            logger.exception("remediation %s cannot record step result; nothing further will run", row["id"])
+            return
         if returncode != 0:
             failed = True
             break
@@ -1038,6 +1064,36 @@ def evidence(
     return stamped
 
 
+OUTPUT_KEPT = 10_000  # characters of a step's output the record keeps, from the end
+OUTPUT_HELD = 1_000_000  # bytes held so the whole output is redacted before it is cut
+
+
+async def _read_output(process: asyncio.subprocess.Process) -> tuple[str, bool]:
+    """A step's output as the record keeps it, and whether any of it was dropped.
+
+    The whole output is redacted BEFORE it is cut to its last 10,000 characters,
+    so a secret the cut would have split was seen whole by the redactor — and the
+    tail, where a failing command says why, is kept. That needs the whole output
+    in hand: past a megabyte nothing is held, and the output is omitted rather
+    than cut at a point nobody redacted.
+    """
+    if process.stdout is None:
+        raise RuntimeError("remediation process has no output pipe")
+    held = bytearray()
+    total = 0
+    while chunk := await process.stdout.read(65536):
+        total += len(chunk)
+        if total <= OUTPUT_HELD:
+            held.extend(chunk)
+        elif held:
+            held.clear()
+    await process.wait()
+    if total > OUTPUT_HELD:
+        return f"(output omitted: {total} bytes, more than can be redacted whole)", True
+    text = redact(bytes(held).decode("utf-8", "replace"))
+    return text[-OUTPUT_KEPT:], len(text) > OUTPUT_KEPT
+
+
 def _audit(workdir: Path, proposal_id: str, command: str, error: bool, *, tool: str = "Exec") -> None:
     """Same flight recorder the agent's tools write to — one account.
 
@@ -1054,7 +1110,7 @@ def _audit(workdir: Path, proposal_id: str, command: str, error: bool, *, tool: 
                 "ts": round(time.time(), 3),
                 "session": f"remediation:{proposal_id}",
                 "tool": tool,
-                "detail": command[:300],
+                "detail": redact(command)[:300],
                 "error": error,
             },
         )

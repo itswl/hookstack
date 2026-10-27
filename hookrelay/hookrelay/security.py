@@ -4,7 +4,7 @@ Inbound: X-Hook-Signature = hex HMAC-SHA256 with the source's secret
 ("sha256=" prefix tolerated). With X-Hook-Timestamp the signature covers
 "{timestamp}.{body}" and must be FRESH, which BOUNDS how long a captured
 request stays useful rather than preventing replay outright; the door pairs it
-with `replay_token` + `Store.claim_signature` to close that window (see
+with `replay_token` + the store's signature lease to close that window (see
 verify_signature). Without a timestamp the legacy body-only form is
 accepted unless the door sets require_timestamp. A source configured without
 a secret is accepted unsigned — a deliberate, documented decision for trusted
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import time
 
 
@@ -63,7 +64,7 @@ def verify_signature(
     CLOSED BY THE DOOR, not here (2026-10-12). A pure function has no store to
     write to, and that is deliberate: `verify_signature` is the one thing both
     the pipe's doors and any second implementation must agree on, so it stays
-    pure. The door pairs it with `replay_token` and `Store.claim_signature`,
+    pure. The door pairs it with `replay_token` and the store's signature lease,
     which together answer the second copy as a duplicate before the pipeline and
     keep it from spending a second verdict. The old reasoning — "the window is
     narrower than the dedup window, so a replay lands as a duplicate anyway" —
@@ -88,6 +89,8 @@ def verify_signature(
         try:
             sent_at = float(str(timestamp_value).strip())
         except ValueError:
+            return False
+        if not math.isfinite(sent_at):
             return False
         current = time.time() if now is None else now
         if abs(current - sent_at) > max(1, max_skew_seconds):

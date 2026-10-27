@@ -1217,6 +1217,7 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
   "sys.kube_v": "present · {m} mutating verbs allowed · {e} errors",
   "sys.aws_v": "present · {n} write actions allowed",
   "sys.not_present": "not present",
+  "sys.unverifiable": "unverifiable",
   "act.title": "Remediation proposals",
   "act.hint": "An investigation proposes a step only when it is confident, and nothing runs without an approval.",
   "act.none": "No remediation proposals.",
@@ -1228,6 +1229,9 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
   "act.status.rejected": "Rejected",
   "act.status.expired": "Expired",
   "act.undo": "undo: {cmd}",
+  "act.unknown": "Outcome unknown — check the target before retrying",
+  "act.not_run": "Not started",
+  "act.truncated": "Output truncated",
   "act.approved_by": "approved by {who}",
   "audit.title": "Audit",
   "audit.hint": "Every tool call in every run, subagents included · {dir}/audit/*.jsonl",
@@ -1568,6 +1572,7 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
   "sys.kube_v": "已挂载 · 允许 {m} 个变更动作 · {e} 个错误",
   "sys.aws_v": "已挂载 · 允许 {n} 个写操作",
   "sys.not_present": "未挂载",
+  "sys.unverifiable": "无法验证",
   "act.title": "处置建议",
   "act.hint": "调查只在有把握时才提出处置步骤，而且没有批准什么都不会执行。",
   "act.none": "没有处置建议。",
@@ -1579,6 +1584,9 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
   "act.status.rejected": "已拒绝",
   "act.status.expired": "已过期",
   "act.undo": "撤销：{cmd}",
+  "act.unknown": "结果未知——重试前请检查目标状态",
+  "act.not_run": "未开始",
+  "act.truncated": "输出已截断",
   "act.approved_by": "批准人 {who}",
   "audit.title": "审计",
   "audit.hint": "每次运行里的每一次工具调用，包括子智能体的 · {dir}/audit/*.jsonl",
@@ -3133,7 +3141,7 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
         (posture ? `<div class="card"><h3>${icon("shield")}${esc(t("sys.posture"))}</h3>` + kv([
           [t("sys.verdict"), posture.verdict], [t("sys.guard"), posture.bash_guard], [t("sys.checked"), fmtTime(posture.checked_at)],
           ["kube", (posture.kube || {}).present ? t("sys.kube_v", { m: ((posture.kube || {}).mutating || []).length, e: ((posture.kube || {}).errors || []).length }) : t("sys.not_present")],
-          ["aws", (posture.aws || {}).present ? t("sys.aws_v", { n: ((posture.aws || {}).allowed || []).length }) : t("sys.not_present")],
+          ["aws", (posture.aws || {}).unverifiable ? t("sys.unverifiable") : (posture.aws || {}).present ? t("sys.aws_v", { n: ((posture.aws || {}).allowed || []).length }) : t("sys.not_present")],
         ]) + "</div>" : "");
     } catch (e) { box.innerHTML = errorHtml(e); }
   }
@@ -3151,9 +3159,11 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
       box.innerHTML = head + rows.map((r) => {
         const steps = (r.steps || []).map((s, i) => {
           const res = (r.results || [])[i];
-          const tag = res ? (res.exit === 0 ? `<span class="ok-t mono" style="font-size:11.5px">exit 0 · ${fmtMs(res.ms)}</span>` : `<span class="bad-t mono" style="font-size:11.5px">exit ${esc(res.exit)}</span>`) : "";
+          const interrupted = r.interrupted;
+          const unknown = interrupted && i >= (interrupted.ran || []).length && (!Array.isArray(interrupted.unknown) || i < (interrupted.ran || []).length + interrupted.unknown.length);
+          const tag = res ? (res.exit === 0 ? `<span class="ok-t mono" style="font-size:11.5px">exit 0 · ${fmtMs(res.ms)}</span>` : `<span class="bad-t mono" style="font-size:11.5px">exit ${esc(res.exit)}</span>`) : interrupted ? `<span class="bad-t" style="font-size:11.5px">${esc(t(unknown ? "act.unknown" : "act.not_run"))}</span>` : "";
           return `<div style="margin-top:8px"><span class="step-risk ${attr(s.risk)}">${esc(s.risk)}</span>${esc(s.action)} ${tag}<div class="cmd">$ ${esc(s.command)}</div>` +
-            (s.rollback ? `<div class="muted" style="font-size:12px">${esc(t("act.undo", { cmd: s.rollback }))}</div>` : "") + (res && res.output ? `<pre class="step-out">${esc(res.output)}</pre>` : "") + "</div>";
+            (s.rollback ? `<div class="muted" style="font-size:12px">${esc(t("act.undo", { cmd: s.rollback }))}</div>` : "") + (res && res.output ? `<pre class="step-out">${esc(res.output)}</pre>` : "") + (res && res.output_truncated ? `<div class="muted">${esc(t("act.truncated"))}</div>` : "") + "</div>";
         }).join("");
         // Past its approval window a proposal is inert: approving it answers 409,
         // so it offers nothing but says what it is. A status this page has no

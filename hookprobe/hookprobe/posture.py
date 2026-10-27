@@ -48,6 +48,8 @@ import json
 import logging
 import os
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -155,7 +157,19 @@ def kubeconfig_path() -> Path | None:
 
 
 def aws_configured() -> bool:
-    if os.environ.get("AWS_ACCESS_KEY_ID"):
+    # A profile NAME alone is not a source: it names a section of a file, and
+    # the files are what the loop below looks for. An instance metadata service
+    # is not configured at all — it is asked (see metadata_offers_credentials).
+    if any(
+        os.environ.get(name)
+        for name in (
+            "AWS_ACCESS_KEY_ID",
+            "AWS_ROLE_ARN",
+            "AWS_WEB_IDENTITY_TOKEN_FILE",
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        )
+    ):
         return True
     for var, default in (("AWS_SHARED_CREDENTIALS_FILE", "~/.aws/credentials"), ("AWS_CONFIG_FILE", "~/.aws/config")):
         if Path(os.environ.get(var) or default).expanduser().is_file():
@@ -190,11 +204,60 @@ async def check_kube(run: Runner) -> dict[str, Any]:
     return record
 
 
+def metadata_offers_credentials(timeout: float = 1.0) -> bool:
+    """Whether an AWS instance metadata service here hands out a role's credentials.
+
+    When nothing names a credential this is the source left, and the AWS CLI
+    asks it the same two questions: a token (IMDSv2), then the role listing.
+    A role name in the answer is a credential; a 404 is an instance with no role;
+    anything else is no AWS service at all. A cloud VM of another vendor answers
+    at the same address, and an answer of any kind is not a credential — GitHub's
+    runners are Azure VMs, and counting any answer made the image refuse to start
+    there. No proxy, on purpose: the probes' egress proxy answers for addresses
+    it refuses, and the question is what this container reaches by itself.
+    """
+    base = (
+        os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT")
+        or (
+            "http://[fd00:ec2::254]"
+            if os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE", "").lower() == "ipv6"
+            else "http://169.254.169.254"
+        )
+    ).rstrip("/")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    token: dict[str, str] = {}
+    put = urllib.request.Request(
+        base + "/latest/api/token", method="PUT", headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"}
+    )
+    try:
+        with opener.open(put, timeout=timeout) as answer:  # nosec B310 — a fixed link-local address
+            token = {"X-aws-ec2-metadata-token": answer.read(256).decode("ascii", "replace").strip()}
+    except (OSError, ValueError):
+        pass  # IMDSv1 only, another vendor's service, or nothing: the listing decides
+    listing = urllib.request.Request(base + "/latest/meta-data/iam/security-credentials/", headers=token)
+    try:
+        with opener.open(listing, timeout=timeout) as answer:  # nosec B310
+            return bool(answer.read(1024).strip())
+    except (OSError, ValueError):  # HTTPError included: 404 is no role, anything else no AWS
+        return False
+
+
 async def check_aws(run: Runner) -> dict[str, Any]:
     if not aws_configured():
-        return {"present": False}
+        # Asked, not assumed. Assuming made every laptop and every probe on an
+        # internal network `unverifiable`, and a writing node with a declared
+        # radius refused to start over a service that cannot exist there.
+        if os.environ.get("AWS_EC2_METADATA_DISABLED", "").lower() == "true":
+            return {"present": False}
+        if not await asyncio.to_thread(metadata_offers_credentials):
+            return {"present": False}
+        # A role is offered: its credentials are measured like any other source.
     record: dict[str, Any] = {"present": True, "identity": None, "allowed": [], "errors": [], "unverifiable": False}
     code, out, err = await run(["aws", "sts", "get-caller-identity", "--output", "json"])
+    if code != 0 and "Unable to locate credentials" in (err or out):
+        # The CLI looked everywhere it looks and found nothing: an instance with
+        # no role, say. That is an absence, not a measurement that failed.
+        return {"present": False}
     if code != 0:
         record["errors"].append(f"get-caller-identity: {(err or out).strip()[:200]}")
         record["unverifiable"] = True
@@ -228,7 +291,29 @@ async def check_aws(run: Runner) -> dict[str, Any]:
         record["errors"].append(f"simulate-principal-policy: {(err or out).strip()[:200]}")
         record["unverifiable"] = True
     else:
-        record["allowed"] = aws_allowed(out)
+        try:
+            results = json.loads(out)["EvaluationResults"]
+            if not isinstance(results, list):
+                raise ValueError("invalid results")
+            record["allowed"] = sorted(
+                {
+                    str(item.get("EvalActionName"))
+                    for item in results
+                    if isinstance(item, dict) and item.get("EvalDecision") == "allowed" and item.get("EvalActionName")
+                }
+            )
+            if any(
+                not isinstance(item, dict)
+                or item.get("EvalDecision") not in {"allowed", "explicitDeny", "implicitDeny"}
+                for item in results
+            ):
+                raise ValueError("invalid decision")
+            decisions = {str(item["EvalActionName"]) for item in results if item.get("EvalDecision")}
+            if not set(DANGEROUS_AWS_ACTIONS).issubset(decisions):
+                raise ValueError("incomplete simulation")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            record["errors"].append("simulate-principal-policy: invalid or incomplete results")
+            record["unverifiable"] = True
     return record
 
 
@@ -281,19 +366,21 @@ def verdict(bash_guard: str, kube: dict[str, Any], aws: dict[str, Any], declared
         # nothing to answer that with and this stays an observation, which is
         # what it was for a year. Declared, `enforce` means the same thing on
         # both postures: the credential may not exceed the declaration.
-        if declared is None:
-            return "unmeasurable" if missing else "recorded"
         if beyond(kube, aws, declared):
             return "wider-than-declared"
-        return "unmeasurable" if missing else "within-declared-radius"
-    if not kube.get("present") and not aws.get("present"):
-        return "no-credentials"
+        if missing:
+            return "unmeasurable"
+        if kube.get("errors") or aws.get("unverifiable"):
+            return "unverifiable"
+        return "recorded" if declared is None else "within-declared-radius"
     if kube.get("mutating") or aws.get("allowed"):
         return "wider-than-declared"
     if missing:
         return "unmeasurable"
     if kube.get("errors") or aws.get("unverifiable"):
         return "unverifiable"
+    if not kube.get("present") and not aws.get("present"):
+        return "no-credentials"
     return "readonly-confirmed"
 
 
@@ -395,13 +482,18 @@ async def on_startup(
         if alarm is not None:
             with contextlib.suppress(Exception):  # the page is a courtesy; the verdict below is the decision
                 await alarm(f"posture UNMEASURABLE — {text}")
-        if bash_guard == "readonly" and mode == "enforce":
+        if (bash_guard == "readonly" or declared is not None) and mode == "enforce":
             logger.error("REFUSING TO START — %s", text)
             raise PostureViolation(
                 f"posture cannot be measured as declared {bash_guard!r}: {missing} not in this image"
             )
         logger.error("%s", text)
     elif record["verdict"] == "unverifiable":
+        if alarm is not None:
+            with contextlib.suppress(Exception):
+                await alarm(f"posture UNVERIFIABLE — {line}")
+        if bash_guard != "readonly" and declared is not None and mode == "enforce":
+            raise PostureViolation(f"declared writing posture could not be verified: {line}")
         logger.warning(
             "posture could not be fully verified: %s · %s",
             line,

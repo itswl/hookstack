@@ -280,6 +280,7 @@ def test_a_restart_settles_a_procedure_it_died_in_the_middle_of(tmp_path):
                 "session_key": "probe:inbound:7",
                 "created_at": 1.0,
                 "status": "running",
+                "in_flight": None,
                 "steps": [
                     {"action": "drain", "command": "kubectl drain node-3", "risk": "high", "rollback": "uncordon"},
                     {"action": "restart", "command": "kubectl rollout restart deploy/api", "risk": "medium"},
@@ -309,6 +310,76 @@ def test_a_restart_settles_a_procedure_it_died_in_the_middle_of(tmp_path):
         "kubectl rollout restart deploy/api",
         "curl -sf http://api/healthz",
     ]
+
+
+def test_interruption_records_completed_and_unknown_steps(tmp_path, monkeypatch):
+    async def scenario():
+        allow = tmp_path / "allow"
+        allow.write_text(".*\n", encoding="utf-8")
+        steps = [
+            {"action": "first", "command": "echo completed", "risk": "low"},
+            {"action": "second", "command": "sleep 2", "risk": "low"},
+            {"action": "third", "command": "echo later", "risk": "low"},
+        ]
+        proposal_id = remediation.propose(tmp_path, "run", steps)
+        row = remediation.load(tmp_path, proposal_id)
+        row.update(status="running", in_flight=None)
+        remediation.save(tmp_path, row)
+        first_done = asyncio.Event()
+        original = remediation._audit
+
+        def record(*args, **kwargs):
+            original(*args, **kwargs)
+            first_done.set()
+
+        monkeypatch.setattr(remediation, "_audit", record)
+        task = asyncio.create_task(remediation.execute(tmp_path, row, bash_timeout_ms=30000, allowlist=allow))
+        await asyncio.wait_for(first_done.wait(), 5)
+        for _ in range(100):
+            if remediation.load(tmp_path, proposal_id).get("in_flight") == 1:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("second step never started")
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return remediation.settle_interrupted(tmp_path)[0]["interrupted"]
+
+    interrupted = asyncio.run(scenario())
+    assert interrupted == {"ran": ["echo completed"], "unknown": ["sleep 2"], "not_run": ["echo later"]}
+
+
+def test_remediation_output_is_redacted_and_bounded(tmp_path):
+    import sys
+
+    async def scenario(command):
+        allow = tmp_path / "allow"
+        allow.write_text(".*\n", encoding="utf-8")
+        row = {"id": "0123456789", "status": "running", "steps": [{"command": command, "risk": "low"}]}
+        await remediation.execute(tmp_path, row, bash_timeout_ms=30000, allowlist=allow)
+        return row["results"][0]
+
+    secret = asyncio.run(scenario("echo password=not-a-real-secret"))
+    assert "not-a-real-secret" not in secret["output"]
+    assert "[redacted]" in secret["output"]
+    # A secret straddling the 10,000-character cut: redacted whole before the cut,
+    # so no piece of it survives, and the tail a failing command writes is kept.
+    script = tmp_path / "straddle.py"
+    script.write_text(
+        'print("A" * 20000 + " sk-ant-" + "Q" * 24 + " " + "B" * 9985)\n',
+        encoding="utf-8",
+    )
+    large = asyncio.run(scenario(f"{sys.executable} {script}"))
+    assert large["output_truncated"] is True
+    assert len(large["output"]) <= 10000
+    assert "QQQQ" not in large["output"]
+    assert large["output"].rstrip().endswith("B" * 9985)
+    flood = tmp_path / "flood.py"
+    flood.write_text('import sys\nsys.stdout.write("x" * 1_100_000)\n', encoding="utf-8")
+    omitted = asyncio.run(scenario(f"{sys.executable} {flood}"))
+    assert omitted["output_truncated"] is True
+    assert omitted["output"].startswith("(output omitted: 1100000 bytes")
 
 
 def test_a_row_that_cannot_be_written_after_execution_is_loud(tmp_path, monkeypatch, caplog):

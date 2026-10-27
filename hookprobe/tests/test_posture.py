@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import pytest
 
@@ -79,6 +80,7 @@ def _with_kube(tmp_path, monkeypatch) -> None:
     cfg.write_text("apiVersion: v1\n")
     monkeypatch.setenv("KUBECONFIG", str(cfg))
     monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "absent"))
     monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "absent2"))
 
@@ -123,12 +125,201 @@ def test_unverifiable_is_a_verdict_not_a_confirmation(tmp_path, monkeypatch) -> 
 def test_no_credentials_and_off(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KUBECONFIG", str(tmp_path / "nope"))
     monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "absent"))
     monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "absent2"))
     run = _runner({})
     assert asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))["verdict"] == "no-credentials"
     assert run.calls == [], "nothing to ask when nothing is mounted"
     assert asyncio.run(posture.on_startup(tmp_path, "readonly", "off", run))["verdict"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    "variables",
+    [
+        {"AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/example", "AWS_WEB_IDENTITY_TOKEN_FILE": "/tmp/token"},
+        {"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "/v2/credentials/example"},
+        {"AWS_CONTAINER_CREDENTIALS_FULL_URI": "http://localhost/credentials"},
+    ],
+)
+def test_aws_credential_sources_are_detected(tmp_path, monkeypatch, variables) -> None:
+    for name in list(os.environ):
+        if name.startswith("AWS_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for name, value in variables.items():
+        monkeypatch.setenv(name, value)
+    assert posture.aws_configured()
+
+
+def _no_aws_named(tmp_path, monkeypatch) -> None:
+    for name in list(os.environ):
+        if name.startswith("AWS_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
+def test_a_profile_name_with_no_file_behind_it_is_not_a_credential(tmp_path, monkeypatch) -> None:
+    _no_aws_named(tmp_path, monkeypatch)
+    monkeypatch.setenv("AWS_PROFILE", "example")
+    assert not posture.aws_configured()
+
+
+def test_no_metadata_service_answering_is_no_credential(tmp_path, monkeypatch) -> None:
+    """The laptop and the internal network: nothing at the address, nothing to measure."""
+    _no_aws_named(tmp_path, monkeypatch)
+    run = _runner({})
+    aws = asyncio.run(posture.check_aws(run))
+    assert aws == {"present": False} and run.calls == []
+    assert posture.verdict("readonly", {"present": False}, aws) == "no-credentials"
+
+
+def test_a_metadata_service_that_answers_is_measured_like_any_source(tmp_path, monkeypatch) -> None:
+    _no_aws_named(tmp_path, monkeypatch)
+    monkeypatch.setattr(posture, "metadata_offers_credentials", lambda timeout=1.0: True)
+    denied = [{"EvalActionName": name, "EvalDecision": "implicitDeny"} for name in posture.DANGEROUS_AWS_ACTIONS]
+    run = _runner(
+        {
+            "aws sts": (0, '{"Arn":"arn:aws:sts::1:assumed-role/instance/i-0"}', ""),
+            "aws iam": (0, json.dumps({"EvaluationResults": denied}), ""),
+        }
+    )
+    aws = asyncio.run(posture.check_aws(run))
+    assert aws["present"] is True and aws["unverifiable"] is False and aws["allowed"] == []
+    assert posture.verdict("readonly", {"present": False}, aws) == "readonly-confirmed"
+
+
+def test_an_instance_with_no_role_has_no_credential(tmp_path, monkeypatch) -> None:
+    _no_aws_named(tmp_path, monkeypatch)
+    monkeypatch.setattr(posture, "metadata_offers_credentials", lambda timeout=1.0: True)
+    run = _runner({"aws sts": (253, "", "Unable to locate credentials. You can configure credentials by running")})
+    assert asyncio.run(posture.check_aws(run)) == {"present": False}
+
+
+def test_metadata_disabled_is_not_asked(tmp_path, monkeypatch) -> None:
+    _no_aws_named(tmp_path, monkeypatch)
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+    def asked(timeout=1.0):
+        raise AssertionError("the disabled service was asked")
+
+    monkeypatch.setattr(posture, "metadata_offers_credentials", asked)
+    assert asyncio.run(posture.check_aws(_runner({}))) == {"present": False}
+
+
+def _metadata_service(put_status: int, listing_status: int, listing: bytes = b""):
+    """A stand-in for the address, answering the CLI's two questions as told."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Service(BaseHTTPRequestHandler):
+        def do_PUT(self) -> None:  # noqa: N802
+            self.send_response(put_status)
+            self.end_headers()
+            if put_status == 200:
+                self.wfile.write(b"a-token")
+
+        def do_GET(self) -> None:  # noqa: N802
+            asked_with_token = self.headers.get("X-aws-ec2-metadata-token") == "a-token" or put_status != 200
+            ok = listing_status == 200 and asked_with_token
+            self.send_response(200 if ok else listing_status if listing_status != 200 else 401)
+            self.end_headers()
+            if ok:
+                self.wfile.write(listing)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Service)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.mark.parametrize(
+    ("put_status", "listing_status", "listing", "offered"),
+    [
+        (200, 200, b"instance-role", True),  # IMDSv2 with a role
+        (403, 200, b"instance-role", True),  # IMDSv1 only, a role all the same
+        (200, 404, b"", False),  # an instance with no role
+        (400, 400, b"", False),  # another vendor's service at the address
+    ],
+)
+def test_the_metadata_question_is_the_clis_and_goes_direct(
+    monkeypatch, real_metadata_probe, put_status, listing_status, listing, offered
+) -> None:
+    """Only a role name is a credential, and the question skips the proxy: one
+    that refuses the address would otherwise read as a service being there."""
+    server = _metadata_service(put_status, listing_status, listing)
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
+    try:
+        assert real_metadata_probe(timeout=2.0) is offered
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_nothing_at_the_address_is_no_credential(monkeypatch, real_metadata_probe) -> None:
+    import socket
+
+    with socket.socket() as closed:
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+    monkeypatch.setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", f"http://127.0.0.1:{port}")
+    assert real_metadata_probe(timeout=2.0) is False
+
+
+def test_writing_node_refuses_unverifiable_declared_radius(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    radius = tmp_path / "radius.txt"
+    radius.write_text("", encoding="utf-8")
+    _with_aws_too(tmp_path, monkeypatch)
+    run = _runner(
+        {
+            "kubectl auth can-i --list": (0, CAN_I_LIST_READONLY, ""),
+            "aws sts": (0, '{"Arn":"arn:aws:iam::1:user/example"}', ""),
+            "aws iam": (1, "", "AccessDenied"),
+        }
+    )
+    with pytest.raises(posture.PostureViolation, match="could not be verified"):
+        asyncio.run(posture.on_startup(tmp_path, "danger-only", "enforce", run, radius=radius))
+    assert posture.read(tmp_path)["verdict"] == "unverifiable"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "not-json",
+        "{}",
+        '{"EvaluationResults": []}',
+        '{"EvaluationResults": [{"EvalActionName": "x", "EvalDecision": "bad"}]}',
+    ],
+)
+def test_incomplete_or_invalid_aws_simulation_is_unverifiable(tmp_path, monkeypatch, response) -> None:
+    _with_aws_too(tmp_path, monkeypatch)
+    run = _runner(
+        {
+            "aws sts": (0, '{"Arn":"arn:aws:iam::1:user/example"}', ""),
+            "aws iam": (0, response, ""),
+        }
+    )
+    record = asyncio.run(posture.check_aws(run))
+    assert record["unverifiable"] and record["errors"]
+    assert posture.verdict("readonly", {"present": False}, record) == "unverifiable"
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_partial_simulation_still_reports_known_allowed_actions(tmp_path, monkeypatch, malformed) -> None:
+    _with_aws_too(tmp_path, monkeypatch)
+    results = [{"EvalActionName": "s3:PutObject", "EvalDecision": "allowed"}]
+    if malformed:
+        results.append(None)
+    response = json.dumps({"EvaluationResults": results})
+    run = _runner({"aws sts": (0, '{"Arn":"arn:aws:iam::1:user/example"}', ""), "aws iam": (0, response, "")})
+    record = asyncio.run(posture.check_aws(run))
+    assert record["unverifiable"] and record["allowed"] == ["s3:PutObject"]
+    assert posture.verdict("readonly", {"present": False}, record) == "wider-than-declared"
 
 
 def test_a_typo_in_the_mode_fails_closed(tmp_path, monkeypatch) -> None:
@@ -262,6 +453,16 @@ def test_a_writing_node_without_kubectl_starts_and_pages(tmp_path, monkeypatch) 
     record = asyncio.run(posture.on_startup(tmp_path, "danger-only", "enforce", run, alarm=alarm))
     assert record["verdict"] == "unmeasurable", "not `recorded`: an empty radius nobody measured is not a radius"
     assert pages and "kubectl" in pages[0]
+
+
+def test_writing_node_with_declared_radius_refuses_missing_tool(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    radius = tmp_path / "radius.txt"
+    radius.write_text("", encoding="utf-8")
+    run = _runner({"kubectl": (127, "", "kubectl: not found")})
+    with pytest.raises(posture.PostureViolation, match="kubectl"):
+        asyncio.run(posture.on_startup(tmp_path, "danger-only", "enforce", run, radius=radius))
+    assert posture.read(tmp_path)["verdict"] == "unmeasurable"
 
 
 def test_warn_starts_a_readonly_node_without_its_tool_and_pages(tmp_path, monkeypatch) -> None:

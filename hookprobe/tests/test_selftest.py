@@ -50,6 +50,17 @@ def test_a_check_that_could_not_run_is_never_a_pass() -> None:
     assert len(worse["checks"]) == 3
 
 
+def test_unverifiable_posture_is_unproven(tmp_path, monkeypatch) -> None:
+    async def unverifiable(*args, **kwargs):
+        return {"verdict": "unverifiable", "kube": {}, "aws": {}}
+
+    monkeypatch.setattr(selftest.posture, "check", unverifiable)
+    result = asyncio.run(selftest.posture_still_holds(make_settings(tmp_path, workdir=tmp_path)))
+    assert result["held"] is None
+    settings = make_settings(tmp_path, workdir=tmp_path, bash_guard="danger-only", blast_radius=tmp_path / "radius")
+    assert asyncio.run(selftest.posture_still_holds(settings))["held"] is False
+
+
 def test_the_gate_check_actually_asks_the_gate(tmp_path) -> None:
     """In-process and through the subprocess path. The second is the one that
     was once simply absent — the hook command could not import hookprobe, the

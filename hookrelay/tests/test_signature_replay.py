@@ -2,8 +2,8 @@
 
 The timestamp on a signed door bounds how long a capture stays useful; on its
 own it does not close the window, because the same signature inside it is
-accepted again. `replay_token` + the store's `signature_seen`/`claim_signature`
-pair close it at the door. These tests pin three things: the door's observable
+accepted again. `replay_token` + the store's signature lease
+(`acquire_signature` / `complete_signature`) close it at the door. These tests pin three things: the door's observable
 answer, the `None` cases where there is nothing a guard can track without
 guessing, and — the one a first cut got wrong — that the signature is claimed
 only once the pipeline has ANSWERED, so a retry after a 5xx or a 429 is
@@ -12,6 +12,7 @@ processed rather than folded as a replay.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import hashlib
@@ -19,10 +20,12 @@ import hmac
 import json
 
 import httpx
+import pytest
 
 import hookrelay.app as app_module
 from hookrelay.app import create_app
-from hookrelay.security import replay_token
+from hookrelay.security import replay_token, verify_signature
+from hookrelay.store import Store
 
 PAYLOAD = {"title": "db down", "message": "x", "state": "alerting"}
 
@@ -163,6 +166,105 @@ async def test_a_second_request_after_success_is_still_folded(client):
     assert again.json() == {"outcome": "skipped", "skip_code": "replayed_signature"}
 
 
+async def test_simultaneous_replay_waits_for_the_first_request(settings, cfg, monkeypatch):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    real = app_module.handle_hook
+    calls = 0
+
+    async def delayed(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        entered.set()
+        await asyncio.wait_for(release.wait(), 2)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(app_module, "handle_hook", delayed)
+    body = json.dumps(PAYLOAD).encode()
+    headers = {"X-Hook-Signature": _sig("s3cret", body)}
+    app = create_app(settings=settings, cfg=cfg)
+    async with _serve(app) as client:
+        first = asyncio.create_task(client.post("/hook/grafana", content=body, headers=headers))
+        await asyncio.wait_for(entered.wait(), 2)
+        concurrent = await client.post("/hook/grafana", content=body, headers=headers)
+        assert concurrent.status_code == 503 and concurrent.headers["retry-after"] == "1"
+        release.set()
+        assert (await first).json()["outcome"] == "routed"
+        retry = await client.post("/hook/grafana", content=body, headers=headers)
+        assert retry.json()["skip_code"] == "replayed_signature"
+    assert calls == 1
+
+
+async def test_expired_processing_lease_can_be_recovered(store):
+    assert await store.acquire_signature("token", "first", 300, 1000, 120) == "acquired"
+    assert await store.acquire_signature("token", "second", 300, 1001, 120) == "busy"
+    assert await store.acquire_signature("token", "second", 300, 1121, 120) == "acquired"
+    assert not await store.complete_signature("token", "first", 300, 1122)
+    assert await store.complete_signature("token", "second", 300, 1122)
+    assert await store.acquire_signature("token", "third", 300, 1123, 120) == "completed"
+
+
+async def test_separate_stores_serialize_signature_acquisition(tmp_path):
+    first = Store(str(tmp_path / "shared.db"))
+    second = Store(str(tmp_path / "shared.db"))
+    await first.open()
+    await second.open()
+    try:
+        outcomes = await asyncio.gather(
+            first.acquire_signature("token", "first", 300, 1000, 120),
+            second.acquire_signature("token", "second", 300, 1000, 120),
+        )
+        assert sorted(outcomes) == ["acquired", "busy"]
+    finally:
+        await first.close()
+        await second.close()
+
+
+async def test_failed_lease_renewal_cancels_processing_and_releases_lease(settings, cfg, monkeypatch):
+    entered = asyncio.Event()
+    real_handle = app_module.handle_hook
+    real_sleep = asyncio.sleep
+    calls = 0
+
+    async def fast_heartbeat(delay):
+        if delay == 40:
+            await entered.wait()
+        else:
+            await real_sleep(delay)
+
+    async def handle(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            await asyncio.Event().wait()
+        return await real_handle(*args, **kwargs)
+
+    async def broken_renew(*args, **kwargs):
+        raise OSError("database unavailable")
+
+    monkeypatch.setattr(app_module.asyncio, "sleep", fast_heartbeat)
+    monkeypatch.setattr(app_module, "handle_hook", handle)
+    body = json.dumps(PAYLOAD).encode()
+    headers = {"X-Hook-Signature": _sig("s3cret", body)}
+    app = create_app(settings=settings, cfg=cfg)
+    async with _serve(app) as client:
+        monkeypatch.setattr(app.state.store, "renew_signature", broken_renew)
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(client.post("/hook/grafana", content=body, headers=headers), 2)
+        monkeypatch.setattr(app_module.asyncio, "sleep", real_sleep)
+        response = await client.post("/hook/grafana", content=body, headers=headers)
+        assert response.status_code == 200 and response.json()["outcome"] == "routed"
+    assert calls == 2
+
+
+def test_nonfinite_signed_timestamps_are_refused():
+    body = b"{}"
+    for timestamp in ("NaN", "inf", "-inf"):
+        signature = hmac.new(b"s3cret", timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+        assert not verify_signature("s3cret", body, signature, timestamp_value=timestamp, require_timestamp=True)
+
+
 # ── the token ─────────────────────────────────────────────────────────────
 
 
@@ -182,23 +284,25 @@ def test_replay_token_is_none_when_there_is_nothing_to_track():
     assert replay_token("", "sig") is None
 
 
-async def test_claim_signature_is_true_once_then_false(store):
+async def test_a_completed_signature_is_spent_once(store):
     now = 1_000.0
-    assert await store.claim_signature("grafana:abc", 300, now) is True
-    assert await store.claim_signature("grafana:abc", 300, now + 1) is False
+    assert await store.acquire_signature("grafana:abc", "a", 300, now, 120) == "acquired"
+    assert await store.complete_signature("grafana:abc", "a", 300, now) is True
+    assert await store.acquire_signature("grafana:abc", "b", 300, now + 1, 120) == "completed"
 
 
-async def test_signature_seen_asks_without_claiming(store):
-    """The peek must not have the side effect of the claim, or the door's
-    peek-then-claim split would be a claim wearing two names."""
-    assert await store.signature_seen("grafana:abc", 300, 1_000.0) is False
-    assert await store.signature_seen("grafana:abc", 300, 1_000.0) is False
-    assert await store.claim_signature("grafana:abc", 300, 1_000.0) is True
-    assert await store.signature_seen("grafana:abc", 300, 1_000.0) is True
+async def test_a_held_signature_is_busy_until_its_holder_lets_go(store):
+    """Released after a failure, the next identical request is processed —
+    the property the spent-after-answer order exists for."""
+    assert await store.acquire_signature("grafana:abc", "a", 300, 1_000.0, 120) == "acquired"
+    assert await store.acquire_signature("grafana:abc", "b", 300, 1_000.0, 120) == "busy"
+    await store.release_signature("grafana:abc", "a")
+    assert await store.acquire_signature("grafana:abc", "b", 300, 1_000.0, 120) == "acquired"
 
 
-async def test_claim_signature_forgets_outside_the_window(store):
+async def test_a_spent_signature_is_forgotten_outside_the_window(store):
     """The prune is what keeps the table the size of the window, not of uptime —
     and what lets a genuinely new request with recycled bytes through later."""
-    assert await store.claim_signature("grafana:abc", 300, 1_000.0) is True
-    assert await store.claim_signature("grafana:abc", 300, 1_301.0) is True
+    assert await store.acquire_signature("grafana:abc", "a", 300, 1_000.0, 120) == "acquired"
+    assert await store.complete_signature("grafana:abc", "a", 300, 1_000.0) is True
+    assert await store.acquire_signature("grafana:abc", "b", 300, 1_301.0, 120) == "acquired"

@@ -221,7 +221,9 @@ async def posture_still_holds(settings: Settings) -> dict[str, Any]:
         detail = f"{detail} · cannot measure: {missing} not in this image"[:280]
     return _check(
         "credentials are no wider than the declared posture",
-        verdict not in ("wider-than-declared", "unmeasurable"),
+        (False if settings.bash_guard != "readonly" and settings.blast_radius is not None else None)
+        if verdict == "unverifiable"
+        else verdict not in ("wider-than-declared", "unmeasurable"),
         detail,
         "a credential whose far side cannot be asked — `unverifiable` is a verdict, not a pass",
     )
