@@ -983,7 +983,13 @@ class Store:
         (spent inside the window). One write, so two identical requests cannot
         both acquire; a crashed owner's lease simply expires. Spent rows are
         pruned in `complete_signature`, so the table is the size of the window.
+        A replay of a handled request is answered from a read, no write lock.
         """
+        cursor = await self.read.execute(
+            "SELECT 1 FROM spent_signatures WHERE token = ? AND seen_at >= ? LIMIT 1", (token, now - window)
+        )
+        if await cursor.fetchone():
+            return "completed"
         async with self._write():
             await self.db.execute("DELETE FROM pending_signatures WHERE expires_at <= ?", (now,))
             cursor = await self.db.execute(
