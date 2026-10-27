@@ -155,7 +155,19 @@ def kubeconfig_path() -> Path | None:
 
 
 def aws_configured() -> bool:
-    if os.environ.get("AWS_ACCESS_KEY_ID"):
+    if any(
+        os.environ.get(name)
+        for name in (
+            "AWS_ACCESS_KEY_ID",
+            "AWS_PROFILE",
+            "AWS_DEFAULT_PROFILE",
+            "AWS_ROLE_ARN",
+            "AWS_WEB_IDENTITY_TOKEN_FILE",
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+            "AWS_EC2_METADATA_SERVICE_ENDPOINT",
+        )
+    ):
         return True
     for var, default in (("AWS_SHARED_CREDENTIALS_FILE", "~/.aws/credentials"), ("AWS_CONFIG_FILE", "~/.aws/config")):
         if Path(os.environ.get(var) or default).expanduser().is_file():
@@ -192,7 +204,13 @@ async def check_kube(run: Runner) -> dict[str, Any]:
 
 async def check_aws(run: Runner) -> dict[str, Any]:
     if not aws_configured():
-        return {"present": False}
+        if os.environ.get("AWS_EC2_METADATA_DISABLED", "").lower() == "true":
+            return {"present": False}
+        return {
+            "present": False,
+            "unverifiable": True,
+            "errors": ["implicit EC2 metadata credentials were not checked"],
+        }
     record: dict[str, Any] = {"present": True, "identity": None, "allowed": [], "errors": [], "unverifiable": False}
     code, out, err = await run(["aws", "sts", "get-caller-identity", "--output", "json"])
     if code != 0:
@@ -228,7 +246,29 @@ async def check_aws(run: Runner) -> dict[str, Any]:
         record["errors"].append(f"simulate-principal-policy: {(err or out).strip()[:200]}")
         record["unverifiable"] = True
     else:
-        record["allowed"] = aws_allowed(out)
+        try:
+            results = json.loads(out)["EvaluationResults"]
+            if not isinstance(results, list):
+                raise ValueError("invalid results")
+            record["allowed"] = sorted(
+                {
+                    str(item.get("EvalActionName"))
+                    for item in results
+                    if isinstance(item, dict) and item.get("EvalDecision") == "allowed" and item.get("EvalActionName")
+                }
+            )
+            if any(
+                not isinstance(item, dict)
+                or item.get("EvalDecision") not in {"allowed", "explicitDeny", "implicitDeny"}
+                for item in results
+            ):
+                raise ValueError("invalid decision")
+            decisions = {str(item["EvalActionName"]) for item in results if item.get("EvalDecision")}
+            if not set(DANGEROUS_AWS_ACTIONS).issubset(decisions):
+                raise ValueError("incomplete simulation")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            record["errors"].append("simulate-principal-policy: invalid or incomplete results")
+            record["unverifiable"] = True
     return record
 
 
@@ -281,19 +321,21 @@ def verdict(bash_guard: str, kube: dict[str, Any], aws: dict[str, Any], declared
         # nothing to answer that with and this stays an observation, which is
         # what it was for a year. Declared, `enforce` means the same thing on
         # both postures: the credential may not exceed the declaration.
-        if declared is None:
-            return "unmeasurable" if missing else "recorded"
         if beyond(kube, aws, declared):
             return "wider-than-declared"
-        return "unmeasurable" if missing else "within-declared-radius"
-    if not kube.get("present") and not aws.get("present"):
-        return "no-credentials"
+        if missing:
+            return "unmeasurable"
+        if kube.get("errors") or aws.get("unverifiable"):
+            return "unverifiable"
+        return "recorded" if declared is None else "within-declared-radius"
     if kube.get("mutating") or aws.get("allowed"):
         return "wider-than-declared"
     if missing:
         return "unmeasurable"
     if kube.get("errors") or aws.get("unverifiable"):
         return "unverifiable"
+    if not kube.get("present") and not aws.get("present"):
+        return "no-credentials"
     return "readonly-confirmed"
 
 
@@ -330,6 +372,8 @@ def summary(record: dict[str, Any]) -> str:
             + (" unverifiable" if aws.get("unverifiable") else "")
             + (f" tool-missing={aws['tool_missing']}" if aws.get("tool_missing") else "")
         )
+    elif aws.get("unverifiable"):
+        parts.append("aws ambient credentials unverifiable")
     return " · ".join(parts)
 
 
@@ -395,13 +439,18 @@ async def on_startup(
         if alarm is not None:
             with contextlib.suppress(Exception):  # the page is a courtesy; the verdict below is the decision
                 await alarm(f"posture UNMEASURABLE — {text}")
-        if bash_guard == "readonly" and mode == "enforce":
+        if (bash_guard == "readonly" or declared is not None) and mode == "enforce":
             logger.error("REFUSING TO START — %s", text)
             raise PostureViolation(
                 f"posture cannot be measured as declared {bash_guard!r}: {missing} not in this image"
             )
         logger.error("%s", text)
     elif record["verdict"] == "unverifiable":
+        if alarm is not None:
+            with contextlib.suppress(Exception):
+                await alarm(f"posture UNVERIFIABLE — {line}")
+        if bash_guard != "readonly" and declared is not None and mode == "enforce":
+            raise PostureViolation(f"declared writing posture could not be verified: {line}")
         logger.warning(
             "posture could not be fully verified: %s · %s",
             line,

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import pytest
 
@@ -79,6 +80,7 @@ def _with_kube(tmp_path, monkeypatch) -> None:
     cfg.write_text("apiVersion: v1\n")
     monkeypatch.setenv("KUBECONFIG", str(cfg))
     monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "absent"))
     monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "absent2"))
 
@@ -123,12 +125,94 @@ def test_unverifiable_is_a_verdict_not_a_confirmation(tmp_path, monkeypatch) -> 
 def test_no_credentials_and_off(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KUBECONFIG", str(tmp_path / "nope"))
     monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "absent"))
     monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "absent2"))
     run = _runner({})
     assert asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))["verdict"] == "no-credentials"
     assert run.calls == [], "nothing to ask when nothing is mounted"
     assert asyncio.run(posture.on_startup(tmp_path, "readonly", "off", run))["verdict"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    "variables",
+    [
+        {"AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/example", "AWS_WEB_IDENTITY_TOKEN_FILE": "/tmp/token"},
+        {"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "/v2/credentials/example"},
+        {"AWS_CONTAINER_CREDENTIALS_FULL_URI": "http://localhost/credentials"},
+        {"AWS_PROFILE": "example"},
+    ],
+)
+def test_aws_credential_sources_are_detected(tmp_path, monkeypatch, variables) -> None:
+    for name in list(os.environ):
+        if name.startswith("AWS_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for name, value in variables.items():
+        monkeypatch.setenv(name, value)
+    assert posture.aws_configured()
+
+
+def test_implicit_metadata_is_not_claimed_absent(tmp_path, monkeypatch) -> None:
+    for name in list(os.environ):
+        if name.startswith("AWS_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    aws = asyncio.run(posture.check_aws(_runner({})))
+    assert aws["unverifiable"] is True
+    assert posture.verdict("readonly", {"present": False}, aws) == "unverifiable"
+
+
+def test_writing_node_refuses_unverifiable_declared_radius(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    radius = tmp_path / "radius.txt"
+    radius.write_text("", encoding="utf-8")
+    _with_aws_too(tmp_path, monkeypatch)
+    run = _runner(
+        {
+            "kubectl auth can-i --list": (0, CAN_I_LIST_READONLY, ""),
+            "aws sts": (0, '{"Arn":"arn:aws:iam::1:user/example"}', ""),
+            "aws iam": (1, "", "AccessDenied"),
+        }
+    )
+    with pytest.raises(posture.PostureViolation, match="could not be verified"):
+        asyncio.run(posture.on_startup(tmp_path, "danger-only", "enforce", run, radius=radius))
+    assert posture.read(tmp_path)["verdict"] == "unverifiable"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "not-json",
+        "{}",
+        '{"EvaluationResults": []}',
+        '{"EvaluationResults": [{"EvalActionName": "x", "EvalDecision": "bad"}]}',
+    ],
+)
+def test_incomplete_or_invalid_aws_simulation_is_unverifiable(tmp_path, monkeypatch, response) -> None:
+    _with_aws_too(tmp_path, monkeypatch)
+    run = _runner(
+        {
+            "aws sts": (0, '{"Arn":"arn:aws:iam::1:user/example"}', ""),
+            "aws iam": (0, response, ""),
+        }
+    )
+    record = asyncio.run(posture.check_aws(run))
+    assert record["unverifiable"] and record["errors"]
+    assert posture.verdict("readonly", {"present": False}, record) == "unverifiable"
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_partial_simulation_still_reports_known_allowed_actions(tmp_path, monkeypatch, malformed) -> None:
+    _with_aws_too(tmp_path, monkeypatch)
+    results = [{"EvalActionName": "s3:PutObject", "EvalDecision": "allowed"}]
+    if malformed:
+        results.append(None)
+    response = json.dumps({"EvaluationResults": results})
+    run = _runner({"aws sts": (0, '{"Arn":"arn:aws:iam::1:user/example"}', ""), "aws iam": (0, response, "")})
+    record = asyncio.run(posture.check_aws(run))
+    assert record["unverifiable"] and record["allowed"] == ["s3:PutObject"]
+    assert posture.verdict("readonly", {"present": False}, record) == "wider-than-declared"
 
 
 def test_a_typo_in_the_mode_fails_closed(tmp_path, monkeypatch) -> None:
@@ -262,6 +346,16 @@ def test_a_writing_node_without_kubectl_starts_and_pages(tmp_path, monkeypatch) 
     record = asyncio.run(posture.on_startup(tmp_path, "danger-only", "enforce", run, alarm=alarm))
     assert record["verdict"] == "unmeasurable", "not `recorded`: an empty radius nobody measured is not a radius"
     assert pages and "kubectl" in pages[0]
+
+
+def test_writing_node_with_declared_radius_refuses_missing_tool(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    radius = tmp_path / "radius.txt"
+    radius.write_text("", encoding="utf-8")
+    run = _runner({"kubectl": (127, "", "kubectl: not found")})
+    with pytest.raises(posture.PostureViolation, match="kubectl"):
+        asyncio.run(posture.on_startup(tmp_path, "danger-only", "enforce", run, radius=radius))
+    assert posture.read(tmp_path)["verdict"] == "unmeasurable"
 
 
 def test_warn_starts_a_readonly_node_without_its_tool_and_pages(tmp_path, monkeypatch) -> None:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import time
 
 
@@ -88,6 +89,8 @@ def verify_signature(
         try:
             sent_at = float(str(timestamp_value).strip())
         except ValueError:
+            return False
+        if not math.isfinite(sent_at):
             return False
         current = time.time() if now is None else now
         if abs(current - sent_at) > max(1, max_skew_seconds):

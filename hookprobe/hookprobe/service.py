@@ -927,9 +927,10 @@ class RunService:
         for row in settled:
             interrupted = row.get("interrupted") or {}
             logger.warning(
-                "remediation interrupted by a restart id=%s ran=%s not_run=%s",
+                "remediation interrupted by a restart id=%s ran=%s unknown=%s not_run=%s",
                 row.get("id"),
                 len(interrupted.get("ran") or []),
+                len(interrupted.get("unknown") or []),
                 len(interrupted.get("not_run") or []),
             )
         if settled:

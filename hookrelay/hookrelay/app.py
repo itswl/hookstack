@@ -19,6 +19,7 @@ import mimetypes
 import os
 import re
 import tempfile
+import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -449,72 +450,83 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
         headers = {key.lower(): value for key, value in request.headers.items()}
         if not adapter.verify(source, body, headers):
             raise HTTPException(status_code=401, detail="bad signature")
-        # A captured request replayed inside the skew is the same signed BYTES,
-        # and the content fingerprint cannot see that: it folds a restatement of
-        # the same alert however long ago the content window closed. So ask here
-        # and answer the second copy as a skip — but PEEK, do not claim: the row
-        # is written only after the pipeline has answered (below), because a
-        # claim made before it would turn a sender's identical retry after a 5xx,
-        # a timeout or the fuse's 429 into a replay, losing the event while both
-        # sides believed it was handled. Off when the window is 0, and a scheme
-        # this cannot name (a plugin adapter's own header) yields no token, which
-        # is a refusal to guess rather than a miss.
         replay: str | None = None
+        owner = uuid.uuid4().hex
+        lease_seconds = 120
+        heartbeat: asyncio.Task[None] | None = None
         if app_settings.signature_replay_seconds > 0:
             replay = replay_token(source.name, headers.get("x-hook-signature"))
-            if replay is not None and await app.state.store.signature_seen(
-                replay, app_settings.signature_replay_seconds, now_ts()
-            ):
-                return JSONResponse({"outcome": "skipped", "skip_code": "replayed_signature"})
-        try:
-            payload = json.loads(body or b"{}")
-        except ValueError:
-            raise HTTPException(status_code=400, detail="body is not JSON") from None
-        # ── storm fuse (volume, not content) ──────────────────────────────
-        # After verification (an unsigned flood is already 401 and free) and
-        # before the pipeline. Two stages: suppress keeps the account, reject
-        # protects the account itself.
-        verdict = app.state.fuse.check(source.name, source.storm_threshold, source.storm_window_seconds, now_ts())
-        if verdict == "reject":
-            raise HTTPException(status_code=429, detail="storm fuse open (hard)")
-        # The adapter reads the payload for BOTH paths from here on. A suppressed
-        # event is still recorded, so it must be recorded the way this door
-        # actually reads its senders: the storm path used to re-extract with the
-        # door's templates alone, and a reshaping adapter (SNS hides the alert
-        # inside a JSON-string `Message`) mis-titled every row the storm made.
-        # It sits after the hard reject, which stores nothing and so reads nothing.
-        extracted = adapter.parse(source, payload)
-        if verdict == "suppress":
-            event_id = await record_storm_suppressed(
-                app.state.store,
-                source,
-                payload,
-                now_ts(),
-                app.state.fuse.window_count(source.name),
-                source.storm_threshold,
-                extracted=extracted,
-            )
             if replay is not None:
-                await app.state.store.claim_signature(replay, app_settings.signature_replay_seconds, now_ts())
-            return JSONResponse({"event_id": event_id, "outcome": "skipped", "skip_code": "storm_suppressed"})
+                state = await app.state.store.acquire_signature(
+                    replay, owner, app_settings.signature_replay_seconds, now_ts(), lease_seconds
+                )
+                if state == "completed":
+                    return JSONResponse({"outcome": "skipped", "skip_code": "replayed_signature"})
+                if state == "busy":
+                    return JSONResponse({"detail": "identical request is still processing"}, 503, {"Retry-After": "1"})
 
-        result = await handle_hook(
-            app.state.store,
-            app.state.config,
-            source,
-            payload,
-            now_ts(),
-            settings=app_settings,
-            client=app.state.http_client,
-            extracted=extracted,
-        )
-        # The pipeline answered, so the event was handled once: remember the
-        # signature now. Anything that raised above — the 400 for a body that is
-        # not JSON, the 429 from the hard fuse, a fault inside handle_hook —
-        # reaches here having claimed nothing, so the sender's retry is processed.
-        if replay is not None:
-            await app.state.store.claim_signature(replay, app_settings.signature_replay_seconds, now_ts())
-        return JSONResponse(result)
+                processing = asyncio.current_task()
+
+                async def renew() -> None:
+                    while True:
+                        await asyncio.sleep(lease_seconds / 3)
+                        try:
+                            renewed = await app.state.store.renew_signature(replay, owner, now_ts(), lease_seconds)
+                        except Exception:
+                            logger.exception("signature processing lease renewal failed")
+                            renewed = False
+                        if not renewed:
+                            logger.error("signature processing lease was lost")
+                            if processing is not None:
+                                processing.cancel()
+                            return
+
+                heartbeat = asyncio.create_task(renew())
+        try:
+            try:
+                payload = json.loads(body or b"{}")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="body is not JSON") from None
+            verdict = app.state.fuse.check(source.name, source.storm_threshold, source.storm_window_seconds, now_ts())
+            if verdict == "reject":
+                raise HTTPException(status_code=429, detail="storm fuse open (hard)")
+            extracted = adapter.parse(source, payload)
+            if verdict == "suppress":
+                event_id = await record_storm_suppressed(
+                    app.state.store,
+                    source,
+                    payload,
+                    now_ts(),
+                    app.state.fuse.window_count(source.name),
+                    source.storm_threshold,
+                    extracted=extracted,
+                )
+                result = {"event_id": event_id, "outcome": "skipped", "skip_code": "storm_suppressed"}
+            else:
+                result = await handle_hook(
+                    app.state.store,
+                    app.state.config,
+                    source,
+                    payload,
+                    now_ts(),
+                    settings=app_settings,
+                    client=app.state.http_client,
+                    extracted=extracted,
+                )
+            if replay is not None and not await app.state.store.complete_signature(
+                replay, owner, app_settings.signature_replay_seconds, now_ts()
+            ):
+                logger.error("signature processing lease was lost before completion")
+                raise HTTPException(status_code=503, detail="signature lease lost; outcome needs reconciliation")
+            return JSONResponse(result)
+        finally:
+            if heartbeat is not None:
+                heartbeat.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat
+            if replay is not None:
+                with contextlib.suppress(Exception):
+                    await app.state.store.release_signature(replay, owner)
 
     @app.post("/explain/{source_name}")
     async def explain(

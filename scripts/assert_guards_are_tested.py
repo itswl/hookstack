@@ -163,8 +163,8 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
     (
         "a credential nobody could measure passes as recorded",
         "hookprobe/hookprobe/posture.py",
-        '            return "unmeasurable" if missing else "recorded"',
-        '            return "recorded"',
+        '        if missing:\n            return "unmeasurable"\n        if kube.get("errors")',
+        '        if missing:\n            return "recorded"\n        if kube.get("errors")',
         ("tests/test_posture.py",),
     ),
     (

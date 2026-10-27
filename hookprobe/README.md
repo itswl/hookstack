@@ -178,11 +178,18 @@ always reach. Two things about the word *default*, before the layers:
   over the dangerous actions) and compares the answer with the declaration:
   `readonly-confirmed`, `wider-than-declared` (refuses to start under the
   default `HOOKPROBE_POSTURE_CHECK=enforce`), `unverifiable`, `unmeasurable`
-  (the measuring tool is not in the image: a readonly node refuses to start
-  under `enforce`, a writing node starts and pages), `recorded`,
+  (the measuring tool is not in the image: a readonly node or a writing node
+  with a declared radius refuses to start under `enforce`; an undeclared
+  writing node starts and pages), `recorded`,
   `no-credentials`. The verdict is at `GET /v1/posture` and at the top of
   every run's audit, so "read-only" is a measurement with a date rather than
   a sentence in this file.
+  An unverifiable writing node with a declared radius also refuses under
+  `enforce`. When no explicit AWS credential source is found, implicit EC2
+  metadata credentials are reported as unverifiable unless
+  `AWS_EC2_METADATA_DISABLED=true` is set. Set that only when metadata
+  credentials are intentionally unavailable; this change may prevent a
+  previously running writing node with a declared radius from starting.
 - **Widening is a decision, and it is signed.** Under `danger-only` the guard
   keeps only the rules no credential scope can undo — `rm -rf`, `mkfs`/`dd`
   onto a device, fork bombs, container runtimes, `terraform destroy`,
@@ -198,6 +205,12 @@ always reach. Two things about the word *default*, before the layers:
   (`HOOKPROBE_REMEDIATION_COOLDOWN_SECONDS`, 15 minutes, 0 disables) is held
   rather than changed twice with nobody looking in between. Both are recorded
   in the run's audit with the person's action beside them.
+  Execution checkpoints distinguish completed steps, a started step with an
+  unknown outcome, and steps not started after an interruption; reconcile an
+  unknown outcome before retrying. Output exceeding 10,000 bytes is omitted to
+  avoid exposing a secret cut in half; common secret patterns in smaller output
+  are redacted, but redaction is not a
+  security boundary and the stored proposal retains its original commands.
 
 1. **Credentials** — mount query-only credentials (read-only kubeconfig,
    Prometheus/Loki endpoints, viewer tokens). This is the real boundary;

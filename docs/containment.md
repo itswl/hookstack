@@ -19,9 +19,17 @@ a real model cannot be steered into emitting a harmful one.
 > defaults to `enforce` in the code, so the deploy composes now spell it out rather than leaving the reader to find it;
 > a `danger-only` runner records its blast radius; an identity that cannot be asked is reported *unverifiable*, never confirmed.
 > A credential whose measuring tool is not in the image is *unmeasurable* (2026-10-12): a readonly runner refuses to start
-> under `enforce`, a writing runner starts and pages, and the hourly selftest fails until the tool is back — ten days of
+> under `enforce`, as does a writing runner with a declared radius; an undeclared writing runner starts and pages, and the hourly selftest fails until the tool is back — ten days of
 > `kubectl: not found` had passed as `unverifiable` and `recorded` before this. The measurement is served on `GET /v1/posture`
 > and cited in every run's audit record.
+> An unverifiable writing runner with a declared radius also refuses under `enforce`. With no explicit AWS source, EC2
+> metadata credentials are unverifiable unless `AWS_EC2_METADATA_DISABLED=true`; this can change startup behavior.
+
+> **Recovery is not exactly-once (2026-10-27).** Concurrent signed hook requests use a durable, renewable processing
+> lease; an in-flight duplicate receives 503 and can retry, while completed signatures are deduplicated. A crash after
+> an external side effect but before the completion record can still cause that effect to repeat. Remediation records
+> each step's start and result; a started step without a durable result is unknown and needs operator reconciliation.
+> Oversized output is omitted and smaller output redacted by pattern, but original proposal commands remain stored and redaction can miss secrets.
 
 ## What holds, and what only helps
 

@@ -146,6 +146,11 @@ CREATE TABLE IF NOT EXISTS spent_signatures (
     seen_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_spent_signatures_seen ON spent_signatures (seen_at);
+CREATE TABLE IF NOT EXISTS pending_signatures (
+    token TEXT NOT NULL PRIMARY KEY,
+    owner TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
 """
 
 
@@ -973,16 +978,52 @@ class Store:
 
     # ── inbound signatures ────────────────────────────────────────────────
 
+    async def acquire_signature(self, token: str, owner: str, window: int, now: float, lease: int) -> str:
+        """Reserve a signature atomically; a crashed owner's lease can expire."""
+        async with self._write():
+            await self.db.execute("DELETE FROM pending_signatures WHERE expires_at <= ?", (now,))
+            cursor = await self.db.execute(
+                "INSERT OR IGNORE INTO pending_signatures (token, owner, expires_at) "
+                "SELECT ?, ?, ? WHERE NOT EXISTS "
+                "(SELECT 1 FROM spent_signatures WHERE token = ? AND seen_at >= ?)",
+                (token, owner, now + lease, token, now - window),
+            )
+            if cursor.rowcount:
+                return "acquired"
+            cursor = await self.db.execute(
+                "SELECT 1 FROM spent_signatures WHERE token = ? AND seen_at >= ?", (token, now - window)
+            )
+            return "completed" if await cursor.fetchone() else "busy"
+
+    async def renew_signature(self, token: str, owner: str, now: float, lease: int) -> bool:
+        async with self._write():
+            cursor = await self.db.execute(
+                "UPDATE pending_signatures SET expires_at = ? WHERE token = ? AND owner = ? AND expires_at > ?",
+                (now + lease, token, owner, now),
+            )
+            return cursor.rowcount == 1
+
+    async def release_signature(self, token: str, owner: str) -> None:
+        async with self._write():
+            await self.db.execute("DELETE FROM pending_signatures WHERE token = ? AND owner = ?", (token, owner))
+
+    async def complete_signature(self, token: str, owner: str, window: int, now: float) -> bool:
+        async with self._write():
+            cursor = await self.db.execute(
+                "SELECT 1 FROM pending_signatures WHERE token = ? AND owner = ? AND expires_at > ?",
+                (token, owner, now),
+            )
+            if not await cursor.fetchone():
+                return False
+            await self.db.execute("DELETE FROM spent_signatures WHERE seen_at < ?", (now - window,))
+            await self.db.execute("INSERT OR REPLACE INTO spent_signatures(token,seen_at) VALUES (?,?)", (token, now))
+            await self.db.execute("DELETE FROM pending_signatures WHERE token = ? AND owner = ?", (token, owner))
+            return True
+
     async def signature_seen(self, token: str, window_seconds: int, now: float) -> bool:
         """Whether this signature was CLAIMED inside the window. A read, no claim.
 
-        Paired with `claim_signature` so the door can ask before the pipeline and
-        record only once the pipeline has answered. Claiming up front looked
-        tidier and lost events: a row written before a 5xx, a client timeout or
-        the fuse's 429 makes the sender's identical RETRY answer as a replay, and
-        both sides then believe the event was handled. The cost of the split is
-        the race between two concurrent identical requests, which degrades to the
-        content dedup — the behaviour before this cache existed, and acceptable.
+        A completed claim is distinct from the recoverable in-flight lease.
 
         The prune lives in `claim_signature`, which runs on every HANDLED
         request, so this stays a read and the table stays bounded by the window.
