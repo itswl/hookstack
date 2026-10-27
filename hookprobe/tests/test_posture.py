@@ -176,7 +176,7 @@ def test_no_metadata_service_answering_is_no_credential(tmp_path, monkeypatch) -
 
 def test_a_metadata_service_that_answers_is_measured_like_any_source(tmp_path, monkeypatch) -> None:
     _no_aws_named(tmp_path, monkeypatch)
-    monkeypatch.setattr(posture, "metadata_reachable", lambda timeout=1.0: True)
+    monkeypatch.setattr(posture, "metadata_offers_credentials", lambda timeout=1.0: True)
     denied = [{"EvalActionName": name, "EvalDecision": "implicitDeny"} for name in posture.DANGEROUS_AWS_ACTIONS]
     run = _runner(
         {
@@ -191,7 +191,7 @@ def test_a_metadata_service_that_answers_is_measured_like_any_source(tmp_path, m
 
 def test_an_instance_with_no_role_has_no_credential(tmp_path, monkeypatch) -> None:
     _no_aws_named(tmp_path, monkeypatch)
-    monkeypatch.setattr(posture, "metadata_reachable", lambda timeout=1.0: True)
+    monkeypatch.setattr(posture, "metadata_offers_credentials", lambda timeout=1.0: True)
     run = _runner({"aws sts": (253, "", "Unable to locate credentials. You can configure credentials by running")})
     assert asyncio.run(posture.check_aws(run)) == {"present": False}
 
@@ -203,40 +203,71 @@ def test_metadata_disabled_is_not_asked(tmp_path, monkeypatch) -> None:
     def asked(timeout=1.0):
         raise AssertionError("the disabled service was asked")
 
-    monkeypatch.setattr(posture, "metadata_reachable", asked)
+    monkeypatch.setattr(posture, "metadata_offers_credentials", asked)
     assert asyncio.run(posture.check_aws(_runner({}))) == {"present": False}
 
 
-def test_the_metadata_question_goes_direct_and_counts_any_answer(monkeypatch, real_metadata_reachable) -> None:
-    """Asked without the proxy: a proxy that refuses the address would otherwise
-    read as a service being there."""
-    import socket
+def _metadata_service(put_status: int, listing_status: int, listing: bytes = b""):
+    """A stand-in for the address, answering the CLI's two questions as told."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    class Metadata(BaseHTTPRequestHandler):
+    class Service(BaseHTTPRequestHandler):
         def do_PUT(self) -> None:  # noqa: N802
-            self.send_response(401)
+            self.send_response(put_status)
             self.end_headers()
+            if put_status == 200:
+                self.wfile.write(b"a-token")
+
+        def do_GET(self) -> None:  # noqa: N802
+            asked_with_token = self.headers.get("X-aws-ec2-metadata-token") == "a-token" or put_status != 200
+            ok = listing_status == 200 and asked_with_token
+            self.send_response(200 if ok else listing_status if listing_status != 200 else 401)
+            self.end_headers()
+            if ok:
+                self.wfile.write(listing)
 
         def log_message(self, *args) -> None:
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Metadata)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Service)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.mark.parametrize(
+    ("put_status", "listing_status", "listing", "offered"),
+    [
+        (200, 200, b"instance-role", True),  # IMDSv2 with a role
+        (403, 200, b"instance-role", True),  # IMDSv1 only, a role all the same
+        (200, 404, b"", False),  # an instance with no role
+        (400, 400, b"", False),  # another vendor's service at the address
+    ],
+)
+def test_the_metadata_question_is_the_clis_and_goes_direct(
+    monkeypatch, real_metadata_probe, put_status, listing_status, listing, offered
+) -> None:
+    """Only a role name is a credential, and the question skips the proxy: one
+    that refuses the address would otherwise read as a service being there."""
+    server = _metadata_service(put_status, listing_status, listing)
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
     monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
     try:
-        monkeypatch.setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
-        assert real_metadata_reachable(timeout=2.0) is True
+        assert real_metadata_probe(timeout=2.0) is offered
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_nothing_at_the_address_is_no_credential(monkeypatch, real_metadata_probe) -> None:
+    import socket
+
     with socket.socket() as closed:
         closed.bind(("127.0.0.1", 0))
         port = closed.getsockname()[1]
     monkeypatch.setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", f"http://127.0.0.1:{port}")
-    assert real_metadata_reachable(timeout=2.0) is False
+    assert real_metadata_probe(timeout=2.0) is False
 
 
 def test_writing_node_refuses_unverifiable_declared_radius(tmp_path, monkeypatch) -> None:

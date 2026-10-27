@@ -186,8 +186,9 @@ always reach. Two things about the word *default*, before the layers:
   a sentence in this file.
   An unverifiable writing node with a declared radius also refuses under
   `enforce`. When nothing names an AWS credential, the instance metadata
-  service is asked directly (one second, no proxy): one that answers is
-  measured like any other source, none answering is no credential, and
+  service is asked directly, the way the AWS CLI asks it (no proxy, a second
+  per question): a role it offers is measured like any other source; no role,
+  another vendor's service at the address, or nothing there is no credential;
   `AWS_EC2_METADATA_DISABLED=true` skips the question.
 - **Widening is a decision, and it is signed.** Under `danger-only` the guard
   keeps only the rules no credential scope can undo — `rm -rf`, `mkfs`/`dd`

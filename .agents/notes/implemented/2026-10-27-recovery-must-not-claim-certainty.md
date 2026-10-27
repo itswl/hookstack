@@ -12,9 +12,10 @@ steps as completed, unknown, or not started. Redact a step's whole output, then
 keep its last 10,000 characters (omit it past a megabyte). Reserve signed
 inbound requests with renewable SQLite leases, recording completion only after
 handling. Treat incomplete posture measurements as unverifiable, and ASK the
-instance metadata service when nothing names an AWS credential: one that
-answers is measured, none answering is no credential. A writing node with a
-declared radius refuses an unverified measurement under enforce.
+instance metadata service, as the AWS CLI does, when nothing names an AWS
+credential: a role it offers is measured; no role, another vendor's service or
+nothing there is no credential. A writing node with a declared radius refuses
+an unverified measurement under enforce.
 
 Amended in review before merge: the first version assumed metadata credentials
 whenever nothing named one, which read every laptop and every probe on an

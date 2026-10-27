@@ -23,7 +23,7 @@ a real model cannot be steered into emitting a harmful one.
 > `kubectl: not found` had passed as `unverifiable` and `recorded` before this. The measurement is served on `GET /v1/posture`
 > and cited in every run's audit record.
 > An unverifiable writing runner with a declared radius also refuses under `enforce`. With no explicit AWS source, the
-> instance metadata service is asked directly: one that answers is measured like any other source, none answering is none.
+> instance metadata service is asked directly whether it offers a role: one it offers is measured like any other source.
 
 > **Recovery is not exactly-once (2026-10-27).** Concurrent signed hook requests use a durable, renewable processing
 > lease; an in-flight duplicate receives 503 and can retry, while completed signatures are deduplicated. A crash after

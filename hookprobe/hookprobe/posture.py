@@ -159,7 +159,7 @@ def kubeconfig_path() -> Path | None:
 def aws_configured() -> bool:
     # A profile NAME alone is not a source: it names a section of a file, and
     # the files are what the loop below looks for. An instance metadata service
-    # is not configured at all — it is asked (see metadata_reachable).
+    # is not configured at all — it is asked (see metadata_offers_credentials).
     if any(
         os.environ.get(name)
         for name in (
@@ -204,32 +204,41 @@ async def check_kube(run: Runner) -> dict[str, Any]:
     return record
 
 
-def metadata_reachable(timeout: float = 1.0) -> bool:
-    """Whether an instance metadata service answers here, asked directly.
+def metadata_offers_credentials(timeout: float = 1.0) -> bool:
+    """Whether an AWS instance metadata service here hands out a role's credentials.
 
-    When nothing names a credential, this is the source left: the AWS CLI asks
-    the same address for an instance role. Any HTTP answer counts, a refusal
-    included, because something is there. No proxy, on purpose: the probes'
-    egress proxy answers for addresses it refuses, and the question is whether
-    this container reaches the service at all. On a laptop or on the probes'
-    internal network the address has no route, and that is the common case.
+    When nothing names a credential this is the source left, and the AWS CLI
+    asks it the same two questions: a token (IMDSv2), then the role listing.
+    A role name in the answer is a credential; a 404 is an instance with no role;
+    anything else is no AWS service at all. A cloud VM of another vendor answers
+    at the same address, and an answer of any kind is not a credential — GitHub's
+    runners are Azure VMs, and counting any answer made the image refuse to start
+    there. No proxy, on purpose: the probes' egress proxy answers for addresses
+    it refuses, and the question is what this container reaches by itself.
     """
-    base = os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT") or (
-        "http://[fd00:ec2::254]"
-        if os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE", "").lower() == "ipv6"
-        else "http://169.254.169.254"
-    )
-    request = urllib.request.Request(
-        base.rstrip("/") + "/latest/api/token",
-        method="PUT",
-        headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"},
+    base = (
+        os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT")
+        or (
+            "http://[fd00:ec2::254]"
+            if os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE", "").lower() == "ipv6"
+            else "http://169.254.169.254"
+        )
+    ).rstrip("/")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    token: dict[str, str] = {}
+    put = urllib.request.Request(
+        base + "/latest/api/token", method="PUT", headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"}
     )
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=timeout):  # nosec B310
-            return True
-    except urllib.error.HTTPError:
-        return True
+        with opener.open(put, timeout=timeout) as answer:  # nosec B310 — a fixed link-local address
+            token = {"X-aws-ec2-metadata-token": answer.read(256).decode("ascii", "replace").strip()}
     except (OSError, ValueError):
+        pass  # IMDSv1 only, another vendor's service, or nothing: the listing decides
+    listing = urllib.request.Request(base + "/latest/meta-data/iam/security-credentials/", headers=token)
+    try:
+        with opener.open(listing, timeout=timeout) as answer:  # nosec B310
+            return bool(answer.read(1024).strip())
+    except (OSError, ValueError):  # HTTPError included: 404 is no role, anything else no AWS
         return False
 
 
@@ -240,9 +249,9 @@ async def check_aws(run: Runner) -> dict[str, Any]:
         # radius refused to start over a service that cannot exist there.
         if os.environ.get("AWS_EC2_METADATA_DISABLED", "").lower() == "true":
             return {"present": False}
-        if not await asyncio.to_thread(metadata_reachable):
+        if not await asyncio.to_thread(metadata_offers_credentials):
             return {"present": False}
-        # A service answered: its credentials are measured like any other source.
+        # A role is offered: its credentials are measured like any other source.
     record: dict[str, Any] = {"present": True, "identity": None, "allowed": [], "errors": [], "unverifiable": False}
     code, out, err = await run(["aws", "sts", "get-caller-identity", "--output", "json"])
     if code != 0 and "Unable to locate credentials" in (err or out):
