@@ -20,7 +20,7 @@ to catch.
     python3 scripts/assert_guards_are_tested.py            # every mutation
     python3 scripts/assert_guards_are_tested.py --list     # names only
 
-WHAT THIS IS NOT. It is not mutation coverage. Seven modules and a hand-written
+WHAT THIS IS NOT. It is not mutation coverage. A few modules and a hand-written
 list is not a proof about the suite; it is a spot check on the claims that would
 hurt most if their tests were decorative. Add one whenever a boundary is added,
 which is the whole ceremony.
@@ -41,6 +41,13 @@ PY = ROOT / "hookprobe" / ".venv" / "bin" / "python"
 
 # (name, file, exact text to replace, replacement, tests that must then fail)
 MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
+    (
+        "alert and chat text reach the CLI as typed input again",
+        "hookprobe/hookprobe/engine.py",
+        "            verbatim_prompts=True,",
+        "            verbatim_prompts=False,",
+        ("tests/test_engine_loop.py",),
+    ),
     (
         "the read-only guard allows everything",
         "hookprobe/hookprobe/guard.py",
