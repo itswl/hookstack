@@ -43,6 +43,14 @@ x-probe-proxy: &probe-proxy
   HTTP_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
   HTTPS_PROXY: ${HOOKPROBE_EGRESS_PROXY:-http://egress-proxy:8888}
   NO_PROXY: ${HOOKPROBE_NO_PROXY:-127.0.0.1,localhost,host.docker.internal,hookrelay,sink,egress-proxy,mcp-gate,watch-signer}
+  # No instance metadata service exists on the probes' network, and their AWS
+  # credentials are files. Without this, an AWS CLI call whose profile names no
+  # region asks 169.254.169.254 for one through the proxy above, and each ask
+  # lands in the egress ledger as a refusal that is nobody's attempt to leave —
+  # a second deployment running copies of these files saw six in one session.
+  # The CLI now says "specify a region" instead; the posture check skips the
+  # metadata question for the same reason.
+  AWS_EC2_METADATA_DISABLED: "true"
 
 services:
   hookrelay:
