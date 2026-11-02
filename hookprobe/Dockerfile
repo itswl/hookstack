@@ -1,21 +1,23 @@
-# hookprobe: Python runtime + Node (the Claude Agent SDK drives the Claude
-# Code CLI) + a lean read-only diagnostic core. Domain CLIs (kubectl, db
-# clients) stay opt-in below — extend with exactly what your alerts need.
+# hookprobe: Python runtime + Node (for MCP servers started with npx, see
+# deploy/mcp.example.json) + a lean read-only diagnostic core. Domain CLIs
+# (kubectl, db clients) stay opt-in below — extend with exactly what your
+# alerts need.
 FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
-# The CLI is the agent runtime itself. Unpinned, every image rebuild
-# silently adopts whatever shipped upstream that day — the one dependency
-# where drift changes behaviour most, pinned last. Bump deliberately:
-#   docker compose build --build-arg CLAUDE_CODE_VERSION=x.y.z
-# 2.1.259: 2.1.232 rejected third-party model names its catalog did not know
-# (`[claude-code:unrecognized_model]` on e.g. gpt-5.6-luna behind a custom
-# ANTHROPIC_BASE_URL), which broke the investigator against gateways that serve
-# only their own model ids. 2.1.259 accepts them.
-ARG CLAUDE_CODE_VERSION=2.1.259
+# The agent's CLI is not installed here. The Claude Agent SDK wheel carries its
+# own build of the Claude Code CLI and runs that one before anything on PATH,
+# so the CLI that runs an investigation is the one requirements.lock pins
+# through claude-agent-sdk (claude_agent_sdk/_cli_version.py names it), and
+# Dependabot proposes it. A second CLI installed here was dead weight that read
+# as the pin: the npm build this file pinned at 2.1.259 sat unused on PATH
+# while 0.9.2 ran the SDK's 2.1.235. Bump the agent runtime by bumping the SDK,
+# and check the new one still takes a gateway's own model ids: a CLI release
+# once refused them (`[claude-code:unrecognized_model]` behind a custom
+# ANTHROPIC_BASE_URL). 2.1.235 and 2.1.316 both accept them.
 
 # The diagnostic core: what any investigation reaches for first, and what
 # marketplace runbooks assume exists (a patrol skill mis-read this container
@@ -26,7 +28,6 @@ RUN apt-get update \
         procps jq iproute2 dnsutils netcat-openbsd lsof \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
