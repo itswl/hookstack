@@ -58,5 +58,5 @@ commands.
   `CLAUDE_CODE_VERSION`. The SDK looks for its bundled binary first. The 0.9.2
   image ran 2.1.235 with 2.1.259 unused on PATH, and this relock moves the
   engine to 2.1.316. So the lock, not the build argument, has been pinning the
-  agent runtime since the SDK began bundling it. Whether the image should drop
-  the npm CLI or point the engine at it is the operator's call.
+  agent runtime since the SDK began bundling it. The operator chose the lock
+  the same day: see 2026-11-02-the-lock-pins-the-agent-runtime.
