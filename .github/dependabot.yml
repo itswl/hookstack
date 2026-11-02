@@ -55,6 +55,15 @@ updates:
     directory: "/hookprobe"
     schedule:
       interval: weekly
+    # The investigator is the one service whose pyproject declares a
+    # [project], so the default strategy reads it as a library and only
+    # widens ranges. A floor like `fastapi>=0.115` already admits the newest
+    # release, widening it changes nothing, and the job log says
+    # "update_not_possible" for every runtime package. The pipe and the judge
+    # read as applications and get their floors raised; the investigator's
+    # runtime, the agent SDK included, went stale with no pull request ever
+    # saying so. `increase` is what the other two already get.
+    versioning-strategy: increase
     groups:
       hookprobe-deps:
         patterns: ["*"]
