@@ -1047,6 +1047,18 @@ class ClaudeAgentEngine:
             # console is for, and an agent that says nothing for two minutes and
             # then everything at once is indistinguishable from a hung one.
             include_partial_messages=True,
+            # The message is not someone typing at the CLI's prompt: it is an
+            # alert's text, a reply under a card, a watch round, written by
+            # whoever can reach those doors. Delivered as typed input, an
+            # `@path` anywhere in it made the CLI read that file and hand it to
+            # the model as a Read result no PreToolUse hook saw, so neither the
+            # guard nor the audit knew the read happened; and a message that
+            # starts with `/` ran a CLI command instead of an investigation
+            # (`/cost` came back as the report). Both were measured on the
+            # 0.9.2 image against a recording stand-in model. Verbatim, the
+            # words arrive as words; the model can still ask to read a file,
+            # and that read is a tool call the guard and the audit see.
+            verbatim_prompts=True,
             # The declared MCP tools ride along so the CLI exposes them at all.
             # This is visibility, not enforcement — with bypassPermissions an
             # allowlist is a preference. _mcp_guard_hook is the gate.

@@ -74,9 +74,11 @@ class _FakeClient:
     connected = 0
     disconnected = 0
     queries: list[str] = []
+    options_seen: Any = None
 
     def __init__(self, options: Any = None) -> None:
         self.options = options
+        type(self).options_seen = options
 
     async def connect(self) -> None:
         type(self).connected += 1
@@ -102,6 +104,7 @@ def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _FakeClient.disconnected = 0
     _FakeClient.queries = []
     _FakeClient.scripted = []
+    _FakeClient.options_seen = None
     monkeypatch.setattr(claude_agent_sdk, "ClaudeSDKClient", _FakeClient)
     settings = make_settings(tmp_path, workdir=tmp_path)
     return ClaudeAgentEngine(settings)
@@ -110,6 +113,19 @@ def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def _run(engine: ClaudeAgentEngine, messages: list[Any]):
     _FakeClient.scripted = messages
     return asyncio.run(engine.run(message="investigate", session_key="probe:t:1"))
+
+
+def test_the_message_reaches_the_model_as_words_not_as_cli_input(engine) -> None:
+    """Alert text, a reply under a card, a watch round: none of it is the
+    operator typing at the CLI's prompt. As typed input, an `@path` in it made
+    the CLI read that file into the model's context with no tool call for the
+    guard to refuse or the audit to record, and a leading `/` ran a CLI command
+    in place of the investigation. Measured on the 0.9.2 image; verbatim
+    prompts deliver the words as words."""
+    _run(engine, [_result()])
+
+    assert _FakeClient.options_seen is not None
+    assert _FakeClient.options_seen.verbatim_prompts is True
 
 
 def test_deltas_are_streamed_but_not_counted(engine) -> None:
