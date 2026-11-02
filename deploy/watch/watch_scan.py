@@ -93,6 +93,12 @@ JIRA = os.environ.get("WATCH_JIRA_SCRIPT") or ""
 # 60 而不是 12：截断要罕见到算异常。上限是 200，一个 20 分钟的窗口里 60 条已经
 # 是刷屏了。真截断了下面会明说，因为结果是新的在前，被丢掉的是更早的那些。
 PER_CHAT = int(os.environ.get("WATCH_MAX_PER_CHAT") or 60)
+# 游标比这还旧的会话（周末之后、长假之后、刚出现的会话）积压的不是一轮的量：
+# 按常量取，取满了就把更早的丢掉。另一套跑着这些文件副本的部署，在两个周一的首轮
+# 各有两个会话「一次取满 60 条」。这种会话单次多取一倍，仍不超过服务端对 limit 的
+# 上限；工作日的常规轮次不变。
+STALE_CURSOR_SECONDS = 36 * 3600
+CHAT_LIMIT_MAX = 200  # search_chat_records 的 limit 上限，超过会被整个调用拒掉
 # 服务端对这个参数的上限就是 100，传 200 会被整个调用拒掉——而一次被拒的
 # 列表调用意味着这一轮完全没看聊天。
 FEED_LIMIT = int(os.environ.get("WATCH_FEED_LIMIT") or 100)
@@ -396,13 +402,14 @@ def scan_chat(
                 continue
             # 到期放行。取完（或取失败走 unreachable）都在下面清 pending。
 
+        limit = PER_CHAT if now - base < STALE_CURSOR_SECONDS else min(PER_CHAT * 2, CHAT_LIMIT_MAX)
         args = {
             "contact_name": name,
             # from_time 是闭区间。原样传游标会把「设定这个游标的那条消息」再取
             # 一遍——2026-09-04 就是这么把一条五小时前的 @All 当成新消息发出去的。
             "from_time": str(int(base) + 1),
             "to_time": str(int(now)),
-            "limit": PER_CHAT,
+            "limit": limit,
         }
         if feed.get("chat_type_label") == "group chat":
             args["search_group"] = True
@@ -467,9 +474,9 @@ def scan_chat(
             unreachable.pop(name, None)  # 又够得着了；下次再断会重新说一次
         if pending is not None:
             pending.pop(name, None)  # 攒的一批已经端出去了；下一批重新起算
-        if len(got) >= PER_CHAT:
+        if len(got) >= limit:
             notes.append(
-                f"{name}: 一次取满 {PER_CHAT} 条，更早的可能没取到（结果是新的在前，游标仍推进到最新，否则会一直重报）"
+                f"{name}: 一次取满 {limit} 条，更早的可能没取到（结果是新的在前，游标仍推进到最新，否则会一直重报）"
             )
         if picked:
             findings.append((name, picked))

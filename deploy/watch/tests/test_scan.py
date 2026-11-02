@@ -232,3 +232,38 @@ def test_a_bot_that_says_so_in_its_name_never_reaches_the_digest(monkeypatch):
     )
     found = watch_scan.scan_chat(chat, {}, watch_scan.when("2026-10-27T02:10:00Z"), [])
     assert [(name, [who for _, who, _ in msgs]) for name, msgs in found] == [("ops room", ["Talbot"])]
+
+
+class _Feeds:
+    """A chat service with the given feeds; records every search it is asked."""
+
+    def __init__(self, feeds):
+        self.feeds, self.asked = feeds, []
+
+    def call(self, tool, **args):
+        if tool == "list_folder_feeds":
+            return {"feeds": self.feeds}
+        assert tool == "search_chat_records", tool
+        self.asked.append(args)
+        return {"messages": []}
+
+
+def test_a_stale_cursor_asks_for_twice_as_much_up_to_the_servers_ceiling(monkeypatch):
+    """A Monday's first round: the weekend group's cursor is Friday's evening."""
+    now = watch_scan.when("2026-11-02T01:40:00Z")
+    feeds = [
+        {"name": "weekend group", "chat_type_label": "group chat", "last_message_send_at": "2026-11-01T07:00:00Z"},
+        {"name": "weekday group", "chat_type_label": "group chat", "last_message_send_at": "2026-11-02T01:30:00Z"},
+    ]
+    cursors = {
+        "weekend group": watch_scan.when("2026-10-30T11:20:00Z"),
+        "weekday group": watch_scan.when("2026-11-02T01:00:00Z"),
+    }
+    monkeypatch.setattr(watch_scan, "PER_CHAT", 60)
+    chat = _Feeds(feeds)
+    watch_scan.scan_chat(chat, dict(cursors), now, [])
+    assert {a["contact_name"]: a["limit"] for a in chat.asked} == {"weekend group": 120, "weekday group": 60}
+    monkeypatch.setattr(watch_scan, "PER_CHAT", 150)
+    chat = _Feeds(feeds)
+    watch_scan.scan_chat(chat, dict(cursors), now, [])
+    assert {a["contact_name"]: a["limit"] for a in chat.asked} == {"weekend group": 200, "weekday group": 150}
