@@ -46,7 +46,17 @@ logger = logging.getLogger("hookprobe.engine")
 # investigates, enforced by the bash guard plus the credentials mounted into
 # the container. Task enables parallel sub-investigations for cascading
 # incidents; hooks (and so both guards) apply inside subagents too.
-_ALLOWED_TOOLS = [
+# The built-in tools this engine offers the model: a closed set. Under
+# bypassPermissions `allowed_tools` restricts nothing, so until 2026-11-03 a run
+# could reach whatever the bundled CLI shipped, and the CLI moves with every
+# relock of the SDK. 2.1.316 (v0.10.0) added Monitor, ListAgents and ToolSearch
+# and put most of the rest behind ToolSearch, none of it reviewed here. `tools`
+# is the base set the CLI offers at all, so a tool a later CLI adds stays out
+# until it is added here on purpose. ToolSearch is left out, so nothing is
+# deferred and every tool below is offered directly. The CLI ignores a name it
+# does not know, so a renamed tool drops out without a word: check this list
+# against what a new SDK offers whenever it moves.
+_TOOLS = (
     "Bash",
     "Read",
     "Write",
@@ -55,11 +65,15 @@ _ALLOWED_TOOLS = [
     "Grep",
     "WebSearch",
     "WebFetch",
-    "TodoWrite",
     "Skill",
-    "Task",
-    "Agent",  # the CLI's current name for the subagent tool; keep both spellings
-]
+    # Subagents; the CLI still accepts the old name `Task` for it.
+    "Agent",
+    # The task list that replaced TodoWrite in the CLI: planning, in-session only.
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1071,7 +1085,9 @@ class ClaudeAgentEngine:
             # The declared MCP tools ride along so the CLI exposes them at all.
             # This is visibility, not enforcement — with bypassPermissions an
             # allowlist is a preference. _mcp_guard_hook is the gate.
-            allowed_tools=[*_ALLOWED_TOOLS, *sorted(self._settings.mcp_tools)],
+            allowed_tools=[*_TOOLS, *sorted(self._settings.mcp_tools)],
+            # The base set the CLI offers at all. See _TOOLS for why it is closed.
+            tools=list(_TOOLS),
             max_turns=self._settings.max_turns,
             # Keep the engine's own system prompt; append the operator's
             # methodology when a system-prompt file is present.

@@ -93,7 +93,7 @@ def mcp_deny_reason(tool_name: str, allowed: frozenset[str]) -> str | None:
     second thing to get subtly wrong, and the list is meant to be read by
     somebody deciding what an agent may do on their behalf.
 
-    Non-MCP tools are not this guard's business; `_ALLOWED_TOOLS` and the bash
+    Non-MCP tools are not this guard's business; `_TOOLS` (engine.py) and the bash
     and input guards already answer for those.
     """
     if not tool_name.startswith("mcp__"):
