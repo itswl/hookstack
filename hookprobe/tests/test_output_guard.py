@@ -4,7 +4,7 @@ The input guard refuses changes, so `env`, a config file and a log line are all
 allowed under `readonly` — and they should be: an investigator that cannot read
 cannot investigate. Since 2026-11-03 one kind of read is refused under every
 posture, the one whose whole content is a credential: a Secret's data, a
-Secrets Manager value (guard.py, `_SECRET_RULES`). Everything else can still
+Secrets Manager value (guard.py, `_REVEAL_RULES`). Everything else can still
 carry one back. What was missing is that nothing then examined the answer, so
 a run whose context was filled with a live credential was indistinguishable
 from one that read a pod list. Nobody could decide to discard the report or

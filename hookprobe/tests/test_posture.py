@@ -512,8 +512,8 @@ def test_reading_secrets_is_reported_and_decides_nothing(tmp_path, monkeypatch) 
 
 
 def test_a_wildcard_grant_reads_secrets_too() -> None:
-    assert posture.kube_secret_rules(CAN_I_LIST_ADMIN) == ["*.*: *"]
-    assert posture.kube_secret_rules(CAN_I_LIST_READONLY) == []
+    assert posture.kube_reading_rules(CAN_I_LIST_ADMIN) == ["*.*: *"]
+    assert posture.kube_reading_rules(CAN_I_LIST_READONLY) == []
 
 
 def test_a_reading_question_that_fails_cannot_change_the_verdict(tmp_path, monkeypatch) -> None:
@@ -540,7 +540,7 @@ def _aws_reader(tmp_path, monkeypatch, reading_answer):
         if argv[:2] == ["aws", "sts"]:
             return 0, '{"Arn": "arn:aws:iam::123456789012:user/reader"}', ""
         actions = argv[argv.index("--action-names") + 1 : argv.index("--output")]
-        if set(actions) == set(posture.SECRET_AWS_ACTIONS):
+        if set(actions) == set(posture.AWS_READ_ACTIONS):
             return reading_answer(actions)
         denied = [{"EvalActionName": action, "EvalDecision": "implicitDeny"} for action in actions]
         return 0, json.dumps({"EvaluationResults": denied}), ""

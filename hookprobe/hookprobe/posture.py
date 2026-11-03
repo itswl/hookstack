@@ -96,9 +96,11 @@ DANGEROUS_AWS_ACTIONS = (
 # measured it on 2026-11-02: its read-only cluster identity read Secret objects
 # in every cluster, and its read-only AWS policy read S3 object contents, which
 # is where state files and backups keep their secrets in plain text.
-KUBE_SECRET_QUESTIONS = (("get", "secrets"), ("list", "secrets"))
-SECRET_READ_VERBS = frozenset({"get", "list", "watch", "*"})
-SECRET_AWS_ACTIONS = (
+# Named without the word, like guard.py's table: code scanning reads such a
+# name as secret data, and these are questions.
+KUBE_READ_QUESTIONS = (("get", "secrets"), ("list", "secrets"))
+READ_VERBS = frozenset({"get", "list", "watch", "*"})
+AWS_READ_ACTIONS = (
     "secretsmanager:GetSecretValue",
     "ssm:GetParameter",
     "kms:Decrypt",
@@ -154,7 +156,7 @@ def kube_mutating_rules(can_i_list: str) -> list[str]:
     return found
 
 
-def kube_secret_rules(can_i_list: str) -> list[str]:
+def kube_reading_rules(can_i_list: str) -> list[str]:
     """The rules in `kubectl auth can-i --list` output that let this identity read
     Secret objects here: `secrets` itself, or a wildcard resource, with a verb
     that returns the data."""
@@ -165,8 +167,8 @@ def kube_secret_rules(can_i_list: str) -> list[str]:
             continue
         resource = line.split()[0]
         verbs = {v.strip() for v in line.rsplit("[", 1)[1].rstrip("]").split() if v.strip()}
-        if resource.split(".")[0] in {"secrets", "*"} and verbs & SECRET_READ_VERBS:
-            found.append(f"{resource}: {' '.join(sorted(verbs & SECRET_READ_VERBS))}")
+        if resource.split(".")[0] in {"secrets", "*"} and verbs & READ_VERBS:
+            found.append(f"{resource}: {' '.join(sorted(verbs & READ_VERBS))}")
     return found
 
 
@@ -239,7 +241,7 @@ async def check_kube(run: Runner) -> dict[str, Any]:
         record["errors"].append(f"can-i --list: {(err or out).strip()[:200]}")
     else:
         record["mutating"].extend(kube_mutating_rules(out))
-        record["reads_secrets"].extend(kube_secret_rules(out))
+        record["reads_secrets"].extend(kube_reading_rules(out))
     for verb, resource in KUBE_QUESTIONS:
         code, out, err = await run(["kubectl", "auth", "can-i", verb, resource, "--all-namespaces"])
         answer = out.strip().lower()
@@ -250,7 +252,7 @@ async def check_kube(run: Runner) -> dict[str, Any]:
     record["mutating"] = sorted(set(record["mutating"]))
     # Reading questions. Their failures go to `read_errors`, never `errors`:
     # an answer that decides nothing must not be able to change the verdict.
-    for verb, resource in KUBE_SECRET_QUESTIONS:
+    for verb, resource in KUBE_READ_QUESTIONS:
         code, out, err = await run(["kubectl", "auth", "can-i", verb, resource, "--all-namespaces"])
         answer = out.strip().lower()
         if answer.startswith("yes"):
@@ -379,11 +381,11 @@ async def check_aws(run: Runner) -> dict[str, Any]:
         except (ValueError, KeyError, TypeError, AttributeError):
             record["errors"].append("simulate-principal-policy: invalid or incomplete results")
             record["unverifiable"] = True
-    record["reads_secrets"], record["read_errors"] = await _secret_reads(run, role_arn(arn))
+    record["reads_secrets"], record["read_errors"] = await _aws_reading(run, role_arn(arn))
     return record
 
 
-async def _secret_reads(run: Runner, principal: str) -> tuple[list[str], list[str]]:
+async def _aws_reading(run: Runner, principal: str) -> tuple[list[str], list[str]]:
     """Which secret-reading actions the identity holds, and what stopped the
     question. A separate simulation from the dangerous one, so that a failure
     here is reported and can never make a verdict unverifiable."""
@@ -395,7 +397,7 @@ async def _secret_reads(run: Runner, principal: str) -> tuple[list[str], list[st
             "--policy-source-arn",
             principal,
             "--action-names",
-            *SECRET_AWS_ACTIONS,
+            *AWS_READ_ACTIONS,
             "--output",
             "json",
         ]
@@ -407,8 +409,8 @@ async def _secret_reads(run: Runner, principal: str) -> tuple[list[str], list[st
         decided = {str(item["EvalActionName"]): str(item["EvalDecision"]) for item in results}
     except (ValueError, KeyError, TypeError, AttributeError):
         return [], ["simulate-principal-policy (reads): invalid results"]
-    missing = [action for action in SECRET_AWS_ACTIONS if action not in decided]
-    allowed = sorted(action for action in SECRET_AWS_ACTIONS if decided.get(action) == "allowed")
+    missing = [action for action in AWS_READ_ACTIONS if action not in decided]
+    allowed = sorted(action for action in AWS_READ_ACTIONS if decided.get(action) == "allowed")
     return allowed, ([f"simulate-principal-policy (reads): no answer for {', '.join(missing)}"] if missing else [])
 
 

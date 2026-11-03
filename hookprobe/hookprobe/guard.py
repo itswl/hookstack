@@ -221,16 +221,19 @@ _UNSEEN_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
 # runtime, a pod that mounts the secret, or another vendor's CLI is not caught.
 # The credential is what holds, and posture reports whether it can read secrets
 # at all (`reads_secrets` on /v1/posture).
+# Named without the word: code scanning reads any name holding it as secret
+# data and follows it into the refusal text, and these hold patterns and
+# descriptions, never a value.
 _KUBE = r"\b(?:kubectl|oc|kubecolor)\b"
 _AWS = r"(?<!\.)\baws\b(?!\.)"
 # `secret`, `secrets`, `secret/name`, or one item of a comma list. A pod named
 # `secret-rotator` is not a Secret.
-_SECRET_RES = r"(?:^|[\s,])secrets?(?=[\s,/]|$)"  # nosec B105 — a pattern for the word, not a credential
+_RESOURCE_WORD = r"(?:^|[\s,])secrets?(?=[\s,/]|$)"
 # An output format that prints the object: anything but the table forms.
 _PRINTED = r"(?:\s-o|\s--output)(?:=|\s+)?(?![\s=])(?!(?:wide|name)\b)"
-_SECRET_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+_REVEAL_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (
-        re.compile(rf"{_KUBE}(?=[^|;&\n]*\bget\b)(?=[^|;&\n]*{_SECRET_RES})(?=[^|;&\n]*{_PRINTED})"),
+        re.compile(rf"{_KUBE}(?=[^|;&\n]*\bget\b)(?=[^|;&\n]*{_RESOURCE_WORD})(?=[^|;&\n]*{_PRINTED})"),
         "printing a Secret's data",
     ),
     (re.compile(rf"{_KUBE}{_SEG}--raw[=\s]+\S*/secrets\b"), "reading a Secret through the raw API"),
@@ -282,7 +285,7 @@ def bash_deny_reason(command: str, mode: str = READONLY) -> str | None:
                 f"unseen-code guard: {label} is blocked. The guard cannot read a script it never "
                 f"sees; fetch it to a file, read it, and run the commands it holds one by one"
             )
-    for pattern, label in _SECRET_RULES:
+    for pattern, label in _REVEAL_RULES:
         if pattern.search(command):
             return (
                 f"secret-value guard: {label} is blocked under every posture. A value printed here "

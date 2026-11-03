@@ -58,15 +58,15 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
     (
         "a secret's value may be printed",
         "hookprobe/hookprobe/guard.py",
-        "    for pattern, label in _SECRET_RULES:",
+        "    for pattern, label in _REVEAL_RULES:",
         "    for pattern, label in ():",
         ("tests/test_guard.py",),
     ),
     (
         "posture stops asking whether secrets can be read",
         "hookprobe/hookprobe/posture.py",
-        'KUBE_SECRET_QUESTIONS = (("get", "secrets"), ("list", "secrets"))',
-        "KUBE_SECRET_QUESTIONS = ()",
+        'KUBE_READ_QUESTIONS = (("get", "secrets"), ("list", "secrets"))',
+        "KUBE_READ_QUESTIONS = ()",
         ("tests/test_posture.py",),
     ),
     (
