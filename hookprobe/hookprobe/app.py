@@ -50,6 +50,7 @@ from hookprobe import (
     describe,
     events,
     handoff,
+    inputs,
     library,
     ops,
     posture,
@@ -228,6 +229,7 @@ def create_app(settings: Settings, service: RunService) -> FastAPI:
             settings.posture_check,
             radius=settings.blast_radius,
             alarm=service.alarm,
+            steering=inputs.operator_files(settings),
         )
         service.recover_orphans()
         service.sweep_interrupted_remediations()

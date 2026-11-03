@@ -1214,8 +1214,9 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
   "sys.verdict": "verdict",
   "sys.guard": "bash guard",
   "sys.checked": "checked",
-  "sys.kube_v": "present · {m} mutating verbs allowed · {e} errors",
-  "sys.aws_v": "present · {n} write actions allowed",
+  "sys.kube_v": "present · {m} mutating verbs allowed · {e} errors · {r} secret-read grants",
+  "sys.aws_v": "present · {n} write actions allowed · {r} secret reads allowed",
+  "sys.writable": "config a run could rewrite",
   "sys.not_present": "not present",
   "sys.unverifiable": "unverifiable",
   "act.title": "Remediation proposals",
@@ -1569,8 +1570,9 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
   "sys.verdict": "结论",
   "sys.guard": "bash 守卫",
   "sys.checked": "检查时间",
-  "sys.kube_v": "已挂载 · 允许 {m} 个变更动作 · {e} 个错误",
-  "sys.aws_v": "已挂载 · 允许 {n} 个写操作",
+  "sys.kube_v": "已挂载 · 允许 {m} 个变更动作 · {e} 个错误 · {r} 项可读机密的授权",
+  "sys.aws_v": "已挂载 · 允许 {n} 个写操作 · 允许 {r} 个读机密动作",
+  "sys.writable": "运行能改写的配置",
   "sys.not_present": "未挂载",
   "sys.unverifiable": "无法验证",
   "act.title": "处置建议",
@@ -3140,8 +3142,10 @@ curl -X POST http://hookprobe:8088/sessions/my:task:1/stop -H ...</pre>
         // it declared: counts and the verdict, never the identity strings.
         (posture ? `<div class="card"><h3>${icon("shield")}${esc(t("sys.posture"))}</h3>` + kv([
           [t("sys.verdict"), posture.verdict], [t("sys.guard"), posture.bash_guard], [t("sys.checked"), fmtTime(posture.checked_at)],
-          ["kube", (posture.kube || {}).present ? t("sys.kube_v", { m: ((posture.kube || {}).mutating || []).length, e: ((posture.kube || {}).errors || []).length }) : t("sys.not_present")],
-          ["aws", (posture.aws || {}).unverifiable ? t("sys.unverifiable") : (posture.aws || {}).present ? t("sys.aws_v", { n: ((posture.aws || {}).allowed || []).length }) : t("sys.not_present")],
+          ["kube", (posture.kube || {}).present ? t("sys.kube_v", { m: ((posture.kube || {}).mutating || []).length, e: ((posture.kube || {}).errors || []).length, r: ((posture.kube || {}).reads_secrets || []).length }) : t("sys.not_present")],
+          ["aws", (posture.aws || {}).unverifiable ? t("sys.unverifiable") : (posture.aws || {}).present ? t("sys.aws_v", { n: ((posture.aws || {}).allowed || []).length, r: ((posture.aws || {}).reads_secrets || []).length }) : t("sys.not_present")],
+          // Paths, not counts: these are what the operator has to remount.
+          [t("sys.writable"), (posture.writable_inputs || []).length ? posture.writable_inputs.join(", ") : "0"],
         ]) + "</div>" : "");
     } catch (e) { box.innerHTML = errorHtml(e); }
   }

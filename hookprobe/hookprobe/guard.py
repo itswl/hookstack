@@ -210,6 +210,52 @@ _UNSEEN_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
 )
 
+# Printing a secret's VALUE. Checked under every posture, before the mode
+# branch, because reading is what both postures may do and this is the read that
+# should not happen by accident: a value printed here is in the model's context
+# and the transcript, one summary away from a chat card. Whether a secret
+# exists, which keys it holds and when it changed stays open — `kubectl get
+# secret x`, `kubectl describe secret x`, `aws secretsmanager describe-secret`,
+# `aws ssm get-parameter` without decryption — and that is nearly always what an
+# investigation needs. The same honesty as above: a raw API URL assembled at
+# runtime, a pod that mounts the secret, or another vendor's CLI is not caught.
+# The credential is what holds, and posture reports whether it can read secrets
+# at all (`reads_secrets` on /v1/posture).
+# Named without the word: code scanning reads any name holding it as secret
+# data and follows it into the refusal text, and these hold patterns and
+# descriptions, never a value.
+_KUBE = r"\b(?:kubectl|oc|kubecolor)\b"
+_AWS = r"(?<!\.)\baws\b(?!\.)"
+# `secret`, `secrets`, `secret/name`, or one item of a comma list. A pod named
+# `secret-rotator` is not a Secret.
+_RESOURCE_WORD = r"(?:^|[\s,])secrets?(?=[\s,/]|$)"
+# An output format that prints the object: anything but the table forms.
+_PRINTED = r"(?:\s-o|\s--output)(?:=|\s+)?(?![\s=])(?!(?:wide|name)\b)"
+_REVEAL_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(rf"{_KUBE}(?=[^|;&\n]*\bget\b)(?=[^|;&\n]*{_RESOURCE_WORD})(?=[^|;&\n]*{_PRINTED})"),
+        "printing a Secret's data",
+    ),
+    (re.compile(rf"{_KUBE}{_SEG}--raw[=\s]+\S*/secrets\b"), "reading a Secret through the raw API"),
+    (re.compile(rf"{_KUBE}{_SEG}\bview-secret\b|\boc\b{_SEG}\bextract\b"), "extracting a Secret's data"),
+    (re.compile(rf"{_AWS}{_SEG}\bsecretsmanager\b{_SEG}\b(?:batch-)?get-secret-value\b"), "a Secrets Manager value"),
+    (
+        re.compile(rf"{_AWS}(?=[^|;&\n]*\bssm\b)(?=[^|;&\n]*\bget-parameter)(?=[^|;&\n]*--with-decryption\b)"),
+        "a decrypted SSM parameter",
+    ),
+    (
+        re.compile(rf"{_AWS}{_SEG}\bkms\b{_SEG}\b(?:decrypt|generate-data-key(?:-pair)?)(?![\w-])"),
+        "a KMS decryption or a plaintext data key",
+    ),
+    (re.compile(rf"{_AWS}{_SEG}\bsts\b{_SEG}\bget-(?:session|federation)-token\b"), "fresh credentials from sts"),
+    (
+        re.compile(
+            rf"{_AWS}{_SEG}\bconfigure\b{_SEG}(?:\bexport-credentials\b|\bget\s+\S*(?:secret_access_key|session_token)\b)"
+        ),
+        "this runner's own AWS credentials",
+    ),
+)
+
 READONLY, DANGER_ONLY = "readonly", "danger-only"
 MODES = (READONLY, DANGER_ONLY)
 
@@ -238,6 +284,14 @@ def bash_deny_reason(command: str, mode: str = READONLY) -> str | None:
             return (
                 f"unseen-code guard: {label} is blocked. The guard cannot read a script it never "
                 f"sees; fetch it to a file, read it, and run the commands it holds one by one"
+            )
+    for pattern, label in _REVEAL_RULES:
+        if pattern.search(command):
+            return (
+                f"secret-value guard: {label} is blocked under every posture. A value printed here "
+                f"reaches the model and can reach a report; ask whether it exists, which keys it "
+                f"holds or when it changed instead (`kubectl describe secret`, "
+                f"`aws secretsmanager describe-secret`, `aws ssm get-parameter` without decryption)"
             )
     if mode == DANGER_ONLY:
         for pattern, label in _DANGER_RULES:

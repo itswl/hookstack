@@ -173,7 +173,7 @@ services:
   # deploy/sidecars/doors.py): the egress proxy, the MCP gate and the console
   # ingress each sit on BOTH networks and are stateless stdlib servers, so three
   # containers were three listeners. The old service names stay as network
-  # aliases: the probes' HTTP_PROXY and NO_PROXY, their /data/mcp.json and every
+  # aliases: the probes' HTTP_PROXY and NO_PROXY, their mcp.json and every
   # document still name egress-proxy, mcp-gate and probe-ingress.
   #
   # The proxy: the investigators' way out, and a list of where out may be.
@@ -436,15 +436,21 @@ services:
       HOOKPROBE_RUNBOOK_ANSWER_DAYS: ${HOOKPROBE_RUNBOOK_ANSWER_DAYS:-}
       HOOKPROBE_REFIRE_ANSWER_HOURS: ${HOOKPROBE_REFIRE_ANSWER_HOURS:-}
       HOOKPROBE_SKILLS: ${HOOKPROBE_SKILLS:-}
-      # Lives inside the volume above, so it is hot-editable like the system
-      # prompt and needs no mount of its own — and it is NOT tracked, so this
-      # is the one place that says what it must contain: the chat's MCP server
-      # is reached as http://mcp-gate:8097/mcp/ with this node's bearer from
-      # .env (deploy/sidecars/mcp.example.json is the shape). A server on the
-      # host is out of reach from this network, and a stdio server cannot be
-      # reached from here at all. A missing file is one warning in the log and
-      # a round with no chat tools, which reads like a quiet day.
-      HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-/data/mcp.json}
+      # On the read-only secrets mount, not the volume above (2026-11-03). The
+      # engine reads it fresh at every run and starts the stdio servers it
+      # names, so a copy the agent could write was a command one run could
+      # plant for every run after it: measured 2026-11-02 with this setting on
+      # the probe image. Still hot-editable from the host
+      # (work-data/probe-plan-secrets/mcp.json), and it holds this node's
+      # mcp-gate bearer, which belongs with the secrets anyway. It is NOT
+      # tracked, so this is the one place that says what it must contain:
+      # the chat's MCP server is reached as http://mcp-gate:8097/mcp/ with this
+      # node's bearer from .env (deploy/sidecars/mcp.example.json is the
+      # shape). A server on the host is out of reach from this network, and a
+      # stdio server cannot be reached from here at all. A missing file is one
+      # warning in the log and a round with no chat tools, which reads like a
+      # quiet day.
+      HOOKPROBE_MCP_CONFIG: ${HOOKPROBE_MCP_CONFIG:-/data/secrets/mcp.json}
       # The closed set of MCP tools this planner may call. EMPTY DENIES ALL —
       # mounting a server is plumbing, naming its tools is policy, and only the
       # second one decides what a colleague's chat message can ask this agent to
@@ -592,7 +598,8 @@ services:
       HOOKPROBE_PRICE_OUT_PER_1M: ${HOOKPROBE_PRICE_OUT_PER_1M:-}
       HOOKPROBE_PRICE_CACHE_READ_PER_1M: ${HOOKPROBE_PRICE_CACHE_READ_PER_1M:-}
       HOOKPROBE_PRICE_CACHE_WRITE_PER_1M: ${HOOKPROBE_PRICE_CACHE_WRITE_PER_1M:-}
-      HOOKPROBE_MCP_CONFIG: /data/mcp.json
+      # On the read-only secrets mount, for the planner's reason above.
+      HOOKPROBE_MCP_CONFIG: /data/secrets/mcp.json
       # Read-only chat tools ONLY. This instance reads colleagues' messages for
       # a living, so the list is the difference between "it can see the thread"
       # and "a message in the thread can post as the operator".

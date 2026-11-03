@@ -106,6 +106,7 @@ def _bash_guard_hook(
     record: Callable[[dict[str, Any]], None] | None = None,
     workdir: Path | None = None,
     home: Path | None = None,
+    configured: tuple[Path, ...] = (),
 ) -> Callable[..., Any]:
     """PreToolUse: refuse a command this runner's posture does not allow.
 
@@ -125,7 +126,7 @@ def _bash_guard_hook(
         reason = bash_deny_reason(command, mode)
         guard = "bash"
         if reason is None and workdir is not None:
-            hit = shell_write_target(command, inputs.protected_paths(workdir, home), workdir)
+            hit = shell_write_target(command, inputs.protected_paths(workdir, home, configured), workdir)
             if hit is not None:
                 guard = "input"
                 reason = (
@@ -194,7 +195,10 @@ def _mcp_guard_hook(
 
 
 def _input_guard_hook(
-    workdir: Path, home: Path | None, record: Callable[[dict[str, Any]], None] | None = None
+    workdir: Path,
+    home: Path | None,
+    record: Callable[[dict[str, Any]], None] | None = None,
+    configured: tuple[Path, ...] = (),
 ) -> Callable[..., Any]:
     """PreToolUse: refuse a write aimed at the files that steer the next run."""
 
@@ -204,7 +208,9 @@ def _input_guard_hook(
         tool_input = input_data.get("tool_input")
         data = tool_input if isinstance(tool_input, dict) else {}
         for key in _WRITE_PATH_KEYS:
-            reason = inputs.write_deny_reason(str(data.get(key) or ""), workdir=workdir, home=home)
+            reason = inputs.write_deny_reason(
+                str(data.get(key) or ""), workdir=workdir, home=home, configured=configured
+            )
             if reason is not None:
                 logger.warning("input guard denied write: %s", data.get(key))
                 if record is not None:
@@ -808,6 +814,9 @@ class ClaudeAgentEngine:
         self._settings = settings
         self._workdir = settings.workdir
         self._home = Path(os.environ.get("HOME", "") or "/data/home")
+        # The files configuration points at (MCP config, roles, allowlists...):
+        # guarded and fingerprinted like the names in the workdir. See inputs.
+        self._configured = inputs.configured(settings)
         self._agents_raw = _load_agents_raw(settings.agents_config)
         (self._workdir / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
         # Set for the duration of one run, so a caller that wants the turn to
@@ -1083,13 +1092,18 @@ class ClaudeAgentEngine:
                     HookMatcher(
                         matcher="Bash",
                         hooks=_hook_list(
-                            _bash_guard_hook(self._settings.bash_guard, recorder, self._workdir, self._home)
+                            _bash_guard_hook(
+                                self._settings.bash_guard, recorder, self._workdir, self._home, self._configured
+                            )
                         ),
                     ),
                     # Matched on every tool, filtered by name inside: the guard
                     # must not depend on how the SDK interprets a matcher
                     # pattern for the one thing it exists to stop.
-                    HookMatcher(matcher=None, hooks=_hook_list(_input_guard_hook(self._workdir, self._home, recorder))),
+                    HookMatcher(
+                        matcher=None,
+                        hooks=_hook_list(_input_guard_hook(self._workdir, self._home, recorder, self._configured)),
+                    ),
                     # matcher=None for the same reason as the line above: the
                     # one guard standing between a colleague's chat message and
                     # a tool that can act as the operator must not depend on
@@ -1127,7 +1141,7 @@ class ClaudeAgentEngine:
         )
 
         logger.info("engine start session=%s model=%s resume=%s", session_key, self._settings.model, resume or "-")
-        inputs_before = inputs.fingerprint(self._workdir, self._home)
+        inputs_before = inputs.fingerprint(self._workdir, self._home, self._configured)
         input_changes: tuple[str, ...] = ()
         last_text = ""
         message_count = 0
@@ -1310,7 +1324,7 @@ class ClaudeAgentEngine:
 
     def _input_changes(self, before: dict[str, str]) -> tuple[str, ...]:
         """What this run did to its own input surface — empty when it behaved."""
-        found = tuple(inputs.changes(before, inputs.fingerprint(self._workdir, self._home)))
+        found = tuple(inputs.changes(before, inputs.fingerprint(self._workdir, self._home, self._configured)))
         if found:
             logger.warning("run rewrote its own inputs: %s", "; ".join(found))
         return found

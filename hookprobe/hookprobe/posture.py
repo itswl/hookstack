@@ -14,7 +14,13 @@ At startup, for every credential present, ask the far side what it would allow:
   aws sts get-caller-identity         who am I
   aws iam simulate-principal-policy   would these dangerous actions be allowed
 
-and compare with the declared posture. A runner declared read-only whose
+and compare with the declared posture. Two more answers are recorded beside the
+verdict and never decide it: whether the identity can read secret values
+(`kubectl auth can-i get|list secrets -A`, and a second simulation of
+Secrets Manager, SSM, KMS and S3 object reads), and which configured files
+this process's own user could rewrite. A read-only identity is allowed to
+read, and an upgrade must not stop a node that ran yesterday; both are there
+so an operator can see them and scope them. A runner declared read-only whose
 credentials can `delete pods` is WIDER THAN DECLARED, and under the default
 (`enforce`) it refuses to start — a boundary that exists only in a README is
 not one, and a runner that starts anyway would spend its first run proving it.
@@ -54,6 +60,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from hookprobe import inputs
+
 logger = logging.getLogger("hookprobe.posture")
 
 MODES = ("enforce", "warn", "off")
@@ -80,6 +88,23 @@ DANGEROUS_AWS_ACTIONS = (
     "eks:DeleteCluster",
     "lambda:UpdateFunctionCode",
     "secretsmanager:PutSecretValue",
+)
+# Reading questions, asked beside the mutating ones and kept apart from them: a
+# read-only identity is allowed to read, so none of this decides a verdict. What
+# it answers is how much a read-only node can see that is a secret's VALUE rather
+# than a fact about a system. A second deployment running copies of these files
+# measured it on 2026-11-02: its read-only cluster identity read Secret objects
+# in every cluster, and its read-only AWS policy read S3 object contents, which
+# is where state files and backups keep their secrets in plain text.
+# Named without the word, like guard.py's table: code scanning reads such a
+# name as secret data, and these are questions.
+KUBE_READ_QUESTIONS = (("get", "secrets"), ("list", "secrets"))
+READ_VERBS = frozenset({"get", "list", "watch", "*"})
+AWS_READ_ACTIONS = (
+    "secretsmanager:GetSecretValue",
+    "ssm:GetParameter",
+    "kms:Decrypt",
+    "s3:GetObject",
 )
 TIMEOUT_SECONDS = 25.0
 
@@ -128,6 +153,22 @@ def kube_mutating_rules(can_i_list: str) -> list[str]:
             continue
         if verbs & MUTATING_VERBS:
             found.append(f"{resource}: {' '.join(sorted(verbs & MUTATING_VERBS))}")
+    return found
+
+
+def kube_reading_rules(can_i_list: str) -> list[str]:
+    """The rules in `kubectl auth can-i --list` output that let this identity read
+    Secret objects here: `secrets` itself, or a wildcard resource, with a verb
+    that returns the data."""
+    found: list[str] = []
+    for raw in can_i_list.splitlines()[1:]:
+        line = raw.strip()
+        if not line or line.startswith("Resources") or "[" not in line:
+            continue
+        resource = line.split()[0]
+        verbs = {v.strip() for v in line.rsplit("[", 1)[1].rstrip("]").split() if v.strip()}
+        if resource.split(".")[0] in {"secrets", "*"} and verbs & READ_VERBS:
+            found.append(f"{resource}: {' '.join(sorted(verbs & READ_VERBS))}")
     return found
 
 
@@ -181,7 +222,14 @@ async def check_kube(run: Runner) -> dict[str, Any]:
     path = kubeconfig_path()
     if path is None:
         return {"present": False}
-    record: dict[str, Any] = {"present": True, "kubeconfig": str(path), "mutating": [], "errors": []}
+    record: dict[str, Any] = {
+        "present": True,
+        "kubeconfig": str(path),
+        "mutating": [],
+        "errors": [],
+        "reads_secrets": [],
+        "read_errors": [],
+    }
     code, out, err = await run(["kubectl", "auth", "can-i", "--list"])
     if code == 127:
         # The binary is not in the image. Four more questions of it would be
@@ -193,6 +241,7 @@ async def check_kube(run: Runner) -> dict[str, Any]:
         record["errors"].append(f"can-i --list: {(err or out).strip()[:200]}")
     else:
         record["mutating"].extend(kube_mutating_rules(out))
+        record["reads_secrets"].extend(kube_reading_rules(out))
     for verb, resource in KUBE_QUESTIONS:
         code, out, err = await run(["kubectl", "auth", "can-i", verb, resource, "--all-namespaces"])
         answer = out.strip().lower()
@@ -201,6 +250,16 @@ async def check_kube(run: Runner) -> dict[str, Any]:
         elif not answer.startswith("no"):
             record["errors"].append(f"can-i {verb} {resource}: {(err or out).strip()[:120]}")
     record["mutating"] = sorted(set(record["mutating"]))
+    # Reading questions. Their failures go to `read_errors`, never `errors`:
+    # an answer that decides nothing must not be able to change the verdict.
+    for verb, resource in KUBE_READ_QUESTIONS:
+        code, out, err = await run(["kubectl", "auth", "can-i", verb, resource, "--all-namespaces"])
+        answer = out.strip().lower()
+        if answer.startswith("yes"):
+            record["reads_secrets"].append(f"{resource} (cluster-wide): {verb}")
+        elif not answer.startswith("no"):
+            record["read_errors"].append(f"can-i {verb} {resource}: {(err or out).strip()[:120]}")
+    record["reads_secrets"] = sorted(set(record["reads_secrets"]))
     return record
 
 
@@ -252,7 +311,15 @@ async def check_aws(run: Runner) -> dict[str, Any]:
         if not await asyncio.to_thread(metadata_offers_credentials):
             return {"present": False}
         # A role is offered: its credentials are measured like any other source.
-    record: dict[str, Any] = {"present": True, "identity": None, "allowed": [], "errors": [], "unverifiable": False}
+    record: dict[str, Any] = {
+        "present": True,
+        "identity": None,
+        "allowed": [],
+        "errors": [],
+        "unverifiable": False,
+        "reads_secrets": [],
+        "read_errors": [],
+    }
     code, out, err = await run(["aws", "sts", "get-caller-identity", "--output", "json"])
     if code != 0 and "Unable to locate credentials" in (err or out):
         # The CLI looked everywhere it looks and found nothing: an instance with
@@ -314,7 +381,37 @@ async def check_aws(run: Runner) -> dict[str, Any]:
         except (ValueError, KeyError, TypeError, AttributeError):
             record["errors"].append("simulate-principal-policy: invalid or incomplete results")
             record["unverifiable"] = True
+    record["reads_secrets"], record["read_errors"] = await _aws_reading(run, role_arn(arn))
     return record
+
+
+async def _aws_reading(run: Runner, principal: str) -> tuple[list[str], list[str]]:
+    """Which secret-reading actions the identity holds, and what stopped the
+    question. A separate simulation from the dangerous one, so that a failure
+    here is reported and can never make a verdict unverifiable."""
+    code, out, err = await run(
+        [
+            "aws",
+            "iam",
+            "simulate-principal-policy",
+            "--policy-source-arn",
+            principal,
+            "--action-names",
+            *AWS_READ_ACTIONS,
+            "--output",
+            "json",
+        ]
+    )
+    if code != 0:
+        return [], [f"simulate-principal-policy (reads): {(err or out).strip()[:200]}"]
+    try:
+        results = json.loads(out)["EvaluationResults"]
+        decided = {str(item["EvalActionName"]): str(item["EvalDecision"]) for item in results}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return [], ["simulate-principal-policy (reads): invalid results"]
+    missing = [action for action in AWS_READ_ACTIONS if action not in decided]
+    allowed = sorted(action for action in AWS_READ_ACTIONS if decided.get(action) == "allowed")
+    return allowed, ([f"simulate-principal-policy (reads): no answer for {', '.join(missing)}"] if missing else [])
 
 
 def declared_radius(path: Path | None) -> set[str] | None:
@@ -410,13 +507,17 @@ def summary(record: dict[str, Any]) -> str:
             f"kube mutating={len(kube.get('mutating') or [])}"
             + (f" errors={len(kube['errors'])}" if kube.get("errors") else "")
             + (f" tool-missing={kube['tool_missing']}" if kube.get("tool_missing") else "")
+            + (f" reads-secrets={len(kube['reads_secrets'])}" if kube.get("reads_secrets") else "")
         )
     if aws.get("present"):
         parts.append(
             f"aws identity={aws.get('identity') or '?'} dangerous-allowed={len(aws.get('allowed') or [])}"
             + (" unverifiable" if aws.get("unverifiable") else "")
             + (f" tool-missing={aws['tool_missing']}" if aws.get("tool_missing") else "")
+            + (f" reads-secrets={len(aws['reads_secrets'])}" if aws.get("reads_secrets") else "")
         )
+    if record.get("writable_inputs"):
+        parts.append(f"writable-inputs={len(record['writable_inputs'])}")
     return " · ".join(parts)
 
 
@@ -432,6 +533,20 @@ def read(workdir: Path) -> dict[str, Any] | None:
         return None
 
 
+async def _say_writable(paths: list[str], alarm: Callable[[str], Awaitable[bool]] | None) -> None:
+    """Name the configured files a run could rewrite, once per start."""
+    if not paths:
+        return
+    text = (
+        f"configured files this node's own user can rewrite, so a run can too: {', '.join(paths)}. "
+        "Mount them read-only, outside the run's volume."
+    )
+    logger.warning("%s", text)
+    if alarm is not None:
+        with contextlib.suppress(Exception):  # a courtesy; the record above is the fact
+            await alarm(f"posture: {text}")
+
+
 async def on_startup(
     workdir: Path,
     bash_guard: str,
@@ -439,6 +554,7 @@ async def on_startup(
     run: Runner = run_cli,
     radius: Path | None = None,
     alarm: Callable[[str], Awaitable[bool]] | None = None,
+    steering: tuple[Path, ...] = (),
 ) -> dict[str, Any] | None:
     """Check, record, announce — and under `enforce`, refuse to start a runner
     whose credentials are wider than it declares.
@@ -452,18 +568,29 @@ async def on_startup(
     credential that could not be measured is said there at once, on both
     postures: the readonly node is about to refuse and loop, and a writing node
     is about to start with a radius nobody measured.
+
+    `steering` is the configured files only an operator writes
+    (`inputs.operator_files`). Any this process's own user could rewrite is
+    recorded as `writable_inputs`, said in the log and on the alarm channel, and
+    never refused: the input guard stops the obvious writes, and the read-only
+    mount that would stop the rest is the operator's to make.
     """
     if mode not in MODES:
         mode = "enforce"  # a typo in the switch that decides whether to refuse must fail closed
     record: dict[str, Any]
+    writable_inputs = inputs.writable(steering)
     if mode == "off":
         record = {"checked_at": round(time.time(), 3), "bash_guard": bash_guard, "verdict": "skipped", "mode": mode}
+        record["writable_inputs"] = writable_inputs
         write(workdir, record)
+        await _say_writable(writable_inputs, alarm)
         return record
     declared = declared_radius(radius)
     record = await check(bash_guard, run, declared)
     record["mode"] = mode
+    record["writable_inputs"] = writable_inputs
     write(workdir, record)
+    await _say_writable(writable_inputs, alarm)
     line = summary(record)
     if record["verdict"] == "wider-than-declared":
         # For a declared writing node the useful detail is the EXCESS, not the

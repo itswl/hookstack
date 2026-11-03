@@ -48,6 +48,11 @@ whose context had been filled with a live credential was indistinguishable from
 one that read a pod list. Nobody could decide to discard the report or rotate
 the key. It records the KIND and never the match, because the reason string
 reaches an audit file and sometimes a chat card.
+*Corrected 2026-11-03:* printing a Secret's data is now refused under every
+posture, with Secrets Manager values, decrypted SSM parameters and KMS
+plaintext (`_REVEAL_RULES` in guard.py; note
+2026-11-03-read-only-still-reads-secret-values). `env` and every other read stay
+allowed, and the output guard still records what comes back from them.
 
 **The third outcome, because nothing escalated.** `deny_reason` could refuse and
 continue, and that was all. An agent steered into the posture twenty times left
