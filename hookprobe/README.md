@@ -238,7 +238,9 @@ always reach. Two things about the word *default*, before the layers:
    is refused, because its verbs never reach a rule. So is printing a secret's
    value: a Secret's data from kubectl, a Secrets Manager value, a decrypted SSM
    parameter, KMS plaintext, or AWS credentials. Whether a secret exists, which
-   keys it holds and when it changed stay open. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
+   keys it holds and when it changed stay open. The model is offered a closed
+   list of built-in tools, so a tool a CLI upgrade adds is not offered until it
+   is added to that list on purpose. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
    cloud CLIs are too many to enumerate — scope their credentials instead.
 3. **Container** — non-root, disposable, nothing precious inside, no container
    runtime and no socket (a run cannot start a container, and cannot build a

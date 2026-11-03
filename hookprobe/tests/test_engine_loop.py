@@ -128,6 +128,34 @@ def test_the_message_reaches_the_model_as_words_not_as_cli_input(engine) -> None
     assert _FakeClient.options_seen.verbatim_prompts is True
 
 
+def test_the_tools_the_model_is_offered_are_a_closed_set(engine) -> None:
+    """Under bypassPermissions an allowlist restricts nothing; the base set is
+    what the CLI offers at all. CLI 2.1.316 (v0.10.0) added Monitor, ListAgents
+    and ToolSearch with nobody choosing them. A tool joins this set on purpose,
+    in this file and in this test, or not at all."""
+    _run(engine, [_result()])
+
+    offered = _FakeClient.options_seen.tools
+    assert offered == [
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "Skill",
+        "Agent",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskUpdate",
+    ]
+    kept_out = {"Monitor", "Workflow", "SendMessage", "ListAgents", "CronCreate", "ToolSearch", "EnterWorktree"}
+    assert kept_out.isdisjoint(offered)
+
+
 def test_deltas_are_streamed_but_not_counted(engine) -> None:
     """The 32,294 bug, as an assertion.
 

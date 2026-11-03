@@ -42,6 +42,13 @@ PY = ROOT / "hookprobe" / ".venv" / "bin" / "python"
 # (name, file, exact text to replace, replacement, tests that must then fail)
 MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
     (
+        "the model is offered whatever tools the CLI ships",
+        "hookprobe/hookprobe/engine.py",
+        "            tools=list(_TOOLS),",
+        "            tools=None,",
+        ("tests/test_engine_loop.py",),
+    ),
+    (
         "a file the operator configured may be written by a run",
         "hookprobe/hookprobe/inputs.py",
         "    paths.extend(configured)",

@@ -34,6 +34,9 @@ have to agree. The operator chose the lock.
 - A relock of claude-agent-sdk is a CLI bump. The SDK's changelog names the
   CLI each release bundles, and `claude_agent_sdk/_cli_version.py` names it
   inside an image.
+- A CLI bump can move the tool surface too: 2.1.316 added Monitor, ListAgents
+  and ToolSearch. The engine's built-in tools are a closed list since
+  2026-11-03 (2026-11-03-the-investigators-built-in-tools-are-a-closed-list).
 - `claude` is no longer on PATH in the image, so `claude --version` there
   fails; read the version file instead.
 - The image lost the npm CLI: 1.69 GB before and 1.17 GB after, in a local
