@@ -1,11 +1,14 @@
 """What came BACK from a tool, which nothing used to look at.
 
-The input guard refuses changes, so `kubectl get secret db-creds -o yaml` and
-`env` are both allowed under `readonly` — and they should be: an investigator
-that cannot read cannot investigate. What was missing is that nothing then
-examined the answer, so a run whose context was filled with a live credential
-was indistinguishable from one that read a pod list. Nobody could decide to
-discard the report or rotate the key, because nobody knew.
+The input guard refuses changes, so `env`, a config file and a log line are all
+allowed under `readonly` — and they should be: an investigator that cannot read
+cannot investigate. Since 2026-11-03 one kind of read is refused under every
+posture, the one whose whole content is a credential: a Secret's data, a
+Secrets Manager value (guard.py, `_SECRET_RULES`). Everything else can still
+carry one back. What was missing is that nothing then examined the answer, so
+a run whose context was filled with a live credential was indistinguishable
+from one that read a pod list. Nobody could decide to discard the report or
+rotate the key, because nobody knew.
 
 Borrowed in idea from `ToolOutputGuardrail` in openai/openai-agents-python.
 """
@@ -20,11 +23,17 @@ import pytest
 from hookprobe import audit, gate
 
 
-def test_the_input_guard_allows_reading_a_secret_which_is_the_whole_point(tmp_path: Path) -> None:
+def test_the_input_guard_allows_the_reads_that_can_carry_a_secret_back(tmp_path: Path) -> None:
     """Pinned so the premise of this file cannot quietly change: these are
-    reads, `readonly` permits reads, and that is correct."""
-    for command in ("kubectl get secret db-creds -o yaml", "env"):
+    reads, `readonly` permits reads, and that is correct. Printing a Secret's
+    data is the one read refused outright (2026-11-03); every other way a
+    credential can come back is this file's to record."""
+    for command in ("env", "cat /etc/app/config.yaml", "kubectl logs deploy/api -n prod --since=1h"):
         assert gate.deny_reason("Bash", {"command": command}, bash_mode="readonly", workdir=tmp_path) is None
+    refused = gate.deny_reason(
+        "Bash", {"command": "kubectl get secret db-creds -o yaml"}, bash_mode="readonly", workdir=tmp_path
+    )
+    assert refused is not None and refused[1].startswith("secret-value guard")
 
 
 @pytest.mark.parametrize(
@@ -93,7 +102,7 @@ def test_a_flagged_answer_lands_in_the_audit_beside_the_call(tmp_path: Path, mon
             {
                 "hook_event_name": "PostToolUse",
                 "tool_name": "Bash",
-                "tool_input": {"command": "kubectl get secret db-creds -o yaml"},
+                "tool_input": {"command": "cat /run/secrets/db-creds/credentials"},
                 "tool_response": response,
             },
             dict(__import__("os").environ),
@@ -113,7 +122,7 @@ def test_a_flagged_answer_lands_in_the_audit_beside_the_call(tmp_path: Path, mon
     assert [line.get("output_secret") for line in lines] == ["aws access key id", None]
     assert all(line["tool"] == "Bash" for line in lines)
     # The command is recorded as before — the flag is added, nothing replaced.
-    assert "kubectl get secret" in lines[0]["detail"]
+    assert "cat /run/secrets/db-creds" in lines[0]["detail"]
 
 
 def test_repeated_refusals_are_counted_where_one_refusal_used_to_look_the_same(
@@ -192,7 +201,7 @@ def test_both_new_numbers_have_a_reader(tmp_path: Path, monkeypatch: pytest.Monk
             {
                 "hook_event_name": "PostToolUse",
                 "tool_name": "Bash",
-                "tool_input": {"command": "kubectl get secret x -o yaml"},
+                "tool_input": {"command": "cat /run/secrets/x/credentials"},
                 "tool_response": {"stdout": "AKIAIOSFODNN7EXAMPLE"},
             },
             env,

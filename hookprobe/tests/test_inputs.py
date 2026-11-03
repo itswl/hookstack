@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -196,3 +197,128 @@ def test_the_hook_survives_a_malformed_tool_input(workdir: Path) -> None:
 
     hook = _input_guard_hook(workdir, None)
     assert asyncio.run(hook({"tool_name": "Write", "tool_input": "not a dict"}, None, None)) == {}
+
+
+# --- the files configuration points at --------------------------------------
+
+
+def test_every_file_setting_is_classified(tmp_path: Path) -> None:
+    """A file the operator names by path steers every run as surely as the names
+    in the workdir do. A new file setting has to be placed here on purpose: as an
+    operator's file (guarded, and expected read-only), or as one of the two the
+    service itself writes. Unclassified, it would be a steering file nobody
+    guards — which is what the MCP config was until 2026-11-02."""
+    import dataclasses
+
+    from hookprobe.settings import Settings
+
+    paths = {f.name for f in dataclasses.fields(Settings) if "Path" in str(f.type)}
+    service_written = {"workdir", "system_prompt_append"}
+    assert paths - service_written == set(inputs._OPERATOR_FILES)
+
+
+def test_a_configured_file_is_refused_wherever_it_lives(workdir: Path, tmp_path: Path) -> None:
+    elsewhere = tmp_path / "operator" / "mcp.json"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text("{}")
+    on_volume = workdir / "mcp.json"
+    configured = (elsewhere, on_volume)
+    reason = inputs.write_deny_reason(str(elsewhere), workdir=workdir, configured=configured)
+    assert reason is not None and "configuration" in reason
+    assert inputs.write_deny_reason("mcp.json", workdir=workdir, configured=configured) is not None, (
+        "a relative path the agent writes from its cwd"
+    )
+    assert inputs.write_deny_reason(str(elsewhere.parent / "notes.md"), workdir=workdir, configured=configured) is None
+    assert inputs.write_deny_reason("mcp.json", workdir=workdir) is None, "only because configuration names it"
+
+
+def test_the_settings_name_every_configured_file(tmp_path: Path) -> None:
+    from tests.helpers import make_settings
+
+    files = {name: tmp_path / f"{name}.txt" for name in inputs._OPERATOR_FILES}
+    settings = make_settings(tmp_path, system_prompt_append=tmp_path / "prompt.md", **files)
+    assert set(inputs.operator_files(settings)) == set(files.values())
+    assert set(inputs.configured(settings)) == {*files.values(), tmp_path / "prompt.md"}
+    assert inputs.configured(make_settings(tmp_path)) == (), "nothing configured, nothing extra"
+
+
+def test_a_shell_write_into_a_configured_file_is_refused_on_every_runtime(workdir: Path, tmp_path: Path) -> None:
+    """The shape of the 2026-11-02 measurement: one shell step wrote the MCP
+    config, and every later run started the command it named."""
+    from hookprobe import gate
+    from hookprobe.engine import _bash_guard_hook
+
+    mcp = workdir / "mcp.json"
+    command = f"printf '%s' '{{\"mcpServers\":{{}}}}' > {mcp}"
+    hook = _bash_guard_hook("readonly", None, workdir, None, (mcp,))
+    out = asyncio.run(hook({"tool_name": "Bash", "tool_input": {"command": command}}, None, None))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    verdict = gate.deny_reason("Bash", {"command": command}, workdir=workdir, configured=(mcp,))
+    assert verdict is not None and verdict[0] == "input"
+    assert gate.deny_reason("Bash", {"command": command}, workdir=workdir) is None, "not without configuration"
+
+
+def test_the_spawned_gate_learns_the_configured_files_from_its_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate is a separate process that knows only what the adapter put in
+    its environment, the same environment it reads its workdir from."""
+    from hookprobe import gate
+    from tests.helpers import make_settings
+
+    mcp = tmp_path / "operator" / "mcp.json"
+    settings = make_settings(tmp_path, mcp_config=mcp)
+    env = gate.environment(settings, "probe:t:1", package_root=str(tmp_path))
+    assert str(mcp) in env["HOOKPROBE_GATE_CONFIGURED"].split(os.pathsep)
+    for name in ("HOOKPROBE_GATE_WORKDIR", "HOOKPROBE_GATE_HOME"):
+        monkeypatch.setenv(name, env[name])
+    decision = gate.decide(
+        {"hook_event_name": "PreToolUse", "tool_name": "Write", "tool_input": {"file_path": str(mcp)}},
+        {**env, "HOOKPROBE_GATE_AUDIT": ""},
+    )
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_the_hook_refuses_a_configured_file(workdir: Path, tmp_path: Path) -> None:
+    from hookprobe.engine import _input_guard_hook
+
+    roles = tmp_path / "operator" / "agents.json"
+    hook = _input_guard_hook(workdir, None, None, (roles,))
+    out = asyncio.run(hook({"tool_name": "Write", "tool_input": {"file_path": str(roles)}}, None, None))
+    assert "configuration" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_a_changed_configured_file_is_caught_however_it_changed(workdir: Path, tmp_path: Path) -> None:
+    mcp = tmp_path / "operator" / "mcp.json"
+    mcp.parent.mkdir()
+    mcp.write_text("{}")
+    before = inputs.fingerprint(workdir, None, (mcp,))
+    mcp.write_text('{"mcpServers": {"planted": {"command": "sh"}}}')
+    found = inputs.changes(before, inputs.fingerprint(workdir, None, (mcp,)))
+    assert found == [f"modified {mcp}"]
+
+
+def test_a_configured_file_this_user_could_replace_is_reported(tmp_path: Path) -> None:
+    """A read-only file in a writable directory is replaceable, and a configured
+    path that does not exist yet in one can be created: both count."""
+    volume = tmp_path / "volume"
+    volume.mkdir()
+    readonly_file = volume / "mcp.json"
+    readonly_file.write_text("{}")
+    readonly_file.chmod(0o444)
+    missing = volume / "agents.json"
+    assert inputs.writable((readonly_file, missing)) == [str(readonly_file), str(missing)]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anything that is not a read-only mount")
+def test_a_file_this_user_cannot_write_is_not_reported(tmp_path: Path) -> None:
+    mounted = tmp_path / "mounted"
+    mounted.mkdir()
+    mcp = mounted / "mcp.json"
+    mcp.write_text("{}")
+    mcp.chmod(0o444)
+    mounted.chmod(0o555)
+    try:
+        assert inputs.writable((mcp,)) == []
+    finally:
+        mounted.chmod(0o755)

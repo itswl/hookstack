@@ -484,3 +484,134 @@ def test_a_missing_aws_cli_is_named_and_a_measured_violation_outranks_it(tmp_pat
     with pytest.raises(posture.PostureViolation, match=r"\*"):
         asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))
     assert posture.read(tmp_path)["verdict"] == "wider-than-declared", "what was measured outranks what could not be"
+
+
+# --- reported beside the verdict, never deciding it -------------------------
+
+CAN_I_LIST_READS_SECRETS = (
+    CAN_I_LIST_READONLY
+    + "secrets                                         []                  []               [get list watch]\n"
+)
+
+
+def test_reading_secrets_is_reported_and_decides_nothing(tmp_path, monkeypatch) -> None:
+    """A second deployment running copies of these files found its read-only
+    cluster identity reading Secret objects in every cluster. Allowed to read is
+    still read-only, so the verdict stands; what changes is that it is said."""
+    _with_kube(tmp_path, monkeypatch)
+    run = _runner(
+        {
+            "kubectl auth can-i --list": (0, CAN_I_LIST_READS_SECRETS, ""),
+            "kubectl auth can-i get secrets": (0, "yes", ""),
+        }
+    )
+    record = asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))
+    assert record["verdict"] == "readonly-confirmed"
+    assert record["kube"]["reads_secrets"] == ["secrets (cluster-wide): get", "secrets: get list watch"]
+    assert "reads-secrets=2" in posture.summary(record)
+
+
+def test_a_wildcard_grant_reads_secrets_too() -> None:
+    assert posture.kube_secret_rules(CAN_I_LIST_ADMIN) == ["*.*: *"]
+    assert posture.kube_secret_rules(CAN_I_LIST_READONLY) == []
+
+
+def test_a_reading_question_that_fails_cannot_change_the_verdict(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    run = _runner(
+        {
+            "kubectl auth can-i --list": (0, CAN_I_LIST_READONLY, ""),
+            "kubectl auth can-i list secrets": (1, "", "the server has asked for the client to provide credentials"),
+        }
+    )
+    record = asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))
+    assert record["verdict"] == "readonly-confirmed" and record["kube"]["errors"] == []
+    assert record["kube"]["read_errors"] and "list secrets" in record["kube"]["read_errors"][0]
+
+
+def _aws_reader(tmp_path, monkeypatch, reading_answer):
+    _no_aws_named(tmp_path, monkeypatch)
+    _with_aws_too(tmp_path, monkeypatch)
+    monkeypatch.setenv("KUBECONFIG", str(tmp_path / "no-kube"))
+    calls: list[list[str]] = []
+
+    async def run(argv: list[str]) -> tuple[int, str, str]:
+        calls.append(argv)
+        if argv[:2] == ["aws", "sts"]:
+            return 0, '{"Arn": "arn:aws:iam::123456789012:user/reader"}', ""
+        actions = argv[argv.index("--action-names") + 1 : argv.index("--output")]
+        if set(actions) == set(posture.SECRET_AWS_ACTIONS):
+            return reading_answer(actions)
+        denied = [{"EvalActionName": action, "EvalDecision": "implicitDeny"} for action in actions]
+        return 0, json.dumps({"EvaluationResults": denied}), ""
+
+    return run, calls
+
+
+def test_aws_secret_reads_are_a_second_simulation(tmp_path, monkeypatch) -> None:
+    def answer(actions):
+        allowed = {"s3:GetObject", "secretsmanager:GetSecretValue"}
+        results = [
+            {"EvalActionName": a, "EvalDecision": "allowed" if a in allowed else "implicitDeny"} for a in actions
+        ]
+        return 0, json.dumps({"EvaluationResults": results}), ""
+
+    run, calls = _aws_reader(tmp_path, monkeypatch, answer)
+    record = asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))
+    assert record["verdict"] == "readonly-confirmed", "the dangerous simulation denied everything"
+    assert record["aws"]["reads_secrets"] == ["s3:GetObject", "secretsmanager:GetSecretValue"]
+    assert record["aws"]["allowed"] == [] and record["aws"]["read_errors"] == []
+    assert len([a for a in calls if a[:2] == ["aws", "iam"]]) == 2
+    assert "reads-secrets=2" in posture.summary(record)
+
+
+def test_a_reading_simulation_that_fails_is_reported_not_judged(tmp_path, monkeypatch) -> None:
+    """Separate on purpose: a read-only identity that may not simulate the
+    reading actions must not become `unverifiable` because of a question that
+    decides nothing."""
+    run, _ = _aws_reader(tmp_path, monkeypatch, lambda actions: (254, "", "AccessDenied"))
+    record = asyncio.run(posture.on_startup(tmp_path, "readonly", "enforce", run))
+    assert record["verdict"] == "readonly-confirmed" and record["aws"]["unverifiable"] is False
+    assert record["aws"]["reads_secrets"] == [] and "AccessDenied" in record["aws"]["read_errors"][0]
+
+
+def test_a_configured_file_a_run_could_rewrite_is_recorded_and_paged(tmp_path, monkeypatch) -> None:
+    """Measured 2026-11-02: an MCP config on the run's volume was written by one
+    run and started as a command by every run after it. Reported, never refused:
+    the input guard stops the obvious writes, the read-only mount is the
+    operator's to make."""
+    _with_kube(tmp_path, monkeypatch)
+    volume = tmp_path / "volume"
+    volume.mkdir()
+    mcp = volume / "mcp.json"
+    mcp.write_text("{}")
+    alarm, pages = _pager()
+    run = _runner({"kubectl auth can-i --list": (0, CAN_I_LIST_READONLY, "")})
+    workdir = tmp_path / "work"
+    record = asyncio.run(posture.on_startup(workdir, "readonly", "enforce", run, alarm=alarm, steering=(mcp,)))
+    assert record["verdict"] == "readonly-confirmed"
+    assert record["writable_inputs"] == [str(mcp)] == posture.read(workdir)["writable_inputs"]
+    assert "writable-inputs=1" in posture.summary(record)
+    assert len(pages) == 1 and str(mcp) in pages[0]
+    off = asyncio.run(posture.on_startup(workdir, "readonly", "off", run, steering=(mcp,)))
+    assert off["writable_inputs"] == [str(mcp)], "said even with the credential check switched off"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anything that is not a read-only mount")
+def test_a_configured_file_nobody_here_can_write_is_quiet(tmp_path, monkeypatch) -> None:
+    _with_kube(tmp_path, monkeypatch)
+    mounted = tmp_path / "mounted"
+    mounted.mkdir()
+    mcp = mounted / "mcp.json"
+    mcp.write_text("{}")
+    mcp.chmod(0o444)
+    mounted.chmod(0o555)
+    alarm, pages = _pager()
+    run = _runner({"kubectl auth can-i --list": (0, CAN_I_LIST_READONLY, "")})
+    try:
+        record = asyncio.run(
+            posture.on_startup(tmp_path / "work", "readonly", "enforce", run, alarm=alarm, steering=(mcp,))
+        )
+    finally:
+        mounted.chmod(0o755)
+    assert record["writable_inputs"] == [] and pages == []

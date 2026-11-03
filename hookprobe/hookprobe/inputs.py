@@ -34,8 +34,10 @@ operator's four write endpoints down with the attack.
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 # Everything the model is handed as standing instruction — plus the audit log,
 # which is here for a different reason: a record its own subject can rewrite is
@@ -80,6 +82,25 @@ _PROTECTED = (
 # and would report tampering on all of them.
 _FINGERPRINTED = (".claude", "CLAUDE.md", "system-prompt.md")
 
+# The files an operator points this service at by path. They steer every run as
+# surely as the names above do — the MCP config is started as processes at the
+# top of every run — but they live wherever the operator put them, so they are
+# protected by the configured path rather than by a name in the workdir. Found
+# 2026-11-02: a deployment kept its MCP config on the run's volume, one run wrote
+# a command into it, and every later run started that command with no tool call
+# for the guards or the audit to see. The service reads these and never writes
+# them, so the boundary that holds is a read-only mount; see `writable`.
+_OPERATOR_FILES = (
+    "mcp_config",
+    "agents_config",
+    "remediation_allowlist",
+    "remediation_high_risk_allowlist",
+    "blast_radius",
+    "decline_patterns",
+    "codex_config",
+    "pi_config",
+)
+
 # Bounds, so that a run cannot make its own verification expensive by dropping
 # a very large or very deep tree into the skills directory.
 _MAX_FILES = 400
@@ -94,16 +115,53 @@ def _resolve(path: Path) -> Path:
         return path
 
 
-def protected_paths(workdir: Path, home: Path | None = None) -> tuple[Path, ...]:
+def operator_files(settings: Any) -> tuple[Path, ...]:
+    """The configured files only an operator writes: the service reads them and
+    never writes them, so nothing running here should be able to either."""
+    found = (getattr(settings, name, None) for name in _OPERATOR_FILES)
+    return tuple(Path(path) for path in found if path)
+
+
+def configured(settings: Any) -> tuple[Path, ...]:
+    """Every file a run is steered by through configuration: the operator's
+    files, and the appended methodology when its path is configured. The
+    service writes that one for the operator (`PUT /v1/system-prompt`), so it is
+    guarded here and never expected to be read-only."""
+    append = getattr(settings, "system_prompt_append", None)
+    return (*operator_files(settings), *((Path(append),) if append else ()))
+
+
+def protected_paths(workdir: Path, home: Path | None = None, configured: Iterable[Path] = ()) -> tuple[Path, ...]:
     """Paths this runner may read but never write."""
     paths = [workdir / name for name in _PROTECTED]
     if home is not None:
         # The host skills library, when HOOKPROBE_SETTING_SOURCES loads "user".
         paths.append(home / ".claude")
+    paths.extend(configured)
     return tuple(_resolve(path) for path in paths)
 
 
-def write_deny_reason(raw_path: str, *, workdir: Path, home: Path | None = None) -> str | None:
+def writable(paths: Iterable[Path]) -> list[str]:
+    """The configured files this process's own user could write or replace.
+
+    The guard on the tool path catches the obvious writes and is not a
+    boundary; the agent shares this uid. What holds is a file this uid cannot
+    write at all: a read-only mount, or a file and directory another user owns.
+    A file in a directory this uid can write is replaceable even when the file
+    itself is read-only, and a configured path that does not exist yet in such
+    a directory can be created, so both count.
+    """
+    found: list[str] = []
+    for path in paths:
+        target = _resolve(path)
+        if (target.exists() and os.access(target, os.W_OK)) or os.access(target.parent, os.W_OK):
+            found.append(str(path))
+    return found
+
+
+def write_deny_reason(
+    raw_path: str, *, workdir: Path, home: Path | None = None, configured: Iterable[Path] = ()
+) -> str | None:
     """Why this write is refused, or None when it may proceed."""
     if not raw_path:
         return None
@@ -112,8 +170,14 @@ def write_deny_reason(raw_path: str, *, workdir: Path, home: Path | None = None)
         # Tool paths are relative to the agent's cwd, which is the workdir.
         candidate = workdir / candidate
     candidate = _resolve(candidate)
-    for root in protected_paths(workdir, home):
+    operator = {_resolve(path) for path in configured}
+    for root in protected_paths(workdir, home, configured):
         if candidate == root or root in candidate.parents:
+            if root in operator:
+                return (
+                    f"input guard: {root} is configuration this node reads fresh at every run, "
+                    "so no run may write it. An operator changes it, outside any run."
+                )
             return (
                 f"input guard: {root} steers the next run, so this runner may not write it. "
                 "Turning a finding into a runbook is an operator action — distill the run, "
@@ -122,13 +186,16 @@ def write_deny_reason(raw_path: str, *, workdir: Path, home: Path | None = None)
     return None
 
 
-def fingerprint(workdir: Path, home: Path | None = None) -> dict[str, str]:
+def fingerprint(workdir: Path, home: Path | None = None, configured: Iterable[Path] = ()) -> dict[str, str]:
     """One digest per input file, for a before/after comparison across a run."""
     roots = [workdir / name for name in _FINGERPRINTED]
     if home is not None:
         # Only the skills subtree: the rest of $HOME/.claude is the CLI's own
         # transcript state, which changes on every run by design.
         roots.append(home / ".claude" / "skills")
+    # The configured files too: whatever way a run found to rewrite one, the
+    # comparison still sees that it changed.
+    roots.extend(configured)
     facts: dict[str, str] = {}
     for root in roots:
         for path in _files(root):

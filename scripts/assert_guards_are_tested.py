@@ -42,6 +42,34 @@ PY = ROOT / "hookprobe" / ".venv" / "bin" / "python"
 # (name, file, exact text to replace, replacement, tests that must then fail)
 MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
     (
+        "a file the operator configured may be written by a run",
+        "hookprobe/hookprobe/inputs.py",
+        "    paths.extend(configured)",
+        "    paths.extend(())",
+        ("tests/test_inputs.py",),
+    ),
+    (
+        "a configured file this user can rewrite is never reported",
+        "hookprobe/hookprobe/inputs.py",
+        "            found.append(str(path))",
+        "            pass",
+        ("tests/test_inputs.py", "tests/test_posture.py"),
+    ),
+    (
+        "a secret's value may be printed",
+        "hookprobe/hookprobe/guard.py",
+        "    for pattern, label in _SECRET_RULES:",
+        "    for pattern, label in ():",
+        ("tests/test_guard.py",),
+    ),
+    (
+        "posture stops asking whether secrets can be read",
+        "hookprobe/hookprobe/posture.py",
+        'KUBE_SECRET_QUESTIONS = (("get", "secrets"), ("list", "secrets"))',
+        "KUBE_SECRET_QUESTIONS = ()",
+        ("tests/test_posture.py",),
+    ),
+    (
         "alert and chat text reach the CLI as typed input again",
         "hookprobe/hookprobe/engine.py",
         "            verbatim_prompts=True,",

@@ -37,8 +37,9 @@ runner failure instead of leaving the caller to wait out its own timeout. A
 poller can write the result on its first confirming read.
 
 **The agent cannot edit what steers the next run.** `.claude/` (skills, roles,
-settings), `CLAUDE.md`, the audit log and the `results/` case files every prompt
-tells the next run to open first are closed to it — by a PreToolUse hook
+settings), `CLAUDE.md`, the audit log, the `results/` case files every prompt
+tells the next run to open first, and every file configuration points at by
+path, its MCP config among them, are closed to it — by a PreToolUse hook
 that refuses the write, and by a digest of every input file compared before and
 after each run, because the two fail differently. Without this, one injected
 line reaching `.claude/skills/` outlives the run that read it and comes back as
@@ -190,6 +191,15 @@ always reach. Two things about the word *default*, before the layers:
   per question): a role it offers is measured like any other source; no role,
   another vendor's service at the address, or nothing there is no credential;
   `AWS_EC2_METADATA_DISABLED=true` skips the question.
+  Two more answers sit beside the verdict and never decide it. `reads_secrets`
+  says whether the identity can read secret values: `kubectl auth can-i
+  get|list secrets -A`, and a second simulation of Secrets Manager values, SSM
+  parameters, KMS decryption and S3 object reads. A read-only identity is
+  allowed to read; this is how much of what it reads is a secret.
+  `writable_inputs` names every configured file this node's own user could
+  rewrite, such as an MCP config, roles, allowlists or a declared radius, and
+  pages once at startup. A run could rewrite such a file, so mount them
+  read-only.
 - **Widening is a decision, and it is signed.** Under `danger-only` the guard
   keeps only the rules no credential scope can undo — `rm -rf`, `mkfs`/`dd`
   onto a device, fork bombs, container runtimes, `terraform destroy`,
@@ -225,7 +235,10 @@ always reach. Two things about the word *default*, before the layers:
    of kubectl, helm, docker/podman, systemctl, terraform, plus ssh/scp and
    `git push`; under `danger-only` it keeps only the estate-wide destroyers
    listed above. Under both, a script piped or handed to a shell (`curl … | sh`)
-   is refused, because its verbs never reach a rule. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
+   is refused, because its verbs never reach a rule. So is printing a secret's
+   value: a Secret's data from kubectl, a Secrets Manager value, a decrypted SSM
+   parameter, KMS plaintext, or AWS credentials. Whether a secret exists, which
+   keys it holds and when it changed stay open. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
    cloud CLIs are too many to enumerate — scope their credentials instead.
 3. **Container** — non-root, disposable, nothing precious inside, no container
    runtime and no socket (a run cannot start a container, and cannot build a
@@ -237,8 +250,10 @@ always reach. Two things about the word *default*, before the layers:
    freely in `/data`, minus the carve-out below.
 4. **Input guard** — the agent may not write what steers the *next* run:
    `.claude/` (skills, roles, settings), `CLAUDE.md`, `system-prompt.md`,
-   the `audit/` flight recorder, and `results/` — the case files the prompt
-   tells every run to open first as earlier evidence. Without this, one
+   the `audit/` flight recorder, `results/` — the case files the prompt
+   tells every run to open first as earlier evidence — and every file
+   configuration points at by path, wherever it lives: the MCP config, roles,
+   allowlists, declared radius, decline patterns and runtime configs. Without this, one
    injected line reaching `.claude/skills/` outlives the run that read it and
    comes back as the operator's own runbook — a single injection made durable —
    and a forged case file is evidence the next run trusts without a tool call.
@@ -251,7 +266,12 @@ always reach. Two things about the word *default*, before the layers:
    share a UID and a process tree: a mount cannot tell `PUT /v1/skills/{name}`
    (an operator installing a reviewed runbook) from a run editing itself, and
    mounting these paths read-only would take the operator's write endpoints
-   down along with the attack.
+   down along with the attack. The files configuration points at are the
+   exception: no endpoint writes them, so a read-only mount outside the run's
+   volume is what holds, and the startup posture names any this UID could
+   still write (`writable_inputs`). A guard is still worth having in front
+   of that: a run that planted an MCP config was measured getting every later
+   run to start its command, with no tool call to see (2026-11-02).
 
 ## Non-goals (v1)
 

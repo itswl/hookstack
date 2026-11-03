@@ -288,3 +288,64 @@ def test_a_script_the_guard_never_sees_is_refused_under_every_posture(command: s
 )
 def test_a_pipe_into_something_else_is_not_this_rule(command: str) -> None:
     assert not (bash_deny_reason(command, READONLY) or "").startswith("unseen-code guard"), command
+
+
+# --- a secret's value, under every posture --------------------------------
+
+SECRET_VALUE_READS = [
+    "kubectl get secret db -o yaml",
+    "kubectl get secrets -A -ojson",
+    "kubectl -n prod get -o=jsonpath='{.data.pass}' secret/db | base64 -d",
+    "kubectl get secret/db --output yaml",
+    "kubectl get configmaps,secrets -o yaml",
+    "oc get secret db -o json",
+    "kubectl get --raw /api/v1/namespaces/prod/secrets/db",
+    "kubectl view-secret db",
+    "oc extract secret/db",
+    "aws secretsmanager get-secret-value --secret-id prod/db",
+    "aws secretsmanager batch-get-secret-value --secret-id-list prod/db",
+    "aws ssm get-parameter --name /prod/db --with-decryption",
+    "aws --region eu-west-1 ssm get-parameters-by-path --path /prod --with-decryption",
+    "aws kms decrypt --ciphertext-blob fileb://blob",
+    "aws kms generate-data-key --key-id alias/app",
+    "aws sts get-session-token",
+    "aws configure export-credentials",
+    "aws configure get default.aws_secret_access_key",
+]
+
+SECRET_METADATA_READS = [
+    "kubectl get secret db",
+    "kubectl get secrets -A -o wide",
+    "kubectl get secrets -o name",
+    "kubectl describe secret db",
+    "kubectl get pod secret-rotator-7d -o yaml",
+    "kubectl get pods -o yaml",
+    "aws secretsmanager describe-secret --secret-id prod/db",
+    "aws secretsmanager list-secrets",
+    "aws ssm get-parameter --name /prod/db",
+    "aws kms describe-key --key-id alias/app",
+    "aws kms generate-data-key-without-plaintext --key-id alias/app",
+    "aws sts get-caller-identity",
+    "aws configure get region",
+    "curl https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html",
+]
+
+
+@pytest.mark.parametrize("mode", [READONLY, DANGER_ONLY])
+@pytest.mark.parametrize("command", SECRET_VALUE_READS)
+def test_printing_a_secrets_value_is_refused_under_every_posture(command: str, mode: str) -> None:
+    """A value printed here is in the model's context and the transcript, one
+    summary away from a chat card. Reading is what both postures may do; this is
+    the read that should not happen by accident."""
+    reason = bash_deny_reason(command, mode)
+    assert reason is not None and reason.startswith("secret-value guard"), command
+    assert "describe secret" in reason, "the refusal says what to ask instead"
+
+
+@pytest.mark.parametrize("mode", [READONLY, DANGER_ONLY])
+@pytest.mark.parametrize("command", SECRET_METADATA_READS)
+def test_whether_a_secret_exists_and_when_it_changed_stays_open(command: str, mode: str) -> None:
+    """What an investigation nearly always needs: the secret is there, holds these
+    keys, changed at this time. A pod named after a secret is not one."""
+    reason = bash_deny_reason(command, mode)
+    assert reason is None or not reason.startswith("secret-value guard"), command

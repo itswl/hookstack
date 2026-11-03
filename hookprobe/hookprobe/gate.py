@@ -222,6 +222,7 @@ def deny_reason(
     mcp_allowed: frozenset[str] = frozenset(),
     workdir: Path | None = None,
     home: Path | None = None,
+    configured: tuple[Path, ...] = (),
 ) -> tuple[str, str, str] | None:
     """Which guard refuses this call, why, and what to record — or None to allow.
 
@@ -237,7 +238,7 @@ def deny_reason(
         if reason is not None:
             return ("bash", reason, command[:300])
         if workdir is not None:
-            hit = shell_write_target(command, inputs.protected_paths(workdir, home), workdir)
+            hit = shell_write_target(command, inputs.protected_paths(workdir, home, configured), workdir)
             if hit is not None:
                 return (
                     "input",
@@ -250,7 +251,7 @@ def deny_reason(
     # rather than in an argument, so the key-reading branch below cannot see it.
     if name == "apply_patch" and workdir is not None:
         for target in patch_targets(str(data.get("command") or data.get("input") or "")):
-            reason = inputs.write_deny_reason(target, workdir=workdir, home=home)
+            reason = inputs.write_deny_reason(target, workdir=workdir, home=home, configured=configured)
             if reason is not None:
                 return ("input", reason, target[:300])
 
@@ -262,7 +263,7 @@ def deny_reason(
     if name in WRITE_TOOLS and workdir is not None:
         for key in _WRITE_PATH_KEYS:
             target = str(data.get(key) or "")
-            reason = inputs.write_deny_reason(target, workdir=workdir, home=home)
+            reason = inputs.write_deny_reason(target, workdir=workdir, home=home, configured=configured)
             if reason is not None:
                 return ("input", reason, target[:300])
 
@@ -351,6 +352,11 @@ def _env_path(name: str) -> Path | None:
     return Path(raw) if raw else None
 
 
+def _env_paths(env: dict[str, str], name: str) -> tuple[Path, ...]:
+    """A path list the adapter joined with os.pathsep; empty when unset."""
+    return tuple(Path(part) for part in env.get(name, "").split(os.pathsep) if part.strip())
+
+
 def decide(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
     """One hook payload in, one decision out. The whole of the spawned gate.
 
@@ -385,6 +391,9 @@ def decide(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
             workdir=_env_path("HOOKPROBE_GATE_WORKDIR"),
             # The agent's home, whose settings and skills are inputs too.
             home=_env_path("HOOKPROBE_GATE_HOME"),
+            # The files configuration points at, wherever they live: the MCP
+            # config, roles, allowlists. Inputs as much as the workdir's are.
+            configured=_env_paths(env, "HOOKPROBE_GATE_CONFIGURED"),
         )
         if verdict is None:
             return {}
@@ -594,6 +603,7 @@ def environment(settings: Any, session_key: str, *, package_root: str) -> dict[s
     env["HOOKPROBE_GATE_AUDIT"] = str(settings.workdir / "audit")
     env["HOOKPROBE_GATE_WORKDIR"] = str(settings.workdir)
     env["HOOKPROBE_GATE_HOME"] = str(Path.home())
+    env["HOOKPROBE_GATE_CONFIGURED"] = os.pathsep.join(str(path) for path in inputs.configured(settings))
     env.update(agent_credentials(settings))
     env.update(trace_environment(session_key))
     return env

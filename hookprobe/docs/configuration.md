@@ -66,9 +66,14 @@ not in a web form. The loop is:
    (`{"mcpServers": {...}}`), and the marketplace `config.json` shape —
    entries with `"enabled": false` are skipped and the flag is stripped, so
    downloaded MCP packages work unedited.
-2. Mount it read-only and point `HOOKPROBE_MCP_CONFIG` at it (see the
-   commented lines in every compose). A path on the volume (e.g.
-   `/data/mcp.json`) also works and is editable without remounting.
+2. Mount it read-only, outside the run's volume, and point
+   `HOOKPROBE_MCP_CONFIG` at it (see the commented lines in every compose).
+   It stays editable from the host, and the next run reads the edit. Not
+   on the volume: the engine starts the stdio servers the file names at
+   the top of every run, so a copy the agent can write is a command one run
+   can plant for every run after it. The input guard refuses the obvious
+   writes to it wherever it lives, and the startup posture lists it under
+   `writable_inputs` while this node's own user could still write it.
 3. Verify with `GET /v1/mcp`: it reads the file fresh and shows each
    server's command/args/type/url plus its env **key names only** — env
    values never leave the file.
