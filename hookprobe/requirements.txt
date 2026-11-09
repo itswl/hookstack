@@ -3,7 +3,7 @@
 # hookprobe itself is only a contract shell around one engine call.
 fastapi>=0.162.0
 uvicorn[standard]>=0.54.0
-claude-agent-sdk>=0.2.175
+claude-agent-sdk>=0.2.176
 
 # Test + lint (tests never import the SDK; they inject fake engines)
 pytest>=9.2.0
