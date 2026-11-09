@@ -109,11 +109,20 @@ async def test_retention_purges_old_but_never_in_flight(store: Store, cfg):
         if row["event_id"] == old_sent["event_id"]:
             await store.mark_sent(row["id"], 2000.0)
     await store.add_silence("ci", until_ts=3000.0, note="expired long ago", now=1000.0)
+    # A press on each. card_actions has no foreign key, so the purge used to
+    # leave every press of a purged event behind, forever (found 2026-11-09).
+    for jti, event, at in (("p-old", old_sent, 1500.0), ("p-stuck", old_stuck, 1500.0), ("p-fresh", fresh, 900_001.0)):
+        assert await store.spend_action(
+            jti, kind="ack", event_id=event["event_id"], correlation_id="", actor="u", now=at
+        )
 
     purged = await store.purge_older_than(cutoff=800_000.0, now=900_000.0)
 
     assert purged["events"] == 1, "only the fully-settled old event is purged"
     assert purged["silences"] == 1
+    assert purged["presses"] == 1, "the press of the purged event goes with it"
+    pressed = {a["event_id"] for a in await store.recent_actions(10)}
+    assert pressed == {old_stuck["event_id"], fresh["event_id"]}, "a press stays while its event does, or while young"
     remaining = {event["id"] for event in await store.recent_events(10)}
     assert old_sent["event_id"] not in remaining
     assert old_stuck["event_id"] in remaining, "a queued promise is never deleted"

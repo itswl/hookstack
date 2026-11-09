@@ -269,8 +269,10 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None) -> F
                 if app_settings.retention_days > 0 and now >= next_purge:
                     next_purge = now + 3600
                     purged = await store.purge_older_than(now - app_settings.retention_days * 86400, now)
-                    if purged["events"] or purged["silences"]:
-                        logger.info("retention: purged %d events, %d silences", purged["events"], purged["silences"])
+                    if any(purged.values()):
+                        logger.info(
+                            "retention: purged %(events)d events, %(silences)d silences, %(presses)d presses", purged
+                        )
             except Exception:  # noqa: BLE001 — the loop must survive anything
                 logger.exception("worker error")
             await asyncio.sleep(app_settings.worker_interval_seconds)

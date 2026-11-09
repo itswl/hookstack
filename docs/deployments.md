@@ -108,6 +108,21 @@ No judge. The watcher already decided what deserves attention, and a judge
 calibrated on alerts — severity keywords, recovery semantics, flap suppression —
 has no vocabulary for a colleague's question.
 
+**What the watcher keeps, since 2026-11-09.** The investigator keeps case files
+and transcripts forever by default, because an investigation is recall. The
+watcher's case files are rounds, one every twenty minutes of the working day,
+read back by the signer's settlement for at most an hour and grepped by the
+next round for the same subject; nothing removed them, and five weeks had left
+several hundred on the volume by the stop on 10-09. The work compose now sets a
+thirty-day window on that node alone (`WATCH_RETENTION_DAYS`); the audit chain
+is verified over its last seven days, so a swept day is never a break. The
+planner and the work runner keep the default. The question came from a second
+deployment running copies of these files, whose runtime upgrade began writing
+records its daily cleanup could not reach, and the same question found a gap in
+the pipe: a card press has no foreign key to its event, so the presses of
+purged events stayed forever. They go with their events now, and every sweep in
+the family says what it removed and what it could not.
+
 ## The first real write
 
 On 2026-09-30 the work shape made its first change with a write credential, end

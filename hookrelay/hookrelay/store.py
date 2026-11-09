@@ -1351,7 +1351,8 @@ class Store:
         """Retention: this ledger must not grow forever once ALL traffic rides
         through it. An event is purgeable when it is older than the cutoff AND
         none of its deliveries is still queued — a promise in flight is never
-        deleted out from under the worker. Expired silences go with them."""
+        deleted out from under the worker. Expired silences go with them, and
+        the card presses of events that are gone."""
         # A batch at a time, each taking the write lock for itself and giving it
         # back. The old shape selected every purgeable id, then deleted in
         # chunks WITHOUT releasing — so chunking bought nothing but SQLite's
@@ -1387,7 +1388,18 @@ class Store:
         async with self._write():
             cursor = await self.db.execute("DELETE FROM silences WHERE until_ts < ?", (now,))
             silences = cursor.rowcount
-        return {"events": events, "silences": max(0, silences)}
+            # card_actions has no foreign key, so the batches above left every
+            # press of a purged event in place, and nothing else deletes one:
+            # the one table this sweep never reached (found 2026-11-09 by asking
+            # which it did). A press stays while its event does — an event kept
+            # for a queued promise keeps its presses — and while it is young.
+            cursor = await self.db.execute(
+                "DELETE FROM card_actions WHERE pressed_at < ?"
+                " AND NOT EXISTS (SELECT 1 FROM events e WHERE e.id = card_actions.event_id)",
+                (cutoff,),
+            )
+            presses = cursor.rowcount
+        return {"events": events, "silences": max(0, silences), "presses": max(0, presses)}
 
     # ── status view ───────────────────────────────────────────────────────
 

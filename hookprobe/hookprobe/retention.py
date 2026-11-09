@@ -29,7 +29,7 @@ def prune(workdir: Path, home: Path, days: int) -> int:
     if days <= 0:
         return 0
     cutoff = time.time() - days * 86400
-    removed = 0
+    removed = skipped = 0
     targets = (
         (workdir / "results", "*.json"),
         (workdir / "audit", "*.jsonl"),
@@ -50,10 +50,27 @@ def prune(workdir: Path, home: Path, days: int) -> int:
                     path.unlink()
                     removed += 1
             except OSError:
+                skipped += 1
                 continue
     if removed:
         logger.info("retention removed %s file(s) older than %s days", removed, days)
+    _say_skipped("retention", skipped)
     return removed
+
+
+def _say_skipped(sweep: str, skipped: int) -> None:
+    """A sweep that cannot remove something must say so, every time it runs.
+
+    Swallowed, a file this user cannot delete stays forever and the sweep
+    still reads as healthy: a second deployment running copies of these files
+    had a daily cleanup whose filter no longer matched what a new version wrote,
+    and it deleted nothing for six days without a word (2026-11-09)."""
+    if skipped:
+        logger.warning(
+            "%s could not remove or inspect %s file(s); a file this user cannot delete stays until someone can",
+            sweep,
+            skipped,
+        )
 
 
 def _newest_write(path: Path) -> float | None:
@@ -95,7 +112,7 @@ def prune_scratch(workdir: Path, home: Path, days: int) -> int:
     if days <= 0:
         return 0
     cutoff = time.time() - days * 86400
-    removed = 0
+    removed = skipped = 0
     scratch = workdir / SCRATCH
     try:
         entries = sorted(scratch.iterdir()) if scratch.is_dir() else []
@@ -112,6 +129,7 @@ def prune_scratch(workdir: Path, home: Path, days: int) -> int:
                 entry.unlink()
             removed += 1
         except OSError:
+            skipped += 1
             continue
     cache = home / CLI_CACHE
     if cache.is_dir():
@@ -121,7 +139,9 @@ def prune_scratch(workdir: Path, home: Path, days: int) -> int:
                     path.unlink()
                     removed += 1
             except OSError:
+                skipped += 1
                 continue
     if removed:
         logger.info("scratch retention removed %s entr(ies) older than %s days", removed, days)
+    _say_skipped("scratch retention", skipped)
     return removed
