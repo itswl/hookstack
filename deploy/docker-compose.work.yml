@@ -557,6 +557,16 @@ services:
       HOOKPROBE_PUBLIC_URL: ${HOOKPROBE_PUBLIC_URL:-}
       HOOKPROBE_AGENT_NAME: watcher
       HOOKPROBE_AGENT_ROLE: reads the operator's own feeds and raises what looks like work
+      # Case files and transcripts older than this are swept daily. The other two
+      # nodes keep theirs (the code's default, 0): an investigation is recall. This
+      # node's case files are ROUNDS, one every twenty minutes of the working day,
+      # read back by the signer's settlement for at most an hour and grepped by
+      # the next round for the same subject. Nothing removed them: by the stop on
+      # 2026-10-09 five weeks had left 356 case files, 317 telemetry files and 36
+      # audit days on this volume. Thirty days is far past any reader, and the
+      # audit chain is verified over its last seven days, so a swept day is never
+      # a break. 0 keeps everything.
+      HOOKPROBE_RETENTION_DAYS: ${WATCH_RETENTION_DAYS:-30}
       # Who this is, on every telemetry event it emits: deployment, service,
       # node. Three probes on one image are indistinguishable without it, and
       # the run adds its pipe key at start (engine._subprocess_env).

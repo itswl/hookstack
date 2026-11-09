@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from hookprobe.app import create_app
@@ -70,6 +72,27 @@ def test_scratch_and_the_cli_logs_have_a_window_of_their_own(tmp_path) -> None:
     assert prune_scratch(workdir, home, 7) == 3
     assert not old_job.exists() and not old_dump.exists() and not log.exists()
     assert (live_job / "partial.bin").exists(), "a folder written into this week is left whole"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root removes anything that is not a read-only mount")
+def test_a_file_the_sweep_cannot_remove_is_said_not_swallowed(tmp_path, caplog) -> None:
+    """A sweep that skips a file in silence reads as healthy forever. The count
+    is the only way anyone finds out, so it is said every time it runs."""
+    workdir, home = tmp_path / "wd", tmp_path / "home"
+    results = workdir / "results"
+    results.mkdir(parents=True)
+    stuck = results / "stuck.json"
+    stuck.write_text("{}")
+    stale = time.time() - 10 * 86400
+    os.utime(stuck, (stale, stale))
+    results.chmod(0o555)
+    try:
+        with caplog.at_level(logging.WARNING, logger="hookprobe.retention"):
+            assert prune(workdir, home, 7) == 0
+    finally:
+        results.chmod(0o755)
+    assert stuck.exists()
+    assert any("could not remove or inspect 1 file" in record.getMessage() for record in caplog.records)
 
 
 def test_healthz_slot_arithmetic(tmp_path) -> None:

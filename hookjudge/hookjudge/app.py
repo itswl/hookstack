@@ -367,7 +367,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         logger.exception("return leg failed for judgement %s", row["id"])
                 if app_settings.retention_days > 0 and now >= next_purge:
                     next_purge = now + 3600
-                    await store.purge_older_than(now - app_settings.retention_days * 86400)
+                    purged = await store.purge_older_than(now - app_settings.retention_days * 86400)
+                    if purged:
+                        logger.info("retention: purged %d judgements", purged)
             except Exception:  # noqa: BLE001 — the loop must survive anything
                 logger.exception("worker error")
             await asyncio.sleep(app_settings.worker_interval_seconds)
