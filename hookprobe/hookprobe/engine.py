@@ -297,6 +297,15 @@ def _context_facts(usage: Any) -> dict[str, Any] | None:
     return facts
 
 
+# A guard that fails is a refusal, not a pass (SDK 0.2.177+). A hook callback
+# that raises, or answers in a shape the CLI rejects, used to count as "no
+# decision", and the call ran: the gate fell open exactly when it was broken.
+# `block` makes the CLI refuse the call instead. The SDK refuses to connect to
+# a CLI that would not honour it, so this cannot revert in silence either. The
+# telemetry and audit hooks decide nothing and keep the default.
+_GUARD_FAILS_CLOSED: Literal["block"] = "block"
+
+
 def _hook_list(*fns: Callable[..., Any]) -> list[Any]:
     """The SDK types hook inputs as a TypedDict union; ours are plain dicts on
     purpose — the tests never import the SDK, so its types cannot appear in
@@ -1112,6 +1121,7 @@ class ClaudeAgentEngine:
                                 self._settings.bash_guard, recorder, self._workdir, self._home, self._configured
                             )
                         ),
+                        on_failure=_GUARD_FAILS_CLOSED,
                     ),
                     # Matched on every tool, filtered by name inside: the guard
                     # must not depend on how the SDK interprets a matcher
@@ -1119,12 +1129,17 @@ class ClaudeAgentEngine:
                     HookMatcher(
                         matcher=None,
                         hooks=_hook_list(_input_guard_hook(self._workdir, self._home, recorder, self._configured)),
+                        on_failure=_GUARD_FAILS_CLOSED,
                     ),
                     # matcher=None for the same reason as the line above: the
                     # one guard standing between a colleague's chat message and
                     # a tool that can act as the operator must not depend on
                     # how the SDK interprets an `mcp__*` matcher pattern.
-                    HookMatcher(matcher=None, hooks=_hook_list(_mcp_guard_hook(self._settings.mcp_tools, recorder))),
+                    HookMatcher(
+                        matcher=None,
+                        hooks=_hook_list(_mcp_guard_hook(self._settings.mcp_tools, recorder)),
+                        on_failure=_GUARD_FAILS_CLOSED,
+                    ),
                     HookMatcher(matcher=None, hooks=_hook_list(_step_begin)),
                 ],
                 # The flight recorder: every tool call, every run, one JSONL

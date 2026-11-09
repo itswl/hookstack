@@ -42,6 +42,13 @@ PY = ROOT / "hookprobe" / ".venv" / "bin" / "python"
 # (name, file, exact text to replace, replacement, tests that must then fail)
 MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
     (
+        "a guard that fails lets the call run",
+        "hookprobe/hookprobe/engine.py",
+        '_GUARD_FAILS_CLOSED: Literal["block"] = "block"',
+        '_GUARD_FAILS_CLOSED: Literal["block"] = "continue"',
+        ("tests/test_engine_loop.py",),
+    ),
+    (
         "the model is offered whatever tools the CLI ships",
         "hookprobe/hookprobe/engine.py",
         "            tools=list(_TOOLS),",

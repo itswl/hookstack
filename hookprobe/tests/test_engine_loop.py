@@ -156,6 +156,20 @@ def test_the_tools_the_model_is_offered_are_a_closed_set(engine) -> None:
     assert kept_out.isdisjoint(offered)
 
 
+def test_a_guard_that_fails_blocks_the_call(engine) -> None:
+    """A hook that raised used to be "no decision" and the call ran: the gate
+    fell open exactly when it was broken. The three guards block instead; the
+    telemetry and audit hooks, which decide nothing, keep the default."""
+    _run(engine, [_result()])
+
+    hooks = _FakeClient.options_seen.hooks
+    guards = [m for m in hooks["PreToolUse"] if m.hooks[0].__name__ == "hook"]
+    assert len(guards) == 3, "the bash, input and MCP guards"
+    assert all(m.on_failure == "block" for m in guards)
+    assert all(m.on_failure is None for m in hooks["PreToolUse"] if m not in guards)
+    assert all(m.on_failure is None for event in ("PostToolUse", "PreCompact") for m in hooks[event])
+
+
 def test_deltas_are_streamed_but_not_counted(engine) -> None:
     """The 32,294 bug, as an assertion.
 

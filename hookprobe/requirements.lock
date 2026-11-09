@@ -9,7 +9,7 @@ CacheControl==0.14.4
 certifi==2026.10.19
 cffi==2.1.1
 charset-normalizer==3.5.1
-claude-agent-sdk==0.2.176
+claude-agent-sdk==0.2.179
 click==8.4.2
 coverage==7.16.2
 cryptography==50.0.0
