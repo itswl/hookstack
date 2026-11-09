@@ -240,7 +240,8 @@ always reach. Two things about the word *default*, before the layers:
    parameter, KMS plaintext, or AWS credentials. Whether a secret exists, which
    keys it holds and when it changed stay open. The model is offered a closed
    list of built-in tools, so a tool a CLI upgrade adds is not offered until it
-   is added to that list on purpose. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
+   is added to that list on purpose. A guard that fails blocks the call rather
+   than counting as no decision. It errs toward over-blocking. HTTP verbs are not policed (query APIs POST), and
    cloud CLIs are too many to enumerate — scope their credentials instead.
 3. **Container** — non-root, disposable, nothing precious inside, no container
    runtime and no socket (a run cannot start a container, and cannot build a
