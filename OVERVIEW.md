@@ -12,10 +12,11 @@ limit: a chat message, a ticket or a timer take the same path on the same code
 ([two deployment shapes](docs/deployments.md)). The alert deployment ran in
 production until 2026-09-23.
 
-Every screenshot is from a local run started from nothing on 2026-09-30, not a
-mockup. The investigator's pictures come from five real investigations on
-`gpt-5.6-luna` ($1.10 together, through a gateway speaking the Anthropic
-dialect). The rest come from the no-key demo and the stack smoke.
+Every screenshot is from a local run started from nothing, not a mockup. The
+investigator's pictures come from five real investigations on `glm-5.3` on
+2026-11-12 ($0.44 together at Z.ai's list rates, through Zhipu's endpoint that
+speaks the Anthropic dialect). The rest come from the no-key demo and the stack
+smoke on 2026-09-30, and the phones from the demo on 2026-11-12.
 
 ```
 upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
@@ -107,30 +108,38 @@ startup; a node wider than it declared refuses to start. The one node meant to
 change things runs `danger-only`, where the credential is the blast radius and
 nothing arrives without a person's signed click.
 
-![hookprobe's sessions tab: five real investigations on the left, the payment-gateway report on the right, conclusion first, root cause unknown and said so](docs/img/hookprobe-sessions.png)
+![hookprobe's sessions tab: five real investigations on the left, the payment-gateway report on the right, its conclusion first and what it observed set apart from what it inferred](docs/img/hookprobe-sessions.png)
 
-The console lists sessions on the left and the conversation on the right, with
-each turn's bill (gpt-5.6-luna · in 1.5k · out 1.4k · cache 55.6kr/21kw ·
-$0.2137 · 25.1s). The report opens on its conclusion and says what it could
-not establish: the host is fictional and unreachable, so the root cause is
-**Unknown**, and the possible causes are named as inferences, not findings. It
-searched the case files first, ranked the remediation, and refused to propose
-a command it could not justify. Below it: the two rulings a person can press,
+The console lists sessions on the left and the conversation on the right,
+each turn with its bill under the report (glm-5.3 · in 24.3k · out 11.2k ·
+cache 52kr/0w · $0.0968 · 209.2s). The report opens on its conclusion and says
+what it could not establish: nothing in the container reaches production, so
+it reads gateway-2's 5xx as one symptom of a fleet-wide failure from the
+alerts' timing alone — gw-3 and gw-4 fired the same rule within seconds — and
+names db-1's filling disk as the leading shared cause, an inference and
+labelled as one. It opened the sibling case files first, set what it observed
+apart from what it inferred, and ranked the remediation; the three commands it
+proposes, two read-only checks and one that deletes old logs, wait in
+Approvals for a person. Below the report: the two rulings a person can press,
 and the button that distills the run into a runbook draft. A follow-up in the
 box at the bottom resumes the same session with everything it gathered.
 
 ![audit view: every tool call in every run, subagents included, newest first](docs/img/hookprobe-audit.png)
 
 The audit view is a flight recorder the agent cannot edit: one line per tool
-call across all runs. Here, 23 calls: the five runs reading each other's case
-files and grepping for their alerts' terms.
+call across all runs. Here, 52 calls: the five runs reading each other's case
+files, grepping the audit log for their hosts and asking DNS for the hosts,
+and the hourly selftest's four calls, refused as they should be. The disk run's
+one refusal is further down: an `ssh -G db-1` the read-only guard stopped
+before it ran.
 
 ![the waterfall: model and tool calls of one investigation on one time axis](docs/img/hookprobe-waterfall.png)
 
 The CLI reports every model call and tool result to the service itself, and
-the run's page draws them on one axis. This run took 25 seconds, all of it
-waiting on the model across five rounds; its two costliest calls were 72% of
-its $0.21.
+the run's page draws them on one axis. This run took 209 seconds, all of it
+waiting on the model across six rounds; the last call alone spent 165 seconds
+writing the 9.6k-token report, and the two costliest calls were 72% of its
+$0.10.
 
 ![skills browser: the diagnostic runbook distilled from the disk investigation, its six lookups and what they found](docs/img/hookprobe-skills.png)
 
@@ -145,8 +154,11 @@ unzipping it into `.claude/skills/`.
 The environment memory (CLAUDE.md) reaches every investigation. The demo's says
 the alerts' hosts are fictional and unreachable and that a reading nobody took
 must never be reported, and the report above is that memory arriving at the
-model: "the host is fictional/inaccessible", "Root cause: Unknown". The prompt
-view beside it holds the methodology; both are read fresh at every run.
+model: "no reading was taken on any of those systems", "No reading is reported
+below that nobody took." What the runs suggest adding waits above it for a
+person; a plain fact about this deployment, like the one about top-ups, is
+applied by itself under a heading that says so. The prompt view beside it holds
+the methodology; both are read fresh at every run.
 
 Four more things fill it out:
 

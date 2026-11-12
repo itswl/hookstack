@@ -33,6 +33,8 @@ description: 让 agent 值班，但不把钥匙交出去 —— 管道给每条�
 - **半天，真上：**[STACK.md](https://github.com/itswl/hookstack/blob/main/STACK.md) 从源码一步步跑起三个服务；[docs/containment.md](../containment.md) 是指向真实集群**之前**要读的边界地图。
 - **完整功能清单：**[docs/what-you-get.md](../what-you-get.md)（英文）。
 
+![hookprobe 的控制台：一次在 GLM-5.3 上的真实调查，结论在最前面，看到的事实和只能推断的分开写，花费在顶部](../img/zh/hookprobe-sessions.png)
+
 ![三块看板装在手机上，都像一个 App，底部是毛玻璃标签栏：hookrelay 的告警页，大标题下那句话泛着琥珀色的光，因为有两件事等你处理；hookprobe 的运行页，一个有人批准过的处置步骤和每条命令的输出；hookjudge 的概览](../img/zh/hookstack-phones.png)
 
 三块看板都能装到手机上当 App 用，能切换中英文，并跟随系统的浅色或深色；[完整介绍](https://github.com/itswl/hookstack/blob/main/OVERVIEW.md)（英文）里有全部截图，取自本地真实运行，不是效果图。
