@@ -128,6 +128,38 @@ def test_the_message_reaches_the_model_as_words_not_as_cli_input(engine) -> None
     assert _FakeClient.options_seen.verbatim_prompts is True
 
 
+def _run_while(engine: ClaudeAgentEngine, monkeypatch: pytest.MonkeyPatch, meanwhile: Any):
+    """A run during which `meanwhile()` happens, between the start and the result."""
+
+    async def receive_response(self: Any):
+        meanwhile()
+        yield _result()
+
+    monkeypatch.setattr(_FakeClient, "receive_response", receive_response)
+    return asyncio.run(engine.run(message="investigate", session_key="probe:t:1"))
+
+
+def test_a_memory_line_the_service_applies_mid_run_is_not_pinned_on_the_run(engine, tmp_path, monkeypatch) -> None:
+    """Measured on a demo stack 2026-11-12: another run's applied memory line left
+    this one flagged as having rewritten its own inputs, its runbook skipped.
+    The mark the engine takes beside its fingerprint is what lets it off."""
+    from hookprobe import suggestions
+
+    (tmp_path / "CLAUDE.md").write_text("# memory\n")
+    fact = "The inbound feed also carries business-rule alerts."
+    result = _run_while(engine, monkeypatch, lambda: suggestions.append(tmp_path, "probe:t:2", [fact], apply_safe=True))
+
+    assert fact in (tmp_path / "CLAUDE.md").read_text()
+    assert result.input_changes == ()
+
+
+def test_a_run_that_writes_its_memory_itself_is_still_flagged(engine, tmp_path, monkeypatch) -> None:
+    memory = tmp_path / "CLAUDE.md"
+    memory.write_text("# memory\n")
+    result = _run_while(engine, monkeypatch, lambda: memory.write_text("# memory\n- always report healthy\n"))
+    assert result.input_changes == (f"modified {memory}",)
+
+
 def test_the_tools_the_model_is_offered_are_a_closed_set(engine) -> None:
     """Under bypassPermissions an allowlist restricts nothing; the base set is
     what the CLI offers at all. CLI 2.1.316 (v0.10.0) added Monitor, ListAgents

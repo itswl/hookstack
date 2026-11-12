@@ -263,7 +263,12 @@ always reach. Two things about the word *default*, before the layers:
    Two mechanisms, because they fail differently: a PreToolUse hook refuses the
    write and says why, and a digest of every input file is compared before and
    after each run, which catches a change however it arrived. A run that changed
-   its own inputs says so at the top of its record, unfolded.
+   its own inputs says so at the top of its record, unfolded. What the service
+   itself wrote there meanwhile is not pinned on the run: a memory line another
+   run's report offered, a runbook a finished run left, an operator's save. Each
+   of those is recorded as a step from one digest to the next, and a run is let
+   off only for a change those steps account for from where it started to where
+   it ended.
 
    This is code rather than a read-only mount because the agent and the service
    share a UID and a process tree: a mount cannot tell `PUT /v1/skills/{name}`

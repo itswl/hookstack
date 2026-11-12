@@ -70,6 +70,13 @@ MUTATIONS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
         ("tests/test_inputs.py", "tests/test_posture.py"),
     ),
     (
+        "a run's own write to its inputs passes for the service's",
+        "hookprobe/hookprobe/inputs.py",
+        "        if was == now or (since is not None and _service_explains(path, was, now, since)):",
+        "        if was == now or since is not None:",
+        ("tests/test_inputs.py",),
+    ),
+    (
         "a secret's value may be printed",
         "hookprobe/hookprobe/guard.py",
         "    for pattern, label in _REVEAL_RULES:",

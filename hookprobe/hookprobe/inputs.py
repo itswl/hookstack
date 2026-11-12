@@ -29,13 +29,26 @@ are untouched by either. That distinction is the whole reason this is code and
 not a read-only mount: agent and service share a UID and a process tree, so a
 mount cannot tell them apart, and mounting these paths read-only would take the
 operator's four write endpoints down with the attack.
+
+The same sharing is why the comparison has to be told what the service wrote.
+A run's before/after spans minutes, and the service writes these files in that
+time on its own account: the memory line another run's report offered and the
+service applied, the runbook a finished run left, an operator saving a page.
+Each of those used to be pinned on every run in flight as "rewrote its own
+inputs" — found 2026-11-12 with two runs overlapping on a demo stack, the
+second one flagged in the console and its runbook skipped for a line the first
+one's report had added. `service_writes` records each such write as a step from
+one digest to the next, and `changes(..., since=mark)` lets a run off only for a
+change those steps account for from where the run started to where it ended.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Iterable
+import threading
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -205,15 +218,86 @@ def fingerprint(workdir: Path, home: Path | None = None, configured: Iterable[Pa
     return facts
 
 
-def changes(before: dict[str, str], after: dict[str, str]) -> list[str]:
-    """What a run did to its own inputs, in words, or an empty list."""
+def changes(before: dict[str, str], after: dict[str, str], *, since: int | None = None) -> list[str]:
+    """What a run did to its own inputs, in words, or an empty list.
+
+    With `since` (the `service_mark()` taken beside `before`), a change the
+    service's own writes after that mark account for is not the run's.
+    """
     found: list[str] = []
     for path in sorted(set(before) | set(after)):
         was, now = before.get(path), after.get(path)
-        if was == now:
+        if was == now or (since is not None and _service_explains(path, was, now, since)):
             continue
         found.append(f"{'created' if was is None else 'deleted' if now is None else 'modified'} {path}")
     return found
+
+
+def surface(workdir: Path) -> tuple[Path, ...]:
+    """The part of the input surface the service itself writes: memory, prompt, `.claude/`."""
+    return tuple(workdir / name for name in _FINGERPRINTED)
+
+
+# The service's own writes to the input surface, in the order made: (sequence,
+# path, digest before, digest after), None for a file that was not there. Kept
+# for the last _STEPS_KEPT writes; a run that outlives more of them than that
+# loses the excuse, and is flagged, which is the safe direction to be wrong in.
+_STEPS: list[tuple[int, str, str | None, str | None]] = []
+_STEPS_KEPT = 2000
+_STEP_LOCK = threading.Lock()
+_last_step = 0
+
+
+def service_mark() -> int:
+    """Where the service's own writes stand now; take it with a run's `fingerprint`."""
+    with _STEP_LOCK:
+        return _last_step
+
+
+@contextmanager
+def service_writes(*roots: Path) -> Iterator[None]:
+    """Around a write the SERVICE makes under `roots`: what it changed is its own.
+
+    Digests before and after, per file, so a write of several files (a runbook
+    and its history) or a removal is recorded whole. A run's own write that
+    lands inside this window would be recorded too; the window is one write
+    long, and the input guard refuses the tool call before it gets that far.
+    """
+    global _last_step
+    before = _digests(roots)
+    try:
+        yield
+    finally:
+        after = _digests(roots)
+        with _STEP_LOCK:
+            for path in sorted(set(before) | set(after)):
+                was, now = before.get(path), after.get(path)
+                if was != now:
+                    _last_step += 1
+                    _STEPS.append((_last_step, path, was, now))
+            del _STEPS[:-_STEPS_KEPT]
+
+
+def _digests(roots: Iterable[Path]) -> dict[str, str]:
+    return {str(path): _digest(path) for root in roots for path in _files(root)}
+
+
+def _service_explains(path: str, was: str | None, now: str | None, since: int) -> bool:
+    """Whether the service's own steps since `since` lead from `was` to `now`.
+
+    Followed in order from what the run started with: a step that starts where
+    the file is moves it on, any other is someone else's file history. If the
+    run wrote the file before the service did, the service's step starts from
+    the run's version, never from `was`, and the walk ends short of `now`; if it
+    wrote after, `now` is not where any step of the service's ended.
+    """
+    state = was
+    with _STEP_LOCK:
+        steps = [(a, b) for seq, p, a, b in _STEPS if seq > since and p == path]
+    for step_from, step_to in steps:
+        if step_from == state:
+            state = step_to
+    return state == now
 
 
 def _files(root: Path) -> Iterable[Path]:

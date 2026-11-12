@@ -25,7 +25,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from hookprobe import automation
+from hookprobe import automation, inputs
 from hookprobe.files import atomic_write, locked
 
 logger = logging.getLogger("hookprobe.suggestions")
@@ -257,7 +257,8 @@ def resolve(workdir: Path, suggestion_id: str, *, accept: bool) -> dict[str, Any
 def _write_memory(memory: Path, line: str, *, heading: str) -> None:
     """Append one line under one heading. Locked: this is a read-append-write and
     the operator's own editor writes the same file through PUT /v1/memory."""
-    with locked(memory):
+    # The service's own write, so a run in flight is not blamed for it.
+    with locked(memory), inputs.service_writes(memory):
         try:
             text = memory.read_text(encoding="utf-8")
         except OSError:

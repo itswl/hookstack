@@ -288,6 +288,30 @@ def test_memory_endpoints(tmp_path) -> None:
         assert client.put("/v1/memory", json={"content": too_big}, headers=AUTH).status_code == 413
 
 
+def test_an_operator_save_while_runs_are_out_is_not_pinned_on_them(tmp_path) -> None:
+    """Every write door marks what it changes as the service's own: a run whose
+    comparison spans the save is let off for it, and only for it."""
+    from hookprobe import inputs
+
+    settings = make_settings(tmp_path, token=TOKEN)
+    with make_client(tmp_path, FakeEngine()) as client:
+        before, mark = inputs.fingerprint(settings.workdir), inputs.service_mark()
+        assert client.put("/v1/memory", json={"content": "# env\nsaved by a person"}, headers=AUTH).status_code == 200
+        role = client.put(
+            "/v1/agents/db-reader", json={"content": "---\nname: db-reader\n---\nread only\n"}, headers=AUTH
+        )
+        assert role.status_code in (200, 201), role.text
+        after = inputs.fingerprint(settings.workdir)
+        assert after != before
+        assert inputs.changes(before, after, since=mark) == []
+
+        # A write that did not come through a door is still a change.
+        (settings.workdir / "CLAUDE.md").write_text("# env\nplanted by a run\n")
+        found = inputs.changes(before, inputs.fingerprint(settings.workdir), since=mark)
+        # There was no memory when the run started, so the run's version is new.
+        assert found == [f"created {settings.workdir / 'CLAUDE.md'}"]
+
+
 def test_engine_failure_is_served_as_final_report(tmp_path) -> None:
     with make_client(tmp_path, FakeEngine(exc=RuntimeError("engine exploded"))) as client:
         body = client.post("/hooks/agent", json=TRIGGER_PAYLOAD, headers=AUTH).json()

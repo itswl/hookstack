@@ -1172,6 +1172,9 @@ class ClaudeAgentEngine:
         )
 
         logger.info("engine start session=%s model=%s resume=%s", session_key, self._settings.model, resume or "-")
+        # The mark first: a write the service makes between the two is then
+        # either after the mark or already in the fingerprint, never neither.
+        inputs_mark = inputs.service_mark()
         inputs_before = inputs.fingerprint(self._workdir, self._home, self._configured)
         input_changes: tuple[str, ...] = ()
         last_text = ""
@@ -1288,7 +1291,7 @@ class ClaudeAgentEngine:
             # then fails is exactly the case a return-path check misses,
             # and the next run cannot see it: its own "before" snapshot
             # already contains the change.
-            input_changes = self._input_changes(inputs_before)
+            input_changes = self._input_changes(inputs_before, inputs_mark)
 
         if result is None:
             return EngineResult(
@@ -1353,9 +1356,14 @@ class ClaudeAgentEngine:
             )
             return None
 
-    def _input_changes(self, before: dict[str, str]) -> tuple[str, ...]:
-        """What this run did to its own input surface — empty when it behaved."""
-        found = tuple(inputs.changes(before, inputs.fingerprint(self._workdir, self._home, self._configured)))
+    def _input_changes(self, before: dict[str, str], since: int) -> tuple[str, ...]:
+        """What this run did to its own input surface — empty when it behaved.
+
+        Less what the service itself wrote there meanwhile (inputs.service_writes):
+        another run's applied memory line is not this run's doing.
+        """
+        after = inputs.fingerprint(self._workdir, self._home, self._configured)
+        found = tuple(inputs.changes(before, after, since=since))
         if found:
             logger.warning("run rewrote its own inputs: %s", "; ".join(found))
         return found
