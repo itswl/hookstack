@@ -35,9 +35,9 @@ The investigator is the product. The pipe and the judge are the smallest alertin
 - **Half a day, for real:** [STACK.md](https://github.com/itswl/hookstack/blob/main/STACK.md) runs all three from source; [docs/containment.md](containment.md) is the boundary map you read *before* pointing it at a cluster.
 - **What it does, in full:** [docs/what-you-get.md](what-you-get.md).
 
-![hookprobe's console: a real investigation, conclusion first, the root cause it could not establish said so, and the bill under it](img/hookprobe-sessions.png)
+![the three boards on a phone, each laid out as an app with a frosted tab bar along the bottom: the pipe's alerts under a large title, its one sentence glowing amber because two things wait on you; the investigator's runtime page with the procedure a person approved and what each command printed; the judge's board](img/hookstack-phones.png)
 
-The three boards read in Chinese or English and follow the system's light or dark; [the full tour](https://github.com/itswl/hookstack/blob/main/OVERVIEW.md) has every screenshot, from local runs and not mockups.
+The three boards install on a phone as apps, read in Chinese or English and follow the system's light or dark; [the full tour](https://github.com/itswl/hookstack/blob/main/OVERVIEW.md) has every screenshot, from local runs and not mockups.
 
 ## How it fits together
 

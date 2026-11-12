@@ -178,7 +178,10 @@ new tokens valued per theme, because no pair of the existing ones keeps the
 selected segment lighter than its track in both. Rejected: two rows of six for
 the console's eleven pages (every page pays for a launcher grid at the top) and
 a tab bar fixed at the bottom (a fixed bar fights the composer and the
-keyboard, and the operator's other installed board took its own out).
+keyboard, and the operator's other installed board took its own out). The
+second was reversed on 2026-11-12
+(`2026-11-12-the-boards-are-apps-on-a-phone.md`): the bar steps aside while a
+field is typed in, and that other board has a bottom tab bar again.
 
 Measured headless at 375 and 414 in both languages, both themes: no cell off
 the screen, nothing overflowing, no name cut, one row on the pipe's and the

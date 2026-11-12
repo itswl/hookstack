@@ -3,6 +3,9 @@
 
 Each page carries one SVG favicon inline — a glyph in the accent colour on the
 surface colour: the pipe's hook, the judge's scales, the investigator's lens.
+On the home screen (since 2026-11-12) the surface is lit from above, a shade
+lighter at the top than the page's own dark, and the glyph sits in a faint glow
+of its accent: an icon among other apps' icons, not a favicon blown up.
 A phone's home screen wants PNGs — 192 and 512, and a "maskable" one whose
 glyph sits inside the safe zone so Android can crop it to any shape. There is
 no image library in any venv and none is worth adding for nine files, so this
@@ -22,7 +25,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SURFACE, ACCENT, OK = (0x11, 0x15, 0x1D), (0x4C, 0x8D, 0xFF), (0x3D, 0xD6, 0x8C)
+ACCENT, OK = (0x4C, 0x8D, 0xFF), (0x3D, 0xD6, 0x8C)
+# The icon's surface, top to bottom (the favicon's flat #11151d lies between the
+# two), and how strongly the accent glows at the glyph's centre.
+LIT, DEEP, GLOW = (0x1E, 0x26, 0x37), (0x0B, 0x0E, 0x14), 0.2
 Colour = tuple[int, int, int]
 # (distance from a point to the shape's centre line, the half width painted, the colour, the bounding box)
 Shape = tuple[Callable[[float, float], float], float, Colour, tuple[float, float, float, float]]
@@ -116,6 +122,12 @@ def _blend(base: Colour, colour: Colour, alpha: float) -> Colour:
     return tuple(round(b + (c - b) * alpha) for b, c in zip(base, colour, strict=True))  # type: ignore[return-value]
 
 
+def _surface(down: float, gx: float, gy: float) -> Colour:
+    """The ground under the glyph: lit from above, and a soft glow at the glyph's centre."""
+    reach = max(0.0, 1.0 - math.hypot(gx - 12.0, gy - 12.0) / 11.0)
+    return _blend(_blend(LIT, DEEP, down), ACCENT, GLOW * reach * reach)
+
+
 def render(size: int, shapes: list[Shape], *, maskable: bool) -> bytes:
     """One PNG. Maskable: full-bleed background and the glyph at 70% in the centre."""
     unit = size / 24.0
@@ -135,7 +147,7 @@ def render(size: int, shapes: list[Shape], *, maskable: bool) -> bytes:
                 row += bytes((0, 0, 0, 0))
                 continue
             gx, gy = (px / unit - offset) / glyph_scale, (py / unit - offset) / glyph_scale
-            colour = SURFACE
+            colour = _surface(py / size, gx, gy)
             for distance, half_width, paint, (x0, y0, x1, y1) in shapes:
                 if x0 <= gx <= x1 and y0 <= gy <= y1:
                     colour = _blend(colour, paint, _coverage(distance(gx, gy), half_width, px_unit))
