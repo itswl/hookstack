@@ -115,6 +115,17 @@ BLOCKS = (
         "// ── install on a phone · keep this block identical in all three pages ─────",
         "// ── end install ───────────────────────────────────────────────────────────",
     ),
+    # Added 2026-11-12, when the boards became apps on a phone: the tab strip as
+    # a bottom bar, a large title the header takes over once it scrolls away,
+    # a group's pages as a segmented control, the search behind a button, and
+    # the pull that refreshes an installed board. Three copies of a scroll
+    # listener and a touch handler are exactly the parts that would drift
+    # unnoticed, because only a phone shows them.
+    (
+        "app shell script",
+        "// ── hookstack app shell · keep this block identical in all three pages ─────",
+        "// ── end app shell ─────────────────────────────────────────────────────────",
+    ),
 )
 
 # Whole files copied between the services, byte for byte. The service worker
