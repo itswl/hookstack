@@ -16,7 +16,7 @@ Every screenshot is from a local run started from nothing, not a mockup. The
 investigator's pictures come from five real investigations on `glm-5.3` on
 2026-11-12 ($0.44 together at Z.ai's list rates, through Zhipu's endpoint that
 speaks the Anthropic dialect). The rest come from the no-key demo and the stack
-smoke on 2026-09-30, and the phones from the demo on 2026-11-12.
+smoke, the same day.
 
 ```
 upstream alert sources (Grafana / Alertmanager / cloud monitoring …)
@@ -205,16 +205,18 @@ What the approve press did: both steps ran as argv with their exit codes and
 output, and the procedure **held**, because the condition ended afterwards.
 Exit 0 alone verifies nothing; the recovery is the witness.
 
-![the work board: two pieces of work done, one verified by its procedure, none closed without a person](docs/img/hookprobe-work-board.png)
+![the work board: five pieces of work done, two verified, one by its procedure and one by its recovery, and only the one that ended on its own closed without a person](docs/img/hookprobe-work-board.png)
 
 One card per piece of work. The disk investigation is `verified ·
-remediation`, and the header reads `0 closed without anyone stepping in`: an
-approval is a person stepping in, and the board says so.
+remediation`; gw-3's is `verified · recovery`, because its condition ended on
+its own, and the header counts exactly that one as `closed without anyone
+stepping in`. An approval is a person stepping in, and the board says so.
 
 ![the disk alert's story on the pipe's board: seven stages top to bottom — the verdict, six cards and what each carried, the report, the approve press named with its actor, the condition ending, the fix held](docs/img/hookrelay-audit-press.png)
 
 The same alert from the pipe's side: received, judged, six cards notified,
-investigated, approved by a named person, the condition ending, the fix held.
+investigated, approved by a named actor (here the demo, pressing as a person
+would), the condition ending, the fix held.
 
 ## On a phone
 
