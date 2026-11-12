@@ -2,7 +2,7 @@
 # deploy/mcp.example.json) + a lean read-only diagnostic core. Domain CLIs
 # (kubectl, db clients) stay opt-in below — extend with exactly what your
 # alerts need.
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
