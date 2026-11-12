@@ -46,15 +46,14 @@
 # and the opt-in dollar ceiling set below, and whose investigator refuses an
 # unsigned approve, which is why the pipe and the investigator both carry the
 # action secret. This file needs all of that, so it cannot point at anything
-# older than 0.8.0; it points at 0.10.2, whose sweeps reach every record and
-# whose guards refuse when they fail, because a stranger should start on the
-# newest.
+# older than 0.8.0; it points at 0.11.0, whose boards are laid out as apps on a
+# phone, because a stranger should start on the newest.
 
 name: hookstack
 
 services:
   hookrelay:
-    image: ghcr.io/itswl/hookrelay:0.10.2@sha256:de44165e1130a560c57d2b12bbf43c0b7a9e3d834fcf8b356a86d1184973d243
+    image: ghcr.io/itswl/hookrelay:0.11.0@sha256:540e9cb2938ce2bfc7596ab5b8f7c674de53c12a9483797106b10bf60e037fc9
     container_name: hs-hookrelay
     restart: unless-stopped
     environment:
@@ -102,7 +101,7 @@ services:
       - sink
 
   hookjudge:
-    image: ghcr.io/itswl/hookjudge:0.10.2@sha256:e41d18078578524b3fb5fb461da8bd5a7d5a9fa053e88035b2f5c910cdf20684
+    image: ghcr.io/itswl/hookjudge:0.11.0@sha256:37022c233bc9c9538adac7c2af70a8445facc7f14c7b560156184d554a961e9c
     container_name: hs-hookjudge
     restart: unless-stopped
     environment:
@@ -135,7 +134,7 @@ services:
   # operator would actually have received. It runs from the pipe's own image
   # because that image now carries it — one fewer thing to pull, and no mount.
   sink:
-    image: ghcr.io/itswl/hookrelay:0.10.2@sha256:de44165e1130a560c57d2b12bbf43c0b7a9e3d834fcf8b356a86d1184973d243
+    image: ghcr.io/itswl/hookrelay:0.11.0@sha256:540e9cb2938ce2bfc7596ab5b8f7c674de53c12a9483797106b10bf60e037fc9
     container_name: hs-sink
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/sink.py"]
@@ -148,7 +147,7 @@ services:
   # exactly the hop a real deployment makes to a custom bot's incoming URL.
   # `ops-feishu` in the baked config is `type: bridge` and points here.
   lark-bridge:
-    image: ghcr.io/itswl/lark-bridge:0.10.2@sha256:dca92b3cc89ec93ec1fb11b1ed0ec6da3341c2bd7149b8bc90b0c52c30f0fe39
+    image: ghcr.io/itswl/lark-bridge:0.11.0@sha256:495f63da3fdaeffebc844be464f527cf8a7c5bceb0f2ccc6ebf291bb14de7610
     container_name: hs-lark-bridge
     restart: unless-stopped
     environment:
@@ -166,7 +165,7 @@ services:
   # not a model: it reports itself as `stub-4o-mini`. Point the judge's AI vars
   # at a real provider and this stops being used.
   stub-ai:
-    image: ghcr.io/itswl/hookjudge:0.10.2@sha256:e41d18078578524b3fb5fb461da8bd5a7d5a9fa053e88035b2f5c910cdf20684
+    image: ghcr.io/itswl/hookjudge:0.11.0@sha256:37022c233bc9c9538adac7c2af70a8445facc7f14c7b560156184d554a961e9c
     container_name: hs-stub-ai
     restart: unless-stopped
     command: ["python", "-u", "/app/examples/stub_ai.py"]
@@ -178,7 +177,7 @@ services:
   # pipe to the same channels; the disk alert in demo.sh also proposes a
   # two-step procedure the approve button runs against the allowlist below.
   hookprobe:
-    image: ghcr.io/itswl/hookprobe:0.10.2@sha256:425db2868c4b5499ed6ff46109f998ff2eeb42ee7a13d58a1b14cf34c57e87d3
+    image: ghcr.io/itswl/hookprobe:0.11.0@sha256:9651427590e5f2f64fa3c44a6baa940ccf98ef8bc75b36a59fcc16fb4d8119b1
     container_name: hs-hookprobe
     restart: unless-stopped
     # The agent executes arbitrary bash, so the container is bounded even in a
