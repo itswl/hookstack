@@ -35,13 +35,13 @@ import json
 import re
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
-from hookprobe import export, suggestions
+from hookprobe import export, inputs, suggestions
 from hookprobe.distill import apply_consolidation, draft_skill, record_revision, snapshot
 from hookprobe.engine import _load_agents_raw
 from hookprobe.files import atomic_write, system_prompt_path
@@ -118,8 +118,28 @@ def _skill_origin(entry: Path) -> dict[str, Any]:
     }
 
 
+# The doors that write a run's input surface: memory, runbooks, roles, prompt.
+_WRITE_DOORS = re.compile(r"/v1/(memory|skills|agents|system-prompt)(/|$)")
+
+
 def register(app: FastAPI, settings: Settings, service: RunService, guard: Callable[..., None]) -> None:
     """Mount the library's read and write doors, all behind the bearer token."""
+
+    @app.middleware("http")
+    async def service_writes(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        """A change made through these doors is the service's, not a run's.
+
+        An operator saving the memory page while two runs are out used to have
+        both flagged as having rewritten their own inputs. Around every write
+        to the doors above, what changed on the input surface is recorded as
+        the service's own (inputs.service_writes), and a run's comparison
+        lets it off for exactly that. One place, so a door added later is
+        covered without anyone remembering to.
+        """
+        if request.method in ("PUT", "POST", "DELETE") and _WRITE_DOORS.search(request.url.path):
+            with inputs.service_writes(*inputs.surface(settings.workdir)):
+                return await call_next(request)
+        return await call_next(request)
 
     @app.get("/v1/memory/suggestions", dependencies=[Depends(guard)])
     async def memory_suggestions() -> dict[str, Any]:

@@ -40,6 +40,7 @@ from hookprobe import (
     distill,
     distill_loop,
     handoff,
+    inputs,
     patches,
     remediation,
     rulings,
@@ -1610,7 +1611,8 @@ class RunService:
             # A consolidation run's product is a PROPOSAL beside the manifest,
             # waiting for review — and it must never itself be distilled, or
             # the loop would write runbooks about rewriting runbooks.
-            distill_loop.accept_consolidation(run, result, self._settings)
+            with inputs.service_writes(*inputs.surface(self._settings.workdir)):
+                distill_loop.accept_consolidation(run, result, self._settings)
         elif run.meta.get("patrol"):
             # Same rule, one category wider, and it took a real run to notice:
             # the first self-review patrol installed a runbook called
@@ -1632,8 +1634,10 @@ class RunService:
             logger.info("auto-distill skipped session=%s reason=synthetic", run.session_key)
         else:
             # After the turn is recorded, because the runbook is assembled from it.
-            distill_loop.auto_distill(run, result, self._settings)
-            distill_loop.maybe_consolidate(run, self._settings, self._store, self.start)
+            # The service's own writes: a run still going is not blamed for them.
+            with inputs.service_writes(*inputs.surface(self._settings.workdir)):
+                distill_loop.auto_distill(run, result, self._settings)
+                distill_loop.maybe_consolidate(run, self._settings, self._store, self.start)
         self._settle(run)
         self._schedule_return(run)
         self._note_landed()
