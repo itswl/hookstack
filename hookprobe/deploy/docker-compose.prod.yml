@@ -54,7 +54,7 @@ services:
   # which needs the neighbouring deployment's compose — see
   # .agents/notes/proposed/2026-09-10-the-agent-can-read-the-provider-key-and-post-it-anywhere.md
   egress-proxy:
-    image: python:3.14-slim
+    image: python:3.15-slim
     container_name: hookprobe-egress
     restart: unless-stopped
     command: ["python3", "-u", "/app/proxy.py"]

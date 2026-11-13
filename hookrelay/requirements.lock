@@ -16,7 +16,7 @@ fastapi==0.162.6
 filelock==4.2.4
 h11==0.16.0
 httpcore==1.0.9
-httptools==0.8.0
+httptools==0.9.0
 httpx==0.28.1
 idna==3.19
 iniconfig==2.3.0
@@ -31,14 +31,14 @@ opentelemetry-api==1.45.1
 packageurl-python==0.17.6
 packaging==26.3
 pathspec==1.1.1
-pip-api==0.0.34
 pip-requirements-parser==32.0.1
+pip_api==0.0.35
 pip_audit==2.10.1
 platformdirs==4.11.3
 pluggy==1.6.0
 py-serializable==2.1.0
-pydantic==2.13.4
-pydantic_core==2.46.4
+pydantic==2.14.3
+pydantic_core==2.50.4
 Pygments==2.21.0
 pyparsing==3.3.2
 pytest==9.2.0
@@ -59,6 +59,6 @@ typing-inspection==0.4.4
 typing_extensions==4.16.0
 urllib3==2.8.0
 uvicorn==0.54.0
-uvloop==0.22.1
+uvloop==0.23.0
 watchfiles==1.2.0
 websockets==17.0.1

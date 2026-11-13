@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 WORKDIR /app
 # Runtime dependencies only, pinned by the lock — pytest, ruff and mypy
