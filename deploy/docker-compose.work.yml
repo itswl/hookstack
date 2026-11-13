@@ -196,7 +196,7 @@ services:
   # before this was written. A byte pump, never an HTTP proxy: the consoles
   # stream events.
   doors:
-    image: python:3.14-slim
+    image: python:3.15-slim
     container_name: work-doors
     restart: unless-stopped
     command: ["python3", "-u", "/app/doors.py"]
@@ -262,7 +262,7 @@ services:
       - "127.0.0.1:8090:8090"
 
   watch-signer:
-    image: python:3.14-slim
+    image: python:3.15-slim
     container_name: work-watch-signer
     restart: unless-stopped
     command: ["python3", "-u", "/app/signer.py"]
@@ -1135,7 +1135,7 @@ services:
     # (see `networks:` at the foot of this file), and this has to be reachable
     # from there AND from the host.
     networks: [default, probe_net]
-    image: python:3.14-slim
+    image: python:3.15-slim
     container_name: work-sink
     command: ["python", "-u", "/examples/sink.py"]
     volumes:

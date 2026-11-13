@@ -54,11 +54,11 @@ jobs:
         # drift. hookprobe's entry said 3.12 while its image was 3.14.
         include:
           - service: hookrelay
-            python: "3.14"
+            python: "3.15"
           - service: hookjudge
-            python: "3.14"
+            python: "3.15"
           - service: hookprobe
-            python: "3.14"
+            python: "3.15"
     defaults:
       run:
         working-directory: ${{ matrix.service }}

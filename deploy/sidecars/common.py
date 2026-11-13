@@ -1,7 +1,7 @@
 """What the four sidecars share, in one file beside them.
 
 The egress proxy, the MCP gate, the watch signer and the console ingress are
-single-file containers: `python:3.14-slim` with a script bind-mounted and no
+single-file containers: `python:3.15-slim` with a script bind-mounted and no
 image to build, which is what lets each of them be read in one sitting and
 edited without a rebuild. Until 2026-10-06 the plumbing they had in common was
 COPIED into each file and pinned identical by scripts/assert_copies.py — five

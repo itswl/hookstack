@@ -137,7 +137,7 @@ services:
   # an operator would actually have received. Lays out Feishu cards; prints
   # anything else as JSON. Answers {"code": 0} so the ledger records `sent`.
   sink:
-    image: python:3.14-slim
+    image: python:3.15-slim
     container_name: hs-sink
     command: ["python", "-u", "/examples/sink.py"]
     volumes:
@@ -149,7 +149,7 @@ services:
   # is not a model: it reports itself as `stub-4o-mini`. Put real credentials
   # in .env and it stops being used.
   stub-ai:
-    image: python:3.14-slim
+    image: python:3.15-slim
     container_name: hs-stub-ai
     command: ["python", "-u", "/examples/stub_ai.py"]
     volumes:
