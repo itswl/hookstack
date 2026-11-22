@@ -182,3 +182,31 @@ jobs:
             docker buildx imagetools create \
               --tag "$repo:latest" "$repo:${{ steps.version.outputs.version }}"
           done
+
+  # The tag already cuts a release in every place that matters except one:
+  # the Releases page, which stayed empty because this workflow only moved
+  # images. generate-notes writes the changelog from the commits since the
+  # previous tag, so the page records what shipped alongside the four image
+  # tags. After promote, because a page saying "shipped" while `:latest`
+  # still points at the previous version would be the split stack again,
+  # this time in prose. Re-runs are safe: an existing release is untouched.
+  release:
+    needs: [promote]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: create the GitHub Release the tag promises
+        env:
+          RAW: ${{ inputs.version || github.ref_name }}
+        run: |
+          case "$RAW" in v*) tag="$RAW" ;; *) tag="v$RAW" ;; esac
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $tag already exists; leaving it untouched"
+            exit 0
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --generate-notes --title "$tag"
