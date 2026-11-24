@@ -50,6 +50,10 @@ and Monitor and ToolSearch are refused as tools that do not exist.
   tool loading active; never call this tool". It is not a capability: a
   stand-in model scripted to call it got `No such tool available:
   DeferredToolPlaceholder` back. The list stays fourteen.
+- Checked at SDK 0.2.188 (CLI 2.1.331, 2026-11-24): the same fifteen, the
+  fourteen and the placeholder, nothing deferred and no listed tool renamed
+  away. The placeholder called on purpose still answers `No such tool
+  available`. The list stays fourteen.
 - An operator who wants a tool off the list, such as NotebookEdit or a
   scheduler, adds it in the engine. There is no setting for it, on purpose.
 - Not changed: the console's live plan still reads TodoWrite calls, which no
