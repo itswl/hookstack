@@ -14,8 +14,11 @@ registry but the container one.
 The release notes are not a separate document. They are the implemented decision
 records that landed since the last tag — that is what the bucket is for, and a
 second place to write them is the duplicate-source mistake this repository keeps
-finding its way back to. There are **no GitHub Release objects**: the annotated
-tag's own message is the note, which is how 0.5.0, 0.6.0 and 0.7.0 shipped.
+finding its way back to. There is a GitHub Release per tag since 2026-11-22:
+`release.yml` cuts it once `:latest` has moved, with the generated list of the
+pull requests since the previous tag, and the fifteen earlier tags were
+backfilled by hand. The page is an index of what shipped; the annotated tag's
+own message is still the note.
 
 ## The steps
 

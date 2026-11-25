@@ -192,10 +192,29 @@ echo "lark-bridge: OK"
 # anyway. hookprobe is deliberately absent: its image carries Node, apt
 # packages and the Claude CLI, so a cold build is minutes, and a gate people
 # start skipping protects nothing. Its own CI job covers it.
+#
+# The gate needs the build to succeed and nothing from the image, so `-q`
+# printed an ID that `>/dev/null` threw away and the image stayed. On a
+# containerd image store every build hands back a new one, cached or not —
+# measured 2026-11-25: three builds of one context, three IDs — so each gate
+# left two untagged images behind, and the first prune of the machine that
+# runs this gate most found 59. The gate now drops what it built, and only
+# that: an image that carries a tag, or that a container uses, stopped or
+# running, stays. On a store where a warm build hands back the ID of an image
+# that already exists — one the work stack may run under a tag — the ID is
+# no proof that the gate made it.
+build_and_drop() {
+  local id
+  id="$(docker build -q "$1")" || return
+  if [ "$(docker image inspect -f '{{len .RepoTags}}' "$id" 2>/dev/null)" = "0" ] \
+     && [ -z "$(docker ps -aq --filter ancestor="$id")" ]; then
+    docker image rm "$id" >/dev/null 2>&1 || :
+  fi
+}
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   echo "docker build (hookrelay, hookjudge)"
-  docker build -q ./hookrelay >/dev/null
-  docker build -q ./hookjudge >/dev/null
+  build_and_drop ./hookrelay
+  build_and_drop ./hookjudge
   echo "images build: OK"
 else
   echo "docker not available — image builds skipped (CI still runs them)"
