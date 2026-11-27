@@ -268,9 +268,15 @@ cd ../steward-$(date +%F)
 
 1. Read each version change, grouped by service. **Patch and minor only.** A
    major, the SDK, or a new dependency is L3.
-2. Install the new versions into that service's own venv (pins follow the bot,
-   floors take the newest) and run its gate:
+2. Build that service's venv from its `requirements.lock`
+   (`pip install -r requirements.lock`), then move **only the bot's named
+   packages** to the bot's versions (pins follow the bot; a named floor takes
+   that package's newest) and run its gate:
    `cd hookrelay && bash scripts/gate.sh` (same for hookjudge, hookprobe).
+   Not a fresh `pip install -r requirements.txt`: measured 2026-11-27, that
+   moves 31/31/40 unrelated transitive pins — the versions the images ship —
+   and pulls whatever SDK is newest. Taking every pin to its newest is a round
+   of its own, decided by a person, with the stack smoke.
 3. Once every changed service is green, `bash scripts/relock.sh`, then run
    `bash scripts/gate.sh` again — **its own step, and read the verdict**.
 4. One PR, titled like
