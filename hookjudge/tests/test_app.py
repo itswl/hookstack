@@ -81,14 +81,36 @@ def _settings(tmp_path, **overrides: Any) -> Settings:
 
 
 @pytest.fixture
-async def app_client(tmp_path):
-    app = create_app(settings=_settings(tmp_path))
+async def app_client(tmp_path, request):
+    # A test passes settings overrides through indirect parametrisation:
+    # `@pytest.mark.parametrize("app_client", [{...}], indirect=True)`.
+    overrides = dict(getattr(request, "param", None) or {})
+    app = create_app(settings=_settings(tmp_path, **overrides))
+    # A test that writes the return state itself asks for a long worker
+    # interval — and needs the worker's ONE startup tick to be over before its
+    # rows exist, or that tick's own mark_return can land after the test's.
+    # Waited for by name, not by sleep: the worker asks the store for pending
+    # returns once per tick, so the first ask IS the startup tick. The bound
+    # turns a worker that never starts into a quick failure, not a hang.
+    ticked: asyncio.Event | None = None
+    if "worker_interval_seconds" in overrides:
+        ticked = asyncio.Event()
+        real_pending_returns = app.state.store.pending_returns
+
+        async def pending_returns(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+            rows = await real_pending_returns(*args, **kwargs)
+            ticked.set()
+            return rows
+
+        app.state.store.pending_returns = pending_returns  # type: ignore[method-assign]
     async with (
         httpx.ASGITransport(app=app) as transport,
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=transport, base_url="http://t") as client,
     ):
         client.app = app  # type: ignore[attr-defined]
+        if ticked is not None:
+            await asyncio.wait_for(ticked.wait(), timeout=5)
         yield client
 
 
@@ -610,12 +632,20 @@ async def test_a_disagreement_is_labeled_in_one_click_and_exports_as_an_eval_row
     assert (await app_client.post(f"/judgements/{row_id}/label", json={"importance": "low"})).status_code == 401
 
 
+@pytest.mark.parametrize("app_client", [{"worker_interval_seconds": 3600}], indirect=True)
 async def test_a_warning_row_can_be_ruled_for_the_platform_and_read_back_by_id(app_client):
     """Three things the rebuilt board leans on. The review queue admits `warning`
     as the `medium` it means, so each row names the platform's word in the
     judge's vocabulary and the label door accepts the platform's own word; a
     verdict is readable by id however far it has scrolled; and the dead-return
-    filter runs in the query, not over the newest page."""
+    filter runs in the query, not over the newest page.
+
+    The worker sleeps for the hour this test does not take (the parametrisation
+    above): this test writes the return state itself, and under the default
+    10 ms tick the worker's own `mark_return(..., "queued", ...)` for this row
+    could land after the test's `mark_return(row_id, "dead", ...)` and turn
+    the row back into a queued one, emptying the `ret=dead` page. Seen red
+    once, under two gates at once."""
     store = app_client.app.state.store
     from hookjudge.contract import Incoming, Verdict
 
