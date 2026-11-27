@@ -48,7 +48,7 @@ python-dotenv==1.2.3
 PyYAML==6.0.3
 requests==2.34.2
 rich==15.0.0
-ruff==0.17.5
+ruff==0.17.6
 sortedcontainers==2.4.0
 starlette==1.6.0
 stevedore==5.9.0
